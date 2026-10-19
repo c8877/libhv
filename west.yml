@@ -3,4 +3,5 @@ manifest:
   version: "0.13"
   self:
     path: .
+    west-commands: west-commands.yml
   projects: []

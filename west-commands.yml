@@ -1,0 +1,32 @@
+# =============================================================================
+# west udf-* 扩展命令注册（实现见 scripts/west_commands/udf.py）
+#
+# 引入方式：west.yml 的 manifest.self 段
+#   self:
+#     path: .
+#     west-commands: west-commands.yml
+#
+# 6 个命令：udf-deps / udf-build / udf-test / udf-mp135 / udf-deploy / udf-board-test
+# 本仓不适用（例如库仓的板端部署）的命令会打印说明并以 rc=1 退出，不会假成功。
+# =============================================================================
+west-commands:
+  - file: scripts/west_commands/udf.py
+    commands:
+      - name: udf-deps
+        class: UdfDeps
+        help: 拉取本仓 manifest 声明的依赖（west update）
+      - name: udf-build
+        class: UdfBuild
+        help: 主机构建（本仓 enp_build.sh）
+      - name: udf-test
+        class: UdfTest
+        help: 跑单元测试（ctest --test-dir <build> --output-on-failure）
+      - name: udf-mp135
+        class: UdfMp135
+        help: MP135 交叉构建（本仓 enp_build_mp135.sh）
+      - name: udf-deploy
+        class: UdfDeploy
+        help: 板端部署（本仓不适用时 rc=1）
+      - name: udf-board-test
+        class: UdfBoardTest
+        help: 板端测试（本仓不适用时 rc=1）
