@@ -79,3 +79,5 @@ cmake_install.cmake
 # west 工作区本地配置（不跨机器共享）
 /.west/*
 !/.west/config
+__pycache__/
+*.pyc
