@@ -4,5 +4,5 @@
 
 cmake -Bbuild .
 cd build
-make -j32
+make -j$(nproc)
 tree -h bin

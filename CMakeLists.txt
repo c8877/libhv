@@ -16,7 +16,7 @@ option(WITH_EVPP "compile evpp" ON)
 option(WITH_HTTP "compile http" ON)
 option(WITH_HTTP_SERVER "compile http/server" ON)
 option(WITH_HTTP_CLIENT "compile http/client" ON)
-option(WITH_MQTT "compile mqtt" OFF)
+option(WITH_MQTT "compile mqtt" ON)
 
 option(ENABLE_UDS "Unix Domain Socket" OFF)
 option(USE_MULTIMAP "MultiMap" OFF)
