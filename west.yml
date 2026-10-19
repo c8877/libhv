@@ -1,0 +1,6 @@
+# west.yml —— 本仓自包含 west workspace（无外部 project）
+manifest:
+  version: "0.13"
+  self:
+    path: .
+  projects: []
