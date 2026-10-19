@@ -81,3 +81,8 @@ cmake_install.cmake
 !/.west/config
 __pycache__/
 *.pyc
+
+# west 的依赖 clone 落位（west.yml 里各 project 的 path = third_party/<name>）。
+# 这些是外部 clone、不是本仓内容：整个 third_party/ 不入库，含依赖的构建目录
+# 与安装前缀 third_party/prefix/<arch>。清场只需 rm -rf third_party。
+/third_party/

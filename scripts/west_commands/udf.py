@@ -4,8 +4,20 @@
 由仓根 west-commands.yml 注册、west.yml 的 manifest.self.west-commands 引入。
 
 与 tuojie_dggy 的 udf.py 不同：这里不引用任何 tuojie 专有脚本/路径，只包本仓真实
-存在的入口（enp_build.sh / enp_build_x86.sh / enp_build_mp135.sh / CMake），
+存在的入口（enp_build.sh / enp_build_x86.sh / enp_build_mp135.sh / CMake / Makefile），
 也不引入 Zephyr 假设（west build 是 Zephyr 的扩展，不是通用命令）。
+
+本仓（libhv）的依赖落位约定（见 west.yml）：
+  * 每个 project 的 path = third_party/<name>（相对仓根），west update 只写
+    third_party/，工作树保持干净（.gitignore 里 /third_party/）；
+  * udf-build 是**真自包含**的三段式：
+      阶段 1  依赖就位检查：third_party/<任一依赖> 缺失 → 自动 west update
+      阶段 2  依赖编译：按实测依赖序把 0 个第三方依赖装进
+              third_party/prefix/<arch>/{include,lib}
+              （本仓 west.yml 没有第三方依赖，阶段 2 为空）
+      阶段 3  本仓构建：bash enp_build.sh --prefix <本仓前缀> --incdir <prefix>/include
+              --libdir <prefix>/lib
+    --no-deps 跳过阶段 2（只用已装好的前缀）。
 
 约定：
   * 本仓没有的能力（例如库仓的板端部署）**明确失败**：打印说明 + rc=1，
@@ -18,6 +30,7 @@
 from __future__ import annotations
 
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -29,14 +42,47 @@ from west.commands import WestCommand
 # 本仓配置（换仓只需要改这一段）
 # =============================================================================
 REPO_NAME = "libhv"
-BUILD_FAMILY = "enp"   # enp | xmq | cmake | none
+BUILD_FAMILY = "enp"   # enp | xmq | cmake | make | none
 BUILD_ENTRY = "enp_build.sh"     # 主机构建入口（相对仓根），"" = 没有
 MP135_ENTRY = "enp_build_mp135.sh"     # MP135 交叉构建入口，"" = 没有
 DEPLOY_ENTRY = ""   # 板端部署入口，"" = 本仓不适用
 BOARD_TEST_ENTRY = ""   # 板端测试入口，"" = 本仓不适用
 DEFAULT_BUILD_DIR = "build"         # enp_build.sh 固定把构建目录放在 <仓>/build
 
+# 本仓自己的额外 CMake 参数（一般不填；{prefix}/{inc}/{lib} 在运行时替换成第三方前缀）。
+# 只用于业务 CMakeLists 把搜索路径写死、不改源码就编不过的场合（见各仓注释）。
+REPO_CMAKE_ARGS = ()
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+DEPS_DIR = "third_party"
+
+# =============================================================================
+# 依赖（west.yml 里 path = third_party/<name>）
+#
+# 依赖序 = 真实依赖链，逐条对照各依赖自己的 west.yml / CMakeLists.txt 实测得出：
+#
+#   本仓 west.yml 的 projects 列表为空：没有需要编译的第三方依赖，
+#   阶段 2 直接跳过（仍保留三段式结构，便于以后加依赖）。
+#
+# 所以顺序是：本仓 west.yml 没有第三方依赖，阶段 2 为空。
+# 不要按 west.yml 的书写顺序拍脑袋排——消费者必须排在提供者之后。
+#
+# kind:
+#   "enp"   <- 依赖自带 ./enp_build.sh（支持 --prefix/--incdir/--libdir/--install）
+#   "x86"   <- 只有 ./enp_build_x86.sh（位置参数=前缀，DO_INSTALL 默认 1）
+#   "cmake" <- 无脚本：CMakeLists.txt 优先（cmake -S/-B + --install），
+#              没有 CMakeLists.txt 时退到 make（make -j + make install PREFIX=<prefix>）
+#   "autotools" <- configure/autogen.sh 工程（./configure --prefix + make + make install）
+#
+# 叶子依赖（没有别的依赖要链接它们）一律 --static --shared 双份：
+#   本仓 CMakeLists 用裸 find_library(NAMES ...) 取库，静态库在链接行上的先后顺序
+#   会决定符号解析（libyyjson.a 排在 liben_iox.a 前面 ⇒ en_iox 内的 yyjson 符号
+#   解析不到）。同时产出 .so 后 find_library 选 .so，顺序无关，且 CMake 会给
+#   构建树二进制自动加 RPATH，构建完就能直接跑。
+DEPS = ()
+# west 层自己消费、不能透传给构建入口的选项
+WEST_ONLY_FLAGS = ("--no-deps",)
 
 
 def _nproc() -> str:
@@ -51,11 +97,35 @@ def _abs_dir(rel: str) -> str:
     return os.path.abspath(os.path.join(REPO_ROOT, rel or DEFAULT_BUILD_DIR))
 
 
+def _arch() -> str:
+    return platform.machine() or "unknown"
+
+
+def _subst(arg: str, prefix: str) -> str:
+    """把 {prefix}/{inc}/{lib} 替换成第三方前缀下的实际路径。"""
+    return (str(arg)
+            .replace("{prefix}", prefix)
+            .replace("{inc}", os.path.join(prefix, "include"))
+            .replace("{lib}", os.path.join(prefix, "lib")))
+
+
+def _deps_prefix() -> str:
+    """第三方依赖安装前缀：third_party/prefix/<arch>（UDF_DEPS_PREFIX 可覆盖）。
+
+    构建入口（enp_build.sh 等）本身就认 UDF_DEPS_PREFIX / TUOJIE_DEPS_PREFIX；
+    这里用同一组变量，保证"脚本单独跑"和"west udf-build 跑"落在同一棵前缀上。
+    """
+    env = os.environ.get("UDF_DEPS_PREFIX") or os.environ.get("TUOJIE_DEPS_PREFIX")
+    if env:
+        return os.path.abspath(env)
+    return os.path.join(REPO_ROOT, DEPS_DIR, "prefix", _arch())
+
+
 # =============================================================================
-# 声明式选项表：(flags, kwargs) —— 只列对应脚本 usage 里真有的选项
+# 声明式选项表：(flags, kwargs) —— 只列对应入口真有的选项
 # =============================================================================
 _BUILD_OPTS = {
-    # enp_build.sh 的完整参数集（已逐项对照本仓脚本 usage）
+    # enp_build.sh 的完整参数集（已逐项对照各仓脚本 usage）
     "enp": (
         (("--static",), dict(action="store_true", help="只编静态库（脚本默认已是静态）")),
         (("--shared",), dict(action="store_true", help="编共享库")),
@@ -83,6 +153,12 @@ _BUILD_OPTS = {
         (("-d", "--dir"), dict(dest="dir", metavar="DIR", default=None, help="构建目录（默认 build）")),
         (("--clean",), dict(action="store_true", help="清空构建目录后重新配置")),
         (("--cmake-args",), dict(action="append", metavar="ARGS", help="透传 CMake 参数，可重复")),
+        (("-j", "--jobs"), dict(dest="jobs", metavar="N", help="并行编译数")),
+    ),
+    # 只有 Makefile 的工程（kconfig/Makefile 项目）
+    "make": (
+        (("--clean",), dict(action="store_true", help="make clean 后退出")),
+        (("--install",), dict(action="store_true", help="make install DESTDIR=<前缀>")),
         (("-j", "--jobs"), dict(dest="jobs", metavar="N", help="并行编译数")),
     ),
     "none": (),
@@ -128,10 +204,11 @@ class _RepoCommand(WestCommand):
                 given.append((flags[0], str(val)))
         return given
 
-    def run_cmd(self, cmd, env=None):
+    def run_cmd(self, cmd, env=None, cwd=None):
         cmd = [str(c) for c in cmd]
-        print("$ " + " ".join(cmd) + "    (cwd=" + REPO_ROOT + ")", flush=True)
-        rc = subprocess.call(cmd, cwd=REPO_ROOT, env=env)
+        where = cwd or REPO_ROOT
+        print("$ " + " ".join(cmd) + "    (cwd=" + where + ")", flush=True)
+        rc = subprocess.call(cmd, cwd=where, env=env)
         if rc != 0:
             # west 忽略 do_run() 的返回值，必须 die(exit_code=rc) 才能让失败可见
             self.die("命令失败（rc=%d）：%s" % (rc, " ".join(cmd)), exit_code=rc)
@@ -148,6 +225,7 @@ class UdfDeps(_RepoCommand):
     NAME = "udf-deps"
     HELP = "拉取本仓 manifest 声明的依赖（west update）"
     DESCRIPTION = ("等于 west update，依赖 revision 以本仓 west.yml 为准；"
+                   "依赖落在 third_party/<name>（见 west.yml 的 path）。"
                    "额外参数原样透传（如 --narrow、-o=--depth=1）。")
     accepts_unknown_args = True
 
@@ -157,59 +235,254 @@ class UdfDeps(_RepoCommand):
 
 class UdfBuild(_RepoCommand):
     NAME = "udf-build"
-    HELP = "主机构建（本仓 enp_build.sh）"
-    DESCRIPTION = ("本仓主机构建入口：bash enp_build.sh，选项原样透传（--static/--shared/--examples/--tests/--install/--clean/--rebuild/--prefix/--host/--libdir/--incdir/--cmake-args/-j）。"
-                   "只声明该入口支持的选项；子进程非 0 即以同一 rc 退出。")
-    OPTS = _BUILD_OPTS[BUILD_FAMILY]
+    HELP = "主机构建（自动 west update + 编依赖 + 编本仓）"
+    DESCRIPTION = (
+        "真自包含的三段式主机构建：\n"
+        "  1) 依赖就位检查：third_party/<任一依赖> 缺失 → 自动执行 west update；\n"
+        "  2) 依赖编译：按实测依赖序逐个编译安装到 third_party/prefix/<arch>；\n"
+        "     依赖序与入口见本文件 DEPS（enp_build.sh / enp_build_x86.sh /\n"
+        "     cmake -S -B --install / make 四种入口按依赖实际具备的脚本选择）；\n"
+        "  3) 本仓构建：bash enp_build.sh（默认补 --prefix/--incdir/--libdir 指向前缀），其余选项原样透传。\n"
+        "--no-deps 跳过第 2 段（只用已装好的前缀）；任一子进程非 0 即以同一 rc 退出。\n"
+        "每段/每个依赖都打印 [udf-build] 前缀的行，失败点一眼可见。"
+    )
+    OPTS = _BUILD_OPTS[BUILD_FAMILY] + (
+        (("--no-deps",), dict(dest="no_deps", action="store_true",
+                              help="跳过依赖编译（只编本仓；要求 third_party/prefix/<arch> 已装好）")),
+    )
 
+    # ------------------------------------------------------------------ 打印
+    @staticmethod
+    def _stage(msg):
+        print("[udf-build] " + msg, flush=True)
+
+    # ------------------------------------------------------------ 阶段 1：就位
+    def _ensure_deps(self):
+        if not DEPS:
+            self._stage("依赖就位检查：本仓 west.yml 没有需要编译的第三方依赖（0 个）")
+            return
+        missing = [d["name"] for d in DEPS
+                   if not os.path.isdir(os.path.join(REPO_ROOT, DEPS_DIR, d["name"]))]
+        if not missing:
+            self._stage("依赖就位检查：%s/ 下 %d 个依赖齐全" % (DEPS_DIR, len(DEPS)))
+            return
+        self._stage("依赖就位检查：缺少 %s → 自动执行 west update"
+                    % ", ".join(missing))
+        self.run_cmd(["west", "update"])
+
+    # ------------------------------------------------------------ 阶段 2：编依赖
+    @staticmethod
+    def _effective_kind(dep, dep_dir):
+        """把声明式的 kind 解析成这套代码真正能跑的入口。
+
+        kind = "cmake" 的依赖是"没有模型脚本的普通工程"：优先 CMakeLists.txt
+        （cmake -S/-B + --install），没有 CMakeLists.txt 时退到 make（zlog 这类
+        纯 Makefile 工程：make -j + make install PREFIX=<prefix>）。
+        返回 "cmake" / "make" / 原 kind / None（两者都没有 ⇒ 调用方 die）。
+        """
+        kind = dep["kind"]
+        if kind == "autotools":
+            if os.path.isfile(os.path.join(dep_dir, "configure")):
+                return "autotools"
+            if os.path.isfile(os.path.join(dep_dir, "autogen.sh")):
+                return "autotools"
+            return None
+        if kind not in ("cmake", "make"):
+            return kind
+        if os.path.isfile(os.path.join(dep_dir, "CMakeLists.txt")):
+            return "cmake"
+        for mk in ("Makefile", "makefile", "GNUmakefile"):
+            if os.path.isfile(os.path.join(dep_dir, mk)):
+                return "make"
+        return None
+
+    def _dep_cmd(self, dep, kind, prefix, jobs):
+        """返回 (cmd, env)：依赖自己的构建入口 + 安装到第三方前缀。"""
+        inc = os.path.join(prefix, "include")
+        lib = os.path.join(prefix, "lib")
+
+        if kind == "enp":
+            # 依赖自带的 enp_build.sh：与本仓同一套参数
+            cmd = ["bash", "./enp_build.sh",
+                   "--prefix", prefix, "--incdir", inc, "--libdir", lib,
+                   "--static", "--shared", "--install", "-j", jobs]
+            for extra in dep.get("cmake_args", ()):
+                cmd += ["--cmake-args", _subst(extra, prefix)]
+            return cmd, None
+
+        if kind == "x86":
+            # 只有 enp_build_x86.sh：前缀是位置参数，安装/并行走环境变量
+            env = os.environ.copy()
+            env["DO_INSTALL"] = "1"
+            env["JOBS"] = jobs
+            return ["bash", "./enp_build_x86.sh", prefix], env
+
+        raise AssertionError("_dep_cmd 不该处理 kind=%r" % kind)
+
+    def _build_dep(self, idx, total, dep, prefix, jobs):
+        name = dep["name"]
+        dep_dir = os.path.join(REPO_ROOT, DEPS_DIR, name)
+        self._stage("依赖编译 (%d/%d) %s：%s" % (idx, total, name, dep["why"]))
+        if not os.path.isdir(dep_dir):
+            self.die("依赖 %s 目录不存在（%s）：先跑 west update" % (name, dep_dir),
+                     exit_code=1)
+
+        kind = self._effective_kind(dep, dep_dir)
+        if kind is None:
+            self.die("依赖 %s 既没有 CMakeLists.txt 也没有 Makefile（%s），"
+                     "不知道怎么编" % (name, dep_dir), exit_code=1)
+        if kind == "enp" and not os.path.isfile(os.path.join(dep_dir, "enp_build.sh")):
+            self.die("依赖 %s 声明为 enp 但没有 enp_build.sh（%s）" % (name, dep_dir),
+                     exit_code=1)
+        if kind == "x86" and not os.path.isfile(os.path.join(dep_dir, "enp_build_x86.sh")):
+            self.die("依赖 %s 声明为 x86 但没有 enp_build_x86.sh（%s）" % (name, dep_dir),
+                     exit_code=1)
+
+        if kind in ("enp", "x86"):
+            cmd, env = self._dep_cmd(dep, kind, prefix, jobs)
+            self.run_cmd(cmd, env=env, cwd=dep_dir)
+
+        elif kind == "make":
+            # 纯 Makefile 工程（如没有 CMakeLists 的 zlog）：PREFIX 直接传进去，
+            # 不碰系统 /usr/local。
+            self.run_cmd(["make", "-j", jobs], cwd=dep_dir)
+            self.run_cmd(["make", "install", "PREFIX=" + prefix], cwd=dep_dir)
+
+        elif kind == "autotools":
+            # autotools 工程（如 libmodbus）：configure --prefix=<前缀> + make + make install
+            if not os.path.isfile(os.path.join(dep_dir, "configure")):
+                self.run_cmd(["bash", "./autogen.sh"], cwd=dep_dir)
+            self.run_cmd(["bash", "./configure", "--prefix", prefix], cwd=dep_dir)
+            self.run_cmd(["make", "-j", jobs], cwd=dep_dir)
+            self.run_cmd(["make", "install"], cwd=dep_dir)
+
+        else:  # cmake
+            build_dir = os.path.join(dep_dir, "build")
+            inc = os.path.join(prefix, "include")
+            lib = os.path.join(prefix, "lib")
+            self.run_cmd(["cmake", "-S", ".", "-B", build_dir,
+                          "-DCMAKE_BUILD_TYPE=Release",
+                          "-DCMAKE_INSTALL_PREFIX=" + prefix,
+                          "-DCMAKE_INCLUDE_PATH=" + inc,
+                          "-DCMAKE_LIBRARY_PATH=" + lib,
+                          "-DCMAKE_PREFIX_PATH=" + prefix]
+                         + list(dep.get("cmake_args", ())), cwd=dep_dir)
+            self.run_cmd(["cmake", "--build", build_dir, "-j", jobs], cwd=dep_dir)
+            self.run_cmd(["cmake", "--install", build_dir], cwd=dep_dir)
+
+        self._stage("依赖编译 (%d/%d) %s：完成" % (idx, total, name))
+
+    # -------------------------------------------------------------- 阶段 3：本仓
+    def _repo_args(self, args, prefix):
+        """本仓构建参数：默认补 --prefix/--incdir/--libdir，其余透传（用户显式给的优先）。"""
+        given = [(f, v) for (f, v) in self._given(args) if f not in WEST_ONLY_FLAGS]
+        flags = set(f for f, _ in given)
+        cmd = ["bash", BUILD_ENTRY]
+        if "--prefix" not in flags:
+            cmd += ["--prefix", os.path.join(REPO_ROOT, ".prefix", _arch())]
+        if "--incdir" not in flags:
+            cmd += ["--incdir", os.path.join(prefix, "include")]
+        if "--libdir" not in flags:
+            cmd += ["--libdir", os.path.join(prefix, "lib")]
+        for extra in REPO_CMAKE_ARGS:
+            cmd += ["--cmake-args", _subst(extra, prefix)]
+        for flag, val in given:
+            cmd.append(flag)
+            if val is not None:
+                cmd.append(val)
+        return cmd
+
+    def _xmq_args(self, args):
+        given = dict(self._given(args))
+        env = os.environ.copy()
+        if given.get("--jobs"):
+            env["JOBS"] = given["--jobs"]
+        if "--no-install" in given:
+            env["DO_INSTALL"] = "0"
+        # 位置参数就是安装前缀：缺省用本仓第三方前缀（third_party/ 下，已 ignore），
+        # 免得脚本在 REPO_DIR 未定义时把前缀算成 "/" 根目录（xmq 脚本 L6 的老毛病）。
+        cmd = ["bash", BUILD_ENTRY, given.get("--prefix") or _deps_prefix()]
+        return cmd, env
+
+    def _cmake_build(self, args, prefix, jobs):
+        if not os.path.isfile(os.path.join(REPO_ROOT, "CMakeLists.txt")):
+            self.not_applicable(
+                "既无 %s 也无 CMakeLists.txt，本仓不能用 cmake 构建" %
+                (BUILD_ENTRY or "enp_build.sh"))
+        build_dir = _abs_dir(getattr(args, "dir", None))
+        if getattr(args, "clean", False) and os.path.isdir(build_dir):
+            print("清理构建目录：%s" % build_dir, flush=True)
+            shutil.rmtree(build_dir)
+        conf = ["-DCMAKE_BUILD_TYPE=Release",
+                "-DCMAKE_INSTALL_PREFIX=" + os.path.join(REPO_ROOT, ".prefix", _arch()),
+                "-DCMAKE_PREFIX_PATH=" + prefix,
+                "-DCMAKE_INCLUDE_PATH=" + os.path.join(prefix, "include"),
+                "-DCMAKE_LIBRARY_PATH=" + os.path.join(prefix, "lib")]
+        for extra in getattr(args, "cmake_args", None) or []:
+            conf.extend(shlex.split(extra))
+        self.run_cmd(["cmake", "-S", REPO_ROOT, "-B", build_dir] + conf)
+        self.run_cmd(["cmake", "--build", build_dir, "-j", jobs])
+        print("构建目录：%s" % build_dir, flush=True)
+
+    def _make_build(self, args, prefix, jobs):
+        if getattr(args, "clean", False):
+            self.run_cmd(["make", "clean"], cwd=REPO_ROOT)
+            return
+        self.run_cmd(["make", "-j", jobs], cwd=REPO_ROOT)
+        if getattr(args, "install", False):
+            self.run_cmd(["make", "install", "DESTDIR=" + prefix], cwd=REPO_ROOT)
+
+    # ------------------------------------------------------------------- 入口
     def do_run(self, args, unknown):
         if unknown:
             self.die("未知参数：%s（本仓 udf-build 只声明入口脚本支持的选项，"
                      "见 west udf-build --help）" % " ".join(unknown), exit_code=2)
 
-        if BUILD_FAMILY == "enp":
-            cmd = ["bash", BUILD_ENTRY]
-            for flag, val in self._given(args):
-                cmd.append(flag)
-                if val is not None:
-                    cmd.append(val)
-            self.run_cmd(cmd)
-
-        elif BUILD_FAMILY == "xmq":
-            given = dict(self._given(args))
-            env = os.environ.copy()
-            if given.get("--jobs"):
-                env["JOBS"] = given["--jobs"]
-            if "--no-install" in given:
-                env["DO_INSTALL"] = "0"
-            cmd = ["bash", BUILD_ENTRY]
-            if given.get("--prefix"):
-                cmd.append(given["--prefix"])
-            self.run_cmd(cmd, env=env)
-
-        elif BUILD_FAMILY == "cmake":
-            self._cmake_build(args)
-
-        else:
+        if BUILD_FAMILY not in ("enp", "xmq", "cmake", "make"):
             self.not_applicable(
-                "本仓没有 CMake/enp_build.sh 构建入口（kconfig/Makefile 工程），"
+                "本仓没有 CMake/enp_build.sh/Makefile 构建入口（kconfig 等工程），"
                 "west udf-build 不适用")
 
-    def _cmake_build(self, args):
-        if not os.path.isfile(os.path.join(REPO_ROOT, "CMakeLists.txt")):
-            self.not_applicable(
-                "既无 %s 也无 CMakeLists.txt，west udf-build 不适用" %
-                (BUILD_ENTRY or "enp_build.sh"))
-        build_dir = _abs_dir(args.dir)
-        if args.clean and os.path.isdir(build_dir):
-            print("清理构建目录：%s" % build_dir, flush=True)
-            shutil.rmtree(build_dir)
-        conf = ["-DCMAKE_BUILD_TYPE=Release"]
-        for extra in args.cmake_args or []:
-            conf.extend(shlex.split(extra))
-        self.run_cmd(["cmake", "-S", REPO_ROOT, "-B", build_dir] + conf)
-        self.run_cmd(["cmake", "--build", build_dir, "-j", args.jobs or _nproc()])
-        print("构建目录：%s" % build_dir, flush=True)
+        prefix = _deps_prefix()
+        jobs = getattr(args, "jobs", None) or _nproc()
+        no_deps = bool(getattr(args, "no_deps", False))
+
+        # ---- 阶段 1：依赖就位 ----
+        if no_deps:
+            self._stage("阶段 1/3 依赖就位检查：--no-deps，跳过 west update（前缀 %s）" % prefix)
+        else:
+            self._stage("阶段 1/3 依赖就位检查：%s" % prefix)
+            self._ensure_deps()
+
+        # ---- 阶段 2：编依赖 ----
+        if no_deps:
+            self._stage("阶段 2/3 依赖编译：--no-deps，跳过（只编本仓）")
+            if DEPS and not os.path.isdir(prefix):
+                self.die("--no-deps 需要已装好的第三方前缀，但 %s 不存在；"
+                         "先跑不带 --no-deps 的 west udf-build" % prefix, exit_code=1)
+        elif not DEPS:
+            self._stage("阶段 2/3 依赖编译：本仓没有需要编译的第三方依赖（0 个），跳过")
+            os.makedirs(prefix, exist_ok=True)
+        else:
+            self._stage("阶段 2/3 依赖编译：%d 个依赖 → %s" % (len(DEPS), prefix))
+            os.makedirs(prefix, exist_ok=True)
+            for i, dep in enumerate(DEPS, 1):
+                self._build_dep(i, len(DEPS), dep, prefix, jobs)
+            self._stage("阶段 2/3 依赖编译：%d 个全部完成" % len(DEPS))
+
+        # ---- 阶段 3：本仓构建 ----
+        self._stage("阶段 3/3 本仓构建：family=%s（第三方前缀 %s）" % (BUILD_FAMILY, prefix))
+        if BUILD_FAMILY == "enp":
+            self.run_cmd(self._repo_args(args, prefix))
+        elif BUILD_FAMILY == "xmq":
+            cmd, env = self._xmq_args(args)
+            self.run_cmd(cmd, env=env)
+        elif BUILD_FAMILY == "cmake":
+            self._cmake_build(args, prefix, jobs)
+        else:  # make
+            self._make_build(args, prefix, jobs)
+        self._stage("阶段 3/3 本仓构建：完成")
+        self._stage("完成：本仓 build/ 与 %s" % prefix)
 
 
 class UdfTest(_RepoCommand):
@@ -247,7 +520,7 @@ class UdfMp135(_RepoCommand):
     NAME = "udf-mp135"
     HELP = "MP135 交叉构建（本仓 enp_build_mp135.sh）"
     DESCRIPTION = ("本仓 MP135 交叉构建入口：bash enp_build_mp135.sh（脚本自己 source /opt/mp135/mp135_env.sh，可选位置参数为安装前缀）。"
-                   "脚本自己 source /opt/mp135/mp135_env.sh；环境缺失时脚本失败，rc 原样返回。")
+                   "环境缺失时脚本失败，rc 原样返回。")
     OPTS = (
         (("--prefix",), dict(metavar="PATH", default=None,
                              help="安装前缀（作为脚本的位置参数传入）")),
