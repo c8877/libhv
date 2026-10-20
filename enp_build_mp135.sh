@@ -68,6 +68,22 @@ while [ $# -gt 0 ]; do
             sed -n '/^# 用法:/,/^# 示例:/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//'
             exit 0
             ;;
+        --opt)
+            [ $# -ge 2 ] || die "选项 --opt 需要一个参数 (none|size|speed)"
+            OPT_LEVEL="$2"
+            PASS_ARGS+=("--opt" "$2")
+            shift 2
+            ;;
+        --opt=*)
+            OPT_LEVEL="${1#--opt=}"
+            PASS_ARGS+=("$1")
+            shift
+            ;;
+        --strip)
+            DO_STRIP=1
+            PASS_ARGS+=("$1")
+            shift
+            ;;
         -*)
             PASS_ARGS+=("$1")
             shift
@@ -85,6 +101,14 @@ while [ $# -gt 0 ]; do
             ;;
     esac
 done
+
+# 校验 --opt 取值（--opt= 空值也会落到这里）
+case "${OPT_LEVEL:-size}" in
+    none|size|speed) ;;
+    *)
+        die "--opt 只接受 none|size|speed（当前: 非法的值）"
+        ;;
+esac
 
 # 显式给了前缀就默认执行安装（与 Makefile mp135_install 的既有语义一致）
 if [ ${SPECIFIED_PREFIX} -eq 1 ]; then

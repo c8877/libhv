@@ -129,6 +129,11 @@ _BUILD_OPTS = {
     "enp": (
         (("--static",), dict(action="store_true", help="只编静态库（脚本默认已是静态）")),
         (("--shared",), dict(action="store_true", help="编共享库")),
+        (("--opt",), dict(choices=("none", "size", "speed"), default="size",
+                          metavar="LEVEL",
+                          help="体积优化级别 none|size|speed（默认 size ⇒ MinSizeRel/-Os；none 保持旧行为）")),
+        (("--strip",), dict(action="store_true",
+                            help="构建后 strip 产物（默认关；与 --install 组合时装 strip 后的产物）")),
         (("--examples",), dict(action="store_true", help="构建示例程序")),
         (("--tests",), dict(action="store_true", help="构建测试用例")),
         (("--install",), dict(action="store_true", help="安装到前缀")),
@@ -523,7 +528,12 @@ class UdfMp135(_RepoCommand):
                    "环境缺失时脚本失败，rc 原样返回。")
     OPTS = (
         (("--prefix",), dict(metavar="PATH", default=None,
-                             help="安装前缀（作为脚本的位置参数传入）")),
+                             help="安装前缀（作为脚本的位置参数传入；给了就 --install）")),
+        (("--opt",), dict(choices=("none", "size", "speed"), default="size",
+                          metavar="LEVEL",
+                          help="体积优化级别 none|size|speed（默认 size；原样透传给 enp_build_mp135.sh）")),
+        (("--strip",), dict(action="store_true",
+                            help="构建后 strip 产物（默认关；原样透传给 enp_build_mp135.sh）")),
     )
 
     def do_run(self, args, unknown):
@@ -532,8 +542,15 @@ class UdfMp135(_RepoCommand):
                 "本仓无 mp135 交叉构建入口（未找到 %s）" %
                 (MP135_ENTRY or "enp_build_mp135.sh"))
         cmd = ["bash", MP135_ENTRY]
+        # 位置参数仍然是安装前缀（保持原语义），其余选项原样透传
         if args.prefix:
             cmd.append(args.prefix)
+        for flag, val in self._given(args):
+            if flag == "--prefix":
+                continue
+            cmd.append(flag)
+            if val is not None:
+                cmd.append(val)
         self.run_cmd(cmd)
 
 

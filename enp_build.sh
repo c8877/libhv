@@ -10,6 +10,8 @@
 #   --prefix <path>       安装前缀 (CMAKE_INSTALL_PREFIX，默认: <仓库父目录>/.prefix/libhv-<arch>)
 #   --static              编译静态库 (libhv_static)       默认: 开
 #   --shared              编译共享库 (hv)                 默认: 开
+#   --opt <level>         体积优化级别: none|size|speed (默认: size ⇒ MinSizeRel/-Os)
+#   --strip               构建后 strip 产物 (默认: 关；与 --install 组合时装 strip 后的产物)
 #   --examples            构建 examples/ (BUILD_EXAMPLES) 默认: 关
 #   --tests               构建 unittest/ (BUILD_UNITTEST) 默认: 关
 #   --benchs              构建基准测试 (libhv 的 CMake 无此开关，忽略并打印说明)
@@ -28,7 +30,7 @@
 #                         例: BUILD_DIR=build/x86_64 ./enp_build.sh --static
 #   CMAKE_INCLUDE_PATH / CMAKE_LIBRARY_PATH / CMAKE_PREFIX_PATH
 #                         传入时与 --incdir/--libdir/--prefix 以 ; 追加拼接，不覆盖
-#   CMAKE_BUILD_TYPE      默认 Release
+#   CMAKE_BUILD_TYPE      默认 MinSizeRel（由 --opt 决定：size=MinSizeRel / speed=Release / none=不传）
 #
 # 说明:
 #   * 源码根即仓库根，CMakeLists.txt 在根目录；脚本可在任意目录被调用（按脚本所在目录定位源码）。
@@ -85,6 +87,11 @@ REBUILD=0
 NPROC=""
 CMAKE_EXTRA_ARGS=()
 BUILD_TYPE="${CMAKE_BUILD_TYPE:-Release}"
+# 体积优化级别：none(不传 CMAKE_BUILD_TYPE，与改动前完全一致) / size(MinSizeRel ⇒ -Os -DNDEBUG) /
+# speed(Release ⇒ -O3 -DNDEBUG)。默认 size —— 用户要的是"优化体积"。
+OPT_LEVEL="size"
+# 构建后是否 strip：默认关，避免调试流程（gdb/addr2line）被误 strip 破坏。
+DO_STRIP=0
 
 SPECIFIED_STATIC=0
 SPECIFIED_SHARED=0
@@ -188,6 +195,19 @@ while [ $# -gt 0 ]; do
             SPECIFIED_SHARED=1
             shift
             ;;
+        --opt)
+            need_arg "$1" $#
+            OPT_LEVEL="$2"
+            shift 2
+            ;;
+        --opt=*)
+            OPT_LEVEL="${1#--opt=}"
+            shift
+            ;;
+        --strip)
+            DO_STRIP=1
+            shift
+            ;;
         --jobs|-j)
             need_arg "$1" $#
             NPROC="$2"
@@ -220,6 +240,15 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# 校验 --opt 取值（--opt= 空值也会落到这里）
+case "$OPT_LEVEL" in
+    none|size|speed) ;;
+    *)
+        echo "错误: --opt 只接受 none|size|speed（当前: '$OPT_LEVEL'）" >&2
+        exit 1
+        ;;
+esac
+
 if [ "$BUILD_STATIC" = "OFF" ] && [ "$BUILD_SHARED" = "OFF" ]; then
     die "至少需要启用一种库类型（--static 或 --shared）"
 fi
@@ -245,6 +274,12 @@ echo "源码目录: $PROJECT_DIR"
 echo "构建目录: $BUILD_DIR$([ "$BUILD_DIR" = "$DEFAULT_BUILD_DIR" ] && echo " (默认)" || echo " (BUILD_DIR 覆盖)")"
 echo "安装前缀: $PREFIX"
 echo "构建类型: $BUILD_TYPE"
+case "$OPT_LEVEL" in
+    size)  echo "优化级别: size (MinSizeRel: -Os -DNDEBUG)" ;;
+    speed) echo "优化级别: speed (Release: -O3 -DNDEBUG)" ;;
+    none)  echo "优化级别: none (不传 CMAKE_BUILD_TYPE)" ;;
+esac
+echo "Strip 产物: $DO_STRIP"
 [ -n "$HOST" ] && echo "交叉编译: $HOST"
 [ -n "$LIBDIR" ] && echo "库路径  : $LIBDIR"
 [ -n "$INCDIR" ] && echo "头文件  : $INCDIR"
@@ -272,7 +307,6 @@ cd "$BUILD_DIR"
 # -----------------------------------------------------------------------------
 CMAKE_ARGS=(
     -DCMAKE_INSTALL_PREFIX="$PREFIX"
-    -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
     -DBUILD_STATIC="$BUILD_STATIC"
     -DBUILD_SHARED="$BUILD_SHARED"
     -DBUILD_EXAMPLES="$BUILD_EXAMPLES"
@@ -340,6 +374,22 @@ if [ -n "$HOST" ]; then
     )
 fi
 
+# 体积/速度优化（CMAKE_BUILD_TYPE）
+# none ⇒ 不传 CMAKE_BUILD_TYPE（与改动前一致，CMake 用自己的默认值）
+case "$OPT_LEVEL" in
+    size)
+        CMAKE_ARGS+=(-DCMAKE_BUILD_TYPE=MinSizeRel)
+        echo "优化参数: -DCMAKE_BUILD_TYPE=MinSizeRel"
+        ;;
+    speed)
+        CMAKE_ARGS+=(-DCMAKE_BUILD_TYPE=Release)
+        echo "优化参数: -DCMAKE_BUILD_TYPE=Release"
+        ;;
+    none)
+        echo "优化参数: 无（不传 CMAKE_BUILD_TYPE，保持改动前行为）"
+        ;;
+esac
+
 # --cmake-args: 原样透传，放在最后以便覆盖上面的默认值
 if [ ${#CMAKE_EXTRA_ARGS[@]} -gt 0 ]; then
     CMAKE_ARGS+=("${CMAKE_EXTRA_ARGS[@]}")
@@ -369,6 +419,102 @@ esac
 echo "并行数: $NPROC"
 cmake --build . -j "$NPROC" \
     || { echo "[enp_build] cmake build failed (build=$BUILD_DIR)" >&2; exit 1; }
+
+# =============================================================================
+# strip（可选，构建后 / 安装前 ⇒ --install 装的是 strip 后的产物）
+# =============================================================================
+
+# 选 strip 工具：--host <triplet> ⇒ <triplet>-strip；STRIP 环境变量；CC 推导；本地 strip
+pick_strip_tool() {
+    if [ -n "$HOST" ]; then
+        echo "${HOST}-strip"
+        return 0
+    fi
+    if [ -n "${STRIP:-}" ]; then
+        echo "${STRIP}"
+        return 0
+    fi
+    if [ -n "${CC:-}" ]; then
+        local cc_base
+        cc_base=$(basename "${CC}")
+        case "$cc_base" in
+            *g++)    echo "${cc_base%g++}strip" ;;
+            *gcc)    echo "${cc_base%gcc}strip" ;;
+            *clang++) echo "${cc_base%clang++}strip" ;;
+            *clang)  echo "${cc_base%clang}strip" ;;
+            *cc)     echo "${cc_base%cc}strip" ;;
+            *)       echo "strip" ;;
+        esac
+        return 0
+    fi
+    echo "strip"
+}
+
+fmt_bytes() {
+    awk -v b="$1" 'BEGIN {
+        if (b >= 1048576) printf "%.2f MB", b / 1048576;
+        else if (b >= 1024) printf "%.1f KB", b / 1024;
+        else printf "%d B", b;
+    }'
+}
+
+if [ "$DO_STRIP" -eq 1 ]; then
+    echo ""
+    echo "=== strip 产物（构建目录，安装前）==="
+    STRIP_TOOL=$(pick_strip_tool)
+    if ! command -v "$STRIP_TOOL" >/dev/null 2>&1; then
+        echo "警告: 未找到 strip 工具 '$STRIP_TOOL'，跳过 strip（产物保留调试信息，构建继续）"
+    else
+        echo "strip 工具: $(command -v "$STRIP_TOOL")"
+        STRIP_TOTAL_BEFORE=0
+        STRIP_TOTAL_AFTER=0
+        STRIP_OK=0
+        STRIP_SKIP=0
+
+        strip_one() {
+            local file="$1" mode="$2" rel before after rc err
+            rel="${file#"$BUILD_DIR"/}"
+            before=$(stat -c '%s' "$file" 2>/dev/null || echo 0)
+            rc=0
+            err=$("$STRIP_TOOL" $mode "$file" 2>&1) || rc=$?
+            if [ $rc -ne 0 ]; then
+                echo "  警告: strip 失败（rc=$rc），已跳过: $rel"
+                [ -n "$err" ] && echo "        $err"
+                STRIP_SKIP=$((STRIP_SKIP + 1))
+                return 0
+            fi
+            after=$(stat -c '%s' "$file" 2>/dev/null || echo 0)
+            if [ "$before" -gt 0 ]; then
+                echo "  $rel: $before → $after 字节（$(fmt_bytes "$before") → $(fmt_bytes "$after")，$(awk -v b="$before" -v a="$after" 'BEGIN { printf "%+.1f%%", (a - b) * 100.0 / b }')）"
+            else
+                echo "  $rel: $before → $after 字节"
+            fi
+            STRIP_TOTAL_BEFORE=$((STRIP_TOTAL_BEFORE + before))
+            STRIP_TOTAL_AFTER=$((STRIP_TOTAL_AFTER + after))
+            STRIP_OK=$((STRIP_OK + 1))
+        }
+
+        while IFS= read -r -d '' f; do
+            strip_one "$f" "--strip-unneeded"
+        done < <(find "$BUILD_DIR" -type f \( -name '*.so' -o -name '*.so.*' \) -print0 2>/dev/null)
+
+        while IFS= read -r -d '' f; do
+            strip_one "$f" "-g"
+        done < <(find "$BUILD_DIR" -type f -name '*.a' -print0 2>/dev/null)
+
+        while IFS= read -r -d '' f; do
+            strip_one "$f" "--strip-unneeded"
+        done < <(find "$BUILD_DIR" -type f -executable \
+                    ! -name '*.so' ! -name '*.so.*' ! -name '*.a' \
+                    ! -path '*/CMakeFiles/*' -print0 2>/dev/null)
+
+        echo "strip 完成: 成功 $STRIP_OK 个，跳过 $STRIP_SKIP 个"
+        if [ "$STRIP_OK" -gt 0 ]; then
+            echo "strip 合计: $STRIP_TOTAL_BEFORE → $STRIP_TOTAL_AFTER 字节（$(fmt_bytes "$STRIP_TOTAL_BEFORE") → $(fmt_bytes "$STRIP_TOTAL_AFTER")）"
+        fi
+    fi
+fi
+
 
 if [ $DO_INSTALL -eq 1 ]; then
     echo ""
