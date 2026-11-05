@@ -57,16 +57,24 @@ build/bin/rtunnel-client --server B_IP --port 8443 --user alice --socks5 127.0.0
 ```bash
 make rtunnel_test                  # 明文
 RTUNNEL_TLS=1 make rtunnel_test    # TLS（需要 --with-openssl 构建）
+RTUNNEL_MTLS=1 make rtunnel_test   # mTLS：证书 SAN 必须等于 devid（另含负向用例）
+RTUNNEL_UDS=1 make rtunnel_test    # 本地入口走 UDS（需要 -DENABLE_UDS=ON 构建）
 ```
 
 覆盖：CONNECT 建链、数据回环、离线设备、端口白名单、ACL、并发（两个 A 客户端同 sid 不串流）、
-设备端关闭传播、256 KiB 大流量；另有 `build/bin/rtnp-codec-test` 校验帧编解码。
+设备端关闭传播、A 侧半关闭、256 KiB 大流量；另有 `build/bin/rtnp-codec-test` 校验帧编解码。
 
-## 与设计文档的差距（v1 实现）
+## mTLS 与 UDS
 
-- **设备身份**：当前 B 接受 C 自报的 devid，未做 mTLS 的 SAN 绑定；生产环境需补证书校验。
-- **本地入口**：只实现 `127.0.0.1:PORT` 的 SOCKS5，设计里的 UDS 默认入口未接。
-- **半关闭**：隧道层支持 `CLOSE` 半关闭，但 libhv 在本地 socket 读到 EOF 时会直接关闭 io，
-  因此「SOCKS 客户端先 FIN、再由 A 回写剩余数据」这条路走不通；SSH 正常关闭不影响。
-- 未实现流控的「按写队列低水位补窗口」，当前收到 DATA 写入本地后即回 `WINDOW`
-  （仍在 credit 上限内，不会无界增长）。
+- mTLS：`--tls-ca` 让 B 要求客户端证书，并校验证书 SAN 与 AUTH.devid 一致；
+  C 侧用 `--tls-cert/--tls-key` 提供设备证书，`--tls-sni` 填 B 证书的主机名。
+- UDS：`--socks5 unix:/path/to/socks.sock`，仅在使用 `-DENABLE_UDS=ON` 构建时可用
+  （libhv 的 UDS 支持是编译期开关），默认仍是 `127.0.0.1:PORT`。
+
+## 实现说明
+
+- 为支持 A 侧半关闭，libhv 新增 `hio_set_keep_write_on_eof()` / `hio_setcb_eof()`：
+  读方向 EOF 时只停读、保留写方向，由 `eof_cb` 通知应用。
+- 为支持 mTLS 身份，`ssl/openssl.c` 新增 `hssl_peer_cert_san()`（取对端证书第一个 DNS SAN）。
+- 流控按设计文档：发送方受 credit 限制；接收方在本地写队列降到 `RTNP_LOW_WATER` 后才回 `WINDOW`。
+

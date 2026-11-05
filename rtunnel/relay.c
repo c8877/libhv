@@ -42,6 +42,7 @@ static hloop_t* g_loop;
 static bconn_t* g_conns;      // 全局
 static bconn_t* g_agents;     // devid 注册表
 static int      g_allow_all = 0;
+static int      g_require_mtls = 0;
 static int      g_verbose = 0;
 
 typedef struct acl_entry_s {
@@ -208,6 +209,23 @@ static void handle_frame(bconn_t* c, rtnp_frame_t* f) {
                 return;
             }
             // 顶替旧连接
+            if (g_require_mtls) {
+#ifdef WITH_OPENSSL
+                char san[256] = {0};
+                if (hssl_peer_cert_san(hio_get_ssl(c->io), san, sizeof(san)) != 0 ||
+                    strcmp(san, c->devid) != 0) {
+                    logf_("[relay] device cert SAN mismatch: devid=%s san=%s", c->devid, san);
+                    send_err(c->io, RTNP_AUTH_FAIL, 0, RTNP_UNAUTHORIZED, "cert/devid mismatch");
+                    hio_close(c->io);
+                    return;
+                }
+#else
+                logf_("[relay] mTLS required but built without OpenSSL");
+                send_err(c->io, RTNP_AUTH_FAIL, 0, RTNP_UNAUTHORIZED, "mtls unsupported");
+                hio_close(c->io);
+                return;
+#endif
+            }
             bconn_t* old = find_agent(c->devid);
             if (old && old != c) {
                 conn_close_all_streams(old, RTNP_DEVICE_REPLACED);
@@ -453,6 +471,12 @@ int main(int argc, char** argv) {
                 argv[0]);
             return 1;
         }
+    }
+
+    if (tls_ca) g_require_mtls = 1;
+    if (g_require_mtls && !(tls_cert && tls_key)) {
+        fprintf(stderr, "--tls-ca requires --tls-cert/--tls-key\n");
+        return 1;
     }
 
     g_loop = hloop_new(0);

@@ -4,6 +4,7 @@
 import os
 import socket
 import struct
+import shutil
 import subprocess
 import sys
 import threading
@@ -81,8 +82,17 @@ def recv_exact(s, n):
     return buf
 
 
-def socks5_open(host, port, devid, dport, timeout=8):
-    s = socket.create_connection((host, port), timeout)
+def socks_connect(ep, timeout):
+    if ep[0] == "unix":
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect(ep[1])
+        return s
+    return socket.create_connection((ep[1], ep[2]), timeout)
+
+
+def socks5_open(ep, devid, dport, timeout=8):
+    s = socks_connect(ep, timeout)
     s.settimeout(timeout)
     s.sendall(b"\x05\x01\x00")
     if recv_exact(s, 2) != b"\x05\x00":
@@ -141,6 +151,28 @@ class CloserServer(threading.Thread):
             pass
 
 
+def _openssl(*args):
+    subprocess.check_call(["openssl"] + list(args),
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def make_client_cert(certdir, name, san):
+    """用 certdir/ca.crt 签发一张带 SAN 的客户端证书。"""
+    ca_crt = os.path.join(certdir, "ca.crt")
+    ca_key = os.path.join(certdir, "ca.key")
+    key = os.path.join(certdir, name + ".key")
+    csr = os.path.join(certdir, name + ".csr")
+    crt = os.path.join(certdir, name + ".crt")
+    ext = os.path.join(certdir, name + ".ext")
+    with open(ext, "w") as f:
+        f.write("subjectAltName=DNS:%s\n" % san)
+    _openssl("req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=" + san,
+             "-keyout", key, "-out", csr)
+    _openssl("x509", "-req", "-in", csr, "-CA", ca_crt, "-CAkey", ca_key,
+             "-CAcreateserial", "-days", "1", "-extfile", ext, "-out", crt)
+    return crt, key
+
+
 def wait_log(path, needle, timeout=10):
     end = time.time() + timeout
     while time.time() < end:
@@ -163,8 +195,15 @@ def main():
     echo_port = free_port()
     close_port = free_port()
     relay_port = free_port()
-    socks1 = free_port()
-    socks2 = free_port()
+    uds = os.environ.get("RTUNNEL_UDS") == "1"
+    if uds:
+        socks1 = ("unix", "/tmp/rtunnel-e2e/socks1.sock")
+        socks2 = ("unix", "/tmp/rtunnel-e2e/socks2.sock")
+        socks1_arg, socks2_arg = "unix:" + socks1[1], "unix:" + socks2[1]
+    else:
+        socks1 = ("tcp", "127.0.0.1", free_port())
+        socks2 = ("tcp", "127.0.0.1", free_port())
+        socks1_arg, socks2_arg = "127.0.0.1:%d" % socks1[2], "127.0.0.1:%d" % socks2[2]
 
     echo = EchoServer(echo_port)
     echo.start()
@@ -179,19 +218,41 @@ def main():
     logs = {k: open(os.path.join(logdir, k + ".log"), "w") for k in ("relay", "agent", "client", "client2")}
 
     tls = os.environ.get("RTUNNEL_TLS") == "1"
-    tls_relay, tls_node = [], []
-    if tls:
+    mtls = os.environ.get("RTUNNEL_MTLS") == "1"
+    tls_relay, tls_agent, tls_client = [], [], []
+    if tls or mtls:
         certdir = os.path.join(logdir, "cert")
+        shutil.rmtree(certdir, ignore_errors=True)
         os.makedirs(certdir, exist_ok=True)
-        crt = os.path.join(certdir, "server.crt")
-        key = os.path.join(certdir, "server.key")
-        if not os.path.exists(crt):
-            subprocess.check_call(
-                ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
-                 "-subj", "/CN=localhost", "-keyout", key, "-out", crt],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        tls_relay = ["--tls-cert", crt, "--tls-key", key]
-        tls_node = ["--tls-ca", crt, "--tls-sni", "localhost"]
+        ca_crt = os.path.join(certdir, "ca.crt")
+        ca_key = os.path.join(certdir, "ca.key")
+        server_crt = os.path.join(certdir, "server.crt")
+        server_key = os.path.join(certdir, "server.key")
+        if mtls:
+            if not os.path.exists(ca_crt):
+                _openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                         "-subj", "/CN=rtunnel-ca", "-keyout", ca_key, "-out", ca_crt)
+                make_client_cert(certdir, "server", "localhost")
+                os.replace(os.path.join(certdir, "server.crt"), server_crt)
+                os.replace(os.path.join(certdir, "server.key"), server_key)
+            tls_relay = ["--tls-cert", server_crt, "--tls-key", server_key, "--tls-ca", ca_crt]
+            tls_agent = ["--tls-ca", ca_crt, "--tls-sni", "localhost",
+                         "--tls-cert", os.path.join(certdir, "agent.crt"),
+                         "--tls-key", os.path.join(certdir, "agent.key")]
+            tls_client = ["--tls-ca", ca_crt, "--tls-sni", "localhost",
+                          "--tls-cert", os.path.join(certdir, "alice.crt"),
+                          "--tls-key", os.path.join(certdir, "alice.key")]
+            if not os.path.exists(os.path.join(certdir, "agent.crt")):
+                make_client_cert(certdir, "agent", "dev1")
+                make_client_cert(certdir, "alice", "alice")
+        else:
+            if not os.path.exists(server_crt):
+                _openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                         "-subj", "/CN=localhost", "-keyout", server_key, "-out", server_crt)
+                subprocess.check_call(["cp", server_crt, ca_crt])
+            tls_relay = ["--tls-cert", server_crt, "--tls-key", server_key]
+            tls_agent = ["--tls-ca", ca_crt, "--tls-sni", "localhost"]
+            tls_client = ["--tls-ca", ca_crt, "--tls-sni", "localhost"]
 
     procs = []
     try:
@@ -204,19 +265,19 @@ def main():
 
         agent = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-agent"), "--server", "127.0.0.1", "--port", str(relay_port),
-             "--devid", "dev1", "--allow", "%d,%d" % (echo_port, close_port)] + tls_node + ["--verbose"],
+             "--devid", "dev1", "--allow", "%d,%d" % (echo_port, close_port)] + tls_agent + ["--verbose"],
             stdout=logs["agent"], stderr=subprocess.STDOUT, env=env)
         procs.append(agent)
 
         client = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-client"), "--server", "127.0.0.1", "--port", str(relay_port),
-             "--user", "tester", "--socks5", "127.0.0.1:%d" % socks1] + tls_node + ["--verbose"],
+             "--user", "tester", "--socks5", socks1_arg] + tls_client + ["--verbose"],
             stdout=logs["client"], stderr=subprocess.STDOUT, env=env)
         procs.append(client)
 
         client2 = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-client"), "--server", "127.0.0.1", "--port", str(relay_port),
-             "--user", "bob", "--socks5", "127.0.0.1:%d" % socks2] + tls_node + ["--verbose"],
+             "--user", "bob", "--socks5", socks2_arg] + tls_client + ["--verbose"],
             stdout=logs["client2"], stderr=subprocess.STDOUT, env=env)
         procs.append(client2)
 
@@ -228,7 +289,7 @@ def main():
             return finish()
 
         # 1. 基本回环
-        s, rep = socks5_open("127.0.0.1", socks1, "dev1", echo_port)
+        s, rep = socks5_open(socks1, "dev1", echo_port)
         if s is None:
             check("CONNECT dev1 建链", False, "rep=%d" % rep)
         else:
@@ -242,23 +303,23 @@ def main():
             s.close()
 
         # 2. 设备离线
-        _, rep = socks5_open("127.0.0.1", socks1, "ghost", echo_port)
+        _, rep = socks5_open(socks1, "ghost", echo_port)
         check("离线设备 REP=0x04", rep == 0x04, "rep=0x%02x" % rep)
 
         # 3. 端口白名单
-        _, rep = socks5_open("127.0.0.1", socks1, "dev1", 80)
+        _, rep = socks5_open(socks1, "dev1", 80)
         check("端口白名单 REP=0x02", rep == 0x02, "rep=0x%02x" % rep)
 
         # 4. ACL（bob 无权）
         wait_log(os.path.join(logdir, "client2.log"), "authenticated", 5)
-        _, rep = socks5_open("127.0.0.1", socks2, "dev1", echo_port)
+        _, rep = socks5_open(socks2, "dev1", echo_port)
         check("ACL 拒绝 REP=0x02", rep == 0x02, "rep=0x%02x" % rep)
 
         # 5. 并发 + 两个 A 客户端同 sid
         errs = []
-        def worker(port, tag):
+        def worker(ep, tag):
             try:
-                s, rep = socks5_open("127.0.0.1", port, "dev1", echo_port)
+                s, rep = socks5_open(ep, "dev1", echo_port)
                 if s is None:
                     raise RuntimeError("rep=%d" % rep)
                 for i in range(20):
@@ -282,7 +343,7 @@ def main():
               not [e for e in errs if e.startswith(("a:", "b:"))], "; ".join(errs))
 
         # 6. 设备端关闭传播：sshd 侧发完数据就关，A 应转发 FIN 给 SOCKS 客户端
-        s, rep = socks5_open("127.0.0.1", socks1, "dev1", close_port)
+        s, rep = socks5_open(socks1, "dev1", close_port)
         if s is None:
             check("设备端关闭传播", False, "rep=%d" % rep)
         else:
@@ -301,8 +362,27 @@ def main():
                   "got=%r eof=%s" % (got, eof))
             s.close()
 
+        # 7. 半关闭：客户端先 FIN，服务端回显后关闭（验证 keep_write_on_eof）
+        s, rep = socks5_open(socks1, "dev1", echo_port)
+        if s is None:
+            check("半关闭（A 侧 FIN）", False, "rep=%d" % rep)
+        else:
+            s.sendall(b"half-close")
+            s.shutdown(socket.SHUT_WR)
+            got = b""
+            try:
+                while True:
+                    d = s.recv(4096)
+                    if not d:
+                        break
+                    got += d
+            except Exception:
+                pass
+            check("半关闭（A 侧 FIN）", got == b"half-close", repr(got))
+            s.close()
+
         # 7. 大流量（256 KiB）
-        s, rep = socks5_open("127.0.0.1", socks1, "dev1", echo_port, timeout=20)
+        s, rep = socks5_open(socks1, "dev1", echo_port, timeout=20)
         total = 256 * 1024
         if s is None:
             check("大流量 256KiB", False, "rep=%d" % rep)
@@ -333,6 +413,23 @@ def main():
             else:
                 check("大流量 256KiB 回环完整", True)
             s.close()
+
+
+        # 8. mTLS 负向：证书 SAN 与 devid 不符必须被拒
+        if mtls:
+            rogue_crt, rogue_key = make_client_cert(certdir, "rogue", "dev2")
+            rogue_log = open(os.path.join(logdir, "rogue.log"), "w")
+            rogue = subprocess.Popen(
+                [os.path.join(BIN, "rtunnel-agent"), "--server", "127.0.0.1", "--port", str(relay_port),
+                 "--devid", "dev1", "--allow", str(echo_port),
+                 "--tls-ca", os.path.join(certdir, "ca.crt"), "--tls-sni", "localhost",
+                 "--tls-cert", rogue_crt, "--tls-key", rogue_key, "--verbose"],
+                stdout=rogue_log, stderr=subprocess.STDOUT, env=env)
+            procs.append(rogue)
+            ok = wait_log(os.path.join(logdir, "relay.log"), "SAN mismatch", 8)
+            check("mTLS: 证书 SAN 与 devid 不符被拒", ok)
+            rogue.terminate()
+            rogue_log.close()
 
     finally:
         for p in procs:

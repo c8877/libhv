@@ -7,6 +7,8 @@
 #include <string.h>
 #include <stdarg.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "rtnp.h"
 
@@ -27,6 +29,7 @@ typedef struct cstream_s {
     int               paused;
     int               want_shutdown;
     uint32_t          credit;
+    uint32_t          unacked;      // 已写入 local 但尚未回 WINDOW 的字节数
     rtnp_buf_t        hs;        // SOCKS5 握手缓冲 / 未发送数据
     rtnp_buf_t        pending;   // 受 credit 限制的待发数据
     htimer_t*         open_timer;
@@ -39,9 +42,12 @@ typedef struct {
     int         port;
     char        user[128];
     char        tls_ca[256];
+    char        tls_cert[256];
+    char        tls_key[256];
     char        tls_sni[256];
     int         socks_host_port;
     char        socks_host[128];
+    char        socks_uds[256];
     int         socks_port;
     int         verbose;
     hio_t*      io;
@@ -78,7 +84,11 @@ static void stream_free(cstream_t* s) {
         pp = &(*pp)->next;
     }
     if (s->open_timer) { htimer_del(s->open_timer); s->open_timer = NULL; }
-    if (s->local && !hio_is_closed(s->local)) hio_close(s->local);
+    if (s->local && !hio_is_closed(s->local)) {
+        // 先摘掉 context，避免 close_cb 再次回到已释放的 stream
+        hio_set_context(s->local, NULL);
+        hio_close(s->local);
+    }
     rtnp_buf_free(&s->hs);
     rtnp_buf_free(&s->pending);
     free(s);
@@ -202,7 +212,8 @@ static void on_local_read(hio_t* io, void* buf, int readbytes) {
         }
         return;
     }
-    if (s->state != CS_OPEN || s->remote_closed) return;
+    if (s->state != CS_OPEN) return;
+    // 注意：remote_closed 只表示 C→A 方向已 EOF，A→C 方向仍要转发客户端数据。
     if (rtnp_buf_append(&s->pending, buf, (size_t)readbytes) != 0) {
         if (g_cli.io) rtnp_send(g_cli.io, RTNP_RESET, s->sid, NULL, 0);
         stream_free(s);
@@ -210,6 +221,10 @@ static void on_local_read(hio_t* io, void* buf, int readbytes) {
     }
     flush_pending(s);
 }
+
+static void on_local_write(hio_t* io, const void* buf, int len);
+static void maybe_finish(cstream_t* s);
+static void maybe_grant_window(cstream_t* s);
 
 static void maybe_shutdown_write(cstream_t* s) {
     if (!s->want_shutdown || s->local == NULL || hio_is_closed(s->local)) return;
@@ -220,10 +235,54 @@ static void maybe_shutdown_write(cstream_t* s) {
     }
 }
 
+static void maybe_grant_window(cstream_t* s) {
+    if (s->local == NULL || hio_is_closed(s->local) || s->unacked == 0) return;
+    // 只有本地写队列降到低水位才补窗口（hio_write 入队不代表对端已消费）
+    if (hio_write_bufsize(s->local) > RTNP_LOW_WATER) {
+        hio_setcb_write(s->local, (hwrite_cb)on_local_write);
+        return;
+    }
+    if (g_cli.io) {
+        rtnp_wr_t w; rtnp_wr_init(&w);
+        rtnp_wr_u32(&w, s->unacked);
+        rtnp_send(g_cli.io, RTNP_WINDOW, s->sid, w.data, (uint16_t)w.len);
+        rtnp_wr_free(&w);
+    }
+    s->unacked = 0;
+    if (!s->want_shutdown) hio_setcb_write(s->local, NULL);
+}
+
 static void on_local_write(hio_t* io, const void* buf, int len) {
     (void)buf; (void)len;
     cstream_t* s = (cstream_t*)hio_context(io);
-    if (s) maybe_shutdown_write(s);
+    if (s == NULL) return;
+    maybe_shutdown_write(s);
+    maybe_grant_window(s);
+}
+
+static void maybe_finish(cstream_t* s) {
+    if (!s->local_eof || !s->remote_closed) return;
+    if (s->local == NULL || hio_is_closed(s->local)) { s->local = NULL; stream_free(s); return; }
+    if (hio_write_is_complete(s->local)) {
+        shutdown(hio_fd(s->local), SHUT_WR);
+        hio_close(s->local);   // 由 on_local_close 统一回收
+    } else {
+        s->want_shutdown = 1;
+        hio_setcb_write(s->local, (hwrite_cb)on_local_write);
+    }
+}
+
+static void on_local_eof(hio_t* io) {
+    cstream_t* s = (cstream_t*)hio_context(io);
+    if (g_cli.verbose) logf_("[client] local eof sid=%u", s ? s->sid : 0);
+    if (s == NULL) return;
+    if (!s->local_eof) {
+        s->local_eof = 1;
+        if (g_cli.state == 2 && g_cli.io) {
+            rtnp_send(g_cli.io, RTNP_CLOSE, s->sid, NULL, 0);
+        }
+    }
+    maybe_finish(s);
 }
 
 static void on_local_close(hio_t* io) {
@@ -252,6 +311,8 @@ static void on_local_accept(hio_t* io) {
     hio_set_context(io, s);
     hio_setcb_read(io, on_local_read);
     hio_setcb_close(io, on_local_close);
+    hio_setcb_eof(io, on_local_eof);
+    hio_set_keep_write_on_eof(io, 1);
     hio_set_max_write_bufsize(io, RTNP_CONN_INFLIGHT + RTNP_MAX_PAYLOAD);
     hio_read(io);
 }
@@ -316,13 +377,11 @@ static void handle_frame(rtnp_frame_t* f) {
     }
     case RTNP_DATA:
         if (s->state != CS_OPEN || s->local == NULL) return;
-        if (f->len > 0) hio_write(s->local, f->payload, f->len);
-        if (g_cli.io) {
-            rtnp_wr_t w; rtnp_wr_init(&w);
-            rtnp_wr_u32(&w, f->len);
-            rtnp_send(g_cli.io, RTNP_WINDOW, s->sid, w.data, (uint16_t)w.len);
-            rtnp_wr_free(&w);
+        if (f->len > 0) {
+            hio_write(s->local, f->payload, f->len);
+            s->unacked += f->len;
         }
+        maybe_grant_window(s);
         return;
     case RTNP_WINDOW: {
         rtnp_rd_t r; rtnp_rd_init(&r, f->payload, f->len);
@@ -340,9 +399,9 @@ static void handle_frame(rtnp_frame_t* f) {
             shutdown(hio_fd(s->local), SHUT_WR);
         } else {
             s->want_shutdown = 1;
-            hio_setcb_write(s->local, on_local_write);
+            hio_setcb_write(s->local, (hwrite_cb)on_local_write);
         }
-        if (s->local_eof) stream_free(s);
+        maybe_finish(s);
         return;
     case RTNP_RESET:
         stream_free(s);
@@ -425,6 +484,8 @@ static void on_reconnect(htimer_t* timer) {
         hssl_ctx_opt_t opt;
         memset(&opt, 0, sizeof(opt));
         opt.ca_file = g_cli.tls_ca;
+        opt.crt_file = g_cli.tls_cert[0] ? g_cli.tls_cert : NULL;
+        opt.key_file = g_cli.tls_key[0] ? g_cli.tls_key : NULL;
         opt.verify_peer = 1;
         opt.endpoint = HSSL_CLIENT;
         if (hio_new_ssl_ctx(io, &opt) != 0) {
@@ -466,13 +527,20 @@ int main(int argc, char** argv) {
             char buf[256];
             snprintf(buf, sizeof(buf), "%s", argv[++i]);
             char* colon = strrchr(buf, ':');
-            if (colon) {
+            if (strncmp(buf, "unix:", 5) == 0) {
+                snprintf(g_cli.socks_uds, sizeof(g_cli.socks_uds), "%s", buf + 5);
+            } else if (colon) {
                 *colon = '\0';
                 snprintf(g_cli.socks_host, sizeof(g_cli.socks_host), "%s", buf);
                 g_cli.socks_port = atoi(colon + 1);
+                g_cli.socks_uds[0] = '\0';
             }
         } else if (strcmp(argv[i], "--tls-ca") == 0 && i + 1 < argc) {
             snprintf(g_cli.tls_ca, sizeof(g_cli.tls_ca), "%s", argv[++i]);
+        } else if (strcmp(argv[i], "--tls-cert") == 0 && i + 1 < argc) {
+            snprintf(g_cli.tls_cert, sizeof(g_cli.tls_cert), "%s", argv[++i]);
+        } else if (strcmp(argv[i], "--tls-key") == 0 && i + 1 < argc) {
+            snprintf(g_cli.tls_key, sizeof(g_cli.tls_key), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--tls-sni") == 0 && i + 1 < argc) {
             snprintf(g_cli.tls_sni, sizeof(g_cli.tls_sni), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--verbose") == 0) {
@@ -492,12 +560,31 @@ int main(int argc, char** argv) {
     g_cli.loop = hloop_new(0);
     rtnp_buf_init(&g_cli.in);
 
-    hio_t* listenio = hloop_create_tcp_server(g_cli.loop, g_cli.socks_host, g_cli.socks_port, on_local_accept);
-    if (listenio == NULL) {
-        fprintf(stderr, "socks5 listen %s:%d failed\n", g_cli.socks_host, g_cli.socks_port);
-        return 2;
+    hio_t* listenio = NULL;
+#ifdef ENABLE_UDS
+    if (g_cli.socks_uds[0]) {
+        unlink(g_cli.socks_uds);
+        listenio = hio_create_socket(g_cli.loop, g_cli.socks_uds, -1, HIO_TYPE_TCP, HIO_SERVER_SIDE);
+        if (listenio) {
+            hio_setcb_accept(listenio, on_local_accept);
+            if (hio_accept(listenio) != 0) listenio = NULL;
+        }
+        if (listenio == NULL) {
+            fprintf(stderr, "socks5 listen unix:%s failed\n", g_cli.socks_uds);
+            return 2;
+        }
+        chmod(g_cli.socks_uds, 0600);
+        logf_("[client] socks5 listening on unix:%s", g_cli.socks_uds);
+    } else
+#endif
+    {
+        listenio = hloop_create_tcp_server(g_cli.loop, g_cli.socks_host, g_cli.socks_port, on_local_accept);
+        if (listenio == NULL) {
+            fprintf(stderr, "socks5 listen %s:%d failed\n", g_cli.socks_host, g_cli.socks_port);
+            return 2;
+        }
+        logf_("[client] socks5 listening on %s:%d", g_cli.socks_host, g_cli.socks_port);
     }
-    logf_("[client] socks5 listening on %s:%d", g_cli.socks_host, g_cli.socks_port);
 
     on_reconnect(NULL);
     htimer_add(g_cli.loop, on_ping, 15000, INFINITE);

@@ -147,6 +147,7 @@ struct hio_s {
     unsigned    close       :1;
     unsigned    alloced_readbuf :1; // for hio_alloc_readbuf
     unsigned    alloced_ssl_ctx :1; // for hio_new_ssl_ctx
+    unsigned    keep_write_on_eof :1; // for hio_set_keep_write_on_eof
 // public:
     hio_type_e  io_type;
     hio_phase_e phase;
@@ -178,6 +179,7 @@ struct hio_s {
     hread_cb    read_cb;
     hwrite_cb   write_cb;
     hclose_cb   close_cb;
+    heof_cb     eof_cb;
     haccept_cb  accept_cb;
     hconnect_cb connect_cb;
     // timers

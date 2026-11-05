@@ -19,6 +19,7 @@ typedef struct astream_s {
     int              paused;
     int              want_shutdown;
     uint32_t         credit;
+    uint32_t         unacked;
     rtnp_buf_t       pending;
     struct astream_s* next;
 } astream_t;
@@ -29,6 +30,8 @@ typedef struct {
     int          port;
     char         devid[128];
     char         tls_ca[256];
+    char         tls_cert[256];
+    char         tls_key[256];
     char         tls_sni[256];
     int          allow_ports[32];
     int          nallow;
@@ -42,6 +45,9 @@ typedef struct {
 } agent_t;
 
 static agent_t g_agent;
+
+static void on_local_write(hio_t* io, const void* buf, int len);
+static void maybe_grant_window(astream_t* s);
 static void schedule_reconnect(void);
 
 static void logf_(const char* fmt, ...) {
@@ -74,6 +80,7 @@ static void stream_free(astream_t* s) {
         pp = &(*pp)->next;
     }
     if (s->local && !hio_is_closed(s->local)) {
+        hio_set_context(s->local, NULL);
         hio_close(s->local);
     }
     rtnp_buf_free(&s->pending);
@@ -95,7 +102,8 @@ static void send_open_fail(uint32_t sid, uint16_t code, const char* msg) {
 }
 
 static void flush_pending(astream_t* s) {
-    if (!s->connected || s->remote_closed) return;
+    // remote_closed 只表示 A→C 方向 EOF，不影响 C→A 的数据回传
+    if (!s->connected) return;
     while (s->pending.len > 0 && s->credit > 0) {
         size_t n = s->pending.len;
         if (n > s->credit) n = s->credit;
@@ -114,6 +122,22 @@ static void flush_pending(astream_t* s) {
     }
 }
 
+static void maybe_grant_window(astream_t* s) {
+    if (s->local == NULL || hio_is_closed(s->local) || s->unacked == 0) return;
+    if (hio_write_bufsize(s->local) > RTNP_LOW_WATER) {
+        hio_setcb_write(s->local, on_local_write);
+        return;
+    }
+    if (g_agent.io) {
+        rtnp_wr_t w; rtnp_wr_init(&w);
+        rtnp_wr_u32(&w, s->unacked);
+        rtnp_send(g_agent.io, RTNP_WINDOW, s->sid, w.data, (uint16_t)w.len);
+        rtnp_wr_free(&w);
+    }
+    s->unacked = 0;
+    if (!s->want_shutdown) hio_setcb_write(s->local, NULL);
+}
+
 static void maybe_shutdown_write(astream_t* s) {
     if (!s->want_shutdown || s->local == NULL || hio_is_closed(s->local)) return;
     if (hio_write_is_complete(s->local)) {
@@ -126,11 +150,14 @@ static void maybe_shutdown_write(astream_t* s) {
 static void on_local_write(hio_t* io, const void* buf, int len) {
     (void)buf; (void)len;
     astream_t* s = (astream_t*)hio_context(io);
-    if (s) maybe_shutdown_write(s);
+    if (s == NULL) return;
+    maybe_shutdown_write(s);
+    maybe_grant_window(s);
 }
 
 static void on_local_close(hio_t* io) {
     astream_t* s = (astream_t*)hio_context(io);
+    if (g_agent.verbose) logf_("[agent] local close sid=%u", s ? s->sid : 0);
     if (s == NULL) return;
     if (!s->connected) {
         // 本地 connect 失败
@@ -153,8 +180,9 @@ static void on_local_close(hio_t* io) {
 
 static void on_local_read(hio_t* io, void* buf, int readbytes) {
     astream_t* s = (astream_t*)hio_context(io);
+    if (g_agent.verbose) logf_("[agent] local read sid=%u len=%d", s ? s->sid : 0, readbytes);
     if (s == NULL || readbytes <= 0) return;
-    if (s->remote_closed) return;
+    // 注意：remote_closed 只表示 A→C 方向已 EOF，C→A 方向仍要把数据发回去。
     if (rtnp_buf_append(&s->pending, buf, (size_t)readbytes) != 0) {
         rtnp_send(g_agent.io, RTNP_RESET, s->sid, NULL, 0);
         stream_free(s);
@@ -261,11 +289,11 @@ static void handle_frame(rtnp_frame_t* f) {
     case RTNP_DATA: {
         astream_t* s = stream_find(f->sid);
         if (s == NULL || s->local == NULL) return;
-        if (f->len > 0) hio_write(s->local, f->payload, f->len);
-        rtnp_wr_t w; rtnp_wr_init(&w);
-        rtnp_wr_u32(&w, f->len);
-        rtnp_send(g_agent.io, RTNP_WINDOW, f->sid, w.data, (uint16_t)w.len);
-        rtnp_wr_free(&w);
+        if (f->len > 0) {
+            hio_write(s->local, f->payload, f->len);
+            s->unacked += f->len;
+        }
+        maybe_grant_window(s);
         return;
     }
     case RTNP_WINDOW: {
@@ -376,6 +404,8 @@ static void on_reconnect(htimer_t* timer) {
         hssl_ctx_opt_t opt;
         memset(&opt, 0, sizeof(opt));
         opt.ca_file = g_agent.tls_ca;
+        opt.crt_file = g_agent.tls_cert[0] ? g_agent.tls_cert : NULL;
+        opt.key_file = g_agent.tls_key[0] ? g_agent.tls_key : NULL;
         opt.verify_peer = 1;
         opt.endpoint = HSSL_CLIENT;
         if (hio_new_ssl_ctx(io, &opt) != 0) {
@@ -424,6 +454,10 @@ int main(int argc, char** argv) {
             g_agent.allow_all = 1;
         } else if (strcmp(argv[i], "--tls-ca") == 0 && i + 1 < argc) {
             snprintf(g_agent.tls_ca, sizeof(g_agent.tls_ca), "%s", argv[++i]);
+        } else if (strcmp(argv[i], "--tls-cert") == 0 && i + 1 < argc) {
+            snprintf(g_agent.tls_cert, sizeof(g_agent.tls_cert), "%s", argv[++i]);
+        } else if (strcmp(argv[i], "--tls-key") == 0 && i + 1 < argc) {
+            snprintf(g_agent.tls_key, sizeof(g_agent.tls_key), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--tls-sni") == 0 && i + 1 < argc) {
             snprintf(g_agent.tls_sni, sizeof(g_agent.tls_sni), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--verbose") == 0) {

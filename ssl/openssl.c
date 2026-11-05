@@ -4,6 +4,7 @@
 
 #include "openssl/ssl.h"
 #include "openssl/err.h"
+#include "openssl/x509v3.h"
 #ifdef _MSC_VER
 //#pragma comment(lib, "libssl.a")
 //#pragma comment(lib, "libcrypto.a")
@@ -90,6 +91,37 @@ error:
 void hssl_ctx_free(hssl_ctx_t ssl_ctx) {
     if (!ssl_ctx) return;
     SSL_CTX_free((SSL_CTX*)ssl_ctx);
+}
+
+int hssl_peer_cert_san(hssl_t ssl, char* buf, int bufsize) {
+    if (ssl == NULL || buf == NULL || bufsize <= 0) return -1;
+    SSL* ssl_ = (SSL*)ssl;
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+    X509* cert = SSL_get1_peer_certificate(ssl_);
+#else
+    X509* cert = SSL_get_peer_certificate(ssl_);
+#endif
+    if (cert == NULL) return -1;
+
+    int ret = -1;
+    GENERAL_NAMES* names = (GENERAL_NAMES*)X509_get_ext_d2i(cert, NID_subject_alt_name, NULL, NULL);
+    if (names) {
+        int n = sk_GENERAL_NAME_num(names);
+        for (int i = 0; i < n; ++i) {
+            GENERAL_NAME* nm = sk_GENERAL_NAME_value(names, i);
+            if (nm->type != GEN_DNS) continue;
+            const unsigned char* d = ASN1_STRING_get0_data(nm->d.dNSName);
+            int len = ASN1_STRING_length(nm->d.dNSName);
+            if (d == NULL || len <= 0 || len >= bufsize) continue;
+            memcpy(buf, d, (size_t)len);
+            buf[len] = '\0';
+            ret = 0;
+            break;
+        }
+        GENERAL_NAMES_free(names);
+    }
+    X509_free(cert);
+    return ret;
 }
 
 hssl_t hssl_new(hssl_ctx_t ssl_ctx, int fd) {
