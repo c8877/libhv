@@ -25,7 +25,7 @@ option(WITH_HTTP_SERVER "compile http/server" ON)
 option(WITH_HTTP_CLIENT "compile http/client" ON)
 option(WITH_MQTT "compile mqtt" ON)
 option(WITH_REDIS "compile redis" OFF)
-option(WITH_RPC "compile hrpc (libhrpc, needs protobuf)" OFF)
+option(WITH_RPC "compile hrpc (libhrpc, needs protobuf)" ON)
 
 option(ENABLE_UDS "Unix Domain Socket" OFF)
 option(USE_MULTIMAP "MultiMap" OFF)

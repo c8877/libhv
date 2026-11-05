@@ -150,8 +150,10 @@ echo "[enp_build_mp135] 构建目录: ${BUILD_DIR}"
 echo "[enp_build_mp135] 环境脚本: ${ENV_FILE}"
 
 # 6) 转调 enp_build.sh（默认静态库 + 共享库）
+# 交叉环境无 ARM 版 protobuf，hrpc 关闭（x86 默认 WITH_RPC=ON）
 set +e
-"${SCRIPT_DIR}/enp_build.sh" --static --shared "${HOST_ARGS[@]}" --prefix "${PREFIX}" "${PASS_ARGS[@]}"
+"${SCRIPT_DIR}/enp_build.sh" --static --shared "${HOST_ARGS[@]}" \
+    --cmake-args "-DWITH_RPC=OFF" --prefix "${PREFIX}" "${PASS_ARGS[@]}"
 rc=$?
 set -e
 
