@@ -1,6 +1,6 @@
 # rtunnel：A → B → C 远程 SSH 隧道
 
-设计见 [`docs/design/remote-ssh-tunnel.md`](../docs/design/remote-ssh-tunnel.md)。
+反向通道设计见 [`docs/design/rtunnel.md`](../docs/design/rtunnel.md)。
 
 ```
 开发者 ssh ──本地 SOCKS5──> A ══TCP/TLS══> B ══TCP/TLS══> C ──> 127.0.0.1:22

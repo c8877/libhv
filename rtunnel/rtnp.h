@@ -1,7 +1,7 @@
 #ifndef RTNP_H_
 #define RTNP_H_
 
-// RTNP v1 —— 反向隧道协议（见 docs/design/remote-ssh-tunnel.md）
+// RTNP v1 —— 反向通道协议（见 docs/design/rtunnel.md）
 //
 // 帧头固定 16 字节，大端：
 //   magic[4] "RTNP" | version(1) | type(1) | flags(2) | stream_id(4) | length(2) | reserved(2)

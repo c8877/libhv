@@ -1,7 +1,11 @@
-# 远程 SSH 隧道系统设计（A → B → C）
+# 反向通道 rtunnel 设计（A → B → C）
+
+> 一句话：设备与开发机都主动外连跳板，跳板按设备 ID 转发字节，形成一条**反向通道**。
+> 承载范围：任意 TCP 应用——SSH / scp / HTTP / HTTPS / WebSocket / HTTP/2 / gRPC / 数据库协议等；
+> 隧道不解析上层协议，只搬字节。不支持 UDP：HTTP/3、QUIC、DNS over UDP 都无法承载。
 
 > 传输：A↔B、B↔C 均为 **TCP**（TLS 作为加密层，生产开启）
-> 关联：`docs/cn/socks5.md`、`examples/socks5_proxy_server.c`、`event/socks5.c`、`event/hevent.c`
+> 关联：`docs/cn/socks5.md`、`examples/socks5_proxy_server.c`、`event/socks5.c`
 
 ---
 
