@@ -15,6 +15,10 @@
 #   --examples            构建 examples/ (BUILD_EXAMPLES) 默认: 关
 #   --tests               构建 unittest/ (BUILD_UNITTEST) 默认: 关
 #   --benchs              构建基准测试 (libhv 的 CMake 无此开关，忽略并打印说明)
+#   --with-openssl        启用 TLS 后端 OpenSSL   (WITH_OPENSSL=ON)
+#   --with-mbedtls        启用 TLS 后端 mbedTLS   (WITH_MBEDTLS=ON)
+#   --with-gnutls         启用 TLS 后端 GnuTLS    (WITH_GNUTLS=ON)
+#                         三者互斥，只能选一个；都不给则与上游默认一致（Linux 下无 TLS）
 #   --install             构建后执行 cmake --install 装到 --prefix
 #   --incdir <p[:p2]>     额外头文件搜索路径 (追加到 CMAKE_INCLUDE_PATH，并 -I 进 C/CXX_FLAGS)
 #   --libdir <p[:p2]>     额外库搜索路径   (追加到 CMAKE_LIBRARY_PATH，并 -L 进链接参数)
@@ -41,7 +45,7 @@
 # 示例:
 #   ./enp_build.sh --static --shared --examples --install --prefix /tmp/libhv-pfx
 #   BUILD_DIR=build/x86_64 ./enp_build.sh --static --shared -j 8
-#   ./enp_build.sh --shared --cmake-args "-DWITH_OPENSSL=ON" --cmake-args "-DWITH_MQTT=ON"
+#   ./enp_build.sh --shared --with-openssl --cmake-args "-DWITH_MQTT=ON"
 # =============================================================================
 
 set -e
@@ -86,6 +90,8 @@ CLEAN=0
 REBUILD=0
 NPROC=""
 CMAKE_EXTRA_ARGS=()
+# TLS 后端：openssl / mbedtls / gnutls 三选一，空数组 = 不启用（上游默认）
+SSL_BACKENDS=()
 BUILD_TYPE="${CMAKE_BUILD_TYPE:-Release}"
 # 体积优化级别：none(不传 CMAKE_BUILD_TYPE，与改动前完全一致) / size(MinSizeRel ⇒ -Os -DNDEBUG) /
 # speed(Release ⇒ -O3 -DNDEBUG)。默认 size —— 用户要的是"优化体积"。
@@ -226,6 +232,18 @@ while [ $# -gt 0 ]; do
             echo "[enp_build] 提示: libhv 的 CMake 工程无 --benchs 对应开关，已忽略（examples/ 已含 wrk 等压测程序）"
             shift
             ;;
+        --with-openssl)
+            SSL_BACKENDS+=(openssl)
+            shift
+            ;;
+        --with-mbedtls)
+            SSL_BACKENDS+=(mbedtls)
+            shift
+            ;;
+        --with-gnutls)
+            SSL_BACKENDS+=(gnutls)
+            shift
+            ;;
         --install)
             DO_INSTALL=1
             shift
@@ -253,6 +271,12 @@ if [ "$BUILD_STATIC" = "OFF" ] && [ "$BUILD_SHARED" = "OFF" ]; then
     die "至少需要启用一种库类型（--static 或 --shared）"
 fi
 
+# TLS 后端三选一（libhv 的 hssl.h 只认一个 WITH_xxx）
+if [ ${#SSL_BACKENDS[@]} -gt 1 ]; then
+    die "TLS 后端只能选一个（--with-openssl / --with-mbedtls / --with-gnutls），当前: ${SSL_BACKENDS[*]}"
+fi
+SSL_BACKEND="${SSL_BACKENDS[0]:-none}"
+
 # prefix 转绝对路径（相对路径基于调用目录）
 mkdir -p "$PREFIX" || die "无法创建安装前缀目录: $PREFIX"
 PREFIX="$(cd "$PREFIX" && pwd)"
@@ -267,7 +291,7 @@ fi
 echo "=============================================================="
 echo "enp_build.sh v${SCRIPT_VERSION}  (${PROJECT_NAME})"
 echo "=============================================================="
-echo "用法: $0 [--static] [--shared] [--examples] [--install] [--prefix <dir>] [-j <N>]"
+echo "用法: $0 [--static] [--shared] [--examples] [--install] [--with-openssl|--with-mbedtls|--with-gnutls] [--prefix <dir>] [-j <N>]"
 echo ""
 echo "系统架构: $ARCH"
 echo "源码目录: $PROJECT_DIR"
@@ -286,6 +310,12 @@ echo "Strip 产物: $DO_STRIP"
 echo "库类型  : 静态库($BUILD_STATIC), 共享库($BUILD_SHARED)"
 echo "示例程序: $BUILD_EXAMPLES"
 echo "单元测试: $BUILD_TESTS"
+case "$SSL_BACKEND" in
+    none)    echo "TLS 后端: none (未启用，hssl_backend()=nossl)" ;;
+    openssl) echo "TLS 后端: openssl (-DWITH_OPENSSL=ON，链接 libssl/libcrypto)" ;;
+    mbedtls) echo "TLS 后端: mbedtls (-DWITH_MBEDTLS=ON)" ;;
+    gnutls)  echo "TLS 后端: gnutls  (-DWITH_GNUTLS=ON)" ;;
+esac
 echo "执行安装: $([ "$DO_INSTALL" -eq 1 ] && echo "是" || echo "否")"
 [ ${#CMAKE_EXTRA_ARGS[@]} -gt 0 ] && echo "自定义 CMake 参数: ${CMAKE_EXTRA_ARGS[*]}"
 echo ""
@@ -324,6 +354,13 @@ if grep -q "BUILD_UNITTEST" "$PROJECT_DIR/CMakeLists.txt" "$PROJECT_DIR/CMakeLis
 elif [ "$BUILD_TESTS" = "ON" ]; then
     echo "[enp_build] 提示: CMakeLists.txt 无 BUILD_UNITTEST 开关，--tests 被忽略"
 fi
+
+# TLS 后端 -> libhv 的 WITH_xxx（三选一；不启用时不传，保持上游默认）
+case "$SSL_BACKEND" in
+    openssl) CMAKE_ARGS+=(-DWITH_OPENSSL=ON) ;;
+    mbedtls) CMAKE_ARGS+=(-DWITH_MBEDTLS=ON) ;;
+    gnutls)  CMAKE_ARGS+=(-DWITH_GNUTLS=ON) ;;
+esac
 
 # prefix 同时进 CMAKE_PREFIX_PATH（与已有值 ; 拼接，不覆盖）
 CMAKE_PREFIX_PATH_VAL="$(append_paths "${CMAKE_PREFIX_PATH:-}" "$PREFIX")"
