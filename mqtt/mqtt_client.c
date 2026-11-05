@@ -4,6 +4,7 @@
 #include "herr.h"
 #include "hendian.h"
 #include "hsocket.h"
+#include "hmath.h"
 
 static unsigned short mqtt_next_mid() {
     static unsigned short s_mid = 0;
@@ -64,10 +65,27 @@ static void mqtt_send_disconnect(hio_t* io) {
     mqtt_send_head(io, MQTT_TYPE_DISCONNECT, 0);
 }
 
+// Skip MQTT v5 properties section
+// Returns 1 on success, 0 on malformed data
+static int mqtt_v5_skip_properties(unsigned char** pp, unsigned char* end) {
+    unsigned char* p = *pp;
+    int bytes = end - p;
+    if (bytes <= 0) return 0;
+    long long prop_len = varint_decode(p, &bytes);
+    if (bytes <= 0) return 0;
+    p += bytes;     // skip varint bytes
+    if (prop_len < 0 || prop_len > end - p) return 0;
+    p += prop_len;  // skip properties data
+    *pp = p;
+    return 1;
+}
+
 /*
  * MQTT_TYPE_CONNECT
- * 2 + protocol_name + 1 protocol_version + 1 conn_flags + 2 keepalive + 2 + [client_id] +
- * [2 + will_topic + 2 + will_payload] +
+ * 2 + protocol_name + 1 protocol_version + 1 conn_flags + 2 keepalive +
+ * [v5: properties] +
+ * 2 + [client_id] +
+ * [v5: varint + will_properties] + [2 + will_topic + 2 + will_payload] +
  * [2 + username] + [2 + password]
  */
 static int mqtt_client_login(mqtt_client_t* cli) {
@@ -81,6 +99,10 @@ static int mqtt_client_login(mqtt_client_t* cli) {
 
     // protocol_name_len
     len += cli->protocol_version == MQTT_PROTOCOL_V31 ? 6 : 4;
+    // MQTT v5: connect properties (empty, 1 byte for property length = 0)
+    if (cli->protocol_version == MQTT_PROTOCOL_V5) {
+        len += 1;
+    }
     if (*cli->client_id) {
         cid_len = strlen(cli->client_id);
     } else {
@@ -101,6 +123,10 @@ static int mqtt_client_login(mqtt_client_t* cli) {
             conn_flags |= ((cli->will->qos & 3) << 3);
             if (cli->will->retain) {
                 conn_flags |= MQTT_CONN_WILL_RETAIN;
+            }
+            // MQTT v5: will properties (empty, 1 byte for property length = 0)
+            if (cli->protocol_version == MQTT_PROTOCOL_V5) {
+                len += 1;
             }
             len += 2 + will_topic_len;
             len += 2 + will_payload_len;
@@ -131,7 +157,6 @@ static int mqtt_client_login(mqtt_client_t* cli) {
     unsigned char* p = buf;
     int headlen = mqtt_head_pack(&head, p);
     p += headlen;
-    // TODO: Not implement MQTT_PROTOCOL_V5
     if (cli->protocol_version == MQTT_PROTOCOL_V31) {
         PUSH16(p, 6);
         PUSH_N(p, MQTT_PROTOCOL_NAME_v31, 6);
@@ -142,11 +167,19 @@ static int mqtt_client_login(mqtt_client_t* cli) {
     PUSH8(p, cli->protocol_version);
     PUSH8(p, conn_flags);
     PUSH16(p, cli->keepalive);
+    // MQTT v5: connect properties (empty)
+    if (cli->protocol_version == MQTT_PROTOCOL_V5) {
+        PUSH8(p, 0);
+    }
     PUSH16(p, cid_len);
     if (cid_len > 0) {
         PUSH_N(p, cli->client_id, cid_len);
     }
     if (conn_flags & MQTT_CONN_HAS_WILL) {
+        // MQTT v5: will properties (empty)
+        if (cli->protocol_version == MQTT_PROTOCOL_V5) {
+            PUSH8(p, 0);
+        }
         PUSH16(p, will_topic_len);
         PUSH_N(p, cli->will->topic, will_topic_len);
         PUSH16(p, will_payload_len);
@@ -188,6 +221,14 @@ static void reconnect_timer_cb(htimer_t* timer) {
     mqtt_client_reconnect(cli);
 }
 
+static void mqtt_client_add_reconnect_timer(mqtt_client_t* cli) {
+    if (cli->reconn_setting && reconn_setting_can_retry(cli->reconn_setting)) {
+        uint32_t delay = reconn_setting_calc_delay(cli->reconn_setting);
+        cli->timer = htimer_add(cli->loop, reconnect_timer_cb, delay, 1);
+        hevent_set_userdata(cli->timer, cli);
+    }
+}
+
 static void on_close(hio_t* io) {
     mqtt_client_t* cli = (mqtt_client_t*)hevent_userdata(io);
     cli->connected = 0;
@@ -196,11 +237,7 @@ static void on_close(hio_t* io) {
         cli->cb(cli, cli->head.type);
     }
     // reconnect
-    if (cli->reconn_setting && reconn_setting_can_retry(cli->reconn_setting)) {
-        uint32_t delay = reconn_setting_calc_delay(cli->reconn_setting);
-        cli->timer = htimer_add(cli->loop, reconnect_timer_cb, delay, 1);
-        hevent_set_userdata(cli->timer, cli);
-    }
+    mqtt_client_add_reconnect_timer(cli);
 }
 
 static void on_packet(hio_t* io, void* buf, int len) {
@@ -228,6 +265,14 @@ static void on_packet(hio_t* io, void* buf, int len) {
             hloge("MQTT CONNACK error=%d", cli->error);
             hio_close(io);
             return;
+        }
+        // MQTT v5: skip connack properties
+        if (cli->protocol_version == MQTT_PROTOCOL_V5 && p < end) {
+            if (!mqtt_v5_skip_properties(&p, end)) {
+                hloge("MQTT CONNACK v5 properties malformed!");
+                hio_close(io);
+                return;
+            }
         }
         cli->connected = 1;
         if (cli->timer) {
@@ -264,6 +309,14 @@ static void on_packet(hio_t* io, void* buf, int len) {
                 return;
             }
             POP16(p, cli->mid);
+        }
+        // MQTT v5: skip publish properties
+        if (cli->protocol_version == MQTT_PROTOCOL_V5 && p < end) {
+            if (!mqtt_v5_skip_properties(&p, end)) {
+                hloge("MQTT PUBLISH v5 properties malformed!");
+                hio_close(io);
+                return;
+            }
         }
         cli->message.payload_len = end - p;
         if (cli->message.payload_len > 0) {
@@ -308,6 +361,14 @@ static void on_packet(hio_t* io, void* buf, int len) {
             return;
         }
         POP16(p, cli->mid);
+        // MQTT v5: skip suback properties
+        if (cli->protocol_version == MQTT_PROTOCOL_V5 && p < end) {
+            if (!mqtt_v5_skip_properties(&p, end)) {
+                hloge("MQTT SUBACK v5 properties malformed!");
+                hio_close(io);
+                return;
+            }
+        }
     }
         break;
     // case MQTT_TYPE_UNSUBSCRIBE:
@@ -320,6 +381,14 @@ static void on_packet(hio_t* io, void* buf, int len) {
             return;
         }
         POP16(p, cli->mid);
+        // MQTT v5: skip unsuback properties
+        if (cli->protocol_version == MQTT_PROTOCOL_V5 && p < end) {
+            if (!mqtt_v5_skip_properties(&p, end)) {
+                hloge("MQTT UNSUBACK v5 properties malformed!");
+                hio_close(io);
+                return;
+            }
+        }
     }
         break;
     case MQTT_TYPE_PINGREQ:
@@ -372,6 +441,10 @@ static void on_connect(hio_t* io) {
 }
 
 mqtt_client_t* mqtt_client_new(hloop_t* loop) {
+    // Own the loop only if we create it here (loop==NULL). When the caller
+    // supplies a loop, the caller owns its run/stop/free lifetime, so
+    // mqtt_client_run/stop must not drive or stop it (see those functions).
+    int is_loop_owner = (loop == NULL);
     if (loop == NULL) {
         loop = hloop_new(HLOOP_FLAG_AUTO_FREE);
         if (loop == NULL) return NULL;
@@ -380,6 +453,7 @@ mqtt_client_t* mqtt_client_new(hloop_t* loop) {
     HV_ALLOC_SIZEOF(cli);
     if (cli == NULL) return NULL;
     cli->loop = loop;
+    cli->is_loop_owner = is_loop_owner;
     cli->protocol_version = MQTT_PROTOCOL_V311;
     cli->keepalive = DEFAULT_MQTT_KEEPALIVE;
     hmutex_init(&cli->mutex_);
@@ -388,6 +462,21 @@ mqtt_client_t* mqtt_client_new(hloop_t* loop) {
 
 void mqtt_client_free(mqtt_client_t* cli) {
     if (!cli) return;
+    // Tear down the io and timer BEFORE freeing cli. They were registered on the
+    // loop with hevent_set_userdata(..., cli); if left armed, a later on_close /
+    // connect_timeout_cb / reconnect_timer_cb would dereference the freed cli
+    // (use-after-free). Detach their back-pointers and close/delete them first.
+    if (cli->timer) {
+        hevent_set_userdata(cli->timer, NULL);
+        htimer_del(cli->timer);
+        cli->timer = NULL;
+    }
+    if (cli->io) {
+        hevent_set_userdata(cli->io, NULL);
+        hio_setcb_close(cli->io, NULL);  // no on_close callback into freed cli
+        hio_close(cli->io);
+        cli->io = NULL;
+    }
     hmutex_destroy(&cli->mutex_);
     if (cli->ssl_ctx && cli->alloced_ssl_ctx) {
         hssl_ctx_free(cli->ssl_ctx);
@@ -400,11 +489,23 @@ void mqtt_client_free(mqtt_client_t* cli) {
 
 void mqtt_client_run (mqtt_client_t* cli) {
     if (!cli || !cli->loop) return;
+    // Only drive the loop we own. When the caller supplied the loop, they are
+    // responsible for running it (e.g. an existing IO thread / runtime loop);
+    // running it here would block or double-drive someone else's loop.
+    if (!cli->is_loop_owner) return;
     hloop_run(cli->loop);
+    // The owned loop uses HLOOP_FLAG_AUTO_FREE, so its IOs/timers and the loop
+    // itself are gone when hloop_run returns. Drop the stale non-owning handles
+    // before mqtt_client_free inspects them.
+    cli->loop = NULL;
+    cli->io = NULL;
+    cli->timer = NULL;
 }
 
 void mqtt_client_stop(mqtt_client_t* cli) {
     if (!cli || !cli->loop) return;
+    // Only stop the loop we own; never stop a caller-supplied loop.
+    if (!cli->is_loop_owner) return;
     hloop_stop(cli->loop);
 }
 
@@ -477,7 +578,10 @@ int mqtt_client_set_reconnect(mqtt_client_t* cli, reconn_setting_t* reconn) {
 }
 
 int mqtt_client_reconnect(mqtt_client_t* cli) {
-    mqtt_client_connect(cli, cli->host, cli->port, cli->ssl);
+    int ret = mqtt_client_connect(cli, cli->host, cli->port, cli->ssl);
+    if (ret == ERR_SOCKET) {
+        mqtt_client_add_reconnect_timer(cli);
+    }
     return 0;
 }
 
@@ -497,7 +601,7 @@ int mqtt_client_connect(mqtt_client_t* cli, const char* host, int port, int ssl)
     cli->port = port;
     cli->ssl = ssl;
     hio_t* io = hio_create_socket(cli->loop, host, port, HIO_TYPE_TCP, HIO_CLIENT_SIDE);
-    if (io == NULL) return -1;
+    if (io == NULL) return ERR_SOCKET;
     if (ssl) {
         if (cli->ssl_ctx) {
             hio_set_ssl_ctx(io, cli->ssl_ctx);
@@ -534,6 +638,8 @@ int mqtt_client_publish(mqtt_client_t* cli, mqtt_message_t* msg) {
     int payload_len = msg->payload_len ? msg->payload_len : strlen(msg->payload);
     int len = 2 + topic_len + payload_len;
     if (msg->qos > 0) len += 2; // mid
+    // MQTT v5: publish properties (empty)
+    if (cli->protocol_version == MQTT_PROTOCOL_V5) len += 1;
     unsigned short mid = 0;
 
     mqtt_head_t head;
@@ -555,6 +661,10 @@ int mqtt_client_publish(mqtt_client_t* cli, mqtt_message_t* msg) {
     if (msg->qos) {
         mid = mqtt_next_mid();
         PUSH16(p, mid);
+    }
+    // MQTT v5: publish properties (empty)
+    if (cli->protocol_version == MQTT_PROTOCOL_V5) {
+        PUSH8(p, 0);
     }
 
     hmutex_lock(&cli->mutex_);
@@ -578,6 +688,8 @@ int mqtt_client_subscribe(mqtt_client_t* cli, const char* topic, int qos) {
     if (!cli->connected) return -2;
     int topic_len = strlen(topic);
     int len = 2 + 2 + topic_len + 1;
+    // MQTT v5: subscribe properties (empty)
+    if (cli->protocol_version == MQTT_PROTOCOL_V5) len += 1;
 
     mqtt_head_t head;
     memset(&head, 0, sizeof(head));
@@ -592,6 +704,10 @@ int mqtt_client_subscribe(mqtt_client_t* cli, const char* topic, int qos) {
     p += headlen;
     unsigned short mid = mqtt_next_mid();
     PUSH16(p, mid);
+    // MQTT v5: subscribe properties (empty)
+    if (cli->protocol_version == MQTT_PROTOCOL_V5) {
+        PUSH8(p, 0);
+    }
     PUSH16(p, topic_len);
     PUSH_N(p, topic, topic_len);
     PUSH8(p, qos & 3);
@@ -606,6 +722,8 @@ int mqtt_client_unsubscribe(mqtt_client_t* cli, const char* topic) {
     if (!cli->connected) return -2;
     int topic_len = strlen(topic);
     int len = 2 + 2 + topic_len;
+    // MQTT v5: unsubscribe properties (empty)
+    if (cli->protocol_version == MQTT_PROTOCOL_V5) len += 1;
 
     mqtt_head_t head;
     memset(&head, 0, sizeof(head));
@@ -620,6 +738,10 @@ int mqtt_client_unsubscribe(mqtt_client_t* cli, const char* topic) {
     p += headlen;
     unsigned short mid = mqtt_next_mid();
     PUSH16(p, mid);
+    // MQTT v5: unsubscribe properties (empty)
+    if (cli->protocol_version == MQTT_PROTOCOL_V5) {
+        PUSH8(p, 0);
+    }
     PUSH16(p, topic_len);
     PUSH_N(p, topic, topic_len);
     // send head + mid + topic

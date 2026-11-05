@@ -97,13 +97,18 @@ int ifconfig(std::vector<ifconfig_t>& ifcs) {
     PIP_ADAPTER_ADDRESSES pAddrs = NULL;
     ULONG buflen = 0;
     GetAdaptersAddresses(AF_INET, 0, NULL, pAddrs, &buflen);
+	if (buflen <= 0) return -20;
     pAddrs = (PIP_ADAPTER_ADDRESSES)malloc(buflen);
     GetAdaptersAddresses(AF_INET, 0, NULL, pAddrs, &buflen);
 
     PIP_ADAPTER_INFO pInfos = NULL;
     buflen = 0;
     GetAdaptersInfo(pInfos, &buflen);
-    pInfos = (PIP_ADAPTER_INFO)malloc(buflen);
+	if (buflen <= 0) {
+		free(pAddrs);
+		return -20;
+    }
+	pInfos = (PIP_ADAPTER_INFO)malloc(buflen);
     GetAdaptersInfo(pInfos, &buflen);
 
     ifconfig_t ifc;
@@ -168,6 +173,9 @@ int ifconfig(std::vector<ifconfig_t>& ifcs) {
     if (ret != 0) return ret;
     ifconfig_s tmp;
     for (ifap = ifas; ifap != NULL; ifap = ifap->ifa_next) {
+        if (ifap->ifa_addr == NULL) {
+            continue;
+        }
         if (ifap->ifa_addr->sa_family == AF_INET) {
             // ipv4
             struct sockaddr_in* addr = (struct sockaddr_in*)ifap->ifa_addr;
@@ -193,6 +201,9 @@ int ifconfig(std::vector<ifconfig_t>& ifcs) {
     }
 
     for (ifap = ifas; ifap != NULL; ifap = ifap->ifa_next) {
+        if (ifap->ifa_addr == NULL) {
+            continue;
+        }
         if (ifap->ifa_addr->sa_family == AF_LINK) {
             // hwaddr
             for (auto iter = ifcs.begin(); iter != ifcs.end(); ++iter) {

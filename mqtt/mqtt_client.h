@@ -28,6 +28,7 @@ struct mqtt_client_s {
     unsigned char   ssl: 1; // Read Only
     unsigned char   alloced_ssl_ctx: 1; // intern
     unsigned char   connected : 1;
+    unsigned char   is_loop_owner: 1; // intern: 1 if this client created its own loop
     unsigned short  keepalive;
     int             ping_cnt;
     char client_id[64];
@@ -172,6 +173,10 @@ public:
         mqtt_client_set_id(client, id);
     }
 
+    void setProtocolVersion(unsigned char version) {
+        client->protocol_version = version;
+    }
+
     void setWill(mqtt_message_t* will) {
         mqtt_client_set_will(client, will);
     }
@@ -246,7 +251,7 @@ public:
 
     int subscribe(const char* topic, int qos = 0, MqttCallback ack_cb = NULL) {
         int mid = mqtt_client_subscribe(client, topic, qos);
-        if (qos > 0 && mid >= 0 && ack_cb) {
+        if (mid >= 0 && ack_cb) {
             setAckCallback(mid, ack_cb);
         }
         return mid;

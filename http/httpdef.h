@@ -75,6 +75,7 @@ enum http_parser_state {
   XX(429, TOO_MANY_REQUESTS,               Too Many Requests)               \
   XX(431, REQUEST_HEADER_FIELDS_TOO_LARGE, Request Header Fields Too Large) \
   XX(451, UNAVAILABLE_FOR_LEGAL_REASONS,   Unavailable For Legal Reasons)   \
+  XX(499, REQUEST_CANCELLED,               Request Cancelled)               \
   XX(500, INTERNAL_SERVER_ERROR,           Internal Server Error)           \
   XX(501, NOT_IMPLEMENTED,                 Not Implemented)                 \
   XX(502, BAD_GATEWAY,                     Bad Gateway)                     \
@@ -203,7 +204,7 @@ enum http_method {
     XX(IMAGE_PNG,               image/png,                png)          \
     XX(IMAGE_GIF,               image/gif,                gif)          \
     XX(IMAGE_ICO,               image/x-icon,             ico)          \
-    XX(IMAGE_BMP,               image/x-ms-bmp,           bmp)          \
+    XX(IMAGE_BMP,               image/bmp,                bmp)          \
     XX(IMAGE_SVG,               image/svg+xml,            svg)          \
     XX(IMAGE_TIFF,              image/tiff,               tiff)         \
     XX(IMAGE_WEBP,              image/webp,               webp)         \

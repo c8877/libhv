@@ -98,5 +98,9 @@
 
 /* #undef WITH_WEPOLL */
 /* #undef WITH_KCP */
+/* #undef WITH_IO_URING */
+
+/* #undef WITH_LUA */
+/* #undef WITH_JS */
 
 #endif // HV_CONFIG_H_

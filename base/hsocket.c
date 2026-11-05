@@ -1,6 +1,11 @@
 #include "hsocket.h"
 
 #include "hdef.h"
+#include "htime.h"
+
+#ifdef OS_UNIX
+#include <poll.h>
+#endif
 
 #ifdef OS_WIN
 #include "hatomic.h"
@@ -62,6 +67,7 @@ int ResolveAddr(const char* host, sockaddr_u* addr) {
 
     if (inet_pton(AF_INET6, host, &addr->sin6.sin6_addr) == 1) {
         addr->sa.sa_family = AF_INET6; // host is ipv6
+        return 0;
     }
 
     struct addrinfo* ais = NULL;
@@ -185,9 +191,33 @@ int sockaddr_compare(const sockaddr_u* addr1, const sockaddr_u* addr2) {
             return addr1->sin6.sin6_family - addr2->sin6.sin6_family;
         if (addr1->sin6.sin6_port != addr2->sin6.sin6_port)
             return addr1->sin6.sin6_port - addr2->sin6.sin6_port;
-        return memcmp(&addr1->sin6.sin6_addr, &addr2->sin6.sin6_addr, sizeof(struct in_addr));
+        return memcmp(&addr1->sin6.sin6_addr, &addr2->sin6.sin6_addr, sizeof(struct in6_addr));
     }
     return memcmp(addr1, addr2, sizeof(sockaddr_u));
+}
+
+uint32_t sockaddr_ip_hash(sockaddr_u* addr) {
+    // FNV-1a hash over the ip bytes only (port excluded).
+    const uint32_t FNV_PRIME = 16777619u;
+    uint32_t hash = 2166136261u;
+    const unsigned char* p = NULL;
+    int len = 0;
+    if (addr->sa.sa_family == AF_INET) {
+        p = (const unsigned char*)&addr->sin.sin_addr;
+        len = sizeof(struct in_addr);
+    }
+    else if (addr->sa.sa_family == AF_INET6) {
+        p = (const unsigned char*)&addr->sin6.sin6_addr;
+        len = sizeof(struct in6_addr);
+    }
+    else {
+        return 0;
+    }
+    for (int i = 0; i < len; ++i) {
+        hash ^= p[i];
+        hash *= FNV_PRIME;
+    }
+    return hash;
 }
 
 static int sockaddr_bind(sockaddr_u* localaddr, int type) {
@@ -260,6 +290,20 @@ static int ListenFD(int sockfd) {
 static int ConnectFDTimeout(int connfd, int ms) {
     int err = 0;
     socklen_t optlen = sizeof(err);
+
+#ifdef OS_UNIX
+    // Use poll() to avoid FD_SETSIZE limit (fd >= 1024 crashes with select)
+    struct pollfd pfd;
+    pfd.fd = connfd;
+    pfd.events = POLLOUT;
+    pfd.revents = 0;
+    int ret = poll(&pfd, 1, ms);
+    if (ret < 0) {
+        perror("poll");
+        goto error;
+    }
+#else
+    // Windows: select() is safe (fd_set uses different implementation)
     struct timeval tv = { ms / 1000, (ms % 1000) * 1000 };
     fd_set writefds;
     FD_ZERO(&writefds);
@@ -269,6 +313,7 @@ static int ConnectFDTimeout(int connfd, int ms) {
         perror("select");
         goto error;
     }
+#endif
     if (ret == 0) {
         errno = ETIMEDOUT;
         goto error;
@@ -320,9 +365,16 @@ int ConnectNonblock(const char* host, int port) {
 }
 
 int ConnectTimeout(const char* host, int port, int ms) {
+    unsigned int start_time = gettick_ms();
     int connfd = Connect(host, port, 1);
     if (connfd < 0) return connfd;
-    return ConnectFDTimeout(connfd, ms);
+    unsigned int elapsed = gettick_ms() - start_time;
+    int remaining = ms - (int)elapsed;
+    if (remaining <= 0) {
+        closesocket(connfd);
+        return -ETIMEDOUT;
+    }
+    return ConnectFDTimeout(connfd, remaining);
 }
 
 #ifdef ENABLE_UDS
