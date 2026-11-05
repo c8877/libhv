@@ -11,9 +11,21 @@ x86:
 	./enp_build.sh --static --shared --examples --benchs
 x86_install:
 	./enp_build.sh --static --shared --install
+# 主机：只出静态库（libhv.a）
+static:
+	./enp_build.sh --static --no-shared
+# 主机：带示例程序（examples/ 里的 httpd、curl、wrk 等）
+x86_examples:
+	./enp_build.sh --static --shared --examples
 
 mp135:
 	./enp_build_mp135.sh
+# MP135：只出静态库（ARM libhv.a）
+mp135_static:
+	./enp_build_mp135.sh --no-shared
+# MP135：带示例程序（交叉编译，examples/ 全部）
+mp135_examples:
+	./enp_build_mp135.sh --examples
 mp135_install:
 	./enp_build_mp135.sh ~/.local/mp135
 
@@ -46,4 +58,4 @@ $(MASTER_TARGETS):
 	@test -f $(MASTER_MAKEFILE) || { echo "缺少 $(MASTER_MAKEFILE)" >&2; exit 1; }
 	$(MAKE) -f $(MASTER_MAKEFILE) $@
 
-.PHONY: x86 x86_install mp135 mp135_install clean clean-master $(MASTER_TARGETS)
+.PHONY: x86 x86_install static x86_examples mp135 mp135_static mp135_examples mp135_install clean clean-master $(MASTER_TARGETS)
