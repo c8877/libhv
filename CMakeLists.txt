@@ -8,3 +8,8 @@ set(WITH_MQTT ON CACHE BOOL "compile mqtt")
 set(WITH_RPC ON CACHE BOOL "compile hrpc (libhrpc, needs protobuf)")
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.master)
+
+# 本地新增组件（上游没有，放在 include 之后定义目标）
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/rtunnel/CMakeLists.txt)
+    add_subdirectory(rtunnel)
+endif()

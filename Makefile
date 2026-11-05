@@ -35,6 +35,10 @@ clean:
 clean-master:
 	$(MAKE) -f $(MASTER_MAKEFILE) clean
 
+# rtunnel 端到端验收（需先 make x86 或 ./enp_build.sh 构建）
+rtunnel_test:
+	python3 rtunnel/tests/e2e.py
+
 # master Makefile 的目标，逐个转交（也可直接 make -f Makefile.master <target>）。
 # 必须是 .PHONY：evpp/、unittest/、examples/ 等同名目录存在，否则会被当成已是最新。
 # master 新增目标时在下面补一项即可。
@@ -58,4 +62,4 @@ $(MASTER_TARGETS):
 	@test -f $(MASTER_MAKEFILE) || { echo "缺少 $(MASTER_MAKEFILE)" >&2; exit 1; }
 	$(MAKE) -f $(MASTER_MAKEFILE) $@
 
-.PHONY: x86 x86_install static x86_examples mp135 mp135_static mp135_examples mp135_install clean clean-master $(MASTER_TARGETS)
+.PHONY: x86 x86_install static x86_examples mp135 mp135_static mp135_examples mp135_install clean clean-master rtunnel_test $(MASTER_TARGETS)
