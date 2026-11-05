@@ -313,12 +313,13 @@ CMAKE_ARGS=(
 )
 
 # --examples 的开关在 libhv 根 CMakeLists 里确实存在（option(BUILD_EXAMPLES ...)），直接映射
-if ! grep -q "BUILD_EXAMPLES" "$PROJECT_DIR/CMakeLists.txt" 2>/dev/null; then
+# 本仓 CMakeLists.txt 只 include CMakeLists.master，选项在两处之一，都要查
+if ! grep -q "BUILD_EXAMPLES" "$PROJECT_DIR/CMakeLists.txt" "$PROJECT_DIR/CMakeLists.master" 2>/dev/null; then
     echo "[enp_build] 提示: CMakeLists.txt 未声明 BUILD_EXAMPLES，--examples 被忽略"
 fi
 
 # --tests -> BUILD_UNITTEST（libhv 的命名），未知则忽略
-if grep -q "BUILD_UNITTEST" "$PROJECT_DIR/CMakeLists.txt" 2>/dev/null; then
+if grep -q "BUILD_UNITTEST" "$PROJECT_DIR/CMakeLists.txt" "$PROJECT_DIR/CMakeLists.master" 2>/dev/null; then
     CMAKE_ARGS+=(-DBUILD_UNITTEST="$BUILD_TESTS")
 elif [ "$BUILD_TESTS" = "ON" ]; then
     echo "[enp_build] 提示: CMakeLists.txt 无 BUILD_UNITTEST 开关，--tests 被忽略"
