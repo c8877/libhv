@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# ============================================================================
+# .githooks/pre-commit —— libhv 版本号自增（base/hversion.c）
+#
+# 每次提交做三件事：
+#   1) HV_VERSION_PATCH += 1（MAJOR / MINOR 不动）
+#   2) HV_VERSION_STRING 重算为 "MAJOR.MINOR.PATCH"
+#   3) git add base/hversion.c，让这次 bump 进入本次提交
+#
+# 版本数据只在 base/hversion.c（hversion.h 只有 getter 声明），所以只改一个文件。
+#
+# 红线：不调用 git commit / git commit --amend（不递归触发提交）；
+#       解析失败 / 改写未命中直接报错退出，绝不静默跳过。
+#
+# 生效：bash scripts/install_hooks.sh（等价 git config core.hooksPath .githooks）
+# ============================================================================
+
+set -euo pipefail
+
+VERSION_FILE="base/hversion.c"
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+die() { echo "[pre-commit] $*" >&2; exit 1; }
+
+[ -f "$VERSION_FILE" ] || die "缺少 $VERSION_FILE（版本真源），拒绝提交"
+
+# 只认行首「#define HV_VERSION_<name> <数字>」，注释/字符串里的同名文本不会误取。
+read_field() {
+    awk -v name="$1" '
+        $1 == "#define" && $2 == name {
+            v = $3
+            gsub(/[^0-9]/, "", v)
+            print v
+            exit
+        }' "$VERSION_FILE"
+}
+
+major="$(read_field HV_VERSION_MAJOR)"
+minor="$(read_field HV_VERSION_MINOR)"
+patch="$(read_field HV_VERSION_PATCH)"
+
+if [ -z "$major" ] || [ -z "$minor" ] || [ -z "$patch" ]; then
+    die "无法从 $VERSION_FILE 解析 HV_VERSION_MAJOR/MINOR/PATCH（期望 #define HV_VERSION_xxx <数字>）"
+fi
+
+patch=$((patch + 1))
+version="$major.$minor.$patch"
+
+# 定点改写：保留其余行（含行尾注释）原样，只改 patch 与 string 两行
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+
+awk -v p="$patch" -v ver="$version" '
+$1 == "#define" && $2 == "HV_VERSION_PATCH"  { printf "#define HV_VERSION_PATCH    %s\n", p;    next }
+$1 == "#define" && $2 == "HV_VERSION_STRING" { printf "#define HV_VERSION_STRING   \"%s\"\n", ver; next }
+{ print }
+' "$VERSION_FILE" > "$tmp"
+
+# 原地覆盖（保留原文件权限与 inode）
+cat "$tmp" > "$VERSION_FILE"
+
+# 断言替换生效，避免 awk 未命中却“成功”提交
+grep -qE "^#define HV_VERSION_PATCH +$patch$" "$VERSION_FILE" || die "HV_VERSION_PATCH 更新失败"
+grep -qF "\"$version\"" "$VERSION_FILE" || die "HV_VERSION_STRING 更新失败（$version）"
+
+git add -- "$VERSION_FILE"
+
+echo "[pre-commit] 版本自增: $version"

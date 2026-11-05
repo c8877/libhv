@@ -322,7 +322,7 @@ JSValue js_hv_version(JSContext* js, JSValueConst this_val, int argc, JSValueCon
     (void)this_val;
     (void)argc;
     (void)argv;
-    return JS_NewString(js, HV_VERSION_STRING);
+    return JS_NewString(js, hv_version());
 }
 
 JSValue js_hv_log(JSContext* js, JSValueConst this_val, int argc, JSValueConst* argv) {

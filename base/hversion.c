@@ -2,6 +2,37 @@
 
 #include "htime.h"
 
+// =============================================================================
+// 版本号唯一真源：数据只写在这里（hversion.h 只有 getter 声明）。
+// 每次提交由 .githooks/pre-commit 把 HV_VERSION_PATCH +0.0.1 并重算 HV_VERSION_STRING，
+// 保持下面四行的形态，钩子按行首 "#define HV_VERSION_xxx" 定点改写。
+// =============================================================================
+#define HV_VERSION_MAJOR    1
+#define HV_VERSION_MINOR    3
+#define HV_VERSION_PATCH    5
+
+#define HV_VERSION_STRING   "1.3.5"
+
+const char* hv_version(void) {
+    return HV_VERSION_STRING;
+}
+
+int hv_version_major(void) {
+    return HV_VERSION_MAJOR;
+}
+
+int hv_version_minor(void) {
+    return HV_VERSION_MINOR;
+}
+
+int hv_version_patch(void) {
+    return HV_VERSION_PATCH;
+}
+
+int hv_version_number(void) {
+    return (HV_VERSION_MAJOR << 16) | (HV_VERSION_MINOR << 8) | HV_VERSION_PATCH;
+}
+
 const char* hv_compile_version() {
     static char s_version[16] = {0};
     datetime_t dt = hv_compile_datetime();

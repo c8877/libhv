@@ -11,7 +11,7 @@
 
 // hv.version() -> libhv version string, e.g. "1.3.4"
 static int l_hv_version(lua_State* L) {
-    lua_pushstring(L, HV_VERSION_STRING);
+    lua_pushstring(L, hv_version());
     return 1;
 }
 

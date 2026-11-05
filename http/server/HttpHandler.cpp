@@ -485,7 +485,7 @@ void HttpHandler::handleExpect100() {
 void HttpHandler::addResponseHeaders() {
     HttpResponse* pResp = resp.get();
     // Server:
-    pResp->headers["Server"] = "libhv/" HV_VERSION_STRING;
+    pResp->headers["Server"] = "libhv/" + std::string(hv_version());
 
     // Connection:
     // graceful shutdown: don't keep the connection alive while draining

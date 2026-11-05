@@ -2,24 +2,18 @@
 #define HV_VERSION_H_
 
 #include "hexport.h"
-#include "hdef.h"
 
 BEGIN_EXTERN_C
 
-#define HV_VERSION_MAJOR    1
-#define HV_VERSION_MINOR    3
-#define HV_VERSION_PATCH    4
-
-#define HV_VERSION_STRING   STRINGIFY(HV_VERSION_MAJOR) "." \
-                            STRINGIFY(HV_VERSION_MINOR) "." \
-                            STRINGIFY(HV_VERSION_PATCH)
-
-#define HV_VERSION_NUMBER   ((HV_VERSION_MAJOR << 16) | (HV_VERSION_MINOR << 8) | HV_VERSION_PATCH)
-
-
-HV_INLINE const char* hv_version() {
-    return HV_VERSION_STRING;
-}
+// 版本号数据定义在 base/hversion.c（唯一真源），这里只声明 getter。
+// 刻意不在头文件里写版本数字：那样调用方在编译期就把版本烤进自己的二进制，
+// hv_version() 返回的是调用方头文件的版本，而不是实际链接进来的库的版本。
+// 每次提交由 .githooks/pre-commit 把 patch +0.0.1。
+HV_EXPORT const char* hv_version(void);         // e.g. "1.3.4"
+HV_EXPORT int         hv_version_major(void);
+HV_EXPORT int         hv_version_minor(void);
+HV_EXPORT int         hv_version_patch(void);
+HV_EXPORT int         hv_version_number(void);  // 0x010304
 
 HV_EXPORT const char* hv_compile_version();
 
