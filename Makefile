@@ -1,3 +1,12 @@
+# 本地构建入口。
+#   make x86 / mp135 / clean ...  -> enp_build.sh（CMake 构建）
+#   make unittest / evpp / libhrpc / ... -> 转交 Makefile.master
+# Makefile.master = 上游 master 的 Makefile 原样保存，合并上游时直接覆盖该文件即可。
+
+MASTER_MAKEFILE := Makefile.master
+
+.DEFAULT_GOAL := x86
+
 x86:
 	./enp_build.sh --static --shared --examples --benchs
 x86_install:
@@ -11,3 +20,30 @@ mp135_install:
 clean:
 	./enp_build.sh --clean
 	rm -rf deploy
+clean-master:
+	$(MAKE) -f $(MASTER_MAKEFILE) clean
+
+# master Makefile 的目标，逐个转交（也可直接 make -f Makefile.master <target>）。
+# 必须是 .PHONY：evpp/、unittest/、examples/ 等同名目录存在，否则会被当成已是最新。
+# master 新增目标时在下面补一项即可。
+MASTER_TARGETS := \
+	all default libhv libhrpc examples prepare install uninstall \
+	unittest run-unittest check evpp webbench echo-servers echo-benchmark \
+	nmap kcptun kcptun_client kcptun_server \
+	jsonrpc jsonrpc_client jsonrpc_server \
+	protorpc protorpc_protoc protorpc_client protorpc_server \
+	hrpc hrpc_calc_protoc hrpc_calc_client hrpc_calc_server \
+	consul curl wget wrk httpd tinyhttpd tinyproxyd nc host \
+	hmain_test htimer_test hloop_test pipe_test \
+	tcp_client_test tcp_echo_server tcp_chat_server tcp_proxy_server \
+	udp_echo_server udp_proxy_server socks5_proxy_server socks5_client_test \
+	multi-acceptor-processes multi-acceptor-threads one-acceptor-multi-workers \
+	http_server_test http_client_test websocket_server_test websocket_client_test \
+	mqtt_sub mqtt_pub mqtt_client_test hvlua hvjs \
+	redis_client_example redis_subscriber_example
+
+$(MASTER_TARGETS):
+	@test -f $(MASTER_MAKEFILE) || { echo "缺少 $(MASTER_MAKEFILE)" >&2; exit 1; }
+	$(MAKE) -f $(MASTER_MAKEFILE) $@
+
+.PHONY: x86 x86_install mp135 mp135_install clean clean-master $(MASTER_TARGETS)
