@@ -9,6 +9,43 @@
 
 #include "rtnp.h"
 
+#if defined(WITH_OPENSSL)
+// mTLS 身份校验在 rtunnel 内完成，不改 libhv：
+// 用公开的 hio_get_ssl() 取到 SSL*，直接读对端证书 SAN。
+#include "openssl/ssl.h"
+#include "openssl/x509v3.h"
+
+static int peer_cert_san(hssl_t ssl, char* buf, int bufsize) {
+    if (ssl == NULL || buf == NULL || bufsize <= 0) return -1;
+    SSL* ssl_ = (SSL*)ssl;
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+    X509* cert = SSL_get1_peer_certificate(ssl_);
+#else
+    X509* cert = SSL_get_peer_certificate(ssl_);
+#endif
+    if (cert == NULL) return -1;
+    int ret = -1;
+    GENERAL_NAMES* names = (GENERAL_NAMES*)X509_get_ext_d2i(cert, NID_subject_alt_name, NULL, NULL);
+    if (names) {
+        int n = sk_GENERAL_NAME_num(names);
+        for (int i = 0; i < n; ++i) {
+            GENERAL_NAME* nm = sk_GENERAL_NAME_value(names, i);
+            if (nm->type != GEN_DNS) continue;
+            const unsigned char* d = ASN1_STRING_get0_data(nm->d.dNSName);
+            int len = ASN1_STRING_length(nm->d.dNSName);
+            if (d == NULL || len <= 0 || len >= bufsize) continue;
+            memcpy(buf, d, (size_t)len);
+            buf[len] = '\0';
+            ret = 0;
+            break;
+        }
+        GENERAL_NAMES_free(names);
+    }
+    X509_free(cert);
+    return ret;
+}
+#endif
+
 typedef struct bconn_s   bconn_t;
 typedef struct bstream_s bstream_t;
 
@@ -212,7 +249,7 @@ static void handle_frame(bconn_t* c, rtnp_frame_t* f) {
             if (g_require_mtls) {
 #ifdef WITH_OPENSSL
                 char san[256] = {0};
-                if (hssl_peer_cert_san(hio_get_ssl(c->io), san, sizeof(san)) != 0 ||
+                if (peer_cert_san(hio_get_ssl(c->io), san, sizeof(san)) != 0 ||
                     strcmp(san, c->devid) != 0) {
                     logf_("[relay] device cert SAN mismatch: devid=%s san=%s", c->devid, san);
                     send_err(c->io, RTNP_AUTH_FAIL, 0, RTNP_UNAUTHORIZED, "cert/devid mismatch");

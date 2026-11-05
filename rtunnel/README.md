@@ -62,7 +62,7 @@ RTUNNEL_UDS=1 make rtunnel_test    # 本地入口走 UDS（需要 -DENABLE_UDS=O
 ```
 
 覆盖：CONNECT 建链、数据回环、离线设备、端口白名单、ACL、并发（两个 A 客户端同 sid 不串流）、
-设备端关闭传播、A 侧半关闭、256 KiB 大流量；另有 `build/bin/rtnp-codec-test` 校验帧编解码。
+设备端关闭传播、256 KiB 大流量；另有 `build/bin/rtnp-codec-test` 校验帧编解码。
 
 ## mTLS 与 UDS
 
@@ -73,8 +73,10 @@ RTUNNEL_UDS=1 make rtunnel_test    # 本地入口走 UDS（需要 -DENABLE_UDS=O
 
 ## 实现说明
 
-- 为支持 A 侧半关闭，libhv 新增 `hio_set_keep_write_on_eof()` / `hio_setcb_eof()`：
-  读方向 EOF 时只停读、保留写方向，由 `eof_cb` 通知应用。
-- 为支持 mTLS 身份，`ssl/openssl.c` 新增 `hssl_peer_cert_san()`（取对端证书第一个 DNS SAN）。
+- **不改动 libhv**：所有能力都在 `rtunnel/` 内实现。
+- mTLS 的 SAN 提取在 `relay.c` 内直接用 OpenSSL 完成（`hio_get_ssl()` 是公开 API），
+  仅 `WITH_OPENSSL` 构建时编译。
 - 流控按设计文档：发送方受 credit 限制；接收方在本地写队列降到 `RTNP_LOW_WATER` 后才回 `WINDOW`。
+- **限制**：libhv 在本地 socket 读到 EOF 时会关闭 io，因此「SOCKS 客户端先 FIN、
+  再由 A 回写剩余数据」不支持；SSH 正常关闭（设备端先关）不受影响。
 

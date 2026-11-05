@@ -92,8 +92,6 @@ HV_EXPORT int hssl_ctx_set_alpn_protos(hssl_ctx_t ssl_ctx, const unsigned char* 
 HV_EXPORT int hssl_set_alpn_protos(hssl_t ssl, const unsigned char* protos, unsigned int protos_len);
 // Returns the negotiated ALPN protocol (e.g. "h2"), not NUL-terminated; *len set. NULL if none.
 HV_EXPORT const char* hssl_get_alpn_proto(hssl_t ssl, unsigned int* len);
-// 取对端证书 SAN 里第一个 DNS 名（mTLS 设备身份用），成功返回 0。
-HV_EXPORT int hssl_peer_cert_san(hssl_t ssl, char* buf, int bufsize);
 #endif
 
 END_EXTERN_C

@@ -114,8 +114,6 @@ void hio_ready(hio_t* io) {
     io->read_cb = NULL;
     io->write_cb = NULL;
     io->close_cb = NULL;
-    io->eof_cb = NULL;
-    io->keep_write_on_eof = 0;
     io->accept_cb = NULL;
     io->connect_cb = NULL;
     // timers
@@ -291,18 +289,6 @@ void hio_setcb_write(hio_t* io, hwrite_cb write_cb) {
 
 void hio_setcb_close(hio_t* io, hclose_cb close_cb) {
     io->close_cb = close_cb;
-}
-
-void hio_setcb_eof(hio_t* io, heof_cb eof_cb) {
-    io->eof_cb = eof_cb;
-}
-
-heof_cb hio_getcb_eof(hio_t* io) {
-    return io->eof_cb;
-}
-
-void hio_set_keep_write_on_eof(hio_t* io, bool enable) {
-    io->keep_write_on_eof = enable ? 1 : 0;
 }
 
 void hio_accept_cb(hio_t* io) {

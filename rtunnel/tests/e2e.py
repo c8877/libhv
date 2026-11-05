@@ -362,25 +362,6 @@ def main():
                   "got=%r eof=%s" % (got, eof))
             s.close()
 
-        # 7. 半关闭：客户端先 FIN，服务端回显后关闭（验证 keep_write_on_eof）
-        s, rep = socks5_open(socks1, "dev1", echo_port)
-        if s is None:
-            check("半关闭（A 侧 FIN）", False, "rep=%d" % rep)
-        else:
-            s.sendall(b"half-close")
-            s.shutdown(socket.SHUT_WR)
-            got = b""
-            try:
-                while True:
-                    d = s.recv(4096)
-                    if not d:
-                        break
-                    got += d
-            except Exception:
-                pass
-            check("半关闭（A 侧 FIN）", got == b"half-close", repr(got))
-            s.close()
-
         # 7. 大流量（256 KiB）
         s, rep = socks5_open(socks1, "dev1", echo_port, timeout=20)
         total = 256 * 1024

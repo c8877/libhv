@@ -296,12 +296,6 @@ read:
         }
     }
     if (nread == 0 && (io->io_type & HIO_TYPE_SOCK_STREAM)) {
-        if (io->keep_write_on_eof) {
-            // TCP 半关闭：停读但保留写方向，由 eof_cb 通知应用。
-            hio_read_stop(io);
-            if (io->eof_cb) io->eof_cb(io);
-            return;
-        }
         goto disconnect;
     }
     if (nread < len) {

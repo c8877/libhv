@@ -145,7 +145,6 @@ static void on_open_timeout(htimer_t* timer) {
 }
 
 // ---------------------------------------------------------------- SOCKS5 握手
-
 static void try_socks(cstream_t* s) {
     for (;;) {
         if (s->state == CS_HANDSHAKE) {
@@ -223,7 +222,6 @@ static void on_local_read(hio_t* io, void* buf, int readbytes) {
 }
 
 static void on_local_write(hio_t* io, const void* buf, int len);
-static void maybe_finish(cstream_t* s);
 static void maybe_grant_window(cstream_t* s);
 
 static void maybe_shutdown_write(cstream_t* s) {
@@ -260,31 +258,6 @@ static void on_local_write(hio_t* io, const void* buf, int len) {
     maybe_grant_window(s);
 }
 
-static void maybe_finish(cstream_t* s) {
-    if (!s->local_eof || !s->remote_closed) return;
-    if (s->local == NULL || hio_is_closed(s->local)) { s->local = NULL; stream_free(s); return; }
-    if (hio_write_is_complete(s->local)) {
-        shutdown(hio_fd(s->local), SHUT_WR);
-        hio_close(s->local);   // 由 on_local_close 统一回收
-    } else {
-        s->want_shutdown = 1;
-        hio_setcb_write(s->local, (hwrite_cb)on_local_write);
-    }
-}
-
-static void on_local_eof(hio_t* io) {
-    cstream_t* s = (cstream_t*)hio_context(io);
-    if (g_cli.verbose) logf_("[client] local eof sid=%u", s ? s->sid : 0);
-    if (s == NULL) return;
-    if (!s->local_eof) {
-        s->local_eof = 1;
-        if (g_cli.state == 2 && g_cli.io) {
-            rtnp_send(g_cli.io, RTNP_CLOSE, s->sid, NULL, 0);
-        }
-    }
-    maybe_finish(s);
-}
-
 static void on_local_close(hio_t* io) {
     cstream_t* s = (cstream_t*)hio_context(io);
     if (s == NULL) return;
@@ -311,8 +284,6 @@ static void on_local_accept(hio_t* io) {
     hio_set_context(io, s);
     hio_setcb_read(io, on_local_read);
     hio_setcb_close(io, on_local_close);
-    hio_setcb_eof(io, on_local_eof);
-    hio_set_keep_write_on_eof(io, 1);
     hio_set_max_write_bufsize(io, RTNP_CONN_INFLIGHT + RTNP_MAX_PAYLOAD);
     hio_read(io);
 }
@@ -401,7 +372,7 @@ static void handle_frame(rtnp_frame_t* f) {
             s->want_shutdown = 1;
             hio_setcb_write(s->local, (hwrite_cb)on_local_write);
         }
-        maybe_finish(s);
+        if (s->local_eof) stream_free(s);
         return;
     case RTNP_RESET:
         stream_free(s);

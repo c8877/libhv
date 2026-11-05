@@ -29,7 +29,6 @@ typedef void (*hconnect_cb) (hio_t* io);
 typedef void (*hread_cb)    (hio_t* io, void* buf, int readbytes);
 typedef void (*hwrite_cb)   (hio_t* io, const void* buf, int writebytes);
 typedef void (*hclose_cb)   (hio_t* io);
-typedef void (*heof_cb)     (hio_t* io);   // 半关闭：读方向 EOF（配合 hio_set_keep_write_on_eof）
 
 /*
  * Callback buffer lifetime: buf passed to hread_cb/hwrite_cb is borrowed from
@@ -331,9 +330,6 @@ HV_EXPORT void hio_setcb_connect  (hio_t* io, hconnect_cb connect_cb);
 HV_EXPORT void hio_setcb_read     (hio_t* io, hread_cb    read_cb);
 HV_EXPORT void hio_setcb_write    (hio_t* io, hwrite_cb   write_cb);
 HV_EXPORT void hio_setcb_close    (hio_t* io, hclose_cb   close_cb);
-HV_EXPORT void hio_setcb_eof      (hio_t* io, heof_cb    eof_cb);
-// 读方向 EOF 时只停读、不关闭 io（保留写方向），用于 TCP 半关闭。
-HV_EXPORT void hio_set_keep_write_on_eof(hio_t* io, bool enable);
 // get callbacks
 HV_EXPORT haccept_cb  hio_getcb_accept(hio_t* io);
 HV_EXPORT hconnect_cb hio_getcb_connect(hio_t* io);
