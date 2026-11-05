@@ -31,7 +31,7 @@ build/bin/rtunnel-agent --server B_IP --port 8443 --devid PILE-000123 --allow 22
 build/bin/rtunnel-client --server B_IP --port 8443 --user alice --socks5 127.0.0.1:1080
 ```
 
-开发者 `~/.ssh/config`：
+开发者 `~/.ssh/config`（SOCKS5 方式）：
 
 ```sshconfig
 Host PILE-000123
@@ -39,6 +39,21 @@ Host PILE-000123
     User root
     ProxyCommand nc -X 5 -x 127.0.0.1:1080 %h %p
     HostKeyAlias %h
+```
+
+也可以走**本地端口映射**（不需要 SOCKS5 客户端）：
+
+```bash
+build/bin/rtunnel-client ... --forward 127.0.0.1:16022=PILE-000123:22
+ssh -p 16022 root@127.0.0.1
+```
+
+```sshconfig
+Host pile
+    HostName 127.0.0.1
+    Port 16022
+    User root
+    HostKeyAlias PILE-000123
 ```
 
 ## 运行（TLS）

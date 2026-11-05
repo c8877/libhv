@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "rtnp.h"
+#include "hsocket.h"
 
 enum {
     CS_HANDSHAKE = 0,
@@ -24,6 +25,7 @@ typedef struct cstream_s {
     uint32_t          sid;
     hio_t*            local;
     int               state;
+    int               is_forward;   // 端口映射会话（跳过 SOCKS5 应答）
     int               local_eof;
     int               remote_closed;
     int               paused;
@@ -48,6 +50,14 @@ typedef struct {
     int         socks_host_port;
     char        socks_host[128];
     char        socks_uds[256];
+    struct {
+        char listen_host[64];
+        int  listen_port;
+        char devid[128];
+        int  target_port;
+        hio_t* listen_io;
+    } fwd[8];
+    int         nfwd;
     int         socks_port;
     int         verbose;
     hio_t*      io;
@@ -139,7 +149,7 @@ static void on_open_timeout(htimer_t* timer) {
     cstream_t* s = (cstream_t*)hevent_userdata(timer);
     if (s && s->state == CS_OPENING) {
         rtnp_send(g_cli.io, RTNP_RESET, s->sid, NULL, 0);
-        if (s->local) socks_reply(s->local, 0x04);
+        if (s->local && !s->is_forward) socks_reply(s->local, 0x04);
     }
     if (s) s->open_timer = NULL;
 }
@@ -271,10 +281,9 @@ static void on_local_close(hio_t* io) {
     }
 }
 
-static void on_local_accept(hio_t* io) {
+static cstream_t* stream_new(hio_t* io) {
     cstream_t* s = calloc(1, sizeof(*s));
     s->local = io;
-    s->state = CS_HANDSHAKE;
     s->credit = RTNP_DEFAULT_CREDIT;
     rtnp_buf_init(&s->hs);
     rtnp_buf_init(&s->pending);
@@ -286,6 +295,41 @@ static void on_local_accept(hio_t* io) {
     hio_setcb_close(io, on_local_close);
     hio_set_max_write_bufsize(io, RTNP_CONN_INFLIGHT + RTNP_MAX_PAYLOAD);
     hio_read(io);
+    return s;
+}
+
+static void on_local_accept(hio_t* io) {
+    cstream_t* s = stream_new(io);
+    s->state = CS_HANDSHAKE;
+}
+
+// 端口映射模式：本地端口直接对应 devid:target_port，跳过 SOCKS5 握手
+static void on_fwd_accept(hio_t* io) {
+    struct sockaddr* la = hio_localaddr(io);
+    int lport = la ? sockaddr_port(la) : 0;
+    int idx = -1;
+    for (int i = 0; i < g_cli.nfwd; ++i) {
+        if (g_cli.fwd[i].listen_port == lport) { idx = i; break; }
+    }
+    if (idx < 0 || g_cli.state != 2 || g_cli.io == NULL) {
+        hio_close(io);
+        return;
+    }
+    cstream_t* s = stream_new(io);
+    s->is_forward = 1;
+    s->state = CS_OPENING;
+    s->sid = ++g_cli.next_sid;
+    s->open_timer = htimer_add(g_cli.loop, on_open_timeout, 15000, 1);
+    hevent_set_userdata(s->open_timer, s);
+
+    rtnp_wr_t w; rtnp_wr_init(&w);
+    rtnp_wr_str(&w, g_cli.fwd[idx].devid);
+    rtnp_wr_u16(&w, (uint16_t)g_cli.fwd[idx].target_port);
+    rtnp_send(g_cli.io, RTNP_OPEN, s->sid, w.data, (uint16_t)w.len);
+    rtnp_wr_free(&w);
+    if (g_cli.verbose) logf_("[client] forward %s:%d -> %s:%d sid=%u",
+                             g_cli.fwd[idx].listen_host, lport,
+                             g_cli.fwd[idx].devid, g_cli.fwd[idx].target_port, s->sid);
 }
 
 // ---------------------------------------------------------------- 隧道帧
@@ -325,7 +369,7 @@ static void handle_frame(rtnp_frame_t* f) {
         if (s->open_timer) { htimer_del(s->open_timer); s->open_timer = NULL; }
         if (s->state != CS_OPENING) return;
         s->state = CS_OPEN;
-        socks_reply(s->local, 0x00);
+        if (!s->is_forward) socks_reply(s->local, 0x00);
         // 客户端可能在收到 SOCKS5 应答前就发了数据（pipelining）
         if (s->hs.len > 0) {
             rtnp_buf_append(&s->pending, s->hs.data, s->hs.len);
@@ -342,7 +386,7 @@ static void handle_frame(rtnp_frame_t* f) {
         if (code == RTNP_DEVICE_OFFLINE || code == RTNP_TIMEOUT) rep = 0x04;
         else if (code == RTNP_TARGET_REFUSED) rep = 0x05;
         else if (code == RTNP_ACL_DENIED || code == RTNP_TARGET_NOT_ALLOWED) rep = 0x02;
-        socks_reply(s->local, rep);
+        if (!s->is_forward) socks_reply(s->local, rep);
         hio_close(s->local);
         return;
     }
@@ -506,6 +550,28 @@ int main(int argc, char** argv) {
                 g_cli.socks_port = atoi(colon + 1);
                 g_cli.socks_uds[0] = '\0';
             }
+        } else if (strcmp(argv[i], "--forward") == 0 && i + 1 < argc && g_cli.nfwd < 8) {
+            char buf[384];
+            snprintf(buf, sizeof(buf), "%s", argv[++i]);
+            char* eq = strchr(buf, '=');
+            char* colon = eq ? strchr(eq + 1, ':') : NULL;
+            char* lcolon = NULL;
+            if (eq && colon) {
+                *eq = '\0';
+                *colon = '\0';
+                lcolon = strrchr(buf, ':');   // 只在 "listen_host:port" 里找
+            }
+            if (lcolon) {
+                *lcolon = '\0';
+                snprintf(g_cli.fwd[g_cli.nfwd].listen_host, 64, "%s", buf);
+                g_cli.fwd[g_cli.nfwd].listen_port = atoi(lcolon + 1);
+                snprintf(g_cli.fwd[g_cli.nfwd].devid, 128, "%s", eq + 1);
+                g_cli.fwd[g_cli.nfwd].target_port = atoi(colon + 1);
+                g_cli.nfwd++;
+            } else {
+                fprintf(stderr, "--forward 格式: 127.0.0.1:16022=devid:22\n");
+                return 1;
+            }
         } else if (strcmp(argv[i], "--tls-ca") == 0 && i + 1 < argc) {
             snprintf(g_cli.tls_ca, sizeof(g_cli.tls_ca), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--tls-cert") == 0 && i + 1 < argc) {
@@ -518,7 +584,8 @@ int main(int argc, char** argv) {
             g_cli.verbose = 1;
         } else {
             fprintf(stderr,
-                "Usage: %s --user U [--server H] [--port P] [--socks5 HOST:PORT] [--verbose]\n",
+                "Usage: %s --user U [--server H] [--port P] [--socks5 HOST:PORT]\n"
+                "          [--forward 127.0.0.1:16022=devid:22 ...] [--verbose]\n",
                 argv[0]);
             return 1;
         }
@@ -555,6 +622,20 @@ int main(int argc, char** argv) {
             return 2;
         }
         logf_("[client] socks5 listening on %s:%d", g_cli.socks_host, g_cli.socks_port);
+    }
+
+    for (int i = 0; i < g_cli.nfwd; ++i) {
+        hio_t* lio = hloop_create_tcp_server(g_cli.loop, g_cli.fwd[i].listen_host,
+                                             g_cli.fwd[i].listen_port, on_fwd_accept);
+        if (lio == NULL) {
+            fprintf(stderr, "forward listen %s:%d failed\n",
+                    g_cli.fwd[i].listen_host, g_cli.fwd[i].listen_port);
+            return 2;
+        }
+        g_cli.fwd[i].listen_io = lio;
+        logf_("[client] forward listening on %s:%d -> %s:%d",
+              g_cli.fwd[i].listen_host, g_cli.fwd[i].listen_port,
+              g_cli.fwd[i].devid, g_cli.fwd[i].target_port);
     }
 
     on_reconnect(NULL);
