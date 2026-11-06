@@ -730,6 +730,30 @@ async function boot() {
   } catch (e) {
     return authForm('login');
   }
+  // 顶栏当前账号 + 登出菜单
+  const roleName = { superadmin: '超级管理员', admin: '管理员', user: '普通账号' };
+  const ub = document.getElementById('userbox');
+  const btn = document.getElementById('userbtn');
+  if (ub && btn) {
+    ub.style.display = '';
+    btn.textContent = Auth.me.username + ' ▾';
+    const info = document.getElementById('userinfo');
+    if (info) info.textContent = Auth.me.username + ' · ' + (roleName[Auth.me.role] || Auth.me.role);
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const m = document.getElementById('usermenu');
+      if (m) m.style.display = m.style.display === 'none' ? '' : 'none';
+    };
+    document.addEventListener('click', () => {
+      const m = document.getElementById('usermenu');
+      if (m) m.style.display = 'none';
+    });
+    const lo = document.getElementById('logout');
+    if (lo) lo.onclick = async () => {
+      try { await fetch('/api/v1/logout', { method: 'POST', cache: 'no-store' }); } catch (e) {}
+      location.reload();
+    };
+  }
   if (!location.hash) location.hash = '#/overview';
   Router.start();
 }

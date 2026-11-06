@@ -93,3 +93,17 @@ button:hover { filter: brightness(.96); }
   #sidebar .logo span, #nav a .txt, #nav a .badge, .side-foot { display: none; }
   #nav a { justify-content: center; padding: 12px 0; }
 }
+
+/* 当前账号与登出菜单 */
+#userbox { position: relative; }
+#userbtn { background: transparent; border: 1px solid rgba(255,255,255,.18); color: inherit;
+  padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+#userbtn:hover { border-color: rgba(255,255,255,.35); }
+#usermenu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 170px; z-index: 50;
+  background: var(--card, #23262d); border: 1px solid rgba(255,255,255,.14); border-radius: 8px;
+  padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+#userinfo { padding: 6px 10px 8px; font-size: 12px; color: var(--muted, #9aa0aa);
+  border-bottom: 1px solid rgba(255,255,255,.08); margin-bottom: 4px; }
+#usermenu #logout { display: block; width: 100%; text-align: left; background: transparent;
+  border: 0; color: inherit; padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+#usermenu #logout:hover { background: rgba(255,255,255,.08); }
