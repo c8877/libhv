@@ -21,7 +21,7 @@
 
 namespace {
 
-const size_t MAX_PROXY_BODY = 8 * 1024 * 1024;
+const size_t MAX_PROXY_BODY = 64 * 1024 * 1024;
 
 int tcpConnect(const char* host, int port, int timeout_ms) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
