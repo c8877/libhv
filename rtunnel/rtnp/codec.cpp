@@ -150,14 +150,14 @@ void Reader::str(char* out, size_t cap) {
 
 // ---------------------------------------------------------------- send
 
-int send(hio_t* io, uint8_t type, uint32_t sid, const void* payload, uint16_t len) {
+int send(hio_t* io, uint8_t type, uint32_t sid, const void* payload, uint16_t len, uint16_t flags) {
     if (len > MAX_PAYLOAD) return -1;
     uint8_t head[HEADER_SIZE];
     memcpy(head, "RTNP", 4);
     head[4] = VERSION;
     head[5] = type;
-    head[6] = 0;
-    head[7] = 0;
+    head[6] = (uint8_t)(flags >> 8);
+    head[7] = (uint8_t)flags;
     head[8]  = (uint8_t)(sid >> 24);
     head[9]  = (uint8_t)(sid >> 16);
     head[10] = (uint8_t)(sid >> 8);

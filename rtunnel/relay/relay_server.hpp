@@ -84,7 +84,7 @@ private:
     RelayStream* findStreamByC(RelayConn* c, uint32_t sid, RelayStream** prev);
     void         streamRemove(RelayStream* s);
     void         sendErr(hio_t* io, uint8_t type, uint32_t sid, uint16_t code, const char* msg);
-    void         forward(RelayConn* to, uint8_t type, uint32_t sid, const uint8_t* payload, uint16_t len);
+    void         forward(RelayConn* to, uint8_t type, uint32_t sid, const uint8_t* payload, uint16_t len, uint16_t flags = 0);
     int          checkPeerSan(RelayConn* c, const char* claimed, const char* what, const char* id_name);
     void         registryRemove(RelayConn* c);
     void         connCloseAllStreams(RelayConn* c, uint16_t code);

@@ -8,7 +8,7 @@ add_library(rtnp STATIC rtnp/codec.cpp)
 target_include_directories(rtnp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(rtnp PUBLIC ${HV_LIBRARIES})
 
-add_library(rtunnel_common STATIC common/tunnel_link.cpp)
+add_library(rtunnel_common STATIC common/tunnel_link.cpp common/shell_spawn.cpp)
 target_link_libraries(rtunnel_common PUBLIC rtnp)
 
 # 嵌入式目标静态链接 C++ 运行时（目标机无 libstdc++ 时使用，如 MP135）
@@ -34,7 +34,7 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
                relay/admin/backend/terminal.cpp
                ${EMBEDDED_CPP})
 add_executable(rtunnel-agent  agent/main.cpp agent/agent_app.cpp)
-add_executable(rtunnel-client client/main.cpp client/client_app.cpp)
+add_executable(rtunnel-client client/main.cpp client/client_app.cpp client/shell_client.cpp)
 add_executable(rtnp-codec-test tests/codec_test.cpp)
 
 target_link_libraries(rtunnel-relay  rtnp)

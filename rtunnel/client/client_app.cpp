@@ -1,5 +1,9 @@
 #include "client_app.hpp"
 #include "common/logging.hpp"
+#include "common/shell_spawn.hpp"
+
+#include <sys/ioctl.h>
+#include "shell_client.hpp"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -404,8 +408,11 @@ void ClientApp::onLinkDown() {
 int ClientApp::run(int argc, char** argv) {
     g_self = this;
 
+    const char* shell_devid = NULL;
     for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--server") == 0 && i + 1 < argc) {
+        if (strcmp(argv[i], "shell") == 0 && i + 1 < argc) {
+            shell_devid = argv[++i];
+        } else if (strcmp(argv[i], "--server") == 0 && i + 1 < argc) {
             host = argv[++i];
         } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             port = atoi(argv[++i]);
@@ -466,6 +473,20 @@ int ClientApp::run(int argc, char** argv) {
     if (user[0] == '\0') {
         fprintf(stderr, "--user is required\n");
         return 1;
+    }
+
+    // shell 子命令：本机终端直连设备免密 shell（不启动 SOCKS5/forward 入口）
+    if (shell_devid) {
+        ShellClient sc;
+        sc.host = host;
+        sc.port = port;
+        sc.verbose = verbose;
+        snprintf(sc.user, sizeof(sc.user), "%s", user);
+        snprintf(sc.tls_ca, sizeof(sc.tls_ca), "%s", tls_ca);
+        snprintf(sc.tls_cert, sizeof(sc.tls_cert), "%s", tls_cert);
+        snprintf(sc.tls_key, sizeof(sc.tls_key), "%s", tls_key);
+        snprintf(sc.tls_sni, sizeof(sc.tls_sni), "%s", tls_sni);
+        return sc.run(shell_devid);
     }
 
     hloop_t* lp = hloop_new(0);

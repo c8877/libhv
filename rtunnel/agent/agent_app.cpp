@@ -1,10 +1,15 @@
 #include "agent_app.hpp"
 #include "common/logging.hpp"
+#include "common/shell_spawn.hpp"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <pty.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <sys/ioctl.h>
 
 // ---------------------------------------------------------------- 回调薄封装
 
@@ -58,6 +63,7 @@ void AgentApp::streamFree(LocalStream* s) {
         pp = &(*pp)->next;
     }
     if (s->close_timer) { htimer_del(s->close_timer); s->close_timer = NULL; }
+    killShellChild(s);
     if (s->local && !hio_is_closed(s->local)) {
         hio_set_context(s->local, NULL);
         hio_close(s->local);
@@ -141,6 +147,7 @@ void AgentApp::onLocalWrite(LocalStream* s) {
 
 void AgentApp::onLocalClose(LocalStream* s) {
     if (verbose) logf_("[agent] local close sid=%u", s->sid);
+    killShellChild(s);
     if (!s->connected) {
         // 本地 connect 失败
         sendOpenFail(s->sid, rtnp::TARGET_REFUSED, "connect refused");
@@ -193,6 +200,27 @@ void AgentApp::onLocalConnect(LocalStream* s) {
 }
 
 void AgentApp::handleOpen(const rtnp::Frame* f) {
+    if (verbose) logf_("[agent] OPEN sid=%u flags=0x%04x", f->sid, f->flags);
+    // OPEN_SHELL：设备侧直接起 shell（forkpty），独立于端口白名单，须 --allow-shell 显式开启
+    if (f->flags & rtnp::OPEN_SHELL) {
+        if (!allow_shell) {
+            sendOpenFail(f->sid, rtnp::TARGET_NOT_ALLOWED, "shell disabled");
+            return;
+        }
+        auto* s = new LocalStream{};
+        s->app = this;
+        s->sid = f->sid;
+        s->credit = rtnp::DEFAULT_CREDIT;
+        s->is_shell = 1;
+        s->next = streams;
+        streams = s;
+        if (openShellStream(s) != 0) {
+            sendOpenFail(f->sid, rtnp::TARGET_REFUSED, "shell spawn failed");
+            streamFree(s);
+        }
+        return;
+    }
+
     rtnp::Reader r(f->payload, f->len);
     uint16_t port = r.u16();
     if (r.err || port == 0) {
@@ -233,6 +261,30 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
     }
 }
 
+// OPEN_SHELL：forkpty 起交互 shell，pty 挂进事件循环，复用现有 DATA/流控逻辑
+int AgentApp::openShellStream(LocalStream* s) {
+    pid_t pid = -1;
+    hio_t* pty = shellSpawnPty(loop, s, localReadCb, localCloseCb, &pid);
+    if (pty == NULL) return -1;
+    s->child_pid = pid;
+    s->local = pty;
+    s->connected = 1;
+    rtnp::Writer w;
+    w.str("127.0.0.1");
+    w.u16(0);
+    rtnp::send(io, rtnp::OPEN_OK, s->sid, w.data, (uint16_t)w.len);
+    if (verbose) logf_("[agent] shell stream %u spawned pid=%d", s->sid, (int)pid);
+    return 0;
+}
+
+void AgentApp::killShellChild(LocalStream* s) {
+    if (s->child_pid > 0) {
+        kill(s->child_pid, SIGHUP);
+        waitpid(s->child_pid, NULL, WNOHANG);
+        s->child_pid = -1;
+    }
+}
+
 // READY 后的会话级帧（连接级 HELLO/AUTH/PING 由 TunnelLink 处理）
 void AgentApp::onFrame(rtnp::Frame* f) {
     switch (f->type) {
@@ -264,7 +316,10 @@ void AgentApp::onFrame(rtnp::Frame* f) {
         LocalStream* s = streamFind(f->sid);
         if (s == NULL) return;
         s->remote_closed = 1;
-        if (s->local && hio_write_is_complete(s->local)) {
+        if (s->is_shell) {
+            // pty 无 SHUT_WR 语义：对端 EOF = 结束 shell 子进程
+            killShellChild(s);
+        } else if (s->local && hio_write_is_complete(s->local)) {
             shutdown(hio_fd(s->local), SHUT_WR);
             s->want_shutdown = 0;
         } else {
@@ -273,6 +328,17 @@ void AgentApp::onFrame(rtnp::Frame* f) {
         }
         if (s->local_eof) streamFree(s);
         else armCloseTimer(s);
+        return;
+    }
+    case rtnp::RESIZE: {
+        LocalStream* s = streamFind(f->sid);
+        if (s == NULL || !s->is_shell || s->local == NULL) return;
+        rtnp::Reader r(f->payload, f->len);
+        uint16_t cols = r.u16();
+        uint16_t rows = r.u16();
+        if (r.err || cols == 0 || rows == 0) return;
+        struct winsize wsz = {(unsigned short)rows, (unsigned short)cols, 0, 0};
+        ioctl(hio_fd(s->local), TIOCSWINSZ, &wsz);
         return;
     }
     case rtnp::RESET: {
@@ -317,6 +383,8 @@ int AgentApp::run(int argc, char** argv) {
             }
         } else if (strcmp(argv[i], "--allow-all") == 0) {
             allow_all = 1;
+        } else if (strcmp(argv[i], "--allow-shell") == 0) {
+            allow_shell = 1;
         } else if (strcmp(argv[i], "--tls-ca") == 0 && i + 1 < argc) {
             snprintf(tls_ca, sizeof(tls_ca), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--tls-cert") == 0 && i + 1 < argc) {

@@ -219,9 +219,9 @@ void RelayServer::sendErr(hio_t* io, uint8_t type, uint32_t sid, uint16_t code, 
     rtnp::send(io, type, sid, w.data, (uint16_t)w.len);
 }
 
-void RelayServer::forward(RelayConn* to, uint8_t type, uint32_t sid, const uint8_t* payload, uint16_t len) {
+void RelayServer::forward(RelayConn* to, uint8_t type, uint32_t sid, const uint8_t* payload, uint16_t len, uint16_t flags) {
     if (to && to->io && !hio_is_closed(to->io)) {
-        if (rtnp::send(to->io, type, sid, payload, len) == 0) {
+        if (rtnp::send(to->io, type, sid, payload, len, flags) == 0) {
             to->bytes_out += (uint64_t)len + rtnp::HEADER_SIZE;
         }
     }
@@ -477,7 +477,9 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             char devid[128] = {0};
             r.str(devid, sizeof(devid));
             uint16_t port = r.u16();
-            if (r.err || devid[0] == '\0' || port == 0) {
+            // OPEN_SHELL 无目标端口（设备侧 forkpty），port=0 合法；普通 OPEN 必须非 0
+            bool is_shell = (f->flags & rtnp::OPEN_SHELL) != 0;
+            if (r.err || devid[0] == '\0' || (!is_shell && port == 0)) {
                 sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::PROTOCOL_ERROR, "bad open");
                 return;
             }
@@ -502,20 +504,21 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
 
             rtnp::Writer w;
             w.u16(port);
-            rtnp::send(agent->io, rtnp::OPEN, s->c_sid, w.data, (uint16_t)w.len);
-            if (verbose) logf_("[relay] OPEN %s:%u a_sid=%u c_sid=%u", devid, port, s->a_sid, s->c_sid);
+            rtnp::send(agent->io, rtnp::OPEN, s->c_sid, w.data, (uint16_t)w.len, f->flags);
+            if (verbose) logf_("[relay] OPEN %s:%u a_sid=%u c_sid=%u flags=0x%04x", devid, port, s->a_sid, s->c_sid, f->flags);
             return;
         }
         case rtnp::DATA:
         case rtnp::WINDOW:
         case rtnp::CLOSE:
-        case rtnp::RESET: {
+        case rtnp::RESET:
+        case rtnp::RESIZE: {
             RelayStream* s = findStreamByA(c, f->sid, NULL);
             if (s == NULL || s->c == NULL) {
                 sendErr(c->io, rtnp::RESET, f->sid, rtnp::PROTOCOL_ERROR, "unknown sid");
                 return;
             }
-            forward(s->c, f->type, s->c_sid, f->payload, f->len);
+            forward(s->c, f->type, s->c_sid, f->payload, f->len, f->flags);
             if (f->type == rtnp::CLOSE) s->a_closed = 1;
             if (f->type == rtnp::RESET) { s->a_closed = s->c_closed = 1; }
             if (s->a_closed && s->c_closed) streamRemove(s);
@@ -527,7 +530,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         }
     }
 
-    // 来自 agent 的会话级帧
+    // 来自 agent 的会话级帧（含 A 的 client 作为 agent 端点：按 c_sid 路由）
     switch (f->type) {
     case rtnp::OPEN_OK:
     case rtnp::OPEN_FAIL: {
@@ -537,20 +540,21 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             s->opened = 1;
             s->opened_at_ms = hloop_now_ms(loop);
         }
-        forward(s->a, f->type, s->a_sid, f->payload, f->len);
+        forward(s->a, f->type, s->a_sid, f->payload, f->len, f->flags);
         if (f->type == rtnp::OPEN_FAIL) { s->a_closed = s->c_closed = 1; streamRemove(s); }
         return;
     }
     case rtnp::DATA:
     case rtnp::WINDOW:
     case rtnp::CLOSE:
-    case rtnp::RESET: {
+    case rtnp::RESET:
+    case rtnp::RESIZE: {
         RelayStream* s = findStreamByC(c, f->sid, NULL);
         if (s == NULL) {
             sendErr(c->io, rtnp::RESET, f->sid, rtnp::PROTOCOL_ERROR, "unknown sid");
             return;
         }
-        forward(s->a, f->type, s->a_sid, f->payload, f->len);
+        forward(s->a, f->type, s->a_sid, f->payload, f->len, f->flags);
         if (f->type == rtnp::CLOSE) s->c_closed = 1;
         if (f->type == rtnp::RESET) { s->a_closed = s->c_closed = 1; }
         if (s->a_closed && s->c_closed) streamRemove(s);
@@ -593,6 +597,8 @@ void RelayServer::onClose(RelayConn* c) {
     if (c->role == rtnp::ROLE_AGENT) {
         registryRemove(c);
         if (c->devid[0]) logf_("[relay] agent offline: %s", c->devid);
+    } else if (c->role == rtnp::ROLE_CLIENT && c->user[0]) {
+        logf_("[relay] client offline: %s", c->user);
     }
 
     // 从全局链表摘除

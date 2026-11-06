@@ -21,6 +21,8 @@ struct LocalStream {
     uint32_t     unacked = 0;
     rtnp::Buffer pending;
     htimer_t*    close_timer = nullptr;   // 半关闭 60s 超时
+    pid_t        child_pid = -1;          // shell 子进程（is_shell 时）
+    int          is_shell = 0;            // OPEN_SHELL：pty 而非 TCP socket
     LocalStream* next = nullptr;
 };
 
@@ -32,6 +34,7 @@ public:
     int          allow_ports[32] = {0};
     int          nallow = 0;
     int          allow_all = 0;
+    int          allow_shell = 0;   // 允许 OPEN_SHELL（forkpty 起 shell，默认禁用）
     LocalStream* streams = nullptr;
 
 protected:
@@ -56,6 +59,8 @@ private:
     void         onLocalRead(LocalStream* s, void* buf, int readbytes);
     void         onLocalConnect(LocalStream* s);
     void         handleOpen(const rtnp::Frame* f);
+    int          openShellStream(LocalStream* s);
+    void         killShellChild(LocalStream* s);
 
     // libhv C 回调的薄封装（对象经 hio_context / hevent_userdata 取回）
     static void localReadCb(hio_t* io, void* buf, int n);

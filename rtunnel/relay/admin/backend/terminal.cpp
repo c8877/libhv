@@ -5,6 +5,32 @@
 #include "common/logging.hpp"
 #include "EventLoop.h"
 
+#include <execinfo.h>
+
+#include <execinfo.h>
+
+#include <execinfo.h>
+
+#include <execinfo.h>
+
+#include <execinfo.h>
+
+#include <execinfo.h>
+
+#include <execinfo.h>
+
+#include <execinfo.h>
+
+#include <execinfo.h>
+
+#include <execinfo.h>
+
+#include <execinfo.h>
+
+#include <execinfo.h>
+
+#include <execinfo.h>
+
 #include <pty.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -24,6 +50,12 @@ struct TerminalSession {
     std::string          user;
     int                  fwd_port = 0;
     bool                 closed = false;
+    // direct（RTNP client 直连 relay，免 ssh/密码，走 agent 的 OPEN_SHELL）
+    bool                 direct = false;
+    hio_t*               link_io = nullptr;
+    rtnp::Decoder        in;
+    uint32_t             sid = 0;
+    rtnp::Buffer         pending_input;   // OPEN_OK 前的输入先缓冲，避免 DATA sid=0 被 RESET
 };
 
 static hloop_t* adminLoop(AdminServer* adm);
@@ -36,6 +68,10 @@ static void sessionClose(TerminalSession* s) {
     if (s->pty_io) {
         hio_close(s->pty_io);
         s->pty_io = nullptr;
+    }
+    if (s->link_io) {
+        hio_close(s->link_io);
+        s->link_io = nullptr;
     }
     if (s->ssh_pid > 0) {
         kill(s->ssh_pid, SIGHUP);
@@ -122,7 +158,7 @@ static void spawnSsh(htimer_t* timer) {
     if (pid == 0) {
         // 子进程：ssh → A 子进程的 forward 端口 → 设备 sshd
         std::string port = std::to_string(s->fwd_port);
-        std::string target = s->user + "@127.0.0.1";
+        std::string target = (s->user.empty() ? "root" : s->user) + "@127.0.0.1";
         execlp("ssh", "ssh", "-p", port.c_str(),
                "-o", "StrictHostKeyChecking=no",
                "-o", "UserKnownHostsFile=/dev/null",
@@ -141,11 +177,117 @@ static void spawnSsh(htimer_t* timer) {
     hio_read(s->pty_io);
 }
 
+// ---------------------------------------------------------------- direct：RTNP client 直连 relay（免密）
+
+static void directConnectCb(hio_t* io) {
+    auto* s = (TerminalSession*)hio_context(io);
+    if (s == NULL) return;
+    if (hio_error(io) != 0) {
+        if (s->ws && s->ws->isConnected()) s->ws->close();
+        return;
+    }
+    rtnp::Writer w;
+    w.u8(rtnp::ROLE_CLIENT);
+    w.u8(rtnp::VERSION);
+    w.str("rtunnel-admin/1");
+    w.u32(0);
+    rtnp::send(io, rtnp::HELLO, 0, w.data, (uint16_t)w.len);
+}
+
+static void directCloseCb(hio_t* io) {
+    auto* s = (TerminalSession*)hio_context(io);
+    if (s) {
+        logf_("[terminal] direct link closed devid=%s error=%d", s->devid.c_str(), hio_error(io));
+        if (s->ws && s->ws->isConnected()) s->ws->close();
+    }
+}
+
+static void directFrame(TerminalSession* s, rtnp::Frame* f) {
+    switch (f->type) {
+    case rtnp::HELLO_ACK: {
+        rtnp::Writer w;
+        // AUTH 用户来自 WS query 的 user（A 端列表点谁的 Shell 就用谁的身份），
+        // 未指定时回退到配置的默认 shell_user
+        const char* auth_user = s->user.empty() ? s->admin->config().shell_user.c_str() : s->user.c_str();
+        w.str(auth_user);
+        rtnp::send(s->link_io, rtnp::AUTH, 0, w.data, (uint16_t)w.len);
+        return;
+    }
+    case rtnp::AUTH_OK: {
+        rtnp::Writer w;
+        w.str(s->devid.c_str());
+        w.u16(0);
+        rtnp::send(s->link_io, rtnp::OPEN, 1, w.data, (uint16_t)w.len, rtnp::OPEN_SHELL);
+        s->sid = 1;
+        return;
+    }
+    case rtnp::OPEN_OK:
+        // shell 就绪：把 OPEN 完成前缓冲的输入补发出去
+        if (s->pending_input.len > 0) {
+            rtnp::send(s->link_io, rtnp::DATA, s->sid, s->pending_input.data, (uint16_t)s->pending_input.len);
+            s->pending_input.clear();
+        }
+        return;
+    case rtnp::OPEN_FAIL: {
+        std::string msg = "open failed";
+        if (f->payload && f->len > 4) msg.assign((const char*)f->payload + 4, f->len - 4);
+        if (s->ws && s->ws->isConnected()) {
+            s->ws->send("OPEN_FAIL: " + msg + "\r\n");
+            s->ws->close();
+        }
+        return;
+    }
+    case rtnp::DATA:
+        if (s->ws && f->len > 0) s->ws->send(std::string((const char*)f->payload, f->len));
+        return;
+    case rtnp::CLOSE:
+    case rtnp::RESET:
+        if (s->ws && s->ws->isConnected()) s->ws->close();
+        return;
+    case rtnp::PING:
+        rtnp::send(s->link_io, rtnp::PONG, 0, f->payload, f->len);
+        return;
+    case rtnp::AUTH_FAIL:
+    case rtnp::ERROR:
+        if (s->ws && s->ws->isConnected()) s->ws->close();
+        return;
+    default:
+        return;
+    }
+}
+
+static void directReadCb(hio_t* io, void* buf, int readbytes) {
+    auto* s = (TerminalSession*)hio_context(io);
+    if (s == NULL || readbytes <= 0) return;
+    if (s->in.append(buf, (size_t)readbytes) != 0) { hio_close(io); return; }
+    for (;;) {
+        rtnp::Frame f;
+        int rc = s->in.next(f);
+        if (rc == 0) return;
+        if (rc < 0) { hio_close(io); return; }
+        directFrame(s, &f);
+        if (s->closed || hio_is_closed(io)) return;
+    }
+}
+
+static void directOpen(AdminServer* adm, TerminalSession* s) {
+    hloop_t* loop = adminLoop(adm);
+    s->link_io = hloop_create_tcp_client(loop, "127.0.0.1", adm->config().shell_relay_port,
+                                         directConnectCb, directCloseCb);
+    if (s->link_io == NULL) {
+        if (s->ws && s->ws->isConnected()) s->ws->close();
+        return;
+    }
+    hio_set_context(s->link_io, s);
+    hio_setcb_read(s->link_io, directReadCb);
+    hio_read(s->link_io);
+}
+
 // ---------------------------------------------------------------- ws 回调
 
 void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequestPtr& req) {
     // 权限：query 里的 token（浏览器 WebSocket 无法自定义 Authorization 头）
-    std::string token, devid, user = "root";
+    std::string token, devid, user;
     for (const auto& kv : req->query_params) {
         if (kv.first == "token") token = kv.second;
         else if (kv.first == "devid") devid = kv.second;
@@ -177,6 +319,15 @@ void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequest
     s->fwd_port = allocFreePort();
     terms_[channel.get()] = s;
 
+    bool direct = (req->Path() == "/ws/shell");
+    if (direct) {
+        // 免密模式：admin 作为 RTNP client 直连 relay，OPEN_SHELL 由 agent forkpty
+        s->direct = true;
+        audit(role, "terminal.open.shell", devid);
+        directOpen(this, s.get());
+        return;
+    }
+
     s->agent_pid = spawnAgentClient(this, devid, s->fwd_port);
     audit(role, "terminal.open", devid + " user=" + user);
     logf_("[terminal] open devid=%s fwd=127.0.0.1:%d agent_pid=%d", devid.c_str(), s->fwd_port, s->agent_pid);
@@ -191,6 +342,31 @@ void AdminServer::onWsMessage(const WebSocketChannelPtr& channel, const std::str
     auto it = terms_.find(channel.get());
     if (it == terms_.end()) return;
     auto& s = it->second;
+
+    if (s->direct) {
+        // direct：输入 → DATA；resize → RESIZE 帧
+        if (msg.compare(0, 7, "{\"type\"") == 0) {
+            if (msg.find("\"resize\"") != std::string::npos) {
+                int cols = 80, rows = 24;
+                if (sscanf(msg.c_str(), "{\"type\":\"resize\",\"cols\":%d,\"rows\":%d", &cols, &rows) == 2) {
+                    rtnp::Writer w;
+                    w.u16((uint16_t)cols);
+                    w.u16((uint16_t)rows);
+                    rtnp::send(s->link_io, rtnp::RESIZE, s->sid, w.data, (uint16_t)w.len);
+                }
+            }
+            return;
+        }
+        if (s->link_io && !msg.empty()) {
+            if (s->sid == 0) {
+                // OPEN_OK 前不允许发 DATA（sid=0 会被 relay 判协议错误），先缓冲
+                s->pending_input.append(msg.data(), msg.size());
+            } else {
+                rtnp::send(s->link_io, rtnp::DATA, s->sid, msg.data(), (uint16_t)msg.size());
+            }
+        }
+        return;
+    }
 
     // 控制消息（JSON）与原始键盘输入分离
     if (msg.compare(0, 7, "{\"type\"") == 0) {
