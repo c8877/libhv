@@ -419,6 +419,20 @@ bool RelayServer::revokeSan(const std::string& san) {
     return true;
 }
 
+bool RelayServer::sendSysinfoReq(const char* devid) {
+    RelayConn* a = findAgent(devid);
+    if (!a || !a->io) return false;
+    rtnp::send(a->io, rtnp::SYSINFO_REQ, 0, NULL, 0);
+    return true;
+}
+
+std::string RelayServer::sysinfoOf(const char* devid, uint64_t* ts) {
+    auto it = sysinfo_cache.find(devid);
+    if (it == sysinfo_cache.end()) { if (ts) *ts = 0; return std::string(); }
+    if (ts) *ts = it->second.ts;
+    return it->second.json;
+}
+
 void RelayServer::loadRevoked() {
     if (cert_dir.empty()) return;
     FILE* fp = fopen((cert_dir + "/revoked.txt").c_str(), "r");
@@ -468,6 +482,19 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         w.u32(0);
         rtnp::send(c->io, rtnp::HELLO_ACK, 0, w.data, (uint16_t)w.len);
         if (verbose) logf_("[relay] HELLO role=%d fd=%d", role, hio_fd(c->io));
+        return;
+    }
+    case rtnp::SYSINFO: {
+        if (c->role != rtnp::ROLE_AGENT) return;
+        rtnp::Reader r(f->payload, f->len);
+        static char buf[65600];
+        r.str(buf, sizeof(buf));
+        if (!r.err) {
+            SysinfoEntry e;
+            e.json = std::string(buf);
+            e.ts = (uint64_t)time(NULL) * 1000;
+            sysinfo_cache[c->devid] = e;
+        }
         return;
     }
     case rtnp::AUTH: {

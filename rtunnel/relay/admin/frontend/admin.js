@@ -261,27 +261,82 @@ const AgentsPage = Object.assign(new Page(), {
 
 // ---------------------------------------------------------------- Pages.设备详情
 const AgentDetailPage = Object.assign(new Page(), {
+  enter(el, params) {
+    this.devid = decodeURIComponent(params[0] || '');
+    this.siForce = 1;              // 进入详情页强制刷新一次
+    return Page.prototype.enter.call(this, el, params);
+  },
   async refresh() {
     const d = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid));
+    let si = null, siTs = 0;
+    try {
+      const q = this.siForce ? '?refresh=1' : '';
+      this.siForce = 0;
+      const r = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/sysinfo' + q);
+      si = r.sysinfo; siTs = r.ts;
+    } catch (e) { /* 设备离线或无响应 */ }
+
     const rows = (d.streams || []).map(s => [
       UI.esc(s.a_user) + ':' + s.a_sid, s.c_sid,
       s.opened ? '<span class="pill ok">OPEN</span>' : '<span class="pill info">OPENING</span>',
       UI.ago(s.opened_at_ms),
     ]);
-    this.el.innerHTML =
-      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>' + UI.esc(d.devid) + '</h2>' +
-      '<span class="pill ok">在线</span></div>' + UI.kv({
+
+    let html = '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>' + UI.esc(d.devid) + '</h2>' +
+      '<span class="pill ok">在线</span><span class="spacer"></span>' +
+      (si ? '<button id="si-export">导出 JSON</button>' : '') + '</div>' + UI.kv({
         '远端地址': UI.esc(d.remote_addr),
         '接入时间': new Date(d.connected_at_ms).toLocaleString(),
         '最近活跃': UI.ago(d.last_seen_ms) + ' 前',
         '流量 ↓/↑': UI.bytes(d.bytes_in) + ' / ' + UI.bytes(d.bytes_out),
-      }) + '</div>' +
-      '<div class="panel"><div class="panel-head"><h2>当前会话</h2></div>' +
+      }) + '</div>';
+
+    if (si) {
+      const kb = n => UI.bytes((Number(n) || 0) * 1024);
+      const certText = si.mtls
+        ? UI.kv({ '证书主体': UI.esc(si.cert_subject || ''), '签发者': UI.esc(si.cert_issuer || ''),
+                  '序列号': UI.esc(String(si.cert_serial || '')), '状态': si.cert_not_after ? '有效' : '已过期' })
+        : '<div style="padding:12px;color:var(--muted)">未启用 mTLS</div>';
+      const nics = (si.nics || []).map(n => [UI.esc(n.name), UI.esc(n.ip), UI.esc(n.netmask),
+        n.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>']);
+      const runtime = UI.kv({
+        'agent 版本': UI.esc(si.version || ''), 'pid': si.pid,
+        '启动时间': new Date(si.started_ms).toLocaleString(),
+        '启动参数': '<code style="font-size:12px">' + UI.esc(si.args || '') + '</code>',
+      });
+      const sys = UI.kv({
+        '架构/内核': UI.esc((si.machine || '') + ' / ' + (si.kernel || '')),
+        'CPU': UI.esc((si.cpu_model || '') + ' · ' + si.cpu_cores + ' 核'),
+        '内存': kb(si.mem_total_kb) + ' / 可用 ' + kb(si.mem_available_kb),
+        'Swap': kb(si.swap_total_kb) + ' / 可用 ' + kb(si.swap_free_kb),
+        '磁盘 /': kb(si.disk_total_kb) + ' / 可用 ' + kb(si.disk_free_kb),
+        '负载': (si.load1 || 0).toFixed(2) + ' ' + (si.load5 || 0).toFixed(2) + ' ' + (si.load15 || 0).toFixed(2),
+        '板卡型号': UI.esc(si.board || '—'),
+      });
+      html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>运行时</h2>' +
+        '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">采集于 ' +
+        new Date(siTs).toLocaleTimeString() + '</span></div>' + runtime + '</div>' +
+        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>证书</h2></div>' + certText + '</div>' +
+        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>系统</h2></div>' + sys + '</div>' +
+        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>网络</h2></div>' +
+        UI.table(['接口', 'IP', '掩码', '状态'], nics) + '</div>';
+    }
+
+    html += '<div class="panel"><div class="panel-head"><h2>当前会话</h2></div>' +
       UI.table(['A 用户:sid', 'c_sid', '状态', '开启于'], rows) + '</div>';
-  },
-  enter(el, params) {
-    this.devid = decodeURIComponent(params[0] || '');
-    return Page.prototype.enter.call(this, el, params);
+    this.el.innerHTML = html;
+
+    if (si) {
+      const btn = document.getElementById('si-export');
+      if (btn) btn.onclick = () => {
+        const blob = new Blob([JSON.stringify(si, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = this.devid + '-sysinfo.json';
+        a.click();
+        URL.revokeObjectURL(a.href);
+      };
+    }
   },
 });
 

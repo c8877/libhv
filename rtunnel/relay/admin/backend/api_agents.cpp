@@ -74,6 +74,33 @@ void AdminServer::handleAgentDetail(const HttpContextPtr& ctx) {
     ctx->send(body);
 }
 
+void AdminServer::handleAgentSysinfo(const HttpContextPtr& ctx) {
+    std::string devid = ctx->param("devid");
+    if (!ownsDevid(devid)) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return;
+    }
+    callRelay([this, &devid]() {
+        return relay_->sendSysinfoReq(devid.c_str()) ? std::string("1") : std::string("0");
+    });
+    std::string js;
+    uint64_t ts = 0;
+    for (int i = 0; i < 40 && js.empty(); ++i) {
+        usleep(50000);
+        js = callRelay([this, &devid, &ts]() {
+            return relay_->sysinfoOf(devid.c_str(), &ts);
+        });
+    }
+    if (js.empty()) {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"device offline or no response\"}");
+        return;
+    }
+    std::string out = "{\"ts\":" + std::to_string(ts) + ",\"sysinfo\":" + js + "}";
+    ctx->send(out);
+}
+
 void AdminServer::handleClients(const HttpContextPtr& ctx) {
     auto actor = currentActor();
     std::string body = callRelay([this, actor]() {

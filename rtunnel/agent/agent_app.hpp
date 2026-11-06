@@ -5,6 +5,7 @@
 // 长连接（HELLO/AUTH/心跳/重连/收帧）由 common/TunnelLink 承担。
 
 #include "common/tunnel_link.hpp"
+#include <string>
 
 class AgentApp;
 
@@ -36,6 +37,8 @@ public:
     int          nallow = 0;
     int          allow_all = 0;
     int          allow_shell = 0;   // 允许 OPEN_SHELL（forkpty 起 shell，默认禁用）
+    std::string  args_line;         // 启动参数（展示/排障）
+    long long    started_ms = 0;
     int          max_idle = 0;      // 无会话空闲多少秒后退出（0=常驻，按需 agent 用）
     uint64_t     last_active_ms = 0;
     int          had_stream = 0;       // 是否用过（用过后无会话快速退出）
@@ -66,6 +69,7 @@ private:
     void         handleOpen(const rtnp::Frame* f);
     int          openShellStream(LocalStream* s);
     void         killShellChild(LocalStream* s);
+    void         sendSysinfo();
 
     // libhv C 回调的薄封装（对象经 hio_context / hevent_userdata 取回）
     static void localReadCb(hio_t* io, void* buf, int n);

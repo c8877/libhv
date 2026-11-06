@@ -226,7 +226,8 @@ void AdminServer::registerRoutes() {
     access(ROLE_VIEWER, "GET", "/api/v1/overview", &AdminServer::handleOverview);
     access(ROLE_VIEWER, "GET", "/api/v1/agents", &AdminServer::handleAgents);
     // operator：详情/会话/文件读写/ACL 读
-    access(ROLE_OPERATOR, "GET", "/api/v1/agents/:devid", &AdminServer::handleAgentDetail);
+    access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid", &AdminServer::handleAgentDetail);
+    access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid/sysinfo", &AdminServer::handleAgentSysinfo);
     access(ROLE_OPERATOR, "GET", "/api/v1/clients", &AdminServer::handleClients);
     access(ROLE_OPERATOR, "GET", "/api/v1/streams", &AdminServer::handleStreams);
     access(ROLE_OPERATOR, "GET", "/api/v1/acl/file", &AdminServer::handleAclGet);

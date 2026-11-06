@@ -1,8 +1,27 @@
 #include "agent_app.hpp"
+#include "hversion.h"
+#include "cpputil/json.hpp"
 #include "common/logging.hpp"
+#include "cpputil/json.hpp"
 #include "common/shell_spawn.hpp"
 
 #include <stdio.h>
+#include <sys/utsname.h>
+#include <sys/statvfs.h>
+#include <sys/sysinfo.h>
+#include <ifaddrs.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <net/if.h>
+#include <unistd.h>
+#include <fstream>
+#include <sstream>
+#include <vector>
+#if defined(WITH_OPENSSL)
+#include "openssl/x509.h"
+#include "openssl/pem.h"
+#include "openssl/bio.h"
+#endif
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -294,8 +313,135 @@ void AgentApp::killShellChild(LocalStream* s) {
 }
 
 // READY 后的会话级帧（连接级 HELLO/AUTH/PING 由 TunnelLink 处理）
+void AgentApp::sendSysinfo() {
+    using nlohmann::json;
+    json j;
+    j["devid"] = devid;
+    j["version"] = hv_version();
+    j["pid"] = (int)getpid();
+    j["started_ms"] = started_ms;
+    j["args"] = args_line;
+
+    struct utsname u;
+    if (uname(&u) == 0) {
+        j["sysname"] = u.sysname;
+        j["kernel"] = u.release;
+        j["kernel_version"] = u.version;
+        j["machine"] = u.machine;
+    }
+    {
+        std::ifstream f("/proc/device-tree/model");
+        if (f) { std::string m; std::getline(f, m); j["board"] = m; }
+    }
+    {
+        std::ifstream f("/proc/cpuinfo");
+        std::string line, model;
+        int cores = 0;
+        while (std::getline(f, line)) {
+            if (line.rfind("processor", 0) == 0) cores++;
+            if (model.empty() && (line.rfind("model name", 0) == 0 || line.rfind("Processor", 0) == 0)) {
+                size_t p = line.find(':');
+                if (p != std::string::npos) model = line.substr(p + 1);
+            }
+        }
+        while (!model.empty() && (model[0] == ' ' || model[0] == '\t')) model.erase(0, 1);
+        j["cpu_model"] = model;
+        j["cpu_cores"] = cores ? cores : (int)sysconf(_SC_NPROCESSORS_ONLN);
+    }
+    {
+        std::ifstream f("/proc/meminfo");
+        std::string line;
+        unsigned long long total = 0, avail = 0, swap_total = 0, swap_free = 0;
+        while (std::getline(f, line)) {
+            unsigned long long v = 0;
+            if (sscanf(line.c_str(), "MemTotal: %llu kB", &v) == 1) total = v;
+            else if (sscanf(line.c_str(), "MemAvailable: %llu kB", &v) == 1) avail = v;
+            else if (sscanf(line.c_str(), "SwapTotal: %llu kB", &v) == 1) swap_total = v;
+            else if (sscanf(line.c_str(), "SwapFree: %llu kB", &v) == 1) swap_free = v;
+        }
+        j["mem_total_kb"] = total;
+        j["mem_available_kb"] = avail;
+        j["swap_total_kb"] = swap_total;
+        j["swap_free_kb"] = swap_free;
+    }
+    {
+        struct statvfs vfs;
+        if (statvfs("/", &vfs) == 0) {
+            j["disk_total_kb"] = (unsigned long long)vfs.f_blocks * vfs.f_frsize / 1024;
+            j["disk_free_kb"] = (unsigned long long)vfs.f_bavail * vfs.f_frsize / 1024;
+            j["disk_inode_total"] = (unsigned long long)vfs.f_files;
+            j["disk_inode_free"] = (unsigned long long)vfs.f_ffree;
+        }
+    }
+    {
+        double la[3] = {0, 0, 0};
+        if (getloadavg(la, 3) == 3) {
+            j["load1"] = la[0]; j["load5"] = la[1]; j["load15"] = la[2];
+        }
+    }
+    {
+        json nics = json::array();
+        struct ifaddrs* ifs = NULL;
+        if (getifaddrs(&ifs) == 0) {
+            for (struct ifaddrs* p = ifs; p; p = p->ifa_next) {
+                if (!p->ifa_addr || p->ifa_addr->sa_family != AF_INET) continue;
+                char ip[64] = {0}, mask[64] = {0};
+                struct sockaddr_in* sin = (struct sockaddr_in*)p->ifa_addr;
+                inet_ntop(AF_INET, &sin->sin_addr, ip, sizeof(ip));
+                if (p->ifa_netmask) {
+                    struct sockaddr_in* m = (struct sockaddr_in*)p->ifa_netmask;
+                    inet_ntop(AF_INET, &m->sin_addr, mask, sizeof(mask));
+                }
+                json n;
+                n["name"] = p->ifa_name;
+                n["ip"] = ip;
+                n["netmask"] = mask;
+                n["up"] = (p->ifa_flags & IFF_UP) ? true : false;
+                nics.push_back(n);
+            }
+            freeifaddrs(ifs);
+        }
+        j["nics"] = nics;
+    }
+    j["mtls"] = (tls_cert[0] != '\0');
+
+#if defined(WITH_OPENSSL)
+    if (tls_cert[0]) {
+        FILE* fp = fopen(tls_cert, "r");
+        if (fp) {
+            X509* x = PEM_read_X509(fp, NULL, NULL, NULL);
+            fclose(fp);
+            if (x) {
+                char subj[256] = {0}, iss[256] = {0};
+                X509_NAME_oneline(X509_get_subject_name(x), subj, sizeof(subj));
+                X509_NAME_oneline(X509_get_issuer_name(x), iss, sizeof(iss));
+                j["cert_subject"] = subj;
+                j["cert_issuer"] = iss;
+                j["cert_serial"] = std::to_string((long long)ASN1_INTEGER_get(X509_get_serialNumber(x)));
+                j["cert_not_after"] = (long long)X509_cmp_current_time(X509_get0_notAfter(x)) < 0
+                    ? 0 : 1;
+                BIO* bo = BIO_new(BIO_s_mem());
+                X509_print_ex(bo, x, XN_FLAG_ONELINE, 0);
+                char* p = NULL; long n = BIO_get_mem_data(bo, &p);
+                if (n > 0 && p) j["cert_text"] = std::string(p, (size_t)n);
+                BIO_free(bo);
+                X509_free(x);
+            }
+        }
+    }
+#endif
+
+    std::string body = j.dump();
+    rtnp::Writer w;
+    w.str(body.c_str());
+    rtnp::send(io, rtnp::SYSINFO, 0, w.data, (uint16_t)w.len);
+}
+
 void AgentApp::onFrame(rtnp::Frame* f) {
     switch (f->type) {
+    case rtnp::SYSINFO_REQ:
+        sendSysinfo();
+        return;
     case rtnp::OPEN:
         handleOpen(f);
         return;
@@ -373,6 +519,11 @@ void AgentApp::onLinkDown() {
 // ---------------------------------------------------------------- 入口
 
 int AgentApp::run(int argc, char** argv) {
+    started_ms = (long long)time(NULL) * 1000;
+    for (int i = 0; i < argc; ++i) {
+        if (i) args_line += " ";
+        args_line += argv[i];
+    }
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--server") == 0 && i + 1 < argc) {
             host = argv[++i];

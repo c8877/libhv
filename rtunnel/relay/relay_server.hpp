@@ -6,10 +6,16 @@
 #include "rtnp/codec.hpp"
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 class RelayServer;
 struct RelayConn;
+
+struct SysinfoEntry {
+    std::string json;
+    uint64_t    ts = 0;
+};
 
 struct RelayStream {
     uint32_t     a_sid = 0;
@@ -75,6 +81,7 @@ public:
     std::vector<std::string> revoked_sans;  // 已吊销身份（cert_dir/revoked.txt 持久化）
     RelayConn*  conns = nullptr;      // 全局连接表
     RelayConn*  agents = nullptr;     // devid 注册表
+    std::unordered_map<std::string, SysinfoEntry> sysinfo_cache;
     struct ClientCred { std::string user, token; };
     std::vector<ClientCred> client_creds;   // --client-users（user:token）
     std::string client_token;               // --client-token（全局 token）
@@ -118,6 +125,8 @@ private:
     bool         isRevoked(const std::string& san) const;
     bool         revokeSan(const std::string& san);   // 写黑名单 + 踢在线连接
     void         loadRevoked();                       // 启动时读 revoked.txt
+    bool         sendSysinfoReq(const char* devid);   // 要求 agent 立即上报
+    std::string  sysinfoOf(const char* devid, uint64_t* ts);
     void         onHsTimeout(RelayConn* c);
     void         handleFrame(RelayConn* c, rtnp::Frame* f);
     void         onRead(RelayConn* c, void* buf, int readbytes);
