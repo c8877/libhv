@@ -871,6 +871,7 @@ int RelayServer::run(int argc, char** argv) {
         admin = adm;
         AdminConfig cfg;
         cfg.addr = admin_addr;
+        cfg.shell_relay_port = port;   // 终端 direct 模式连本机 relay 的端口，必须跟 --port 一致
         cfg.token = admin_token ? admin_token : "";
         cfg.users = admin_users ? admin_users : "";
         cfg.docroot = admin_docroot ? admin_docroot : "";
