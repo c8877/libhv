@@ -23,6 +23,7 @@ struct LocalStream {
     htimer_t*    close_timer = nullptr;   // 半关闭 60s 超时
     pid_t        child_pid = -1;          // shell 子进程（is_shell 时）
     int          is_shell = 0;            // OPEN_SHELL：pty 而非 TCP socket
+    int          freed = 0;               // 防重复释放（close 回调与超时/断链并发）
     LocalStream* next = nullptr;
 };
 

@@ -57,6 +57,8 @@ LocalStream* AgentApp::streamFind(uint32_t sid) {
 }
 
 void AgentApp::streamFree(LocalStream* s) {
+    if (s == NULL || s->freed) return;
+    s->freed = 1;
     LocalStream** pp = &streams;
     while (*pp) {
         if (*pp == s) { *pp = s->next; break; }
