@@ -105,6 +105,9 @@ private:
     void handleDeviceBind(const HttpContextPtr& ctx, const AdminActor& actor);
     // api_proxy.cpp
     void handleDeviceProxy(const HttpContextPtr& ctx);
+    void handleDeviceWsOpen(const WebSocketChannelPtr& channel, const HttpRequestPtr& req);
+    bool handleDeviceWsMessage(const WebSocketChannelPtr& channel, const std::string& msg);
+    bool handleDeviceWsClose(const WebSocketChannelPtr& channel);
     // api_files.cpp
     void handleFiles(const HttpContextPtr& ctx);
     void handleFileDownload(const HttpContextPtr& ctx);

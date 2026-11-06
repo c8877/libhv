@@ -149,6 +149,10 @@ static void directOpen(AdminServer* adm, TerminalSession* s) {
 // ---------------------------------------------------------------- ws 回调
 
 void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequestPtr& req) {
+    if (req->path.compare(0, 8, "/device/") == 0) {
+        handleDeviceWsOpen(channel, req);
+        return;
+    }
     // 权限：query 里的 token（浏览器 WebSocket 无法自定义 Authorization 头）
     std::string token, devid, user;
     for (const auto& kv : req->query_params) {
@@ -191,6 +195,7 @@ void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequest
 }
 
 void AdminServer::onWsMessage(const WebSocketChannelPtr& channel, const std::string& msg) {
+    if (handleDeviceWsMessage(channel, msg)) return;
     auto it = terms_.find(channel.get());
     if (it == terms_.end()) return;
     auto& s = it->second;
@@ -219,6 +224,7 @@ void AdminServer::onWsMessage(const WebSocketChannelPtr& channel, const std::str
 }
 
 void AdminServer::onWsClose(const WebSocketChannelPtr& channel) {
+    if (handleDeviceWsClose(channel)) return;
     auto it = terms_.find(channel.get());
     if (it == terms_.end()) return;
     sessionClose(it->second.get());
