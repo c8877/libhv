@@ -500,6 +500,7 @@ int ClientApp::run(int argc, char** argv) {
         } else if (strcmp(argv[i], "--user") == 0 && i + 1 < argc) {
             snprintf(user, sizeof(user), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--socks5") == 0 && i + 1 < argc) {
+            socks_enabled = 1;
             char buf[256];
             snprintf(buf, sizeof(buf), "%s", argv[++i]);
             char* colon = strrchr(buf, ':');
@@ -565,6 +566,10 @@ int ClientApp::run(int argc, char** argv) {
         fprintf(stderr, "--user is required\n");
         return 1;
     }
+    if (!shell_devid && !socks_enabled && nfwd == 0) {
+        fprintf(stderr, "need --socks5 or --forward (or 'shell <devid>')\n");
+        return 1;
+    }
 
     // shell 子命令：本机终端直连设备免密 shell（不启动 SOCKS5/forward 入口）
     if (shell_devid) {
@@ -586,7 +591,7 @@ int ClientApp::run(int argc, char** argv) {
 
     hio_t* listenio = NULL;
 #ifdef ENABLE_UDS
-    if (socks_uds[0]) {
+    if (socks_enabled && socks_uds[0]) {
         unlink(socks_uds);
         listenio = hio_create_socket(lp, socks_uds, -1, HIO_TYPE_TCP, HIO_SERVER_SIDE);
         if (listenio) {
@@ -601,7 +606,7 @@ int ClientApp::run(int argc, char** argv) {
         logf_("[client] socks5 listening on unix:%s", socks_uds);
     } else
 #endif
-    {
+    if (socks_enabled) {
         listenio = hloop_create_tcp_server(lp, socks_host, socks_port, acceptCb);
         if (listenio == NULL) {
             fprintf(stderr, "socks5 listen %s:%d failed\n", socks_host, socks_port);

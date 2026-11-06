@@ -51,6 +51,7 @@ public:
     } fwd[8];
     int         nfwd = 0;
     int         socks_port = 1080;
+    int         socks_enabled = 0;
     int         allow_shell = 0;            // 允许 B 通知本机按需拉起 agent（默认关）
     char        agent_path[512] = {0};      // rtunnel-agent 路径（默认同目录）
     int         agent_idle = 60;            // 子 agent 空闲多少秒自退

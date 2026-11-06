@@ -41,6 +41,7 @@ protected:
     virtual void        onReady() {}           // AUTH_OK 之后
     virtual void        onFrame(rtnp::Frame* f) = 0;  // READY 后的会话级帧
     virtual void        onLinkDown() = 0;      // 断线：子类清理自己的流表
+    virtual bool        autoReconnect() const { return true; }  // shell 等一次性会话返回 false
 
 private:
     void handleFrame(rtnp::Frame* f);

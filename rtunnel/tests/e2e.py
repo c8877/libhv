@@ -432,6 +432,17 @@ def main():
                   "got=%r eof=%s" % (got, eof))
             s.close()
 
+        # 6.4 CLI 免密 shell：远端 shell 退出后客户端必须退出
+        try:
+            r = subprocess.run(
+                [os.path.join(BIN, "rtunnel-client"), "--server", "127.0.0.1", "--port", str(relay_port),
+                 "--user", "tester", "--token", "tok-tester", "shell", "dev1"] + tls_tester,
+                input=b"echo CLI-SHELL-$((6*7)); exit\n", capture_output=True, timeout=10)
+            out = (r.stdout + r.stderr).decode(errors="ignore")
+            check("CLI 免密 shell 正常退出", r.returncode == 0 and "CLI-SHELL-42" in out, out[-120:])
+        except subprocess.TimeoutExpired:
+            check("CLI 免密 shell 正常退出", False, "timeout")
+
         # 6.5 A 侧按需 agent：admin 对 a:tester 发 OPEN_SHELL，relay 通知 client 拉起本地 agent
         try:
             q = socket.create_connection(("127.0.0.1", relay_port), 5)

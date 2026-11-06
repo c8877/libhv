@@ -171,7 +171,11 @@ void AgentApp::onLocalClose(LocalStream* s) {
 
 void AgentApp::onLocalRead(LocalStream* s, void* buf, int readbytes) {
     if (verbose) logf_("[agent] local read sid=%u len=%d", s->sid, readbytes);
-    if (readbytes <= 0) return;
+    if (readbytes <= 0) {
+        // pty 的 io_type 不是 socket，libhv 不会自动 close；read==0 视为 EOF
+        if (s->local && !hio_is_closed(s->local)) hio_close(s->local);
+        return;
+    }
     // 注意：remote_closed 只表示 A→C 方向已 EOF，C→A 方向仍要把数据发回去。
     if (s->pending.append(buf, (size_t)readbytes) != 0) {
         rtnp::send(io, rtnp::RESET, s->sid, NULL, 0);

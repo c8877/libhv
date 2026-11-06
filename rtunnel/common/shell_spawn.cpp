@@ -24,6 +24,9 @@ hio_t* shellSpawnPty(hloop_t* loop, void* ctx, hread_cb read_cb, hclose_cb close
         close(master);
         return NULL;
     }
+    // 标成流类型：libhv 在 read 返回 0/EIO 时才会走 close 路径；
+    // 否则 pty 子进程退出后 agent 收不到 EOF，CLOSE 永远不发。
+    hio_set_type(io, HIO_TYPE_SOCK_STREAM);
     hio_set_context(io, ctx);
     hio_setcb_read(io, read_cb);
     hio_setcb_close(io, close_cb);

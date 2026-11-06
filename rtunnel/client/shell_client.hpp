@@ -20,6 +20,7 @@ protected:
     void        onReady() override;
     void        onFrame(rtnp::Frame* f) override;
     void        onLinkDown() override;
+    bool        autoReconnect() const override { return false; }
 
 private:
     std::string devid_;

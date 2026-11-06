@@ -176,7 +176,7 @@ build/bin/rtunnel-client --server B --port 8443 --user alice --token <token> \
 | 参数 | 说明 |
 |---|---|
 | `--server/--port --user --token` | relay 地址与登录身份 |
-| `--socks5 HOST:PORT` / `unix:PATH` | 本地 SOCKS5 入口 |
+| `--socks5 HOST:PORT` / `unix:PATH` | 本地 SOCKS5 入口；**可省略**，省略时只做 `--forward` / `shell`，不会再默认占用 1080 |
 | `--forward 127.0.0.1:16022=devid:22` | 本地端口映射，可多次 |
 | `--allow-shell` | 允许 B 通知本机按需拉起 agent（默认关） |
 | `--agent-path` / `--agent-idle` | agent 路径 / 空闲自退秒数（默认 60） |

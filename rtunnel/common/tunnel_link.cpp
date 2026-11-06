@@ -96,13 +96,15 @@ void TunnelLink::onTunnelRead(void* buf, int readbytes) {
 }
 
 void TunnelLink::onTunnelClose() {
-    logf_("[%s] tunnel closed, reconnect in %d ms", logTag(), backoff_ms);
+    if (autoReconnect()) {
+        logf_("[%s] tunnel closed, reconnect in %d ms", logTag(), backoff_ms);
+    }
     onLinkDown();
     if (hs_timer_) { htimer_del(hs_timer_); hs_timer_ = NULL; }
     io = NULL;
     state = 0;
     in_.reset();
-    scheduleReconnect();
+    if (autoReconnect()) scheduleReconnect();
 }
 
 // 握手/认证阶段超时：HELLO_ACK 5s、AUTH_OK 10s（设计 §8.8）
