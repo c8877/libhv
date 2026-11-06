@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <string.h>
+#include <signal.h>
 
 #include "rtnp.h"
 
@@ -73,6 +74,7 @@ struct bconn_s {
     bconn_t*   reg_next;     // 注册表链表（仅 agent）
     uint64_t   bytes_in;
     uint64_t   bytes_out;
+    htimer_t*  hs_timer;     // 握手+认证超时（AUTH_OK 后摘除）
 };
 
 static hloop_t* g_loop;
@@ -88,7 +90,13 @@ typedef struct acl_entry_s {
     struct acl_entry_s* next;
 } acl_entry_t;
 
-static acl_entry_t* g_acl;
+static acl_entry_t* g_acl_cli;    // --acl 命令行条目（固定）
+static acl_entry_t* g_acl_file;   // --acl-file 文件条目（SIGHUP 热加载）
+static char       g_acl_file_path[256];
+static hio_t*     g_listenio;
+static int        g_draining = 0;
+static uint64_t   g_drain_deadline = 0;
+static uint32_t   g_drain_timeout_ms = 10000;
 
 static void logf_(const char* fmt, ...) {
     va_list ap;
@@ -109,14 +117,17 @@ static int pattern_match(const char* pat, const char* s) {
 static int acl_check(const char* user, const char* devid) {
     if (g_allow_all) return 1;
     if (user[0] == '\0') return 0;
-    for (acl_entry_t* e = g_acl; e; e = e->next) {
-        if (strcmp(e->user, user) != 0) continue;
-        if (pattern_match(e->pattern, devid)) return 1;
+    for (int i = 0; i < 2; ++i) {
+        acl_entry_t* head = i == 0 ? g_acl_cli : g_acl_file;
+        for (acl_entry_t* e = head; e; e = e->next) {
+            if (strcmp(e->user, user) != 0) continue;
+            if (pattern_match(e->pattern, devid)) return 1;
+        }
     }
     return 0;
 }
 
-static void acl_add(const char* user, const char* patterns) {
+static void acl_add_to(acl_entry_t** head, const char* user, const char* patterns) {
     char buf[512];
     snprintf(buf, sizeof(buf), "%s", patterns);
     char* save = NULL;
@@ -124,9 +135,58 @@ static void acl_add(const char* user, const char* patterns) {
         acl_entry_t* e = calloc(1, sizeof(*e));
         snprintf(e->user, sizeof(e->user), "%s", user);
         snprintf(e->pattern, sizeof(e->pattern), "%s", p);
-        e->next = g_acl;
-        g_acl = e;
+        e->next = *head;
+        *head = e;
     }
+}
+
+static void acl_free(acl_entry_t** head) {
+    acl_entry_t* e = *head;
+    while (e) {
+        acl_entry_t* next = e->next;
+        free(e);
+        e = next;
+    }
+    *head = NULL;
+}
+
+// 加载 ACL 文件：每行 user=devid[,devid|*]，# 注释、空行跳过。
+// 只有整文件解析成功才替换旧表；任何错误保留旧授权（fail-closed 由默认拒绝保证）。
+static int acl_file_load(void) {
+    if (g_acl_file_path[0] == '\0') return -1;
+    FILE* fp = fopen(g_acl_file_path, "r");
+    if (fp == NULL) {
+        logf_("[relay] acl reload: cannot open %s, keep old acl", g_acl_file_path);
+        return -1;
+    }
+    acl_entry_t* newlist = NULL;
+    char line[512];
+    int lineno = 0;
+    while (fgets(line, sizeof(line), fp)) {
+        lineno++;
+        char* p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '#' || *p == '\n' || *p == '\r' || *p == '\0') continue;
+        char* eq = strchr(p, '=');
+        if (eq == NULL) {
+            logf_("[relay] acl reload: %s:%d bad line, keep old acl", g_acl_file_path, lineno);
+            fclose(fp);
+            acl_free(&newlist);
+            return -1;
+        }
+        *eq = '\0';
+        char* pats = eq + 1;
+        char* end = pats + strlen(pats);
+        while (end > pats && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == ' ' || end[-1] == '\t')) *--end = '\0';
+        acl_add_to(&newlist, p, pats);
+    }
+    fclose(fp);
+    acl_free(&g_acl_file);
+    g_acl_file = newlist;
+    int n = 0;
+    for (acl_entry_t* e = g_acl_file; e; e = e->next) n++;
+    logf_("[relay] acl reloaded: %d entries from %s", n, g_acl_file_path);
+    return 0;
 }
 
 static bconn_t* find_agent(const char* devid) {
@@ -174,10 +234,34 @@ static void send_err(hio_t* io, uint8_t type, uint32_t sid, uint16_t code, const
     rtnp_wr_free(&w);
 }
 
-static void forward(hio_t* to, uint8_t type, uint32_t sid, const uint8_t* payload, uint16_t len) {
-    if (to) {
-        rtnp_send(to, type, sid, payload, len);
+static void forward(bconn_t* to, uint8_t type, uint32_t sid, const uint8_t* payload, uint16_t len) {
+    if (to && to->io && !hio_is_closed(to->io)) {
+        if (rtnp_send(to->io, type, sid, payload, len) == 0) {
+            to->bytes_out += (uint64_t)len + RTNP_HEADER_SIZE;
+        }
     }
+}
+
+// mTLS 身份校验：对端证书 SAN 必须与 AUTH 声称的身份一致（agent 的 devid、
+// client 的 user）——身份取自证书，不信任自报。返回 1 = 通过，0 = 已拒绝并关闭。
+static int check_peer_san(bconn_t* c, const char* claimed, const char* what, const char* id_name) {
+    if (!g_require_mtls) return 1;
+#ifdef WITH_OPENSSL
+    char san[256] = {0};
+    if (peer_cert_san(hio_get_ssl(c->io), san, sizeof(san)) != 0 ||
+        strcmp(san, claimed) != 0) {
+        logf_("[relay] %s cert SAN mismatch: %s=%s san=%s", what, id_name, claimed, san);
+        send_err(c->io, RTNP_AUTH_FAIL, 0, RTNP_UNAUTHORIZED, "cert identity mismatch");
+        hio_close(c->io);
+        return 0;
+    }
+    return 1;
+#else
+    logf_("[relay] mTLS required but built without OpenSSL");
+    send_err(c->io, RTNP_AUTH_FAIL, 0, RTNP_UNAUTHORIZED, "mtls unsupported");
+    hio_close(c->io);
+    return 0;
+#endif
 }
 
 // ------------------------------------------------------------------ 注册表
@@ -207,12 +291,22 @@ static void conn_close_all_streams(bconn_t* c, uint16_t code) {
     c->streams = NULL;
 }
 
+// 未认证连接超时：10s 内未走完 HELLO + AUTH 即回收，防半开连接占 fd
+static void on_hs_timeout(htimer_t* timer) {
+    bconn_t* c = (bconn_t*)hevent_userdata(timer);
+    if (c == NULL) return;
+    c->hs_timer = NULL;
+    if (!c->authed) {
+        logf_("[relay] handshake/auth timeout fd=%d", hio_fd(c->io));
+        hio_close(c->io);
+    }
+}
+
 // ------------------------------------------------------------------ 读循环
 
 static void on_read(hio_t* io, void* buf, int readbytes);
 
 static void handle_frame(bconn_t* c, rtnp_frame_t* f) {
-    c->bytes_in += f->len;
     if (g_verbose) logf_("[relay] frame role=%d type=0x%02x sid=%u len=%u", c->role, f->type, f->sid, f->len);
 
     switch (f->type) {
@@ -245,24 +339,8 @@ static void handle_frame(bconn_t* c, rtnp_frame_t* f) {
                 hio_close(c->io);
                 return;
             }
+            if (!check_peer_san(c, c->devid, "device", "devid")) return;
             // 顶替旧连接
-            if (g_require_mtls) {
-#ifdef WITH_OPENSSL
-                char san[256] = {0};
-                if (peer_cert_san(hio_get_ssl(c->io), san, sizeof(san)) != 0 ||
-                    strcmp(san, c->devid) != 0) {
-                    logf_("[relay] device cert SAN mismatch: devid=%s san=%s", c->devid, san);
-                    send_err(c->io, RTNP_AUTH_FAIL, 0, RTNP_UNAUTHORIZED, "cert/devid mismatch");
-                    hio_close(c->io);
-                    return;
-                }
-#else
-                logf_("[relay] mTLS required but built without OpenSSL");
-                send_err(c->io, RTNP_AUTH_FAIL, 0, RTNP_UNAUTHORIZED, "mtls unsupported");
-                hio_close(c->io);
-                return;
-#endif
-            }
             bconn_t* old = find_agent(c->devid);
             if (old && old != c) {
                 conn_close_all_streams(old, RTNP_DEVICE_REPLACED);
@@ -270,6 +348,7 @@ static void handle_frame(bconn_t* c, rtnp_frame_t* f) {
                 hio_close(old->io);
             }
             c->authed = 1;
+            if (c->hs_timer) { htimer_del(c->hs_timer); c->hs_timer = NULL; }
             c->reg_next = g_agents;
             g_agents = c;
             rtnp_wr_t w; rtnp_wr_init(&w);
@@ -285,7 +364,9 @@ static void handle_frame(bconn_t* c, rtnp_frame_t* f) {
                 hio_close(c->io);
                 return;
             }
+            if (!check_peer_san(c, c->user, "client", "user")) return;
             c->authed = 1;
+            if (c->hs_timer) { htimer_del(c->hs_timer); c->hs_timer = NULL; }
             rtnp_wr_t w; rtnp_wr_init(&w);
             rtnp_wr_str(&w, c->user);
             rtnp_wr_u32(&w, 15000);
@@ -303,13 +384,18 @@ static void handle_frame(bconn_t* c, rtnp_frame_t* f) {
         char devid[128] = {0};
         rtnp_rd_str(&r, devid, sizeof(devid));
         int online = 0;
+        uint32_t active = 0;
         if (!r.err && c->authed && c->role == RTNP_ROLE_CLIENT && acl_check(c->user, devid)) {
-            online = find_agent(devid) != NULL;
+            bconn_t* agent = find_agent(devid);
+            if (agent) {
+                online = 1;
+                for (bstream_t* st = agent->streams; st; st = st->next_c) active++;
+            }
         }
         rtnp_wr_t w; rtnp_wr_init(&w);
         rtnp_wr_str(&w, devid);
         rtnp_wr_u8(&w, (uint8_t)online);
-        rtnp_wr_u32(&w, 0);
+        rtnp_wr_u32(&w, active);
         rtnp_send(c->io, RTNP_DEVICE_STATUS, 0, w.data, (uint16_t)w.len);
         rtnp_wr_free(&w);
         return;
@@ -370,7 +456,7 @@ static void handle_frame(bconn_t* c, rtnp_frame_t* f) {
                 send_err(c->io, RTNP_RESET, f->sid, RTNP_PROTOCOL_ERROR, "unknown sid");
                 return;
             }
-            forward(s->c->io, f->type, s->c_sid, f->payload, f->len);
+            forward(s->c, f->type, s->c_sid, f->payload, f->len);
             if (f->type == RTNP_CLOSE) s->a_closed = 1;
             if (f->type == RTNP_RESET) { s->a_closed = s->c_closed = 1; }
             if (s->a_closed && s->c_closed) stream_remove(s);
@@ -388,7 +474,7 @@ static void handle_frame(bconn_t* c, rtnp_frame_t* f) {
     case RTNP_OPEN_FAIL: {
         bstream_t* s = find_stream_by_c(c, f->sid, NULL);
         if (s == NULL) return;
-        forward(s->a->io, f->type, s->a_sid, f->payload, f->len);
+        forward(s->a, f->type, s->a_sid, f->payload, f->len);
         if (f->type == RTNP_OPEN_FAIL) { s->a_closed = s->c_closed = 1; stream_remove(s); }
         return;
     }
@@ -401,7 +487,7 @@ static void handle_frame(bconn_t* c, rtnp_frame_t* f) {
             send_err(c->io, RTNP_RESET, f->sid, RTNP_PROTOCOL_ERROR, "unknown sid");
             return;
         }
-        forward(s->a->io, f->type, s->a_sid, f->payload, f->len);
+        forward(s->a, f->type, s->a_sid, f->payload, f->len);
         if (f->type == RTNP_CLOSE) s->c_closed = 1;
         if (f->type == RTNP_RESET) { s->a_closed = s->c_closed = 1; }
         if (s->a_closed && s->c_closed) stream_remove(s);
@@ -439,7 +525,9 @@ static void on_close(hio_t* io) {
     bconn_t* c = (bconn_t*)hio_context(io);
     if (c == NULL) return;
 
-    conn_close_all_streams(c, RTNP_DEVICE_OFFLINE);
+    if (c->hs_timer) { htimer_del(c->hs_timer); c->hs_timer = NULL; }
+    // agent 掉线 = 设备离线；client 掉线 = 会话取消（设备并未离线）
+    conn_close_all_streams(c, c->role == RTNP_ROLE_AGENT ? RTNP_DEVICE_OFFLINE : RTNP_CANCELLED);
     if (c->role == RTNP_ROLE_AGENT) {
         registry_remove(c);
         if (c->devid[0]) logf_("[relay] agent offline: %s", c->devid);
@@ -468,7 +556,67 @@ static void on_accept(hio_t* io) {
     hio_setcb_close(io, on_close);
     hio_set_max_write_bufsize(io, RTNP_CONN_INFLIGHT + RTNP_MAX_PAYLOAD);
     hio_read(io);
+    // 未认证连接 10s 未走完 HELLO+AUTH 即回收
+    c->hs_timer = htimer_add(g_loop, on_hs_timeout, 10000, 1);
+    hevent_set_userdata(c->hs_timer, c);
     if (g_verbose) logf_("[relay] accept fd=%d", hio_fd(io));
+}
+
+// ------------------------------------------------------------------ 运维面
+
+// SIGHUP：热加载 --acl-file；命令行 --acl 条目不受影响
+static void on_sighup(hsignal_t* sig) {
+    (void)sig;
+    if (g_acl_file_path[0]) {
+        acl_file_load();
+    } else {
+        logf_("[relay] SIGHUP ignored: no --acl-file configured");
+    }
+}
+
+// 周期统计：连接数 / 活跃流（按 agent 侧计，避免双算）/ 累计字节
+static void on_stats(htimer_t* timer) {
+    (void)timer;
+    int nclient = 0, nagent = 0, nstream = 0;
+    uint64_t in = 0, out = 0;
+    for (bconn_t* c = g_conns; c; c = c->next_all) {
+        if (c->role == RTNP_ROLE_AGENT) {
+            nagent++;
+            for (bstream_t* s = c->streams; s; s = s->next_c) nstream++;
+        } else if (c->role == RTNP_ROLE_CLIENT) {
+            nclient++;
+        }
+        in += c->bytes_in;
+        out += c->bytes_out;
+    }
+    logf_("[relay] stats: agents=%d clients=%d streams=%d bytes_in=%llu bytes_out=%llu",
+          nagent, nclient, nstream, (unsigned long long)in, (unsigned long long)out);
+}
+
+static void on_drain(htimer_t* timer) {
+    if (g_conns && hloop_now_ms(g_loop) < g_drain_deadline) return;
+    int left = 0;
+    for (bconn_t* c = g_conns; c; c = c->next_all) left++;
+    logf_("[relay] drain done (remaining=%d), exiting", left);
+    htimer_del(timer);
+    hloop_stop(g_loop);
+}
+
+// SIGTERM/SIGINT：停止 accept → 等现有连接收尾（--drain-timeout）→ 退出。
+// 第二次信号立即退出。A/C 侧断线后按既有退避重连，无需额外通知。
+static void on_shutdown(hsignal_t* sig) {
+    int signo = (int)hevent_id(sig);
+    if (g_draining) {
+        logf_("[relay] signal %d again, force exit", signo);
+        hloop_stop(g_loop);
+        return;
+    }
+    g_draining = 1;
+    logf_("[relay] signal %d: draining (stop accept, timeout %u ms)", signo, g_drain_timeout_ms);
+    if (g_listenio) hio_close(g_listenio);
+    if (g_conns == NULL) { hloop_stop(g_loop); return; }
+    g_drain_deadline = hloop_now_ms(g_loop) + g_drain_timeout_ms;
+    htimer_add(g_loop, on_drain, 100, INFINITE);
 }
 
 int main(int argc, char** argv) {
@@ -499,11 +647,16 @@ int main(int argc, char** argv) {
             char* eq = strchr(buf, '=');
             if (eq) {
                 *eq = '\0';
-                acl_add(buf, eq + 1);
+                acl_add_to(&g_acl_cli, buf, eq + 1);
             }
+        } else if (strcmp(argv[i], "--acl-file") == 0 && i + 1 < argc) {
+            snprintf(g_acl_file_path, sizeof(g_acl_file_path), "%s", argv[++i]);
+        } else if (strcmp(argv[i], "--drain-timeout") == 0 && i + 1 < argc) {
+            g_drain_timeout_ms = (uint32_t)atoi(argv[++i]);
         } else {
             fprintf(stderr,
                 "Usage: %s [--host H] [--port P] [--acl user=devid[,devid|*]] [--allow-all]\n"
+                "          [--acl-file PATH] [--drain-timeout MS]\n"
                 "          [--tls-cert crt --tls-key key [--tls-ca ca]] [--verbose]\n",
                 argv[0]);
             return 1;
@@ -540,9 +693,19 @@ int main(int argc, char** argv) {
         fprintf(stderr, "listen %s:%d failed\n", host, port);
         return 2;
     }
+    g_listenio = listenio;
+    if (g_acl_file_path[0]) acl_file_load();
     logf_("[relay] listening on %s:%d (%s, acl=%s)", host, port,
           (tls_cert && tls_key) ? "tls" : "tcp",
-          g_allow_all ? "allow-all" : (g_acl ? "on" : "deny-all"));
+          g_allow_all ? "allow-all" : ((g_acl_cli || g_acl_file) ? "on" : "deny-all"));
+    if (!g_require_mtls) {
+        logf_("[relay] WARNING: no peer identity verification (--tls-ca off); "
+              "peers can claim any devid/user");
+    }
+    hsignal_add(g_loop, on_shutdown, SIGTERM);
+    hsignal_add(g_loop, on_shutdown, SIGINT);
+    hsignal_add(g_loop, on_sighup, SIGHUP);
+    htimer_add(g_loop, on_stats, 60000, INFINITE);
     hloop_run(g_loop);
     hloop_free(&g_loop);
     return 0;

@@ -21,6 +21,7 @@ typedef struct astream_s {
     uint32_t         credit;
     uint32_t         unacked;
     rtnp_buf_t       pending;
+    htimer_t*        close_timer;   // 半关闭 60s 超时
     struct astream_s* next;
 } astream_t;
 
@@ -42,6 +43,8 @@ typedef struct {
     rtnp_buf_t   in;
     astream_t*   streams;
     int          backoff_ms;
+    htimer_t*    hs_timer;      // 握手/认证阶段超时
+    int          ping_unacked;  // 连续未获 PONG 的 PING 数
 } agent_t;
 
 static agent_t g_agent;
@@ -49,6 +52,7 @@ static agent_t g_agent;
 static void on_local_write(hio_t* io, const void* buf, int len);
 static void maybe_grant_window(astream_t* s);
 static void schedule_reconnect(void);
+static void arm_hs_timer(uint32_t ms);
 
 static void logf_(const char* fmt, ...) {
     va_list ap;
@@ -79,12 +83,33 @@ static void stream_free(astream_t* s) {
         if (*pp == s) { *pp = s->next; break; }
         pp = &(*pp)->next;
     }
+    if (s->close_timer) { htimer_del(s->close_timer); s->close_timer = NULL; }
     if (s->local && !hio_is_closed(s->local)) {
         hio_set_context(s->local, NULL);
         hio_close(s->local);
     }
     rtnp_buf_free(&s->pending);
     free(s);
+}
+
+// 半关闭 60s 未收到对端 CLOSE：RESET(CLOSE_TIMEOUT) 并回收（设计 §7.5）
+static void on_close_timeout(htimer_t* timer) {
+    astream_t* s = (astream_t*)hevent_userdata(timer);
+    if (s == NULL) return;
+    s->close_timer = NULL;
+    if (g_agent.io && g_agent.state == 2 && !hio_is_closed(g_agent.io)) {
+        rtnp_wr_t w; rtnp_wr_init(&w);
+        rtnp_wr_u16(&w, RTNP_CLOSE_TIMEOUT);
+        rtnp_send(g_agent.io, RTNP_RESET, s->sid, w.data, (uint16_t)w.len);
+        rtnp_wr_free(&w);
+    }
+    stream_free(s);
+}
+
+static void arm_close_timer(astream_t* s) {
+    if (s->close_timer) return;
+    s->close_timer = htimer_add(g_agent.loop, on_close_timeout, 60000, 1);
+    hevent_set_userdata(s->close_timer, s);
 }
 
 static void buf_consume(rtnp_buf_t* b, size_t n) {
@@ -168,13 +193,15 @@ static void on_local_close(hio_t* io) {
     }
     if (!s->local_eof) {
         s->local_eof = 1;
-        if (g_agent.state == 2) {
+        if (g_agent.state == 2 && g_agent.io && !hio_is_closed(g_agent.io)) {
             rtnp_send(g_agent.io, RTNP_CLOSE, s->sid, NULL, 0);
         }
     }
     s->local = NULL;
     if (s->remote_closed) {
         stream_free(s);
+    } else {
+        arm_close_timer(s);
     }
 }
 
@@ -261,11 +288,14 @@ static void handle_frame(rtnp_frame_t* f) {
         rtnp_send(g_agent.io, RTNP_AUTH, 0, w.data, (uint16_t)w.len);
         rtnp_wr_free(&w);
         g_agent.state = 1;
+        arm_hs_timer(10000);   // 认证超时
         return;
     }
     case RTNP_AUTH_OK:
         g_agent.state = 2;
         g_agent.backoff_ms = 1000;
+        g_agent.ping_unacked = 0;
+        if (g_agent.hs_timer) { htimer_del(g_agent.hs_timer); g_agent.hs_timer = NULL; }
         logf_("[agent] authenticated as %s", g_agent.devid);
         return;
     case RTNP_AUTH_FAIL:
@@ -275,6 +305,9 @@ static void handle_frame(rtnp_frame_t* f) {
         return;
     case RTNP_PING:
         rtnp_send(g_agent.io, RTNP_PONG, 0, f->payload, f->len);
+        return;
+    case RTNP_PONG:
+        g_agent.ping_unacked = 0;
         return;
     default:
         break;
@@ -313,11 +346,13 @@ static void handle_frame(rtnp_frame_t* f) {
         s->remote_closed = 1;
         if (s->local && hio_write_is_complete(s->local)) {
             shutdown(hio_fd(s->local), SHUT_WR);
+            s->want_shutdown = 0;
         } else {
             s->want_shutdown = 1;
             if (s->local) hio_setcb_write(s->local, on_local_write);
         }
         if (s->local_eof) stream_free(s);
+        else arm_close_timer(s);
         return;
     }
     case RTNP_RESET: {
@@ -353,14 +388,30 @@ static void on_close(hio_t* io) {
     while (g_agent.streams) {
         astream_t* s = g_agent.streams;
         g_agent.streams = s->next;
+        if (s->close_timer) htimer_del(s->close_timer);
         if (s->local && !hio_is_closed(s->local)) hio_close(s->local);
         rtnp_buf_free(&s->pending);
         free(s);
     }
+    if (g_agent.hs_timer) { htimer_del(g_agent.hs_timer); g_agent.hs_timer = NULL; }
     g_agent.io = NULL;
     g_agent.state = 0;
     g_agent.in.len = 0;
     schedule_reconnect();
+}
+
+// 握手/认证阶段超时：HELLO_ACK 5s、AUTH_OK 10s（设计 §8.8）
+static void on_hs_timeout(htimer_t* timer) {
+    (void)timer;
+    g_agent.hs_timer = NULL;
+    if (g_agent.state == 2) return;
+    logf_("[agent] handshake/auth timeout");
+    if (g_agent.io) hio_close(g_agent.io);
+}
+
+static void arm_hs_timer(uint32_t ms) {
+    if (g_agent.hs_timer) htimer_del(g_agent.hs_timer);
+    g_agent.hs_timer = htimer_add(g_agent.loop, on_hs_timeout, ms, 1);
 }
 
 static void on_connect(hio_t* io) {
@@ -380,15 +431,23 @@ static void on_connect(hio_t* io) {
     rtnp_wr_u32(&w, 0);
     rtnp_send(io, RTNP_HELLO, 0, w.data, (uint16_t)w.len);
     rtnp_wr_free(&w);
+    arm_hs_timer(5000);   // 握手超时
 }
 
 static void on_ping(htimer_t* timer) {
     (void)timer;
     if (g_agent.state == 2 && g_agent.io) {
+        if (g_agent.ping_unacked >= 3) {
+            // 连续 3 个 PING 无 PONG：连接半开，断开走重连（设计 §5.3）
+            logf_("[agent] heartbeat lost, reconnecting");
+            hio_close(g_agent.io);
+            return;
+        }
         rtnp_wr_t w; rtnp_wr_init(&w);
         rtnp_wr_u64(&w, hloop_now_ms(g_agent.loop));
         rtnp_send(g_agent.io, RTNP_PING, 0, w.data, (uint16_t)w.len);
         rtnp_wr_free(&w);
+        g_agent.ping_unacked++;
     }
 }
 

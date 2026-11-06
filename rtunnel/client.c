@@ -35,6 +35,7 @@ typedef struct cstream_s {
     rtnp_buf_t        hs;        // SOCKS5 握手缓冲 / 未发送数据
     rtnp_buf_t        pending;   // 受 credit 限制的待发数据
     htimer_t*         open_timer;
+    htimer_t*         close_timer;  // 半关闭 60s 超时
     struct cstream_s* next;
 } cstream_t;
 
@@ -66,6 +67,8 @@ typedef struct {
     cstream_t*  streams;
     uint32_t    next_sid;
     int         backoff_ms;
+    htimer_t*   hs_timer;       // 握手/认证阶段超时
+    int         ping_unacked;   // 连续未获 PONG 的 PING 数
 } client_t;
 
 static client_t g_cli;
@@ -79,6 +82,7 @@ static void logf_(const char* fmt, ...) {
 }
 
 static void schedule_reconnect(void);
+static void arm_hs_timer(uint32_t ms);
 
 static cstream_t* stream_find(uint32_t sid) {
     for (cstream_t* s = g_cli.streams; s; s = s->next) {
@@ -93,6 +97,7 @@ static void stream_free(cstream_t* s) {
         if (*pp == s) { *pp = s->next; break; }
         pp = &(*pp)->next;
     }
+    if (s->close_timer) { htimer_del(s->close_timer); s->close_timer = NULL; }
     if (s->open_timer) { htimer_del(s->open_timer); s->open_timer = NULL; }
     if (s->local && !hio_is_closed(s->local)) {
         // 先摘掉 context，避免 close_cb 再次回到已释放的 stream
@@ -102,6 +107,26 @@ static void stream_free(cstream_t* s) {
     rtnp_buf_free(&s->hs);
     rtnp_buf_free(&s->pending);
     free(s);
+}
+
+// 半关闭 60s 未收到对端 CLOSE：RESET(CLOSE_TIMEOUT) 并回收（设计 §7.5）
+static void on_close_timeout(htimer_t* timer) {
+    cstream_t* s = (cstream_t*)hevent_userdata(timer);
+    if (s == NULL) return;
+    s->close_timer = NULL;
+    if (g_cli.io && g_cli.state == 2 && !hio_is_closed(g_cli.io)) {
+        rtnp_wr_t w; rtnp_wr_init(&w);
+        rtnp_wr_u16(&w, RTNP_CLOSE_TIMEOUT);
+        rtnp_send(g_cli.io, RTNP_RESET, s->sid, w.data, (uint16_t)w.len);
+        rtnp_wr_free(&w);
+    }
+    stream_free(s);
+}
+
+static void arm_close_timer(cstream_t* s) {
+    if (s->close_timer) return;
+    s->close_timer = htimer_add(g_cli.loop, on_close_timeout, 60000, 1);
+    hevent_set_userdata(s->close_timer, s);
 }
 
 static void buf_consume(rtnp_buf_t* b, size_t n) {
@@ -147,11 +172,19 @@ static void flush_pending(cstream_t* s) {
 
 static void on_open_timeout(htimer_t* timer) {
     cstream_t* s = (cstream_t*)hevent_userdata(timer);
-    if (s && s->state == CS_OPENING) {
-        rtnp_send(g_cli.io, RTNP_RESET, s->sid, NULL, 0);
-        if (s->local && !s->is_forward) socks_reply(s->local, 0x04);
-    }
     if (s) s->open_timer = NULL;
+    if (s == NULL || s->state != CS_OPENING) return;
+    // OPEN 15s 未决：RESET 通知 B/C 取消，释放本地，避免映射悬挂
+    if (g_cli.state == 2 && g_cli.io && !hio_is_closed(g_cli.io)) {
+        rtnp_send(g_cli.io, RTNP_RESET, s->sid, NULL, 0);
+    }
+    if (s->local && !s->is_forward) socks_reply(s->local, 0x04);
+    if (s->local) {
+        s->state = CS_CLOSED;   // 让 on_local_close 走 stream_free 分支
+        hio_close(s->local);
+    } else {
+        stream_free(s);
+    }
 }
 
 // ---------------------------------------------------------------- SOCKS5 握手
@@ -272,12 +305,20 @@ static void on_local_close(hio_t* io) {
     cstream_t* s = (cstream_t*)hio_context(io);
     if (s == NULL) return;
     s->local = NULL;
-    if (s->state == CS_OPEN && !s->local_eof && g_cli.state == 2 && g_cli.io) {
-        s->local_eof = 1;
-        rtnp_send(g_cli.io, RTNP_CLOSE, s->sid, NULL, 0);
+    if (s->open_timer) { htimer_del(s->open_timer); s->open_timer = NULL; }
+    if (g_cli.state == 2 && g_cli.io && !hio_is_closed(g_cli.io)) {
+        if (s->state == CS_OPENING) {
+            // OPEN 未决时本地断开：通知 B 取消（CANCELLED），避免 relay 侧映射悬挂
+            rtnp_send(g_cli.io, RTNP_RESET, s->sid, NULL, 0);
+        } else if (s->state == CS_OPEN && !s->local_eof) {
+            s->local_eof = 1;
+            rtnp_send(g_cli.io, RTNP_CLOSE, s->sid, NULL, 0);
+        }
     }
     if (s->state != CS_OPEN || s->remote_closed) {
         stream_free(s);
+    } else {
+        arm_close_timer(s);
     }
 }
 
@@ -342,11 +383,14 @@ static void handle_frame(rtnp_frame_t* f) {
         rtnp_send(g_cli.io, RTNP_AUTH, 0, w.data, (uint16_t)w.len);
         rtnp_wr_free(&w);
         g_cli.state = 1;
+        arm_hs_timer(10000);   // 认证超时
         return;
     }
     case RTNP_AUTH_OK:
         g_cli.state = 2;
         g_cli.backoff_ms = 1000;
+        g_cli.ping_unacked = 0;
+        if (g_cli.hs_timer) { htimer_del(g_cli.hs_timer); g_cli.hs_timer = NULL; }
         logf_("[client] authenticated as %s", g_cli.user);
         return;
     case RTNP_AUTH_FAIL:
@@ -356,6 +400,9 @@ static void handle_frame(rtnp_frame_t* f) {
         return;
     case RTNP_PING:
         rtnp_send(g_cli.io, RTNP_PONG, 0, f->payload, f->len);
+        return;
+    case RTNP_PONG:
+        g_cli.ping_unacked = 0;
         return;
     default:
         break;
@@ -387,6 +434,7 @@ static void handle_frame(rtnp_frame_t* f) {
         else if (code == RTNP_TARGET_REFUSED) rep = 0x05;
         else if (code == RTNP_ACL_DENIED || code == RTNP_TARGET_NOT_ALLOWED) rep = 0x02;
         if (!s->is_forward) socks_reply(s->local, rep);
+        s->state = CS_CLOSED;   // relay 侧已删映射，防止 on_local_close 再发 RESET
         hio_close(s->local);
         return;
     }
@@ -412,11 +460,13 @@ static void handle_frame(rtnp_frame_t* f) {
         if (s->local == NULL) { stream_free(s); return; }
         if (hio_write_is_complete(s->local)) {
             shutdown(hio_fd(s->local), SHUT_WR);
+            s->want_shutdown = 0;
         } else {
             s->want_shutdown = 1;
             hio_setcb_write(s->local, (hwrite_cb)on_local_write);
         }
         if (s->local_eof) stream_free(s);
+        else arm_close_timer(s);
         return;
     case RTNP_RESET:
         stream_free(s);
@@ -449,16 +499,32 @@ static void on_tunnel_close(hio_t* io) {
     while (g_cli.streams) {
         cstream_t* s = g_cli.streams;
         g_cli.streams = s->next;
+        if (s->close_timer) htimer_del(s->close_timer);
         if (s->local && !hio_is_closed(s->local)) hio_close(s->local);
         if (s->open_timer) htimer_del(s->open_timer);
         rtnp_buf_free(&s->hs);
         rtnp_buf_free(&s->pending);
         free(s);
     }
+    if (g_cli.hs_timer) { htimer_del(g_cli.hs_timer); g_cli.hs_timer = NULL; }
     g_cli.io = NULL;
     g_cli.state = 0;
     g_cli.in.len = 0;
     schedule_reconnect();
+}
+
+// 握手/认证阶段超时：HELLO_ACK 5s、AUTH_OK 10s（设计 §8.8）
+static void on_hs_timeout(htimer_t* timer) {
+    (void)timer;
+    g_cli.hs_timer = NULL;
+    if (g_cli.state == 2) return;
+    logf_("[client] handshake/auth timeout");
+    if (g_cli.io) hio_close(g_cli.io);
+}
+
+static void arm_hs_timer(uint32_t ms) {
+    if (g_cli.hs_timer) htimer_del(g_cli.hs_timer);
+    g_cli.hs_timer = htimer_add(g_cli.loop, on_hs_timeout, ms, 1);
 }
 
 static void on_connect(hio_t* io) {
@@ -478,15 +544,23 @@ static void on_connect(hio_t* io) {
     rtnp_wr_u32(&w, 0);
     rtnp_send(io, RTNP_HELLO, 0, w.data, (uint16_t)w.len);
     rtnp_wr_free(&w);
+    arm_hs_timer(5000);   // 握手超时
 }
 
 static void on_ping(htimer_t* timer) {
     (void)timer;
     if (g_cli.state == 2 && g_cli.io) {
+        if (g_cli.ping_unacked >= 3) {
+            // 连续 3 个 PING 无 PONG：连接半开，断开走重连（设计 §5.3）
+            logf_("[client] heartbeat lost, reconnecting");
+            hio_close(g_cli.io);
+            return;
+        }
         rtnp_wr_t w; rtnp_wr_init(&w);
         rtnp_wr_u64(&w, hloop_now_ms(g_cli.loop));
         rtnp_send(g_cli.io, RTNP_PING, 0, w.data, (uint16_t)w.len);
         rtnp_wr_free(&w);
+        g_cli.ping_unacked++;
     }
 }
 

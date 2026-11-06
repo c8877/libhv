@@ -2,6 +2,7 @@
 """rtunnel 端到端验收：echo 服务 + B/C/A 三进程 + SOCKS5 客户端。"""
 
 import os
+import signal
 import socket
 import struct
 import shutil
@@ -114,6 +115,25 @@ def socks5_open(ep, devid, dport, timeout=8):
     return s, 0
 
 
+def rtnp_hdr(ftype, sid, payload=b""):
+    return (b"RTNP" + bytes([1, ftype]) + b"\x00\x00" +
+            struct.pack("!I", sid) + struct.pack("!HH", len(payload), 0) + payload)
+
+
+def rtnp_str(s):
+    b = s.encode()
+    return struct.pack("!H", len(b)) + b
+
+
+def rtnp_recv(s):
+    h = recv_exact(s, 16)
+    if h[:4] != b"RTNP":
+        raise RuntimeError("bad magic")
+    ftype = h[5]
+    ln = struct.unpack("!H", h[12:14])[0]
+    return ftype, (recv_exact(s, ln) if ln else b"")
+
+
 class CloserServer(threading.Thread):
     """接受连接后发一句 bye 再关（验证 C→A 方向的 CLOSE 传播）。"""
 
@@ -219,7 +239,7 @@ def main():
 
     tls = os.environ.get("RTUNNEL_TLS") == "1"
     mtls = os.environ.get("RTUNNEL_MTLS") == "1"
-    tls_relay, tls_agent, tls_client = [], [], []
+    tls_relay, tls_agent, tls_tester, tls_bob = [], [], [], []
     if tls or mtls:
         certdir = os.path.join(logdir, "cert")
         shutil.rmtree(certdir, ignore_errors=True)
@@ -239,12 +259,18 @@ def main():
             tls_agent = ["--tls-ca", ca_crt, "--tls-sni", "localhost",
                          "--tls-cert", os.path.join(certdir, "agent.crt"),
                          "--tls-key", os.path.join(certdir, "agent.key")]
-            tls_client = ["--tls-ca", ca_crt, "--tls-sni", "localhost",
-                          "--tls-cert", os.path.join(certdir, "alice.crt"),
-                          "--tls-key", os.path.join(certdir, "alice.key")]
+
+            def user_cert(name):
+                return ["--tls-ca", ca_crt, "--tls-sni", "localhost",
+                        "--tls-cert", os.path.join(certdir, name + ".crt"),
+                        "--tls-key", os.path.join(certdir, name + ".key")]
+
+            tls_tester = user_cert("tester")
+            tls_bob = user_cert("bob")
             if not os.path.exists(os.path.join(certdir, "agent.crt")):
                 make_client_cert(certdir, "agent", "dev1")
-                make_client_cert(certdir, "alice", "alice")
+                make_client_cert(certdir, "tester", "tester")
+                make_client_cert(certdir, "bob", "bob")
         else:
             if not os.path.exists(server_crt):
                 _openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
@@ -252,13 +278,16 @@ def main():
                 subprocess.check_call(["cp", server_crt, ca_crt])
             tls_relay = ["--tls-cert", server_crt, "--tls-key", server_key]
             tls_agent = ["--tls-ca", ca_crt, "--tls-sni", "localhost"]
-            tls_client = ["--tls-ca", ca_crt, "--tls-sni", "localhost"]
+            tls_tester = tls_bob = ["--tls-ca", ca_crt, "--tls-sni", "localhost"]
 
     procs = []
+    aclfile = os.path.join(logdir, "acl.txt")
+    with open(aclfile, "w") as f:
+        f.write("# initial: no file-based acl\n")
     try:
         relay = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-relay"), "--host", "127.0.0.1", "--port", str(relay_port),
-             "--acl", "tester=*"] + tls_relay + ["--verbose"],
+             "--acl", "tester=*", "--acl-file", aclfile, "--drain-timeout", "500"] + tls_relay + ["--verbose"],
             stdout=logs["relay"], stderr=subprocess.STDOUT, env=env)
         procs.append(relay)
         time.sleep(0.3)
@@ -271,13 +300,13 @@ def main():
 
         client = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-client"), "--server", "127.0.0.1", "--port", str(relay_port),
-             "--user", "tester", "--socks5", socks1_arg] + tls_client + ["--verbose"],
+             "--user", "tester", "--socks5", socks1_arg] + tls_tester + ["--verbose"],
             stdout=logs["client"], stderr=subprocess.STDOUT, env=env)
         procs.append(client)
 
         client2 = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-client"), "--server", "127.0.0.1", "--port", str(relay_port),
-             "--user", "bob", "--socks5", socks2_arg] + tls_client + ["--verbose"],
+             "--user", "bob", "--socks5", socks2_arg] + tls_bob + ["--verbose"],
             stdout=logs["client2"], stderr=subprocess.STDOUT, env=env)
         procs.append(client2)
 
@@ -395,8 +424,74 @@ def main():
                 check("大流量 256KiB 回环完整", True)
             s.close()
 
+        # 8. OPEN 未决时断开：CANCELLED 清理（relay 映射不悬挂）
+        def open_then_abort(n):
+            for _ in range(n):
+                try:
+                    s = socks_connect(socks1, 5)
+                    s.settimeout(5)
+                    s.sendall(b"\x05\x01\x00")
+                    recv_exact(s, 2)
+                    d = b"dev1"
+                    s.sendall(b"\x05\x01\x00\x03" + bytes([len(d)]) + d + struct.pack("!H", echo_port))
+                    s.close()   # 不等 REP：部分会话落在 OPENING 窗口
+                except OSError:
+                    pass
+                time.sleep(0.01)
+        open_then_abort(30)
+        time.sleep(0.5)
 
-        # 8. mTLS 负向：证书 SAN 与 devid 不符必须被拒
+        # 原始 RTNP 连接查 DEVICE_QUERY：active_streams 必须归零
+        q = socket.create_connection(("127.0.0.1", relay_port), 5)
+        q.settimeout(5)
+        if tls or mtls:
+            import ssl as ssl_mod
+            ctx = ssl_mod.create_default_context(cafile=ca_crt)
+            if mtls:
+                ctx.load_cert_chain(os.path.join(certdir, "tester.crt"),
+                                    os.path.join(certdir, "tester.key"))
+            q = ctx.wrap_socket(q, server_hostname="localhost")
+        try:
+            q.sendall(rtnp_hdr(0x01, 0, bytes([2, 1]) + rtnp_str("e2e-query") + struct.pack("!I", 0)))
+            t, _ = rtnp_recv(q)          # HELLO_ACK
+            if t != 0x02:
+                raise RuntimeError("no HELLO_ACK: 0x%02x" % t)
+            q.sendall(rtnp_hdr(0x03, 0, rtnp_str("tester")))
+            t, _ = rtnp_recv(q)          # AUTH_OK
+            if t != 0x04:
+                raise RuntimeError("no AUTH_OK: 0x%02x" % t)
+            q.sendall(rtnp_hdr(0x08, 0, rtnp_str("dev1")))
+            t, p = rtnp_recv(q)          # DEVICE_STATUS
+            if t != 0x09:
+                raise RuntimeError("no DEVICE_STATUS: 0x%02x" % t)
+            dlen = struct.unpack("!H", p[:2])[0]
+            online = p[2 + dlen]
+            active = struct.unpack("!I", p[2 + dlen + 1:2 + dlen + 5])[0]
+            check("OPEN 未决断开 CANCELLED 不悬挂（active_streams=0）",
+                  online == 1 and active == 0,
+                  "online=%d active=%d" % (online, active))
+        except Exception as e:
+            check("OPEN 未决断开 CANCELLED 不悬挂（active_streams=0）", False, str(e))
+        finally:
+            q.close()
+
+        # 9. SIGHUP 热加载 ACL：bob 从拒绝→放行→再拒绝
+        with open(aclfile, "w") as f:
+            f.write("bob=dev1\n")
+        os.kill(relay.pid, signal.SIGHUP)
+        time.sleep(0.2)
+        s, rep = socks5_open(socks2, "dev1", echo_port)
+        check("SIGHUP 热加载后 bob 放行", rep == 0x00, "rep=0x%02x" % rep)
+        if s:
+            s.close()
+        with open(aclfile, "w") as f:
+            f.write("# revoked\n")
+        os.kill(relay.pid, signal.SIGHUP)
+        time.sleep(0.2)
+        _, rep = socks5_open(socks2, "dev1", echo_port)
+        check("SIGHUP 撤销后 bob 再拒", rep == 0x02, "rep=0x%02x" % rep)
+
+        # 10. mTLS 负向：证书 SAN 与 devid 不符必须被拒
         if mtls:
             rogue_crt, rogue_key = make_client_cert(certdir, "rogue", "dev2")
             rogue_log = open(os.path.join(logdir, "rogue.log"), "w")
@@ -411,6 +506,27 @@ def main():
             check("mTLS: 证书 SAN 与 devid 不符被拒", ok)
             rogue.terminate()
             rogue_log.close()
+
+            # 9. mTLS 负向：客户端证书 SAN 与 user 不符必须被拒（bob 的证书声称 tester）
+            rogue_c_log = open(os.path.join(logdir, "rogue_client.log"), "w")
+            rogue_c = subprocess.Popen(
+                [os.path.join(BIN, "rtunnel-client"), "--server", "127.0.0.1", "--port", str(relay_port),
+                 "--user", "tester", "--socks5", "127.0.0.1:%d" % free_port()] + tls_bob + ["--verbose"],
+                stdout=rogue_c_log, stderr=subprocess.STDOUT, env=env)
+            procs.append(rogue_c)
+            ok = wait_log(os.path.join(logdir, "relay.log"), "client cert SAN mismatch", 8)
+            check("mTLS: 客户端证书 SAN 与 user 不符被拒", ok)
+            rogue_c.terminate()
+            rogue_c_log.close()
+
+        # 11. SIGTERM 优雅退出（drain 500ms 后强制退出，进程 rc=0）
+        relay.send_signal(signal.SIGTERM)
+        ok = wait_log(os.path.join(logdir, "relay.log"), "draining", 5)
+        try:
+            rc = relay.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            rc = None
+        check("SIGTERM 优雅退出", ok and rc == 0, "draining=%s rc=%s" % (ok, rc))
 
     finally:
         for p in procs:

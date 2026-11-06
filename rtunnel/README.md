@@ -77,14 +77,23 @@ RTUNNEL_UDS=1 make rtunnel_test    # 本地入口走 UDS（需要 -DENABLE_UDS=O
 ```
 
 覆盖：CONNECT 建链、数据回环、离线设备、端口白名单、ACL、并发（两个 A 客户端同 sid 不串流）、
-设备端关闭传播、256 KiB 大流量；另有 `build/bin/rtnp-codec-test` 校验帧编解码。
+设备端关闭传播、OPEN 未决断开（CANCELLED）映射清理、256 KiB 大流量；另有 `build/bin/rtnp-codec-test` 校验帧编解码。
 
 ## mTLS 与 UDS
 
-- mTLS：`--tls-ca` 让 B 要求客户端证书，并校验证书 SAN 与 AUTH.devid 一致；
+- mTLS：`--tls-ca` 让 B 要求客户端证书：C 侧校验证书 SAN 与 AUTH.devid 一致，
+  A 侧校验证书 SAN 与 AUTH.user 一致（身份以证书为准，不接受自报）；
   C 侧用 `--tls-cert/--tls-key` 提供设备证书，`--tls-sni` 填 B 证书的主机名。
 - UDS：`--socks5 unix:/path/to/socks.sock`，仅在使用 `-DENABLE_UDS=ON` 构建时可用
   （libhv 的 UDS 支持是编译期开关），默认仍是 `127.0.0.1:PORT`。
+
+## 运维
+
+- **ACL 热加载**：`--acl-file acl.txt`（每行 `user=devid[,devid|*]`，`#` 注释），改完
+  `kill -HUP <pid>` 生效；只影响新 OPEN，不动已建立会话。整文件解析失败保留旧表。
+- **优雅退出**：`SIGTERM`/`SIGINT` 停止 accept，等现有连接收尾（`--drain-timeout`，默认 10s）
+  后退出；第二次信号立即强退。A/C 断线后按既有退避重连。
+- **统计**：每 60s 一条 `[relay] stats:` 日志（agents/clients/streams/bytes_in/bytes_out）。
 
 ## 实现说明
 
@@ -92,6 +101,8 @@ RTUNNEL_UDS=1 make rtunnel_test    # 本地入口走 UDS（需要 -DENABLE_UDS=O
 - mTLS 的 SAN 提取在 `relay.c` 内直接用 OpenSSL 完成（`hio_get_ssl()` 是公开 API），
   仅 `WITH_OPENSSL` 构建时编译。
 - 流控按设计文档：发送方受 credit 限制；接收方在本地写队列降到 `RTNP_LOW_WATER` 后才回 `WINDOW`。
+- 超时体系：HELLO 5s / AUTH 10s / 未认证连接 10s；OPEN 15s；半关闭 60s 未对关发
+  `RESET(CLOSE_TIMEOUT)`；心跳 15s、连续 3 个 PING 无 PONG 判死重连。
 - **限制**：libhv 在本地 socket 读到 EOF 时会关闭 io，因此「SOCKS 客户端先 FIN、
   再由 A 回写剩余数据」不支持；SSH 正常关闭（设备端先关）不受影响。
 

@@ -143,6 +143,8 @@ sequenceDiagram
     Note over A,B: 之后可发 OPEN / DEVICE_QUERY
 ```
 
+mTLS 模式下 user 以客户端证书 SAN 为准：AUTH.user 与 SAN 不符即拒绝（同 §5.1 设备侧）。
+
 ### 5.3 心跳与重连
 
 - 空闲 15s 发 `PING`；连续 3 次无 `PONG` 判死。
@@ -482,7 +484,8 @@ StreamMeta { a_conn_id, a_sid, c_conn_id, c_sid, state, opened_at }
 
 - **信任模型**：B 是可信中继，TLS 在 B 终结；SSH 仍是 A↔C 端到端加密，B 只见密文与元数据。
 - **设备身份**：mTLS，devid 取自证书 SAN；`AUTH.devid` 只是断言，与 SAN 不符即 `AUTH_FAIL`。
-- **开发者身份**：mTLS 或 SSO token；B 侧 ACL 决定可访问的 devid，默认拒绝。
+- **开发者身份**：mTLS 或 SSO token（v1 落地 mTLS：user 取自客户端证书 SAN，
+  AUTH.user 仅为断言，与 SAN 不符即 `AUTH_FAIL`，同 §5.1 设备侧）；B 侧 ACL 决定可访问的 devid，默认拒绝。
 - **目标限制**：C 只连 `127.0.0.1`，端口白名单默认仅 22。
 - **入口暴露**：A 的 SOCKS5 默认走 UDS（0600）；用 TCP 时仅绑回环。
 
