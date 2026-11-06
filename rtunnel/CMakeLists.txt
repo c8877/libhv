@@ -1,18 +1,39 @@
-# rtunnel：A/B/C 三件套（协议见 docs/design/remote-ssh-tunnel.md）
-include_directories(${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/base ${PROJECT_SOURCE_DIR}/event ${PROJECT_SOURCE_DIR}/ssl)
+# rtunnel：A/B/C 三件套（协议见 docs/design/rtunnel.md）
+# C++ 对象化结构：rtnp/ 协议库 + common/ 共享组件 + client|agent|relay 各自目录
+include_directories(${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/base ${PROJECT_SOURCE_DIR}/event ${PROJECT_SOURCE_DIR}/ssl
+                    ${PROJECT_SOURCE_DIR}/http ${PROJECT_SOURCE_DIR}/http/server ${PROJECT_SOURCE_DIR}/evpp ${PROJECT_SOURCE_DIR}/cpputil
+                    ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_library(rtnp STATIC rtnp.c)
+add_library(rtnp STATIC rtnp/codec.cpp)
 target_include_directories(rtnp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(rtnp PUBLIC ${HV_LIBRARIES})
 
-add_executable(rtunnel-relay  relay.c)
-add_executable(rtunnel-agent  agent.c)
-add_executable(rtunnel-client client.c)
-add_executable(rtnp-codec-test tests/codec_test.c)
+add_library(rtunnel_common STATIC common/tunnel_link.cpp)
+target_link_libraries(rtunnel_common PUBLIC rtnp)
+
+# relay 管理台前端：编译期内嵌 admin.html/admin.js/admin.css
+find_package(Python3 COMPONENTS Interpreter)
+set(ADMIN_FRONTEND ${CMAKE_CURRENT_SOURCE_DIR}/relay/admin/frontend)
+set(EMBEDDED_CPP ${CMAKE_CURRENT_BINARY_DIR}/embedded_frontend.cpp)
+add_custom_command(OUTPUT ${EMBEDDED_CPP}
+    COMMAND ${Python3_EXECUTABLE} ${ADMIN_FRONTEND}/embed.py ${ADMIN_FRONTEND} ${EMBEDDED_CPP}
+    DEPENDS ${ADMIN_FRONTEND}/admin.html ${ADMIN_FRONTEND}/admin.js ${ADMIN_FRONTEND}/admin.css ${ADMIN_FRONTEND}/embed.py
+    COMMENT "embed rtunnel admin frontend")
+
+add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_log.cpp
+               relay/admin/backend/admin_server.cpp
+               relay/admin/backend/api_agents.cpp
+               relay/admin/backend/api_streams.cpp
+               relay/admin/backend/api_ops.cpp
+               relay/admin/backend/api_certs.cpp
+               ${EMBEDDED_CPP})
+add_executable(rtunnel-agent  agent/main.cpp agent/agent_app.cpp)
+add_executable(rtunnel-client client/main.cpp client/client_app.cpp)
+add_executable(rtnp-codec-test tests/codec_test.cpp)
 
 target_link_libraries(rtunnel-relay  rtnp)
-target_link_libraries(rtunnel-agent  rtnp)
-target_link_libraries(rtunnel-client rtnp)
+target_link_libraries(rtunnel-agent  rtunnel_common)
+target_link_libraries(rtunnel-client rtunnel_common)
 target_link_libraries(rtnp-codec-test rtnp)
 
 install(TARGETS rtunnel-relay rtunnel-agent rtunnel-client

@@ -239,6 +239,18 @@ def main():
 
     tls = os.environ.get("RTUNNEL_TLS") == "1"
     mtls = os.environ.get("RTUNNEL_MTLS") == "1"
+
+    # admin 签发用 CA（mTLS 模式下与设备认证 CA 同源）
+    adminca = os.path.join(logdir, "adminca")
+    os.makedirs(adminca, exist_ok=True)
+    admin_ca_crt = os.path.join(adminca, "ca.crt")
+    admin_ca_key = os.path.join(adminca, "ca.key")
+    if not os.path.exists(admin_ca_crt):
+        _openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+                 "-subj", "/CN=rtunnel-admin-ca", "-keyout", admin_ca_key, "-out", admin_ca_crt)
+    certout = os.path.join(logdir, "certs")
+    shutil.rmtree(certout, ignore_errors=True)   # 台账/revoked 每次重跑清空
+    os.makedirs(certout, exist_ok=True)
     tls_relay, tls_agent, tls_tester, tls_bob = [], [], [], []
     if tls or mtls:
         certdir = os.path.join(logdir, "cert")
@@ -250,8 +262,8 @@ def main():
         server_key = os.path.join(certdir, "server.key")
         if mtls:
             if not os.path.exists(ca_crt):
-                _openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
-                         "-subj", "/CN=rtunnel-ca", "-keyout", ca_key, "-out", ca_crt)
+                shutil.copy(admin_ca_crt, ca_crt)
+                shutil.copy(admin_ca_key, ca_key)
                 make_client_cert(certdir, "server", "localhost")
                 os.replace(os.path.join(certdir, "server.crt"), server_crt)
                 os.replace(os.path.join(certdir, "server.key"), server_key)
@@ -281,13 +293,17 @@ def main():
             tls_tester = tls_bob = ["--tls-ca", ca_crt, "--tls-sni", "localhost"]
 
     procs = []
+    admin_port = free_port()
     aclfile = os.path.join(logdir, "acl.txt")
     with open(aclfile, "w") as f:
         f.write("# initial: no file-based acl\n")
     try:
         relay = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-relay"), "--host", "127.0.0.1", "--port", str(relay_port),
-             "--acl", "tester=*", "--acl-file", aclfile, "--drain-timeout", "500"] + tls_relay + ["--verbose"],
+             "--acl", "tester=*", "--acl-file", aclfile, "--drain-timeout", "500",
+             "--admin", "127.0.0.1:%d" % admin_port,
+             "--admin-ca-cert", admin_ca_crt, "--admin-ca-key", admin_ca_key,
+             "--admin-cert-dir", certout] + tls_relay + ["--verbose"],
             stdout=logs["relay"], stderr=subprocess.STDOUT, env=env)
         procs.append(relay)
         time.sleep(0.3)
@@ -491,7 +507,143 @@ def main():
         _, rep = socks5_open(socks2, "dev1", echo_port)
         check("SIGHUP 撤销后 bob 再拒", rep == 0x02, "rep=0x%02x" % rep)
 
-        # 10. mTLS 负向：证书 SAN 与 devid 不符必须被拒
+        # 10. admin 管理台只读 API 与前端
+        import json as json_mod
+        import urllib.request
+        admin_base = "http://127.0.0.1:%d" % admin_port
+
+        def admin_get(path):
+            with urllib.request.urlopen(admin_base + path, timeout=5) as r:
+                return json_mod.loads(r.read().decode())
+
+        try:
+            ov = admin_get("/api/v1/overview")
+            check("admin overview", ov.get("agents") == 1 and ov.get("clients") == 2, str(ov))
+            ag = admin_get("/api/v1/agents")
+            check("admin agents 列表", any(a["devid"] == "dev1" for a in ag), str(ag))
+            cl = admin_get("/api/v1/clients")
+            check("admin clients 列表", {c["user"] for c in cl} == {"tester", "bob"}, str(cl))
+            d = admin_get("/api/v1/agents/dev1")
+            check("admin 设备详情", d.get("devid") == "dev1" and "streams" in d, str(d)[:120])
+            s, rep = socks5_open(socks1, "dev1", echo_port)
+            st = admin_get("/api/v1/streams")
+            check("admin streams 列表",
+                  any(x["c_devid"] == "dev1" and x["state"] == "OPEN" for x in st), str(st))
+            if s:
+                s.close()
+            with urllib.request.urlopen(admin_base + "/", timeout=5) as r:
+                html = r.read().decode()
+            check("admin 前端页面", "RTUNNEL" in html and "/admin.js" in html)
+            with urllib.request.urlopen(admin_base + "/admin.js", timeout=5) as r:
+                js = r.read().decode()
+            check("admin.js 可访问", "Router" in js)
+            with urllib.request.urlopen(admin_base + "/admin.css", timeout=5) as r:
+                css = r.read().decode()
+            check("admin.css 可访问", "sidebar" in css)
+        except Exception as e:
+            check("admin 管理台", False, str(e))
+
+        # 11. admin 操作面：踢会话 / 设备下线重连 / ACL 读写
+        def admin_req(method, path, body=None):
+            data = json_mod.dumps(body).encode() if body is not None else None
+            req = urllib.request.Request(admin_base + path, data=data, method=method)
+            if data:
+                req.add_header("Content-Type", "application/json")
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return json_mod.loads(r.read().decode())
+
+        s, rep = socks5_open(socks1, "dev1", echo_port)
+        st = admin_get("/api/v1/streams")
+        kicked = False
+        if st:
+            a_sid = st[0]["a_sid"]
+            r = admin_req("DELETE", "/api/v1/streams/%d" % a_sid)
+            try:
+                eof = (s.recv(4096) == b"")
+            except OSError:
+                eof = True
+            kicked = bool(r.get("kicked")) and eof
+        check("admin 踢会话（双侧 RESET）", kicked)
+        if s:
+            s.close()
+        time.sleep(0.2)
+        st = admin_get("/api/v1/streams")
+        check("踢后 streams 为空", len(st) == 0, str(st))
+
+        admin_req("PUT", "/api/v1/acl/file", {"content": "bob=dev1\n"})
+        _, rep = socks5_open(socks2, "dev1", echo_port)
+        check("ACL PUT 后 bob 放行", rep == 0x00, "rep=0x%02x" % rep)
+        admin_req("PUT", "/api/v1/acl/file", {"content": "# empty\n"})
+        _, rep = socks5_open(socks2, "dev1", echo_port)
+        check("ACL PUT 撤销后 bob 再拒", rep == 0x02, "rep=0x%02x" % rep)
+
+        admin_req("POST", "/api/v1/agents/dev1/kick")
+        time.sleep(2.0)   # agent 退避 1s 后重连
+        s, rep = socks5_open(socks1, "dev1", echo_port)
+        check("agent 被踢后自动重连", rep == 0x00, "rep=0x%02x" % rep)
+        if s:
+            s.close()
+
+        # 12. admin 证书面：签发 / 吊销 / 审计
+        r = admin_req("POST", "/api/v1/certs/issue", {"san": "PILE-900001", "role": "device", "days": 90})
+        check("签发证书", r.get("san") == "PILE-900001" and "cert" in r and "key" in r)
+        newcrt = os.path.join(certout, "PILE-900001.crt")
+        newkey = os.path.join(certout, "PILE-900001.key")
+        check("证书文件落盘", os.path.exists(newcrt) and os.path.exists(newkey))
+        cl = admin_get("/api/v1/certs")
+        check("证书台账", any(c["san"] == "PILE-900001" and c["status"] == "valid" for c in cl), str(cl))
+
+        if mtls:
+            # 新证书可注册上线（与 relay 的认证 CA 同源）
+            new_log = open(os.path.join(logdir, "agent900001.log"), "w")
+            new_agent = subprocess.Popen(
+                [os.path.join(BIN, "rtunnel-agent"), "--server", "127.0.0.1", "--port", str(relay_port),
+                 "--devid", "PILE-900001", "--allow", str(echo_port),
+                 "--tls-ca", os.path.join(certdir, "ca.crt"), "--tls-sni", "localhost",
+                 "--tls-cert", newcrt, "--tls-key", newkey, "--verbose"],
+                stdout=new_log, stderr=subprocess.STDOUT, env=env)
+            procs.append(new_agent)
+            ok = wait_log(os.path.join(logdir, "agent900001.log"), "authenticated as PILE-900001", 8)
+            check("签发证书可注册上线", ok)
+
+        admin_req("POST", "/api/v1/certs/revoke", {"san": "PILE-900001"})
+        cl = admin_get("/api/v1/certs")
+        check("吊销状态", any(c["san"] == "PILE-900001" and c["status"] == "revoked" for c in cl), str(cl))
+        if mtls:
+            ok = wait_log(os.path.join(logdir, "relay.log"), "identity revoked", 8)
+            check("吊销后 AUTH 被拒", ok)
+
+        # CSR 上传签名（私钥不出设备；无 SAN 的 CSR 走 CN 回退）
+        csr_key = os.path.join(certout, "PILE-900002.key")
+        csr_file = os.path.join(certout, "PILE-900002.csr")
+        _openssl("req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=PILE-900002",
+                 "-keyout", csr_key, "-out", csr_file)
+        with open(csr_file) as f:
+            csr_pem = f.read()
+        r = admin_req("POST", "/api/v1/certs/sign", {"csr": csr_pem, "days": 90})
+        check("CSR 签名", r.get("san") == "PILE-900002" and "cert" in r, str(r)[:100])
+        if mtls:
+            with open(os.path.join(certout, "PILE-900002.crt"), "w") as f:
+                f.write(r["cert"])
+            new_log2 = open(os.path.join(logdir, "agent900002.log"), "w")
+            new_agent2 = subprocess.Popen(
+                [os.path.join(BIN, "rtunnel-agent"), "--server", "127.0.0.1", "--port", str(relay_port),
+                 "--devid", "PILE-900002", "--allow", str(echo_port),
+                 "--tls-ca", os.path.join(certdir, "ca.crt"), "--tls-sni", "localhost",
+                 "--tls-cert", os.path.join(certout, "PILE-900002.crt"), "--tls-key", csr_key, "--verbose"],
+                stdout=new_log2, stderr=subprocess.STDOUT, env=env)
+            procs.append(new_agent2)
+            ok = wait_log(os.path.join(logdir, "agent900002.log"), "authenticated as PILE-900002", 8)
+            check("CSR 签出证书可注册上线", ok)
+
+        with urllib.request.urlopen(admin_base + "/metrics", timeout=5) as r:
+            metrics = r.read().decode()
+        check("/metrics", "rtunnel_agents" in metrics and "rtunnel_bytes_in_total" in metrics)
+
+        au = admin_get("/api/v1/audit")
+        check("审计日志", any("certs.issue" in x for x in au) and any("certs.revoke" in x for x in au), str(au)[:120])
+
+        # 13. mTLS 负向：证书 SAN 与 devid 不符必须被拒
         if mtls:
             rogue_crt, rogue_key = make_client_cert(certdir, "rogue", "dev2")
             rogue_log = open(os.path.join(logdir, "rogue.log"), "w")
@@ -518,6 +670,28 @@ def main():
             check("mTLS: 客户端证书 SAN 与 user 不符被拒", ok)
             rogue_c.terminate()
             rogue_c_log.close()
+
+        # admin /shutdown（独立 relay 实例，与 SIGTERM 路径分别覆盖）
+        r2_port = free_port()
+        a2_port = free_port()
+        r2log = open(os.path.join(logdir, "relay2.log"), "w")
+        relay2 = subprocess.Popen(
+            [os.path.join(BIN, "rtunnel-relay"), "--host", "127.0.0.1", "--port", str(r2_port),
+             "--acl", "tester=*", "--drain-timeout", "200",
+             "--admin", "127.0.0.1:%d" % a2_port],
+            stdout=r2log, stderr=subprocess.STDOUT, env=env)
+        procs.append(relay2)
+        time.sleep(0.5)
+        req = urllib.request.Request("http://127.0.0.1:%d/api/v1/shutdown" % a2_port, data=b"{}", method="POST")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            resp = json_mod.loads(r.read().decode())
+        try:
+            rc2 = relay2.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            rc2 = None
+        check("admin /shutdown 优雅退出", resp.get("draining") and rc2 == 0, "rc=%s" % rc2)
+        r2log.close()
 
         # 11. SIGTERM 优雅退出（drain 500ms 后强制退出，进程 rc=0）
         relay.send_signal(signal.SIGTERM)
