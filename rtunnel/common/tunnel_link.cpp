@@ -43,7 +43,7 @@ void TunnelLink::handleFrame(rtnp::Frame* f) {
     case rtnp::HELLO_ACK: {
         rtnp::Writer w;
         w.str(identity());
-        // AUTH 扩展：auth_type(0=none,1=token) + token；旧 relay 只读前面的 identity 也能兼容
+        // AUTH：identity + auth_type(0=none,1=token) + token
         bool has_token = auth_token[0] != '\0';
         w.u8(has_token ? 1 : 0);
         w.str(has_token ? auth_token : "");

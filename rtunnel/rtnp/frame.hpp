@@ -65,9 +65,6 @@ enum Role : uint8_t {
 constexpr uint8_t AUTH_MTLS  = 0x01;
 constexpr uint8_t AUTH_TOKEN = 0x02;
 
-// HELLO.capabilities 位：client 声明自己也实现 agent 能力（可接收 B 路由的 OPEN/OPEN_SHELL）
-constexpr uint32_t CAP_AGENT = 0x0001;
-
 struct Frame {
     uint8_t        type;
     uint16_t       flags;

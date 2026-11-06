@@ -15,7 +15,7 @@ const Api = {
       // 账号体系下不再弹 token；回到登录页
       this.token = '';
       localStorage.removeItem('rt_admin_token');
-      if (typeof Auth !== 'undefined' && Auth.me) location.reload();
+      if (Auth.me) location.reload();
       throw new Error('unauthorized');
     }
     if (!r.ok) {
@@ -114,7 +114,7 @@ const Router = {
   register(re, page, title) { this.routes.push({ re, page, title }); },
   go(h) { location.hash = h; },
   renderNav(activeHash) {
-    const role = (typeof Auth !== 'undefined' && Auth.me && Auth.me.role) || 'superadmin';
+    const role = (Auth.me && Auth.me.role) || 'user';
     const allow = role === 'user'
       ? ['#/overview', '#/agents', '#/streams']
       : role === 'admin'
@@ -743,7 +743,7 @@ async function boot() {
   try {
     const st = await (await fetch('/api/v1/setup/status', { cache: 'no-store' })).json();
     if (st.initialized === false) return authForm('setup');
-  } catch (e) { /* 旧版无此接口，继续 */ }
+  } catch (e) { return authForm('login'); }
   try {
     Auth.me = await Api.get('/api/v1/me');
   } catch (e) {

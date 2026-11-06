@@ -343,13 +343,6 @@ sequenceDiagram
 | `0x16` | `RESET` | 双向 | `u16 code`（立即中止并回收） |
 | `0x17` | `RESIZE` | A→C | `u16 cols + u16 rows`（shell 终端尺寸） |
 
-**HELLO.capabilities（v1）**
-
-| bit | 名称 | 状态 |
-|---|---|---|
-| `0x0001` | `CAP_AGENT` | **预留未使用**。曾计划让 A 在同一条 AB 连接上兼做 agent；因双角色会让身份/流表/生命周期耦合而放弃，A 侧 shell 改走 §12.1 的 `SPAWN_AGENT` + `a:<user>`。v1 双方都发 0，接收方忽略 |
-| 其余 | — | 未定义，必须发 0；接收方忽略非 0 位 |
-
 > v1 的 OPEN 没有 host 字段。将来要访问设备内网其他主机，用预留的 capacity 位协商（v1 未定义常量），并在 C 侧配主机白名单。
 
 ### 8.3 错误码

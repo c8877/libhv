@@ -160,18 +160,9 @@ void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequest
         else if (kv.first == "devid") devid = kv.second;
         else if (kv.first == "user") user = kv.second;
     }
-    // 优先用 Cookie 会话（账号体系）；query token 仅兼容紧急入口
     std::string role;
     AdminActor actor;
-    if (!wsAuthorize(req, actor, role)) {
-        if (!token.empty()) {
-            std::string authRole;
-            auto it = users_.find(token);
-            if (it != users_.end()) authRole = it->second;
-            else if (!cfg_.token.empty() && token == cfg_.token && cfg_.emergency_token == token) authRole = "admin";
-            role = authRole;
-        }
-    }
+    if (!wsAuthorize(req, actor, role)) role.clear();
     if (role != "admin" && role != "operator") {
         logf_("[terminal] reject: unauthorized (devid=%s)", devid.c_str());
         channel->close();
