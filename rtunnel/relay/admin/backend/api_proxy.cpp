@@ -1,6 +1,7 @@
 // 设备 Web 代理（路径式）：/device/<devid>/<port>/<rest>
 // 认证复用管理台会话；数据面走本机 relay 的 RTNP OPEN，与 Web 终端同一机制。
 #include "admin_server.hpp"
+#include "http/server/HttpResponseWriter.h"
 #include "cpputil/json.hpp"
 
 #include <arpa/inet.h>
@@ -268,41 +269,35 @@ void AdminServer::handleDeviceProxy(const HttpContextPtr& ctx) {
     req += "Connection: close\r\n\r\n";
     if (!body.empty()) req += body;
 
-    std::string upstream;
-    std::string data = rtnpStr(devid);  // 占位，实际发送 DATA
-    (void)data;
-    std::string payload = req;
-    sendFrame(fd, 0x13, 1, payload);
-    sendFrame(fd, 0x15, 1, std::string());   // CLOSE：请求结束
+    // 发送请求并半关闭
+    sendData(fd, 1, req);
+    sendFrame(fd, 0x15, 1, std::string());
 
-    uint8_t t; uint32_t sid; std::string p;
+    // 先读到响应头
+    std::string raw, p;
+    uint8_t t; uint32_t sid;
+    size_t hdrEnd = std::string::npos;
     while (recvFrame(fd, t, sid, p)) {
         if (t == 0x13 && !p.empty()) {
-            upstream += p;
-            std::string win; put32(win, (uint32_t)p.size());
-            sendFrame(fd, 0x14, 1, win);   // 归还 credit
-            if (upstream.size() > MAX_PROXY_BODY) break;
-        } else if (t == 0x15 || t == 0x16) {
-            break;
-        }
+            raw += p;
+            sendWindow(fd, 1, (uint32_t)p.size());
+            hdrEnd = raw.find("\r\n\r\n");
+            if (hdrEnd != std::string::npos) break;
+        } else if (t == 0x15 || t == 0x16) break;
     }
-    close(fd);
-
-    size_t hdrEnd = upstream.find("\r\n\r\n");
     if (hdrEnd == std::string::npos) {
+        close(fd);
         ctx->response->status_code = HTTP_STATUS_BAD_GATEWAY;
         ctx->send("bad upstream response");
         return;
     }
-    std::string head = upstream.substr(0, hdrEnd);
-    std::string rbody = upstream.substr(hdrEnd + 4);
 
+    std::string head = raw.substr(0, hdrEnd);
     int status = 502;
     std::vector<std::pair<std::string, std::string>> hdrs;
     {
         size_t eol = head.find("\r\n");
-        std::string line = head.substr(0, eol);
-        sscanf(line.c_str(), "HTTP/%*s %d", &status);
+        sscanf(head.substr(0, eol).c_str(), "HTTP/%*s %d", &status);
         size_t pos = (eol == std::string::npos) ? head.size() : eol + 2;
         while (pos < head.size()) {
             size_t e = head.find("\r\n", pos);
@@ -317,52 +312,97 @@ void AdminServer::handleDeviceProxy(const HttpContextPtr& ctx) {
     std::string ctype;
     for (auto& h : hdrs) {
         std::string k = lower(h.first);
-        if (k == "transfer-encoding" && h.second.find("chunked") != std::string::npos) chunked = true;
+        if (k == "transfer-encoding" && lower(h.second).find("chunked") != std::string::npos) chunked = true;
         if (k == "content-type") ctype = h.second;
     }
-    if (chunked) rbody = dechunk(rbody);
 
     ctx->response->status_code = (http_status)status;
     for (auto& h : hdrs) {
         std::string k = lower(h.first);
         if (k == "transfer-encoding" || k == "connection" || k == "content-length") continue;
         if (k == "set-cookie") {
-            std::string cprefix = "d_" + devid + "_" + port_s + "_";
+            std::string cprefix = "d_" + devid + "_" + std::to_string(port) + "_";
             std::string v = h.second;
             size_t eq = v.find('=');
             if (eq != std::string::npos) {
                 std::string name = trim(v.substr(0, eq));
                 std::string tail = v.substr(eq);
-                // Path 改成代理前缀
                 size_t ppos = lower(tail).find("; path=");
                 if (ppos != std::string::npos) {
-                    size_t end = tail.find(';', ppos + 2);
-                    tail = tail.substr(0, ppos) + "; Path=" + prefix + "/" +
-                           (end == std::string::npos ? "" : tail.substr(end));
+                    size_t e2 = tail.find(';', ppos + 2);
+                    tail = tail.substr(0, ppos) + "; Path=" + prefix +
+                           (e2 == std::string::npos ? "" : tail.substr(e2));
                 }
                 h.second = cprefix + name + tail;
             }
             ctx->response->headers["Set-Cookie"] = h.second;
             continue;
         }
-        if (k == "location" && !h.second.empty() && h.second[0] == '/') {
-            h.second = prefix + h.second;
-        }
+        if (k == "location" && !h.second.empty() && h.second[0] == '/') h.second = prefix + h.second;
         ctx->response->headers[h.first] = h.second;
     }
-
-    // text/html、text/css 里以 / 开头的绝对引用加前缀（best-effort）
-    std::string lct = lower(ctype);
-    if (lct.find("text/html") != std::string::npos || lct.find("text/css") != std::string::npos) {
-        rbody = replaceAll(rbody, "href=\"/", "href=\"" + prefix + "/");
-        rbody = replaceAll(rbody, "src=\"/", "src=\"" + prefix + "/");
-        rbody = replaceAll(rbody, "action=\"/", "action=\"" + prefix + "/");
-        rbody = replaceAll(rbody, "url(/", "url(" + prefix + "/");
-    }
-    ctx->response->body = rbody;
     if (!ctype.empty()) ctx->response->headers["Content-Type"] = ctype;
-}
 
+    std::string pending = raw.substr(hdrEnd + 4);
+    bool done = false;
+    int cstate = 0;      // 0=size 1=data
+    size_t need = 0;
+
+    // 有 writer 就流式；否则退化为整包
+    hv::HttpResponseWriter* w = ctx->writer.get();
+    if (w == nullptr) {
+        std::string body = pending, rest;
+        while (recvFrame(fd, t, sid, p)) {
+            if (t == 0x13 && !p.empty()) { rest += p; if (rest.size() > MAX_PROXY_BODY) break; }
+            else if (t == 0x15 || t == 0x16) break;
+        }
+        body += rest;
+        if (chunked) body = dechunk(body);
+        ctx->response->body = body;
+        close(fd);
+        return;
+    }
+
+    w->Begin();
+    w->EndHeaders("Transfer-Encoding", "chunked");
+    auto emit = [&](const char* d, size_t n) {
+        if (n) w->WriteChunked(d, (int)n);
+    };
+    auto feed = [&](const std::string& in) {
+        if (!chunked) { emit(in.data(), in.size()); return; }
+        pending += in;
+        size_t pos = 0;
+        while (!done) {
+            if (cstate == 0) {
+                size_t e = pending.find("\r\n", pos);
+                if (e == std::string::npos) break;
+                long n = strtol(pending.substr(pos, e - pos).c_str(), nullptr, 16);
+                pos = e + 2;
+                if (n <= 0) { done = true; break; }
+                need = (size_t)n; cstate = 1;
+            } else {
+                if (pending.size() - pos < need + 2) break;
+                emit(pending.data() + pos, need);
+                pos += need + 2;
+                cstate = 0;
+            }
+        }
+        if (pos > 0) pending.erase(0, pos);
+    };
+
+    if (!pending.empty()) feed(pending);
+    pending.clear();
+    while (!done && recvFrame(fd, t, sid, p)) {
+        if (t == 0x13 && !p.empty()) {
+            sendWindow(fd, 1, (uint32_t)p.size());
+            feed(p);
+        } else if (t == 0x15 || t == 0x16) {
+            break;
+        }
+    }
+    close(fd);
+    w->End();
+}
 
 // ---------------------------------------------------------------- WebSocket 代理
 // 浏览器 WS 已在 admin 终结；这里再向设备做一次 WS 握手，然后按帧转发。
