@@ -162,7 +162,16 @@ int openStream(const AdminConfig& cfg, const std::string& devid, int port, std::
     std::string open = rtnpStr(devid);
     put16(open, (uint16_t)port);
     sendFrame(fd, 0x10, 1, open);
-    if (!recvFrame(fd, t, sid, p) || t != 0x11) { err = "open failed"; close(fd); return -1; }
+    if (!recvFrame(fd, t, sid, p) || t != 0x11) {
+        if (t == 0x12 && p.size() > 2) {
+            // OPEN_FAIL: u16 code + str msg
+            err = "open failed: " + p.substr(4);
+        } else {
+            err = "open failed";
+        }
+        close(fd);
+        return -1;
+    }
     return fd;
 }
 
