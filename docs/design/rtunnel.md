@@ -528,7 +528,6 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 | `--admin-file-dir D` | 文件管理根目录 |
 | `--admin-shell-user/--admin-shell-token` | Web 终端连本机 relay 的身份与凭证 |
 | `--admin-db PATH` | SQLite 账号库（users/sessions/devices），需 OpenSSL 构建（PBKDF2） |
-| `--admin-emergency-token T` | 初始化后保留的 token 入口（紧急恢复，默认关） |
 
 账号体系：首次用 `--admin-token` 初始化 superadmin，之后用户名+密码登录（HttpOnly Cookie 会话）。
 角色：superadmin（全部）/ admin（建普通账号、绑设备、踢会话、文件）/ user（只看自己绑定的设备）。

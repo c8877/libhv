@@ -106,7 +106,7 @@ std::string AdminServer::roleOf(const HttpContextPtr& ctx) {
         if (auth.compare(0, prefix.size(), prefix) == 0) {
             std::string tok = auth.substr(prefix.size());
             if (!cfg_.token.empty() && tok == cfg_.token) {
-                bool allow = !initialized || (!cfg_.emergency_token.empty() && tok == cfg_.emergency_token);
+                bool allow = !initialized;
                 if (allow && !initialized) {
                     // 初始化窗口只放行 setup 相关接口，其余仍需账号登录
                     const std::string& path = ctx->request->path;
@@ -128,8 +128,6 @@ std::string AdminServer::roleOf(const HttpContextPtr& ctx) {
         return "";
     }
 
-    // 3) 完全没配凭据且未初始化：回环信任域（开发模式）
-    if (!initialized) return "admin";
     return "";
 }
 
@@ -176,8 +174,7 @@ bool AdminServer::wsAuthorize(const HttpRequestPtr& req, AdminActor& actor, std:
     if (auth.compare(0, prefix.size(), prefix) == 0) {
         std::string tok = auth.substr(prefix.size());
         bool initialized = db_.ok() && db_.initialized();
-        if (!cfg_.token.empty() && tok == cfg_.token &&
-            (!initialized || (!cfg_.emergency_token.empty() && tok == cfg_.emergency_token))) {
+        if (!cfg_.token.empty() && tok == cfg_.token && !initialized) {
             actor.id = 0; actor.username = "bootstrap"; actor.role = "superadmin";
             role = "admin";
             return true;

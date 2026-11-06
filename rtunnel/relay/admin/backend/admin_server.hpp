@@ -33,7 +33,6 @@ struct AdminConfig {
     std::string shell_token;             // 该用户连 relay 的凭证（--admin-shell-token）
     int         shell_relay_port = 8443; // direct 模式连接的 relay 端口（本机）
     std::string db_path = "rtunnel-admin.db"; // SQLite 账号库
-    std::string emergency_token;              // 初始化后仍允许 token 登录（紧急恢复，可选）
 };
 
 struct AdminActor {

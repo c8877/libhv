@@ -128,7 +128,6 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 - **首次部署**：浏览器打开管理台 → 初始化页输入 `--admin-token` + 超管用户名/密码 → 创建 superadmin；
   初始化前 token 只能访问 `/api/v1/setup*`
 - **之后登录**：用户名 + 密码，服务端会话（HttpOnly Cookie，12h），不再用 token
-- **紧急入口**：`--admin-emergency-token T` 保留 Bearer token 登录（默认关）
 - **角色**：
   | 角色 | 权限 |
   |---|---|
@@ -207,7 +206,6 @@ http://B:9443/device/<devid>/<port>/<path>
 | `--admin ADDR --admin-token T` | 管理台监听与 Bearer token |
 | `--admin-users F` | 每行 `token:role`（viewer/operator/admin，兼容旧配置） |
 | `--admin-db PATH` | SQLite 账号库，默认 `rtunnel-admin.db`（需 OpenSSL 构建） |
-| `--admin-emergency-token T` | 初始化后仍允许该 token 登录（紧急恢复，默认关） |
 | `--admin-shell-user U --admin-shell-token T` | Web 终端连本机 relay 的身份与凭证 |
 | `--admin-ca-cert/--admin-ca-key/--admin-cert-dir` | 证书签发 CA 与台账目录 |
 | `--admin-file-dir` / `--admin-docroot` | 文件管理目录 / 前端磁盘目录 |

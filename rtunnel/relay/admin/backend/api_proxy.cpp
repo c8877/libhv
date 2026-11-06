@@ -362,21 +362,7 @@ void AdminServer::handleDeviceProxy(const HttpContextPtr& ctx) {
     int cstate = 0;      // 0=size 1=data
     size_t need = 0;
 
-    // 有 writer 就流式；否则退化为整包
     hv::HttpResponseWriter* w = ctx->writer.get();
-    if (w == nullptr) {
-        std::string body = pending, rest;
-        while (recvFrame(fd, t, sid, p)) {
-            if (t == 0x13 && !p.empty()) { rest += p; if (rest.size() > MAX_PROXY_BODY) break; }
-            else if (t == 0x15 || t == 0x16) break;
-        }
-        body += rest;
-        if (chunked) body = dechunk(body);
-        ctx->response->body = body;
-        close(fd);
-        return;
-    }
-
     bool no_body = (status == 204 || status == 304 || ctx->request->method == HTTP_HEAD);
     w->Begin();
     if (no_body) {

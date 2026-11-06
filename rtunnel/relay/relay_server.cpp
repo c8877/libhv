@@ -818,7 +818,6 @@ int RelayServer::run(int argc, char** argv) {
     const char* admin_shell_user = "devuser";
     const char* admin_shell_token = NULL;
     const char* admin_db = NULL;
-    const char* admin_emergency_token = NULL;
     const char* client_users_file = NULL;
     const char* client_token_arg = NULL;
     const char* shell_users_arg = NULL;
@@ -846,8 +845,6 @@ int RelayServer::run(int argc, char** argv) {
             admin_shell_token = argv[++i];
         } else if (strcmp(argv[i], "--admin-db") == 0 && i + 1 < argc) {
             admin_db = argv[++i];
-        } else if (strcmp(argv[i], "--admin-emergency-token") == 0 && i + 1 < argc) {
-            admin_emergency_token = argv[++i];
         } else if (strcmp(argv[i], "--verbose") == 0) {
             verbose = 1;
         } else if (strcmp(argv[i], "--acl") == 0 && i + 1 < argc) {
@@ -887,7 +884,7 @@ int RelayServer::run(int argc, char** argv) {
                 "          [--tls-cert crt --tls-key key [--tls-ca ca]] [--verbose]\n"
                 "          [--client-users F] [--client-token T] [--shell-users u1,u2]\n"
                 "          [--admin 127.0.0.1:9443 [--admin-token T] [--admin-users F] [--admin-db PATH]\n"
-                "            [--admin-emergency-token T] [--admin-docroot DIR]\n"
+                "            [--admin-docroot DIR]\n"
                 "            [--admin-ca-cert C --admin-ca-key K --admin-cert-dir D]]\n",
                 argv[0]);
             return 1;
@@ -973,7 +970,6 @@ int RelayServer::run(int argc, char** argv) {
         cfg.shell_user = admin_shell_user;
         cfg.shell_token = admin_shell_token ? admin_shell_token : "";
         if (admin_db) cfg.db_path = admin_db;
-        cfg.emergency_token = admin_emergency_token ? admin_emergency_token : "";
         if (adm->start(cfg) != 0) {
             delete adm;
             admin = NULL;
