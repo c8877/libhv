@@ -218,6 +218,7 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
         s->sid = f->sid;
         s->credit = rtnp::DEFAULT_CREDIT;
         s->is_shell = 1;
+        had_stream = 1;
         s->next = streams;
         streams = s;
         if (openShellStream(s) != 0) {
@@ -245,6 +246,7 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
     auto* s = new LocalStream{};
     s->app = this;
     s->sid = f->sid;
+    had_stream = 1;
     s->credit = rtnp::DEFAULT_CREDIT;
     s->next = streams;
     streams = s;
@@ -421,12 +423,27 @@ int AgentApp::run(int argc, char** argv) {
     if (max_idle > 0) {
         htimer_t* idle_timer = htimer_add(lp, [](htimer_t* t) {
             auto* app = (AgentApp*)hevent_userdata(t);
-            if (app->streams != NULL) { app->last_active_ms = hloop_now_ms(app->loop); return; }
-            if (hloop_now_ms(app->loop) - app->last_active_ms >= (uint64_t)app->max_idle * 1000) {
+            uint64_t now = hloop_now_ms(app->loop);
+            if (app->streams != NULL) {
+                app->last_active_ms = now;
+                app->had_stream = 1;
+                app->idle_since_ms = 0;
+                return;
+            }
+            if (app->had_stream) {
+                // 按需 agent：最后一个会话结束后 2s 退出
+                if (!app->idle_since_ms) app->idle_since_ms = now;
+                if (now - app->idle_since_ms >= 2000) {
+                    logf_("[agent] no sessions, exiting (on-demand agent)");
+                    hloop_stop(app->loop);
+                }
+                return;
+            }
+            if (now - app->last_active_ms >= (uint64_t)app->max_idle * 1000) {
                 logf_("[agent] idle %ds, exiting (on-demand agent)", app->max_idle);
                 hloop_stop(app->loop);
             }
-        }, 5000, INFINITE);
+        }, 1000, INFINITE);
         hevent_set_userdata(idle_timer, this);
     }
     init(lp);

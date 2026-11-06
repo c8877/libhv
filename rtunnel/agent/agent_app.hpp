@@ -38,6 +38,8 @@ public:
     int          allow_shell = 0;   // 允许 OPEN_SHELL（forkpty 起 shell，默认禁用）
     int          max_idle = 0;      // 无会话空闲多少秒后退出（0=常驻，按需 agent 用）
     uint64_t     last_active_ms = 0;
+    int          had_stream = 0;       // 是否用过（用过后无会话快速退出）
+    uint64_t     idle_since_ms = 0;
     LocalStream* streams = nullptr;
 
 protected:

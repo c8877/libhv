@@ -54,7 +54,7 @@ public:
     int         socks_enabled = 0;
     int         allow_shell = 0;            // 允许 B 通知本机按需拉起 agent（默认关）
     char        agent_path[512] = {0};      // rtunnel-agent 路径（默认同目录）
-    int         agent_idle = 60;            // 子 agent 空闲多少秒自退
+    int         agent_idle = 15;            // 子 agent 未使用时多少秒自退
     struct AgentChild {
         char  devid[128] = {0};
         pid_t pid = -1;
