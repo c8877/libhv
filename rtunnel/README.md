@@ -125,8 +125,12 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 
 「设备 C」「客户端 A」列表的 Shell 入口：admin 作为 RTNP client 直连本机 relay，
 向目标 agent 发 `OPEN_SHELL`（flags=0x0001），agent `forkpty` 起交互 shell，
-经 WebSocket 接到浏览器 xterm.js。不 fork ssh、不经手密码；AUTH 用户即该 A 用户身份，
-relay 按该用户 ACL 校验。终端尺寸经 `RESIZE`(0x17) 帧同步。
+经 WebSocket 接到浏览器 xterm.js。不 fork ssh、不经手密码。
+
+- 身份固定为 `--admin-shell-user`（凭证 `--admin-shell-token`），**不接受浏览器指定用户**；
+- 设备列表：目标 devid = 设备 ID；客户端列表：目标 devid = `a:<user>`（按需拉起，见下节）；
+- 需要 relay 的 `--shell-users` 允许该身份，且目标 agent 开 `--allow-shell`；
+- 终端尺寸经 `RESIZE`(0x17) 帧同步。
 A 端也可在本机执行 `rtunnel-client --server B --user U shell <devid>` 直连设备免密 shell。
 
 ## A 侧按需 Shell（client 列表的 Shell 按钮）
@@ -146,6 +150,85 @@ client 侧只做「拉起/回收」，shell 逻辑完全复用 agent；relay 侧
 build/bin/rtunnel-client --server B --port 8443 --user alice --token <token> \
     --socks5 127.0.0.1:1080 --allow-shell --agent-idle 60
 ```
+
+## 参数速查
+
+**relay（B）**
+
+| 参数 | 说明 |
+|---|---|
+| `--host/--port` | 隧道监听地址，默认 `0.0.0.0:8443` |
+| `--acl user=dev1,dev2` / `--acl-file F` | 用户→设备 ACL；文件可 `SIGHUP` 热加载 |
+| `--allow-all` | 关闭 ACL（仅调试） |
+| `--client-users F` | 每行 `user:token`，强制 A 端凭证 |
+| `--client-token T` | 全局客户端 token（`--client-users` 的简化版） |
+| `--shell-users u1,u2` / `*` | 允许 `OPEN_SHELL` 的用户；默认空 = 全部拒绝 |
+| `--tls-cert/--tls-key [--tls-ca]` | 服务端 TLS；给 `--tls-ca` 即要求客户端证书（mTLS） |
+| `--admin ADDR --admin-token T` | 管理台监听与 Bearer token |
+| `--admin-users F` | 每行 `token:role`（viewer/operator/admin） |
+| `--admin-shell-user U --admin-shell-token T` | Web 终端连本机 relay 的身份与凭证 |
+| `--admin-ca-cert/--admin-ca-key/--admin-cert-dir` | 证书签发 CA 与台账目录 |
+| `--admin-file-dir` / `--admin-docroot` | 文件管理目录 / 前端磁盘目录 |
+| `--drain-timeout` | 优雅退出等待时长，默认 10000ms |
+
+**client（A）**
+
+| 参数 | 说明 |
+|---|---|
+| `--server/--port --user --token` | relay 地址与登录身份 |
+| `--socks5 HOST:PORT` / `unix:PATH` | 本地 SOCKS5 入口 |
+| `--forward 127.0.0.1:16022=devid:22` | 本地端口映射，可多次 |
+| `--allow-shell` | 允许 B 通知本机按需拉起 agent（默认关） |
+| `--agent-path` / `--agent-idle` | agent 路径 / 空闲自退秒数（默认 60） |
+| `--tls-ca/--tls-cert/--tls-key/--tls-sni` | TLS / mTLS |
+| `shell <devid>` | 本机终端直连设备免密 shell |
+
+**agent（C）**
+
+| 参数 | 说明 |
+|---|---|
+| `--server/--port --devid` | relay 地址与设备 ID |
+| `--allow 22,80` / `--allow-all` | 目标端口白名单 |
+| `--allow-shell` / `--max-idle` | 允许 `OPEN_SHELL` / 空闲自退秒数 |
+| `--tls-ca/--tls-cert/--tls-key/--tls-sni` | TLS / mTLS |
+
+## 三机部署示例
+
+```bash
+# B（192.168.1.133）：隧道 + 管理台
+printf 'dev:tok-dev\nops:tok-ops\n' > /tmp/rtunnel/clients.txt
+./rtunnel-relay --host 0.0.0.0 --port 18443 \
+    --acl ops='*' --client-users /tmp/rtunnel/clients.txt --shell-users ops \
+    --admin 0.0.0.0:9443 --admin-token <admin-token> \
+    --admin-ca-cert ca.crt --admin-ca-key ca.key --admin-cert-dir certs \
+    --admin-file-dir files --admin-shell-user ops --admin-shell-token tok-ops
+
+# C（192.168.1.55，板子）
+./rtunnel-agent --server 192.168.1.133 --port 18443 --devid board01 \
+    --allow 22 --allow-shell
+
+# A（开发机）
+./rtunnel-client --server 192.168.1.133 --port 18443 --user dev --token tok-dev \
+    --socks5 127.0.0.1:11080 --forward 127.0.0.1:16022=board01:22 \
+    --allow-shell --agent-idle 120
+```
+
+```bash
+ssh -p 16022 root@127.0.0.1                         # 到板子
+# 管理台：http://B:9443/ ，Bearer token 打开后 → 客户端列表 Shell = 本机 shell
+```
+
+## 故障排查
+
+| 现象 | 原因 / 处理 |
+|---|---|
+| Web 终端显示「连接已关闭」 | 1.3.19 之前 `shell_relay_port` 不跟随 `--port`；升级 relay 或让 relay 监听 8443 |
+| 客户端列表 Shell 没反应 | client 未加 `--allow-shell`，或该用户不在 `--shell-users`，或 devid 不是 `a:<user>` |
+| A 端上线即断开 | relay 配了 `--client-users/--client-token`，client 缺 `--token` 或 token 不匹配 |
+| `OPEN_FAIL: shell not allowed` | relay 的 `--shell-users` 未包含该用户 |
+| `OPEN_FAIL: shell disabled` | agent 未加 `--allow-shell` |
+| client 启动报 `bind: Address already in use` | 默认会监听 1080，换 `--socks5 127.0.0.1:<port>` |
+| 部署后 `undefined symbol: hv_version` | 用了共享库构建只拷了二进制；用 `--no-shared` 静态构建或一并部署 `libhv.so` |
 
 ## 实现说明
 

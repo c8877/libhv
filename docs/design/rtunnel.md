@@ -36,7 +36,9 @@
 | **C（Agent）** | 设备侧 agent。连 B、上报 devid、执行「连本地 sshd」并透传字节 |
 | **devid** | 设备唯一标识，命名规则见 §8.5 |
 | **a_sid / c_sid** | A↔B 段与 B↔C 段各自的 stream_id，由 B 映射（§10） |
-| **RTNP** | 反向隧道协议（Reverse Tunnel Protocol），运行在 TCP 之上 |
+| **a:\<user\>** | A 侧按需 agent 的 devid：shell 落在开发者机器上，而不是设备 |
+| **admin** | B 上的管理台：HTTP API + WebSocket 终端 + 内嵌前端 |
+| **RTNP** | 反向通道协议（Reverse Tunnel Protocol），运行在 TCP 之上 |
 
 ---
 
@@ -318,7 +320,7 @@ sequenceDiagram
 |---|---|---|---|
 | `0x01` | `HELLO` | 双向 | `u8 role`(1=C,2=A) + `u8 ver` + `str agent_ver` + `u32 capabilities` |
 | `0x02` | `HELLO_ACK` | B→对端 | `u16 max_payload` + `u8 auth_methods`(bit0 mTLS,1 token) + `u32 keepalive_ms` + `u32 capabilities` |
-| `0x03` | `AUTH` | 双向 | C：`str devid`；A：`str user` |
+| `0x03` | `AUTH` | 双向 | C：`str devid`；A：`str user` + `u8 auth_type`(0=none,1=token) + `str token` |
 | `0x04` | `AUTH_OK` | B→对端 | `str devid`（规范化）+ `u32 keepalive_ms` |
 | `0x05` | `AUTH_FAIL` | B→对端 | `u16 code + str msg` |
 | `0x06` | `PING` | 双向 | `u64 时间戳ms` |
@@ -326,18 +328,20 @@ sequenceDiagram
 | `0x08` | `DEVICE_QUERY` | A→B | `str devid`（仅 UI，§8.7） |
 | `0x09` | `DEVICE_STATUS` | B→A | `str devid + u8 online + u32 active_streams` |
 | `0x0F` | `ERROR` | 双向 | `u16 code + str msg`（非致命） |
+| `0x18` | `SPAWN_AGENT` | B→A | `str devid`：要求 A 在本机按需拉起 agent（§12.1） |
 
 **会话级（stream_id > 0）**
 
 | type | 名称 | 方向 | payload |
 |---|---|---|---|
-| `0x10` | `OPEN` | A→B / B→C | A→B：`str devid + u16 port`；B→C：`u16 port`（C 固定连 `127.0.0.1`） |
+| `0x10` | `OPEN` | A→B / B→C | A→B：`str devid + u16 port`；B→C：`u16 port`（C 固定连 `127.0.0.1`）；`flags & 0x0001 = OPEN_SHELL` |
 | `0x11` | `OPEN_OK` | C→B→A | `str bound_host + u16 bound_port` |
 | `0x12` | `OPEN_FAIL` | C/B→A | `u16 code + str msg` |
 | `0x13` | `DATA` | 双向 | 原始字节 |
 | `0x14` | `WINDOW` | 双向 | `u32 credit 增量` |
 | `0x15` | `CLOSE` | 双向 | 空（本方向 EOF） |
 | `0x16` | `RESET` | 双向 | `u16 code`（立即中止并回收） |
+| `0x17` | `RESIZE` | A→C | `u16 cols + u16 rows`（shell 终端尺寸） |
 
 > v1 的 OPEN 没有 host 字段。将来要访问设备内网其他主机，用 `capabilities` 的 `TARGET_HOST` 位协商，并配白名单。
 
@@ -507,7 +511,51 @@ StreamMeta { a_conn_id, a_sid, c_conn_id, c_sid, state, opened_at }
 拆成独立 agent 进程后，身份（user 与 a:user）、授权（`--shell-users`）、生命周期（按需起停）、
 故障域都彼此独立，shell 逻辑与设备 agent 完全复用。
 
-## 13. 备选方案与取舍
+## 13. 管理台与运维面
+
+B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**，relay 状态经
+`hloop_post_event` 回投到 relay 线程，数据面不加锁。
+
+### 13.1 启停与鉴权
+
+| 参数 | 说明 |
+|---|---|
+| `--admin ADDR` | 监听地址，如 `127.0.0.1:9443`；启动时不带凭据且非回环会被拒绝 |
+| `--admin-token T` | 单 token，全权（等价 admin 角色） |
+| `--admin-users F` | 每行 `token:role`，role = viewer / operator / admin |
+| `--admin-docroot D` | 前端改从磁盘读（调试用）；默认编译期内嵌 |
+| `--admin-ca-cert/--admin-ca-key/--admin-cert-dir` | 签发 CA 与台账目录 |
+| `--admin-file-dir D` | 文件管理根目录 |
+| `--admin-shell-user/--admin-shell-token` | Web 终端连本机 relay 的身份与凭证 |
+
+角色权限：viewer 只读；operator 可踢会话/设备、改 ACL、传文件；admin 额外可签发/吊销证书。
+
+### 13.2 接口
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/v1/overview` | 汇总（agents/clients/streams/bytes/version） |
+| GET | `/api/v1/agents`、`/api/v1/agents/{devid}` | 设备列表/详情 |
+| GET | `/api/v1/clients`、`/api/v1/streams` | 客户端与流列表 |
+| DELETE | `/api/v1/streams/{a_sid}` | 踢单个会话（双侧 RESET） |
+| POST | `/api/v1/agents/{devid}/kick` | 强制设备下线（agent 自动重连） |
+| GET/PUT | `/api/v1/acl/file`、`POST /api/v1/acl/reload` | ACL 读写与热加载 |
+| GET | `/api/v1/audit` | 审计（登录、OPEN、踢、证书、文件、终端） |
+| GET/POST | `/api/v1/certs`、`/api/v1/certs/issue`、`/sign`、`/revoke` | 证书台账/签发/CSR 签名/吊销（admin） |
+| GET/POST/DELETE | `/api/v1/files[/{name}]` | 文件列表/上传/下载/删除（≤32 MiB，文件名白名单） |
+| GET | `/metrics` | Prometheus 文本指标 |
+| WS | `/ws/shell?devid=..&token=..` | 浏览器终端（xterm.js） |
+| POST | `/api/v1/shutdown` | 优雅退出 |
+
+### 13.3 Web 终端
+
+- 身份固定为 `--admin-shell-user`，浏览器**不能**指定用户（防冒充）；
+- 设备列表 → `devid`；客户端列表 → `a:<user>`（触发 §12.1 按需 agent）；
+- 需要 relay `--shell-users` 包含该身份，且目标 agent 开 `--allow-shell`；
+- 输入/输出走 `DATA`，尺寸走 `RESIZE`；
+- 管理台是 **HTTP 明文**：非回环部署建议加 TLS 反代或只绑回环。
+
+## 14. 备选方案与取舍
 
 | 方案 | 优点 | 缺点 | 结论 |
 |---|---|---|---|
@@ -534,3 +582,6 @@ StreamMeta { a_conn_id, a_sid, c_conn_id, c_sid, state, opened_at }
 8. 流级未知 type → `RESET`；连接级未知 → 关闭连接。
 9. devid 必须字母开头；A 只接受 `ATYP=domain`。
 10. 单连接单写者；控制帧优先于数据帧。
+11. 配了 `--client-users/--client-token` 就必须校验 A 的 token；未配时启动日志必须告警。
+12. `OPEN_SHELL` 需要 relay 的 `--shell-users` 与 agent 的 `--allow-shell` 双开关。
+13. A 侧 agent 只接受 `a:<自身 user>`；client 的 `--allow-shell` 默认关。
