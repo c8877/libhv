@@ -6,6 +6,7 @@
 
 #include "common/tunnel_link.hpp"
 #include <string>
+#include <vector>
 
 class AgentApp;
 
@@ -37,6 +38,9 @@ public:
     int          nallow = 0;
     int          allow_all = 0;
     int          allow_shell = 0;   // 允许 OPEN_SHELL（forkpty 起 shell，默认禁用）
+    double       cpu_usage = 0;
+    std::vector<double> cpu_cores;
+    std::vector<unsigned long long> cpu_last_tot, cpu_last_idle;
     std::string  args_line;         // 启动参数（展示/排障）
     long long    started_ms = 0;
     int          max_idle = 0;      // 无会话空闲多少秒后退出（0=常驻，按需 agent 用）

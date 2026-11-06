@@ -113,3 +113,14 @@ button:hover { filter: brightness(.96); }
 .term-tab { background: transparent; border: 1px solid rgba(255,255,255,.16); color: inherit;
   padding: 3px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; }
 .term-tab.active { border-color: #4a9eff; color: #4a9eff; }
+
+/* 设备详情：图表布局 */
+.si-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.si-body { padding: 12px 16px 16px; }
+.si-legend { margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.si-cores { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.si-cores span { display: inline-flex; align-items: center; gap: 6px; }
+.si-cores i { display: inline-block; height: 6px; background: #4a9eff; border-radius: 3px; min-width: 2px; }
+.si-disks { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; padding: 16px; }
+.si-disk { text-align: center; }
+@media (max-width: 900px) { .si-grid { grid-template-columns: 1fr; } }

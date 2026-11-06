@@ -313,8 +313,41 @@ void AgentApp::killShellChild(LocalStream* s) {
 }
 
 // READY 后的会话级帧（连接级 HELLO/AUTH/PING 由 TunnelLink 处理）
+static void agentSampleCpu(AgentApp* app) {
+    std::ifstream f("/proc/stat");
+    if (!f) return;
+    std::string line;
+    std::vector<unsigned long long> tot, idl;
+    while (std::getline(f, line)) {
+        if (line.rfind("cpu", 0) != 0) break;
+        unsigned long long v[8] = {0};
+        int n = sscanf(line.c_str(), "%*s %llu %llu %llu %llu %llu %llu %llu %llu",
+                       &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7]);
+        if (n < 4) continue;
+        unsigned long long t = 0;
+        for (int i = 0; i < 8; ++i) t += v[i];
+        tot.push_back(t);
+        idl.push_back(v[3] + v[4]);
+    }
+    if (tot.empty()) return;
+    if (app->cpu_last_tot.size() == tot.size()) {
+        app->cpu_usage = 0;
+        app->cpu_cores.clear();
+        for (size_t i = 0; i < tot.size(); ++i) {
+            unsigned long long dt = tot[i] - app->cpu_last_tot[i];
+            unsigned long long di = idl[i] - app->cpu_last_idle[i];
+            double u = dt > 0 ? 100.0 * (double)(dt - di) / (double)dt : 0.0;
+            if (i == 0) app->cpu_usage = u;
+            else app->cpu_cores.push_back(u);
+        }
+    }
+    app->cpu_last_tot = tot;
+    app->cpu_last_idle = idl;
+}
+
 void AgentApp::sendSysinfo() {
     using nlohmann::json;
+    agentSampleCpu(this);
     json j;
     j["devid"] = devid;
     j["version"] = hv_version();
@@ -365,13 +398,40 @@ void AgentApp::sendSysinfo() {
         j["swap_free_kb"] = swap_free;
     }
     {
-        struct statvfs vfs;
-        if (statvfs("/", &vfs) == 0) {
-            j["disk_total_kb"] = (unsigned long long)vfs.f_blocks * vfs.f_frsize / 1024;
-            j["disk_free_kb"] = (unsigned long long)vfs.f_bavail * vfs.f_frsize / 1024;
-            j["disk_inode_total"] = (unsigned long long)vfs.f_files;
-            j["disk_inode_free"] = (unsigned long long)vfs.f_ffree;
+        nlohmann::json mounts = nlohmann::json::array();
+        std::ifstream mf("/proc/mounts");
+        std::string line;
+        std::string last_dev;
+        while (std::getline(mf, line)) {
+            std::istringstream is(line);
+            std::string dev, mnt, fstype;
+            if (!(is >> dev >> mnt >> fstype)) continue;
+            if (fstype == "squashfs" || fstype == "overlay" ||
+                mnt.rfind("/run", 0) == 0 || mnt.rfind("/dev/shm", 0) == 0 ||
+                mnt.rfind("/sys", 0) == 0 ||
+                fstype == "proc" || fstype == "sysfs" || fstype == "devtmpfs" ||
+                fstype == "devpts" || fstype.rfind("cgroup", 0) == 0 ||
+                fstype == "pstore" || fstype == "debugfs" || fstype == "securityfs" ||
+                fstype == "tracefs" || fstype == "configfs" || fstype == "mqueue" ||
+                fstype == "hugetlbfs" || fstype == "fusectl" || fstype == "binfmt_misc") continue;
+            struct statvfs vfs;
+            if (statvfs(mnt.c_str(), &vfs) != 0) continue;
+            unsigned long long total = (unsigned long long)vfs.f_blocks * vfs.f_frsize / 1024;
+            if (total == 0) continue;
+            nlohmann::json m;
+            m["mount"] = mnt;
+            m["fstype"] = fstype;
+            m["total_kb"] = total;
+            m["free_kb"] = (unsigned long long)vfs.f_bavail * vfs.f_frsize / 1024;
+            mounts.push_back(m);
         }
+        j["mounts"] = mounts;
+    }
+    {
+        nlohmann::json cpu;
+        cpu["usage"] = cpu_usage;
+        cpu["cores"] = cpu_cores;
+        j["cpu"] = cpu;
     }
     {
         double la[3] = {0, 0, 0};
@@ -572,6 +632,11 @@ int AgentApp::run(int argc, char** argv) {
     hloop_t* lp = hloop_new(0);
     last_active_ms = hloop_now_ms(lp);
     if (max_idle > 0) {
+        agentSampleCpu(this);
+        htimer_t* cpu_timer = htimer_add(lp, [](htimer_t* t) {
+            agentSampleCpu((AgentApp*)hevent_userdata(t));
+        }, 1000, INFINITE);
+        hevent_set_userdata(cpu_timer, this);
         htimer_t* idle_timer = htimer_add(lp, [](htimer_t* t) {
             auto* app = (AgentApp*)hevent_userdata(t);
             uint64_t now = hloop_now_ms(app->loop);

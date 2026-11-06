@@ -263,18 +263,25 @@ const AgentsPage = Object.assign(new Page(), {
 const AgentDetailPage = Object.assign(new Page(), {
   enter(el, params) {
     this.devid = decodeURIComponent(params[0] || '');
-    this.siForce = 1;              // 进入详情页强制刷新一次
+    this.cpuHist = [];
+    this.charts = [];
     return Page.prototype.enter.call(this, el, params);
+  },
+  chart(id, cfg) {
+    const c = document.getElementById(id);
+    if (!c || !window.Chart) return;
+    this.charts.push(new Chart(c.getContext('2d'), cfg));
+  },
+  ringColor(pct) {
+    return pct >= 85 ? '#e5534b' : pct >= 70 ? '#f5a623' : '#4a9eff';
   },
   async refresh() {
     const d = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid));
     let si = null, siTs = 0;
     try {
-      const q = this.siForce ? '?refresh=1' : '';
-      this.siForce = 0;
-      const r = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/sysinfo' + q);
+      const r = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/sysinfo?refresh=1');
       si = r.sysinfo; siTs = r.ts;
-    } catch (e) { /* 设备离线或无响应 */ }
+    } catch (e) { /* 离线 */ }
 
     const rows = (d.streams || []).map(s => [
       UI.esc(s.a_user) + ':' + s.a_sid, s.c_sid,
@@ -292,32 +299,55 @@ const AgentDetailPage = Object.assign(new Page(), {
       }) + '</div>';
 
     if (si) {
+      this.charts.forEach(c => { try { c.destroy(); } catch (e) {} });
+      this.charts = [];
       const kb = n => UI.bytes((Number(n) || 0) * 1024);
+      const pct = (used, total) => total > 0 ? Math.round(used * 100 / total) : 0;
+      const memUsed = (si.mem_total_kb || 0) - (si.mem_available_kb || 0);
+      const memPct = pct(memUsed, si.mem_total_kb);
+      const cpu = si.cpu || { usage: 0, cores: [] };
+      this.cpuHist.push(cpu.usage || 0);
+      if (this.cpuHist.length > 60) this.cpuHist.shift();
+      const disks = (si.mounts || []);
+
+      html += '<div class="si-grid">' +
+        '<div class="panel"><div class="panel-head"><h2>内存</h2></div>' +
+        '<div class="si-body"><canvas id="si-mem" height="150"></canvas>' +
+        '<div class="si-legend">已用 <b>' + kb(memUsed) + '</b> / ' + kb(si.mem_total_kb) +
+        '<br>Swap ' + kb(si.swap_total_kb) + ' / 可用 ' + kb(si.swap_free_kb) + '</div></div></div>' +
+        '<div class="panel"><div class="panel-head"><h2>CPU</h2>' +
+        '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">load ' +
+        (si.load1 || 0).toFixed(2) + ' / ' + (si.load5 || 0).toFixed(2) + ' / ' + (si.load15 || 0).toFixed(2) +
+        '</span></div><div class="si-body"><canvas id="si-cpu" height="130"></canvas>' +
+        '<div class="si-cores">' + (cpu.cores || []).map((u, i) =>
+          '<span>cpu' + i + ' <i style="width:' + Math.min(100, u) + '%"></i>' + u.toFixed(0) + '%</span>').join('') +
+        '</div></div></div></div>';
+
+      html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>存储</h2></div>' +
+        '<div class="si-disks">' + disks.map((m, i) => {
+          const used = (m.total_kb || 0) - (m.free_kb || 0);
+          return '<div class="si-disk"><canvas id="si-disk-' + i + '" height="120"></canvas>' +
+            '<div class="si-legend"><b>' + UI.esc(m.mount) + '</b> (' + UI.esc(m.fstype) + ')<br>' +
+            kb(used) + ' / ' + kb(m.total_kb) + '</div></div>';
+        }).join('') + '</div></div>';
+
       const certText = si.mtls
         ? UI.kv({ '证书主体': UI.esc(si.cert_subject || ''), '签发者': UI.esc(si.cert_issuer || ''),
                   '序列号': UI.esc(String(si.cert_serial || '')), '状态': si.cert_not_after ? '有效' : '已过期' })
         : '<div style="padding:12px;color:var(--muted)">未启用 mTLS</div>';
-      const nics = (si.nics || []).map(n => [UI.esc(n.name), UI.esc(n.ip), UI.esc(n.netmask),
-        n.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>']);
       const runtime = UI.kv({
         'agent 版本': UI.esc(si.version || ''), 'pid': si.pid,
         '启动时间': new Date(si.started_ms).toLocaleString(),
         '启动参数': '<code style="font-size:12px">' + UI.esc(si.args || '') + '</code>',
-      });
-      const sys = UI.kv({
         '架构/内核': UI.esc((si.machine || '') + ' / ' + (si.kernel || '')),
-        'CPU': UI.esc((si.cpu_model || '') + ' · ' + si.cpu_cores + ' 核'),
-        '内存': kb(si.mem_total_kb) + ' / 可用 ' + kb(si.mem_available_kb),
-        'Swap': kb(si.swap_total_kb) + ' / 可用 ' + kb(si.swap_free_kb),
-        '磁盘 /': kb(si.disk_total_kb) + ' / 可用 ' + kb(si.disk_free_kb),
-        '负载': (si.load1 || 0).toFixed(2) + ' ' + (si.load5 || 0).toFixed(2) + ' ' + (si.load15 || 0).toFixed(2),
-        '板卡型号': UI.esc(si.board || '—'),
+        'CPU 型号': UI.esc((si.cpu_model || '') + ' · ' + si.cpu_cores + ' 核'),
       });
-      html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>运行时</h2>' +
+      const nics = (si.nics || []).map(n => [UI.esc(n.name), UI.esc(n.ip), UI.esc(n.netmask),
+        n.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>']);
+      html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>证书</h2></div>' + certText + '</div>' +
+        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>系统</h2>' +
         '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">采集于 ' +
         new Date(siTs).toLocaleTimeString() + '</span></div>' + runtime + '</div>' +
-        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>证书</h2></div>' + certText + '</div>' +
-        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>系统</h2></div>' + sys + '</div>' +
         '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>网络</h2></div>' +
         UI.table(['接口', 'IP', '掩码', '状态'], nics) + '</div>';
     }
@@ -327,12 +357,41 @@ const AgentDetailPage = Object.assign(new Page(), {
     this.el.innerHTML = html;
 
     if (si) {
+      const self = this;
+      const memUsed2 = (si.mem_total_kb || 0) - (si.mem_available_kb || 0);
+      const memPct2 = si.mem_total_kb ? Math.round(memUsed2 * 100 / si.mem_total_kb) : 0;
+      this.chart('si-mem', {
+        type: 'pie',
+        data: { labels: ['已用', '空闲'], datasets: [{ data: [memUsed2, Math.max(0, (si.mem_total_kb || 0) - memUsed2)],
+          backgroundColor: [self.ringColor(memPct2), '#2b3038'], borderWidth: 0 }] },
+        options: { plugins: { legend: { labels: { color: '#c9ced6', boxWidth: 12 } } }, animation: false }
+      });
+      const cpu = si.cpu || { usage: 0 };
+      this.chart('si-cpu', {
+        type: 'line',
+        data: { labels: self.cpuHist.map((_, i) => i + 1),
+          datasets: [{ data: self.cpuHist, borderColor: '#4a9eff', backgroundColor: 'rgba(74,158,255,.15)',
+            fill: true, pointRadius: 0, tension: .25 }] },
+        options: { scales: { x: { display: false }, y: { min: 0, max: 100,
+          ticks: { color: '#8b929c', callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,.06)' } } },
+          plugins: { legend: { display: false } }, animation: false }
+      });
+      (si.mounts || []).forEach((m, i) => {
+        const used = (m.total_kb || 0) - (m.free_kb || 0);
+        const p = m.total_kb ? Math.round(used * 100 / m.total_kb) : 0;
+        self.chart('si-disk-' + i, {
+          type: 'pie',
+          data: { labels: ['已用', '空闲'], datasets: [{ data: [used, Math.max(0, (m.total_kb || 0) - used)],
+            backgroundColor: [self.ringColor(p), '#2b3038'], borderWidth: 0 }] },
+          options: { plugins: { legend: { labels: { color: '#c9ced6', boxWidth: 12 } } }, animation: false }
+        });
+      });
       const btn = document.getElementById('si-export');
       if (btn) btn.onclick = () => {
         const blob = new Blob([JSON.stringify(si, null, 2)], { type: 'application/json' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = this.devid + '-sysinfo.json';
+        a.download = self.devid + '-sysinfo.json';
         a.click();
         URL.revokeObjectURL(a.href);
       };

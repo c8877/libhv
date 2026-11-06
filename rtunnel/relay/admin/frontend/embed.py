@@ -11,7 +11,8 @@ FILES = [("admin.html", "text/html"),
          ("admin.css", "text/css"),
          ("vendor/xterm.js", "application/javascript"),
          ("vendor/xterm.css", "text/css"),
-         ("vendor/xterm-addon-fit.js", "application/javascript")]
+         ("vendor/xterm-addon-fit.js", "application/javascript"),
+         ("vendor/chart.umd.min.js", "application/javascript")]
 
 
 def main():
