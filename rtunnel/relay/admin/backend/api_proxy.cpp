@@ -19,10 +19,18 @@
 #include <mutex>
 #include <unordered_map>
 #include <random>
+#include <atomic>
 
 namespace {
 
 const size_t MAX_PROXY_BODY = 64 * 1024 * 1024;
+const int MAX_PROXY_ACTIVE = 32;
+std::atomic<int> g_proxy_active{0};
+
+struct ProxyGuard {
+    ProxyGuard() { ++g_proxy_active; }
+    ~ProxyGuard() { --g_proxy_active; }
+};
 
 int tcpConnect(const char* host, int port, int timeout_ms) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -212,6 +220,12 @@ void AdminServer::handleDeviceProxy(const HttpContextPtr& ctx) {
 
     std::string role;
     if (requireRole(ctx, ROLE_VIEWER, role)) return;
+    if (g_proxy_active.load() >= MAX_PROXY_ACTIVE) {
+        ctx->response->status_code = HTTP_STATUS_SERVICE_UNAVAILABLE;
+        ctx->send("{\"error\":\"too many concurrent proxy requests\"}");
+        return;
+    }
+    ProxyGuard guard;
     if (!ownsDevid(devid)) {
         ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
         ctx->send("forbidden");
@@ -363,10 +377,18 @@ void AdminServer::handleDeviceProxy(const HttpContextPtr& ctx) {
         return;
     }
 
+    bool no_body = (status == 204 || status == 304 || ctx->request->method == HTTP_HEAD);
     w->Begin();
+    if (no_body) {
+        w->EndHeaders();
+        close(fd);
+        w->End();
+        return;
+    }
     w->EndHeaders("Transfer-Encoding", "chunked");
+    bool client_gone = false;
     auto emit = [&](const char* d, size_t n) {
-        if (n) w->WriteChunked(d, (int)n);
+        if (n && w->WriteChunked(d, (int)n) < 0) client_gone = true;
     };
     auto feed = [&](const std::string& in) {
         if (!chunked) { emit(in.data(), in.size()); return; }
@@ -393,6 +415,7 @@ void AdminServer::handleDeviceProxy(const HttpContextPtr& ctx) {
     if (!pending.empty()) feed(pending);
     pending.clear();
     while (!done && recvFrame(fd, t, sid, p)) {
+        if (client_gone) break;
         if (t == 0x13 && !p.empty()) {
             sendWindow(fd, 1, (uint32_t)p.size());
             feed(p);
