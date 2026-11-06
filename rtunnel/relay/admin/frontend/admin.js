@@ -200,6 +200,7 @@ const AgentsPage = Object.assign(new Page(), {
       UI.ago(a.last_seen_ms) + ' 前活跃',
       a.streams,
       UI.bytes(a.bytes_in) + ' / ' + UI.bytes(a.bytes_out),
+      '<button class="web" data-devid="' + UI.esc(a.devid) + '">Web</button> ' +
       '<button class="shell" data-devid="' + UI.esc(a.devid) + '">Shell</button> ' +
       ((Auth.me && (Auth.me.role === 'superadmin' || Auth.me.role === 'admin'))
         ? '<button class="bind" data-devid="' + UI.esc(a.devid) + '">绑定</button> ' : '') +
@@ -208,6 +209,14 @@ const AgentsPage = Object.assign(new Page(), {
     this.el.innerHTML = '<div class="panel"><div class="panel-head"><h2>设备（C 侧）</h2>' +
       '<span class="spacer"></span><span>共 ' + arr.length + ' 台 · 5s 自动刷新</span></div>' +
       UI.table(['devid', '状态', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'], rows) + '</div>';
+    document.querySelectorAll('#page button.web').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const port = prompt('设备 Web 端口（需在 agent --allow 列表）', '80');
+        if (!port) return;
+        window.open('/device/' + encodeURIComponent(btn.dataset.devid) + '/' + encodeURIComponent(port) + '/', '_blank');
+      };
+    });
     document.querySelectorAll('#page button.shell').forEach(btn => {
       btn.onclick = (e) => {
         e.stopPropagation();
@@ -281,6 +290,14 @@ const ClientsPage = Object.assign(new Page(), {
     this.el.innerHTML = '<div class="panel"><div class="panel-head"><h2>客户端（A 侧）</h2>' +
       '<span class="spacer"></span><span>共 ' + arr.length + ' 个</span></div>' +
       UI.table(['用户', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'], rows) + '</div>';
+    document.querySelectorAll('#page button.web').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const port = prompt('设备 Web 端口（需在 agent --allow 列表）', '80');
+        if (!port) return;
+        window.open('/device/' + encodeURIComponent(btn.dataset.devid) + '/' + encodeURIComponent(port) + '/', '_blank');
+      };
+    });
     document.querySelectorAll('#page button.shell').forEach(btn => {
       btn.onclick = async () => {
         const user = btn.dataset.user;

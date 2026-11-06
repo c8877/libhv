@@ -392,6 +392,17 @@ void AdminServer::registerRoutes() {
         return 200;
     });
 
+    auto devproxy = [this](const HttpContextPtr& ctx) {
+        handleDeviceProxy(ctx);
+        return (int)ctx->response->status_code;
+    };
+    service_.Handle("GET", "/device/*", devproxy);
+    service_.Handle("POST", "/device/*", devproxy);
+    service_.Handle("PUT", "/device/*", devproxy);
+    service_.Handle("DELETE", "/device/*", devproxy);
+    service_.Handle("OPTIONS", "/device/*", devproxy);
+    service_.Handle("HEAD", "/device/*", devproxy);
+
     service_.GET("/", [this](const HttpContextPtr& ctx) {
         return serveFrontend(ctx, "admin.html", "text/html");
     });

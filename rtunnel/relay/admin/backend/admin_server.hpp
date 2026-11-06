@@ -103,6 +103,8 @@ private:
     void handleUserDelete(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleDeviceList(const HttpContextPtr& ctx);
     void handleDeviceBind(const HttpContextPtr& ctx, const AdminActor& actor);
+    // api_proxy.cpp
+    void handleDeviceProxy(const HttpContextPtr& ctx);
     // api_files.cpp
     void handleFiles(const HttpContextPtr& ctx);
     void handleFileDownload(const HttpContextPtr& ctx);
