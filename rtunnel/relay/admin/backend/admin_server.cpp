@@ -155,6 +155,8 @@ void AdminServer::registerRoutes() {
     viewer("GET", "/api/v1/audit", &AdminServer::handleAudit);
     viewer("GET", "/api/v1/certs", &AdminServer::handleCerts);
     viewer("GET", "/metrics", &AdminServer::handleMetrics);
+    viewer("GET", "/api/v1/files", &AdminServer::handleFiles);
+    viewer("GET", "/api/v1/files/:name", &AdminServer::handleFileDownload);
 
     service_.Handle("DELETE", "/api/v1/streams/:a_sid", [this](const HttpContextPtr& ctx) {
         std::string role;
@@ -205,6 +207,20 @@ void AdminServer::registerRoutes() {
         handleCertSign(ctx, role);
         return 200;
     });
+    service_.Handle("POST", "/api/v1/files/:name", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        if (rc) return rc;
+        handleFileUpload(ctx, role);
+        return 200;
+    });
+    service_.Handle("DELETE", "/api/v1/files/:name", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        if (rc) return rc;
+        handleFileDelete(ctx, role);
+        return 200;
+    });
     service_.Handle("POST", "/api/v1/shutdown", [this](const HttpContextPtr& ctx) {
         std::string role;
         int rc = requireRole(ctx, ROLE_ADMIN, role);
@@ -221,6 +237,12 @@ void AdminServer::registerRoutes() {
     });
     service_.GET("/admin.css", [this](const HttpContextPtr& ctx) {
         return serveFrontend(ctx, "admin.css", "text/css");
+    });
+    service_.GET("/vendor/:name", [this](const HttpContextPtr& ctx) {
+        std::string name = ctx->param("name");
+        std::string ctype = name.size() > 4 && name.compare(name.size() - 4, 4, ".css") == 0
+                                ? "text/css" : "application/javascript";
+        return serveFrontend(ctx, ("vendor/" + name).c_str(), ctype.c_str());
     });
 }
 
@@ -272,6 +294,7 @@ int AdminServer::start(const AdminConfig& cfg) {
     }
 
     registerRoutes();
+    initTerminal();
     server_.setHost(host);
     server_.setPort(port);
     server_.setThreadNum(1);

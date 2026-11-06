@@ -11,6 +11,9 @@ target_link_libraries(rtnp PUBLIC ${HV_LIBRARIES})
 add_library(rtunnel_common STATIC common/tunnel_link.cpp)
 target_link_libraries(rtunnel_common PUBLIC rtnp)
 
+# 嵌入式目标静态链接 C++ 运行时（目标机无 libstdc++ 时使用，如 MP135）
+option(RTUNNEL_STATIC_LIBGCC "静态链接 libstdc++/libgcc" OFF)
+
 # relay 管理台前端：编译期内嵌 admin.html/admin.js/admin.css
 find_package(Python3 COMPONENTS Interpreter)
 set(ADMIN_FRONTEND ${CMAKE_CURRENT_SOURCE_DIR}/relay/admin/frontend)
@@ -18,6 +21,7 @@ set(EMBEDDED_CPP ${CMAKE_CURRENT_BINARY_DIR}/embedded_frontend.cpp)
 add_custom_command(OUTPUT ${EMBEDDED_CPP}
     COMMAND ${Python3_EXECUTABLE} ${ADMIN_FRONTEND}/embed.py ${ADMIN_FRONTEND} ${EMBEDDED_CPP}
     DEPENDS ${ADMIN_FRONTEND}/admin.html ${ADMIN_FRONTEND}/admin.js ${ADMIN_FRONTEND}/admin.css ${ADMIN_FRONTEND}/embed.py
+            ${ADMIN_FRONTEND}/vendor/xterm.js ${ADMIN_FRONTEND}/vendor/xterm.css ${ADMIN_FRONTEND}/vendor/xterm-addon-fit.js
     COMMENT "embed rtunnel admin frontend")
 
 add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_log.cpp
@@ -26,6 +30,8 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
                relay/admin/backend/api_streams.cpp
                relay/admin/backend/api_ops.cpp
                relay/admin/backend/api_certs.cpp
+               relay/admin/backend/api_files.cpp
+               relay/admin/backend/terminal.cpp
                ${EMBEDDED_CPP})
 add_executable(rtunnel-agent  agent/main.cpp agent/agent_app.cpp)
 add_executable(rtunnel-client client/main.cpp client/client_app.cpp)
@@ -35,6 +41,12 @@ target_link_libraries(rtunnel-relay  rtnp)
 target_link_libraries(rtunnel-agent  rtunnel_common)
 target_link_libraries(rtunnel-client rtunnel_common)
 target_link_libraries(rtnp-codec-test rtnp)
+
+if (RTUNNEL_STATIC_LIBGCC)
+    target_link_options(rtunnel-relay  PRIVATE -static-libstdc++ -static-libgcc)
+    target_link_options(rtunnel-agent  PRIVATE -static-libstdc++ -static-libgcc)
+    target_link_options(rtunnel-client PRIVATE -static-libstdc++ -static-libgcc)
+endif()
 
 install(TARGETS rtunnel-relay rtunnel-agent rtunnel-client
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

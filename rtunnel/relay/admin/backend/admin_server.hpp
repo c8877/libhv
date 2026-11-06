@@ -10,9 +10,12 @@
 
 #include "http/server/HttpServer.h"
 #include "http/server/HttpContext.h"
+#include "http/server/WebSocketServer.h"
 
 #include "relay/relay_server.hpp"
 #include "relay/audit_log.hpp"
+
+struct TerminalSession;
 
 struct AdminConfig {
     std::string addr;        // 形如 127.0.0.1:9443
@@ -22,6 +25,11 @@ struct AdminConfig {
     std::string ca_cert;     // 签发用 CA 证书
     std::string ca_key;      // 签发用 CA 私钥
     std::string cert_dir;    // 证书台账目录（index.txt/revoked.txt/audit.log）
+    std::string file_dir;    // 文件管理目录（--admin-file-dir）
+    // Web 终端（--admin-shell-client 启用）：fork A 子进程 + forkpty(ssh)
+    std::string shell_client_path;  // rtunnel-client 路径（空 = 不启用终端）
+    std::string shell_user = "devuser";  // A 子进程登录 relay 的用户（须被 ACL 授权）
+    int         shell_relay_port = 8443; // A 子进程连接的 relay 端口（本机）
 };
 
 class AdminServer {
@@ -30,6 +38,14 @@ public:
 
     int  start(const AdminConfig& cfg);
     void stop();
+
+    // 供 terminal.cpp 等协作模块使用
+    const AdminConfig& config() const { return cfg_; }
+    hv::HttpServer&    httpServer() { return server_; }
+    void auditPublic(const std::string& role, const std::string& action, const std::string& detail) {
+        audit(role, action, detail);
+    }
+    void initTerminal();
 
 private:
     std::string callRelay(std::function<std::string()> fn);
@@ -59,6 +75,11 @@ private:
     void handleCertSign(const HttpContextPtr& ctx, const std::string& role);
     void handleShutdown(const HttpContextPtr& ctx, const std::string& role);
     void handleMetrics(const HttpContextPtr& ctx);
+    // api_files.cpp
+    void handleFiles(const HttpContextPtr& ctx);
+    void handleFileDownload(const HttpContextPtr& ctx);
+    void handleFileUpload(const HttpContextPtr& ctx, const std::string& role);
+    void handleFileDelete(const HttpContextPtr& ctx, const std::string& role);
 
     RelayServer*    relay_;
     hv::HttpService service_;
@@ -66,6 +87,13 @@ private:
     AdminConfig     cfg_;
     std::unordered_map<std::string, std::string> users_;   // token -> role
     AuditLog        audit_;
+
+    // Web 终端
+    hv::WebSocketService ws_service_;
+    std::map<hv::WebSocketChannel*, std::shared_ptr<TerminalSession>> terms_;
+    void onWsOpen(const WebSocketChannelPtr& channel, const HttpRequestPtr& req);
+    void onWsMessage(const WebSocketChannelPtr& channel, const std::string& msg);
+    void onWsClose(const WebSocketChannelPtr& channel);
 };
 
 // 角色权重：viewer=1 operator=2 admin=3

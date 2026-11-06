@@ -8,7 +8,10 @@ import sys
 
 FILES = [("admin.html", "text/html"),
          ("admin.js", "application/javascript"),
-         ("admin.css", "text/css")]
+         ("admin.css", "text/css"),
+         ("vendor/xterm.js", "application/javascript"),
+         ("vendor/xterm.css", "text/css"),
+         ("vendor/xterm-addon-fit.js", "application/javascript")]
 
 
 def main():

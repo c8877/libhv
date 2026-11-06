@@ -107,6 +107,10 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
   `POST /api/v1/certs/sign`（上传 CSR 签名，私钥不出设备，身份取 SAN 缺省回退 CN）、
   `POST /api/v1/certs/revoke`（吊销即刻生效：踢在线连接 + 后续 AUTH 拒绝）；
 - 其它：`GET /metrics`（Prometheus 文本指标）、`POST /api/v1/shutdown`（复用 drain 优雅退出）；
+- 文件管理：`GET /api/v1/files?sort=name|size|mtime&order=asc|desc`（列表+排序）、
+  `POST /api/v1/files/{name}`（raw body 上传，≤32MiB）、`GET /api/v1/files/{name}`（下载）、
+  `DELETE /api/v1/files/{name}`（删除）；目录由 `--admin-file-dir D` 指定，
+  文件名白名单防目录穿越，写入走 tmp+rename 原子替换；viewer 可读、operator 可写；
 - 前端：`http://127.0.0.1:9443/`（侧边栏 + hash 路由；`admin.html/admin.js/admin.css`
   编译期内嵌，`--admin-docroot DIR` 可改为磁盘读取便于调试）；
 - 鉴权与角色：`--admin-token T`（全权）或 `--admin-users F`（每行 `token:role`，

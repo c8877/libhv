@@ -97,6 +97,7 @@ const Router = {
     { hash: '#/streams', title: '会话', icon: '⇄' },
     { hash: '#/certs', title: '证书', icon: '⚿' },
     { hash: '#/acl', title: 'ACL', icon: '☰' },
+    { hash: '#/files', title: '文件', icon: '⬇' },
     { hash: '#/audit', title: '审计', icon: '≣' },
   ],
   register(re, page, title) { this.routes.push({ re, page, title }); },
@@ -180,11 +181,18 @@ const AgentsPage = Object.assign(new Page(), {
       UI.ago(a.last_seen_ms) + ' 前活跃',
       a.streams,
       UI.bytes(a.bytes_in) + ' / ' + UI.bytes(a.bytes_out),
+      '<button class="term" data-devid="' + UI.esc(a.devid) + '">终端</button> ' +
       '<button class="kick" data-devid="' + UI.esc(a.devid) + '">下线</button>',
     ]);
     this.el.innerHTML = '<div class="panel"><div class="panel-head"><h2>设备（C 侧）</h2>' +
       '<span class="spacer"></span><span>共 ' + arr.length + ' 台 · 5s 自动刷新</span></div>' +
       UI.table(['devid', '状态', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'], rows) + '</div>';
+    document.querySelectorAll('#page button.term').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        Router.go('#/terminal/' + encodeURIComponent(btn.dataset.devid));
+      };
+    });
     document.querySelectorAll('#page tbody tr').forEach((tr, i) => {
       tr.onclick = () => Router.go('#/agents/' + encodeURIComponent(arr[i].devid));
     });
@@ -391,6 +399,123 @@ const AuditPage = Object.assign(new Page(), {
   },
 });
 
+// ---------------------------------------------------------------- Pages.文件
+const FilesPage = Object.assign(new Page(), {
+  enter(el, params, hash) {
+    const q = new URLSearchParams((hash || '').split('?')[1] || '');
+    this.sort = q.get('sort') || 'name';
+    this.order = q.get('order') || 'asc';
+    return Page.prototype.enter.call(this, el, params, hash);
+  },
+  sortLink(field, label) {
+    let order = 'asc';
+    if (this.sort === field) order = this.order === 'asc' ? 'desc' : 'asc';
+    const cur = this.sort === field ? (this.order === 'asc' ? ' ▲' : ' ▼') : '';
+    return '<a href="#/files?sort=' + field + '&order=' + order +
+      '" style="color:inherit;text-decoration:none">' + label + cur + '</a>';
+  },
+  async refresh() {
+    const arr = await Api.get('/api/v1/files?sort=' + this.sort + '&order=' + this.order);
+    const rows = arr.map(f => [
+      '<b>' + UI.esc(f.name) + '</b>', UI.bytes(f.size),
+      new Date(f.mtime_ms).toLocaleString(),
+      '<button class="dl" data-name="' + UI.esc(f.name) + '">下载</button> ' +
+      '<button class="del" data-name="' + UI.esc(f.name) + '">删除</button>',
+    ]);
+    this.el.innerHTML =
+      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>上传文件</h2></div>' +
+      '<div style="padding:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+      '<input type="file" id="upload-input"> <button class="primary" id="upload-btn">上传</button>' +
+      '<span id="upload-status" style="color:var(--muted)"></span></div></div>' +
+      '<div class="panel"><div class="panel-head"><h2>文件列表</h2><span class="spacer"></span>' +
+      '<span>共 ' + arr.length + ' 个</span></div>' +
+      UI.table([this.sortLink('name', '名称'), this.sortLink('size', '大小'),
+                this.sortLink('mtime', '修改时间'), '操作'], rows) + '</div>';
+
+    document.getElementById('upload-btn').onclick = async () => {
+      const fi = document.getElementById('upload-input').files[0];
+      if (!fi) { UI.toast('请选择文件', true); return; }
+      const status = document.getElementById('upload-status');
+      status.textContent = '上传中…';
+      try {
+        const headers = { 'X-Requested-With': 'fetch' };
+        if (Api.token) headers['Authorization'] = 'Bearer ' + Api.token;
+        const r = await fetch('/api/v1/files/' + encodeURIComponent(fi.name),
+          { method: 'POST', headers, body: fi });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        status.textContent = '已上传 ' + fi.name + '（' + UI.bytes(fi.size) + '）';
+        this.refresh();
+      } catch (e) { status.textContent = ''; UI.toast('上传失败：' + e.message, true); }
+    };
+    document.querySelectorAll('#page button.dl').forEach(btn => {
+      btn.onclick = async () => {
+        try {
+          const headers = {};
+          if (Api.token) headers['Authorization'] = 'Bearer ' + Api.token;
+          const r = await fetch('/api/v1/files/' + encodeURIComponent(btn.dataset.name), { headers });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const blob = await r.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = btn.dataset.name;
+          a.click();
+          URL.revokeObjectURL(url);
+        } catch (e) { UI.toast('下载失败：' + e.message, true); }
+      };
+    });
+    document.querySelectorAll('#page button.del').forEach(btn => {
+      btn.onclick = async () => {
+        if (!confirm('删除 ' + btn.dataset.name + '？')) return;
+        try {
+          await Api.del('/api/v1/files/' + encodeURIComponent(btn.dataset.name));
+          UI.toast('已删除 ' + btn.dataset.name);
+          this.refresh();
+        } catch (e) { UI.toast('删除失败：' + e.message, true); }
+      };
+    });
+  },
+});
+
+// ---------------------------------------------------------------- Pages.终端（xterm.js + WebSocket）
+const TerminalPage = Object.assign(new Page(), {
+  enter(el, params) {
+    this.devid = decodeURIComponent(params[0] || '');
+    el.innerHTML = '<div class="panel"><div class="panel-head"><h2>终端：' + UI.esc(this.devid) + '</h2>' +
+      '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">密码在终端内由 SSH 提示输入</span>' +
+      '<button id="term-close">关闭</button></div>' +
+      '<div id="term" style="height:calc(100vh - 220px);background:#000;padding:8px"></div></div>';
+
+    this.term = new Terminal({ cursorBlink: true, fontSize: 14 });
+    this.fit = new FitAddon.FitAddon();
+    this.term.loadAddon(this.fit);
+    this.term.open(document.getElementById('term'));
+    this.fit.fit();
+
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    this.ws = new WebSocket(proto + '://' + location.host + '/ws/terminal?devid=' +
+      encodeURIComponent(this.devid) + '&user=root&token=' + encodeURIComponent(Api.token));
+    this.ws.onmessage = (e) => this.term.write(e.data);
+    this.ws.onclose = () => this.term.write('\r\n[连接已关闭]\r\n');
+    this.term.onData(d => { if (this.ws.readyState === 1) this.ws.send(d); });
+    this.term.onResize(({ cols, rows }) => {
+      if (this.ws.readyState === 1) this.ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+    });
+    this._rs = () => this.fit.fit();
+    window.addEventListener('resize', this._rs);
+    document.getElementById('term-close').onclick = () => {
+      this.ws.close();
+      Router.go('#/agents');
+    };
+  },
+  leave() {
+    if (this.ws) this.ws.close();
+    if (this._rs) window.removeEventListener('resize', this._rs);
+    if (this.term) this.term.dispose();
+    if (this.timer) clearInterval(this.timer);
+  },
+});
+
 // ---------------------------------------------------------------- 启动
 Router.register(/^#\/overview$/, OverviewPage, '概览');
 Router.register(/^#\/agents$/, AgentsPage, '设备 C');
@@ -400,5 +525,7 @@ Router.register(/^#\/streams$/, StreamsPage, '会话');
 Router.register(/^#\/certs$/, CertsPage, '证书');
 Router.register(/^#\/acl$/, AclPage, 'ACL');
 Router.register(/^#\/audit$/, AuditPage, '审计');
+Router.register(/^#\/files(?:\?.*)?$/, FilesPage, '文件');
+Router.register(/^#\/terminal\/([^/]+)$/, TerminalPage, '终端');
 if (!location.hash) location.hash = '#/overview';
 Router.start();

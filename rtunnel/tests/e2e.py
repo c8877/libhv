@@ -251,6 +251,12 @@ def main():
     certout = os.path.join(logdir, "certs")
     shutil.rmtree(certout, ignore_errors=True)   # 台账/revoked 每次重跑清空
     os.makedirs(certout, exist_ok=True)
+    filedir = os.path.join(logdir, "files")
+    shutil.rmtree(filedir, ignore_errors=True)
+    os.makedirs(filedir, exist_ok=True)
+    usersfile = os.path.join(logdir, "admin_users")
+    with open(usersfile, "w") as f:
+        f.write("viewertok:viewer\nopertok:operator\n")
     tls_relay, tls_agent, tls_tester, tls_bob = [], [], [], []
     if tls or mtls:
         certdir = os.path.join(logdir, "cert")
@@ -302,8 +308,9 @@ def main():
             [os.path.join(BIN, "rtunnel-relay"), "--host", "127.0.0.1", "--port", str(relay_port),
              "--acl", "tester=*", "--acl-file", aclfile, "--drain-timeout", "500",
              "--admin", "127.0.0.1:%d" % admin_port,
+             "--admin-token", "admintok", "--admin-users", usersfile,
              "--admin-ca-cert", admin_ca_crt, "--admin-ca-key", admin_ca_key,
-             "--admin-cert-dir", certout] + tls_relay + ["--verbose"],
+             "--admin-cert-dir", certout, "--admin-file-dir", filedir] + tls_relay + ["--verbose"],
             stdout=logs["relay"], stderr=subprocess.STDOUT, env=env)
         procs.append(relay)
         time.sleep(0.3)
@@ -512,8 +519,10 @@ def main():
         import urllib.request
         admin_base = "http://127.0.0.1:%d" % admin_port
 
-        def admin_get(path):
-            with urllib.request.urlopen(admin_base + path, timeout=5) as r:
+        def admin_get(path, token="admintok"):
+            req = urllib.request.Request(admin_base + path)
+            req.add_header("Authorization", "Bearer " + token)
+            with urllib.request.urlopen(req, timeout=5) as r:
                 return json_mod.loads(r.read().decode())
 
         try:
@@ -544,9 +553,10 @@ def main():
             check("admin 管理台", False, str(e))
 
         # 11. admin 操作面：踢会话 / 设备下线重连 / ACL 读写
-        def admin_req(method, path, body=None):
+        def admin_req(method, path, body=None, token="admintok"):
             data = json_mod.dumps(body).encode() if body is not None else None
             req = urllib.request.Request(admin_base + path, data=data, method=method)
+            req.add_header("Authorization", "Bearer " + token)
             if data:
                 req.add_header("Content-Type", "application/json")
             with urllib.request.urlopen(req, timeout=5) as r:
@@ -578,8 +588,14 @@ def main():
         check("ACL PUT 撤销后 bob 再拒", rep == 0x02, "rep=0x%02x" % rep)
 
         admin_req("POST", "/api/v1/agents/dev1/kick")
-        time.sleep(2.0)   # agent 退避 1s 后重连
-        s, rep = socks5_open(socks1, "dev1", echo_port)
+        # 等设备重新注册上线（kick 后 agent 退避重连，轮询最多 8s）
+        rep = -1
+        s = None
+        for _ in range(16):
+            time.sleep(0.5)
+            s, rep = socks5_open(socks1, "dev1", echo_port)
+            if rep == 0x00:
+                break
         check("agent 被踢后自动重连", rep == 0x00, "rep=0x%02x" % rep)
         if s:
             s.close()
@@ -636,9 +652,51 @@ def main():
             ok = wait_log(os.path.join(logdir, "agent900002.log"), "authenticated as PILE-900002", 8)
             check("CSR 签出证书可注册上线", ok)
 
-        with urllib.request.urlopen(admin_base + "/metrics", timeout=5) as r:
+        req = urllib.request.Request(admin_base + "/metrics")
+        req.add_header("Authorization", "Bearer admintok")
+        with urllib.request.urlopen(req, timeout=5) as r:
             metrics = r.read().decode()
         check("/metrics", "rtunnel_agents" in metrics and "rtunnel_bytes_in_total" in metrics)
+
+        # 文件管理：上传/列表/排序/下载/删除 + 角色权限
+        def upload(name, data, token="admintok"):
+            req = urllib.request.Request(admin_base + "/api/v1/files/" + name, data=data, method="POST")
+            req.add_header("Authorization", "Bearer " + token)
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return json_mod.loads(r.read().decode())
+
+        fl = admin_get("/api/v1/files", token="viewertok")
+        check("viewer 可读文件列表", isinstance(fl, list))
+        try:
+            upload("denied.txt", b"x", token="viewertok")
+            check("viewer 上传被拒(403)", False, "unexpected success")
+        except urllib.error.HTTPError as e:
+            check("viewer 上传被拒(403)", e.code == 403, "code=%d" % e.code)
+        try:
+            admin_req("POST", "/api/v1/certs/issue", {"san": "PILE-999999", "days": 30}, token="opertok")
+            check("operator 签发被拒(403)", False, "unexpected success")
+        except urllib.error.HTTPError as e:
+            check("operator 签发被拒(403)", e.code == 403, "code=%d" % e.code)
+
+        upload("a-small.txt", b"hello")
+        upload("b-large.bin", bytes(range(256)) * 8)   # 2048B
+        fl = admin_get("/api/v1/files?sort=size&order=desc")
+        check("文件列表+按大小降序", len(fl) == 2 and fl[0]["name"] == "b-large.bin", str(fl))
+        fl = admin_get("/api/v1/files?sort=name&order=asc")
+        check("按名称升序", fl[0]["name"] == "a-small.txt", str(fl))
+        req = urllib.request.Request(admin_base + "/api/v1/files/b-large.bin")
+        req.add_header("Authorization", "Bearer admintok")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            data = r.read()
+        check("下载内容一致", data == bytes(range(256)) * 8)
+        admin_req("DELETE", "/api/v1/files/a-small.txt")
+        fl = admin_get("/api/v1/files")
+        check("删除后列表", len(fl) == 1 and fl[0]["name"] == "b-large.bin", str(fl))
+        try:
+            upload("..%2Fescape", b"x")
+            check("目录穿越被拒", False, "unexpected success")
+        except urllib.error.HTTPError as e:
+            check("目录穿越被拒", e.code in (400, 404), "code=%d" % e.code)
 
         au = admin_get("/api/v1/audit")
         check("审计日志", any("certs.issue" in x for x in au) and any("certs.revoke" in x for x in au), str(au)[:120])
