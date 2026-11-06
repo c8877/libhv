@@ -12,8 +12,10 @@ const Api = {
     if (this.token) headers['Authorization'] = 'Bearer ' + this.token;
     const r = await fetch(path, Object.assign({ cache: 'no-store' }, opt, { headers }));
     if (r.status === 401) {
-      const t = prompt('需要 admin token（Bearer）：');
-      if (t) { this.token = t; localStorage.setItem('rt_admin_token', t); return this.req(path, opt); }
+      // 账号体系下不再弹 token；回到登录页
+      this.token = '';
+      localStorage.removeItem('rt_admin_token');
+      if (typeof Auth !== 'undefined' && Auth.me) location.reload();
       throw new Error('unauthorized');
     }
     if (!r.ok) {

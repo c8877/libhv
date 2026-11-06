@@ -165,6 +165,7 @@ void AdminServer::audit(const std::string& role, const std::string& action, cons
 // ---------------------------------------------------------------- 前端
 
 int AdminServer::serveFrontend(const HttpContextPtr& ctx, const char* name, const char* ctype) {
+    ctx->response->headers["Cache-Control"] = "no-store";
     if (!cfg_.docroot.empty()) {
         std::string path = cfg_.docroot + "/" + name;
         FILE* fp = fopen(path.c_str(), "rb");
