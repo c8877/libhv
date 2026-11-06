@@ -58,17 +58,78 @@ std::string AdminServer::callRelay(std::function<std::string()> fn) {
 
 // ---------------------------------------------------------------- 鉴权与角色
 
-std::string AdminServer::roleOf(const HttpContextPtr& ctx) {
-    // 回环且未配置任何凭据：本机即信任域，全权
-    if (cfg_.token.empty() && users_.empty()) return "admin";
+thread_local AdminActor tl_actor;
 
-    std::string auth = ctx->header("Authorization");
-    const std::string prefix = "Bearer ";
-    if (auth.compare(0, prefix.size(), prefix) != 0) return "";
-    std::string tok = auth.substr(prefix.size());
-    if (!cfg_.token.empty() && tok == cfg_.token) return "admin";
-    auto it = users_.find(tok);
-    if (it != users_.end()) return it->second;
+static std::string cookieValue(const HttpContextPtr& ctx, const std::string& key) {
+    const HttpCookie& ck = ctx->request->GetCookie(key.c_str());
+    if (!ck.name.empty()) return ck.value;
+    std::string c = ctx->header("Cookie");
+    size_t pos = 0;
+    while (pos < c.size()) {
+        size_t semi = c.find(';', pos);
+        std::string item = c.substr(pos, semi == std::string::npos ? std::string::npos : semi - pos);
+        size_t eq = item.find('=');
+        if (eq != std::string::npos) {
+            std::string k = item.substr(0, eq);
+            while (!k.empty() && (k[0] == ' ' || k[0] == '\t')) k.erase(0, 1);
+            if (k == key) return item.substr(eq + 1);
+        }
+        if (semi == std::string::npos) break;
+        pos = semi + 1;
+    }
+    return "";
+}
+
+std::string AdminServer::roleOf(const HttpContextPtr& ctx) {
+    tl_actor = AdminActor{};
+
+    // 1) 会话 Cookie
+    std::string sid = cookieValue(ctx, "rt_sid");
+    if (!sid.empty() && db_.ok()) {
+        DbUser u;
+        bool got = db_.getSession(AdminDb::sha256Hex(sid), u, AdminDb::nowMs());
+        if (got) {
+            tl_actor.id = u.id;
+            tl_actor.username = u.username;
+            tl_actor.role = u.role;
+            if (u.role == "superadmin") return "admin";
+            if (u.role == "admin") return "operator";
+            return "viewer";
+        }
+    }
+
+    // 2) 首次初始化前，或显式配置了紧急 token 时，允许 Bearer
+    bool initialized = db_.ok() && db_.initialized();
+    if (!cfg_.token.empty() || !users_.empty()) {
+        std::string auth = ctx->header("Authorization");
+        const std::string prefix = "Bearer ";
+        if (auth.compare(0, prefix.size(), prefix) == 0) {
+            std::string tok = auth.substr(prefix.size());
+            if (!cfg_.token.empty() && tok == cfg_.token) {
+                bool allow = !initialized || (!cfg_.emergency_token.empty() && tok == cfg_.emergency_token);
+                if (allow && !initialized) {
+                    // 初始化窗口只放行 setup 相关接口，其余仍需账号登录
+                    const std::string& path = ctx->request->path;
+                    if (path.find("/api/v1/setup") != 0) allow = false;
+                }
+                if (allow) {
+                    tl_actor.username = "bootstrap";
+                    tl_actor.role = "superadmin";
+                    return "admin";
+                }
+            }
+            auto it = users_.find(tok);
+            if (it != users_.end()) {
+                tl_actor.username = "token";
+                tl_actor.role = it->second;
+                return it->second;
+            }
+        }
+        return "";
+    }
+
+    // 3) 完全没配凭据且未初始化：回环信任域（开发模式）
+    if (!initialized) return "admin";
     return "";
 }
 
@@ -229,6 +290,73 @@ void AdminServer::registerRoutes() {
         return 200;
     });
 
+    // 账号/会话（公开接口由 handler 自己校验）
+    service_.Handle("GET", "/api/v1/setup/status", [this](const HttpContextPtr& ctx) {
+        handleSetupStatus(ctx); return (int)ctx->response->status_code;
+    });
+    service_.Handle("POST", "/api/v1/setup", [this](const HttpContextPtr& ctx) {
+        handleSetup(ctx); return (int)ctx->response->status_code;
+    });
+    service_.Handle("POST", "/api/v1/login", [this](const HttpContextPtr& ctx) {
+        handleLogin(ctx); return (int)ctx->response->status_code;
+    });
+    service_.Handle("POST", "/api/v1/logout", [this](const HttpContextPtr& ctx) {
+        handleLogout(ctx); return (int)ctx->response->status_code;
+    });
+    service_.Handle("GET", "/api/v1/me", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_VIEWER, role);
+        if (rc) return rc;
+        handleMe(ctx); return (int)ctx->response->status_code;
+    });
+    service_.Handle("GET", "/api/v1/users", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        if (rc) return rc;
+        handleUsers(ctx); return (int)ctx->response->status_code;
+    });
+    service_.Handle("POST", "/api/v1/users", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        if (rc) return rc;
+        handleUserCreate(ctx, currentActor());
+        return 200;
+    });
+    service_.Handle("PUT", "/api/v1/users/:id/password", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_VIEWER, role);
+        if (rc) return rc;
+        handleUserPassword(ctx, currentActor());
+        return 200;
+    });
+    service_.Handle("PUT", "/api/v1/users/:id/status", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        if (rc) return rc;
+        handleUserStatus(ctx, currentActor());
+        return 200;
+    });
+    service_.Handle("DELETE", "/api/v1/users/:id", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        if (rc) return rc;
+        handleUserDelete(ctx, currentActor());
+        return 200;
+    });
+    service_.Handle("GET", "/api/v1/devices", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        if (rc) return rc;
+        handleDeviceList(ctx); return (int)ctx->response->status_code;
+    });
+    service_.Handle("PUT", "/api/v1/devices/:devid/owner", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        if (rc) return rc;
+        handleDeviceBind(ctx, currentActor());
+        return 200;
+    });
+
     service_.GET("/", [this](const HttpContextPtr& ctx) {
         return serveFrontend(ctx, "admin.html", "text/html");
     });
@@ -248,6 +376,15 @@ void AdminServer::registerRoutes() {
 
 int AdminServer::start(const AdminConfig& cfg) {
     cfg_ = cfg;
+
+    {
+        std::string db_err;
+        if (db_.open(cfg_.db_path, db_err)) {
+            logf_("[admin] db: %s", cfg_.db_path.c_str());
+        } else {
+            logf_("[admin] db open failed: %s (%s)", cfg_.db_path.c_str(), db_err.c_str());
+        }
+    }
 
     // 账户文件：每行 token:role（viewer/operator/admin），# 注释
     if (!cfg_.users.empty()) {

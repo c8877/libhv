@@ -121,6 +121,27 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 - 线程模型：HTTP 在 admin worker 线程，relay 状态访问经 `hloop_post_event` 投递回
   relay 线程执行（promise/future 同步），relay 数据无锁。
 
+## 账号与权限（SQLite）
+
+管理台账号存 SQLite（`--admin-db`，默认 `rtunnel-admin.db`），**需要 OpenSSL 构建**（PBKDF2 口令哈希）。
+
+- **首次部署**：浏览器打开管理台 → 初始化页输入 `--admin-token` + 超管用户名/密码 → 创建 superadmin；
+  初始化前 token 只能访问 `/api/v1/setup*`
+- **之后登录**：用户名 + 密码，服务端会话（HttpOnly Cookie，12h），不再用 token
+- **紧急入口**：`--admin-emergency-token T` 保留 Bearer token 登录（默认关）
+- **角色**：
+  | 角色 | 权限 |
+  |---|---|
+  | superadmin | 全部：账号/设备绑定/证书/ACL/文件/审计 |
+  | admin | 创建普通账号、绑定设备、踢会话、文件、审计（不能签发证书/改 ACL） |
+  | user | 只看绑定到自己账号的设备/会话，Shell 需账号有权限且设备开 `--allow-shell` |
+- **设备归属**：`PUT /api/v1/devices/{devid}/owner {"username":"alice"}`（空串=解绑）；
+  普通账号的设备/会话列表按归属过滤，未绑定设备仅 admin 可见
+- **账号 API**：`GET/POST /api/v1/users`、`PUT /api/v1/users/{id}/password|status`、
+  `DELETE /api/v1/users/{id}`；`POST /api/v1/login|logout`、`GET /api/v1/me`
+- 口令策略：最短 8 位；连续 5 次失败锁定 5 分钟；改密/禁用会吊销该账号全部会话
+- 旧 `--admin-users token:role` 仍兼容（可作为服务账号）
+
 ## Web 终端（免密）
 
 「设备 C」「客户端 A」列表的 Shell 入口：admin 作为 RTNP client 直连本机 relay，
@@ -165,7 +186,9 @@ build/bin/rtunnel-client --server B --port 8443 --user alice --token <token> \
 | `--shell-users u1,u2` / `*` | 允许 `OPEN_SHELL` 的用户；默认空 = 全部拒绝 |
 | `--tls-cert/--tls-key [--tls-ca]` | 服务端 TLS；给 `--tls-ca` 即要求客户端证书（mTLS） |
 | `--admin ADDR --admin-token T` | 管理台监听与 Bearer token |
-| `--admin-users F` | 每行 `token:role`（viewer/operator/admin） |
+| `--admin-users F` | 每行 `token:role`（viewer/operator/admin，兼容旧配置） |
+| `--admin-db PATH` | SQLite 账号库，默认 `rtunnel-admin.db`（需 OpenSSL 构建） |
+| `--admin-emergency-token T` | 初始化后仍允许该 token 登录（紧急恢复，默认关） |
 | `--admin-shell-user U --admin-shell-token T` | Web 终端连本机 relay 的身份与凭证 |
 | `--admin-ca-cert/--admin-ca-key/--admin-cert-dir` | 证书签发 CA 与台账目录 |
 | `--admin-file-dir` / `--admin-docroot` | 文件管理目录 / 前端磁盘目录 |

@@ -101,13 +101,21 @@ const Router = {
     { hash: '#/streams', title: '会话', icon: '⇄' },
     { hash: '#/certs', title: '证书', icon: '⚿' },
     { hash: '#/acl', title: 'ACL', icon: '☰' },
+    { hash: '#/accounts', title: '账号', icon: '☺' },
     { hash: '#/files', title: '文件', icon: '⬇' },
     { hash: '#/audit', title: '审计', icon: '≣' },
   ],
   register(re, page, title) { this.routes.push({ re, page, title }); },
   go(h) { location.hash = h; },
   renderNav(activeHash) {
-    document.getElementById('nav').innerHTML = this.nav.map(n =>
+    const role = (typeof Auth !== 'undefined' && Auth.me && Auth.me.role) || 'superadmin';
+    const allow = role === 'user'
+      ? ['#/overview', '#/agents', '#/streams']
+      : role === 'admin'
+        ? ['#/overview', '#/agents', '#/clients', '#/streams', '#/accounts', '#/files', '#/audit']
+        : null;
+    const navs = allow ? this.nav.filter(n => allow.indexOf(n.hash) >= 0) : this.nav;
+    document.getElementById('nav').innerHTML = navs.map(n =>
       '<a href="' + n.hash + '"' + (activeHash.indexOf(n.hash) === 0 ? ' class="active"' : '') + '>' +
       '<span>' + n.icon + '</span><span class="txt">' + n.title + '</span></a>').join('');
   },
@@ -187,6 +195,8 @@ const AgentsPage = Object.assign(new Page(), {
       a.streams,
       UI.bytes(a.bytes_in) + ' / ' + UI.bytes(a.bytes_out),
       '<button class="shell" data-devid="' + UI.esc(a.devid) + '">Shell</button> ' +
+      ((Auth.me && (Auth.me.role === 'superadmin' || Auth.me.role === 'admin'))
+        ? '<button class="bind" data-devid="' + UI.esc(a.devid) + '">绑定</button> ' : '') +
       '<button class="kick" data-devid="' + UI.esc(a.devid) + '">下线</button>',
     ]);
     this.el.innerHTML = '<div class="panel"><div class="panel-head"><h2>设备（C 侧）</h2>' +
@@ -200,6 +210,17 @@ const AgentsPage = Object.assign(new Page(), {
     });
     document.querySelectorAll('#page tbody tr').forEach((tr, i) => {
       tr.onclick = () => Router.go('#/agents/' + encodeURIComponent(arr[i].devid));
+    });
+    document.querySelectorAll('#page button.bind').forEach(btn => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const owner = prompt('绑定到账号（留空 = 解绑）', '');
+        if (owner === null) return;
+        try {
+          await Api.put('/api/v1/devices/' + encodeURIComponent(btn.dataset.devid) + '/owner', { username: owner });
+          UI.toast(owner ? ('已绑定到 ' + owner) : '已解绑');
+        } catch (err) { UI.toast('绑定失败：' + err.message, true); }
+      };
     });
     document.querySelectorAll('#page button.kick').forEach(btn => {
       btn.onclick = async (e) => {
@@ -282,6 +303,17 @@ const StreamsPage = Object.assign(new Page(), {
     this.el.innerHTML = '<div class="panel"><div class="panel-head"><h2>会话</h2>' +
       '<span class="spacer"></span><span>共 ' + arr.length + ' 条</span></div>' +
       UI.table(['A 用户:a_sid', 'C 设备:c_sid', '状态', '开启于', '操作'], rows) + '</div>';
+    document.querySelectorAll('#page button.bind').forEach(btn => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const owner = prompt('绑定到账号（留空 = 解绑）', '');
+        if (owner === null) return;
+        try {
+          await Api.put('/api/v1/devices/' + encodeURIComponent(btn.dataset.devid) + '/owner', { username: owner });
+          UI.toast(owner ? ('已绑定到 ' + owner) : '已解绑');
+        } catch (err) { UI.toast('绑定失败：' + err.message, true); }
+      };
+    });
     document.querySelectorAll('#page button.kick').forEach(btn => {
       btn.onclick = async () => {
         if (!confirm('踢掉会话 a_sid=' + btn.dataset.sid + '？（双侧 RESET）')) return;
@@ -583,12 +615,125 @@ const TerminalPage = Object.assign(new Page(), {
 Router.register(/^#\/overview$/, OverviewPage, '概览');
 Router.register(/^#\/agents$/, AgentsPage, '设备 C');
 Router.register(/^#\/agents\/([^/]+)$/, AgentDetailPage, '设备详情');
+// ---------------------------------------------------------------- Pages.账号
+const AccountsPage = Object.assign(new Page(), {
+  refreshInterval() { return 0; },
+  async refresh() {
+    const me = Auth.me || {};
+    const arr = await Api.get('/api/v1/users');
+    const rows = arr.map(u => {
+      let ops = '<button class="pw" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">改密</button> ';
+      if (me.role === 'superadmin' || (me.role === 'admin' && u.role === 'user')) {
+        ops += '<button class="st" data-id="' + u.id + '" data-st="' + (u.status === 'active' ? 'disabled' : 'active') + '">' +
+               (u.status === 'active' ? '禁用' : '启用') + '</button> ';
+        ops += '<button class="del" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">删除</button>';
+      }
+      return ['<b>' + UI.esc(u.username) + '</b>', UI.esc(u.role), UI.esc(u.status),
+              new Date(u.created_ms).toLocaleString(), ops];
+    });
+    const roleOpts = me.role === 'superadmin'
+      ? '<option value="user">普通账号</option><option value="admin">管理员</option>'
+      : '<option value="user">普通账号</option>';
+    this.el.innerHTML =
+      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>创建账号</h2></div>' +
+      '<div style="padding:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+      '<input id="nu-name" placeholder="用户名" size="14"> ' +
+      '<input id="nu-pass" type="password" placeholder="密码（≥8位）" size="16"> ' +
+      '<select id="nu-role">' + roleOpts + '</select> ' +
+      '<button class="primary" id="nu-btn">创建</button><span id="nu-result" style="color:var(--muted)"></span></div></div>' +
+      '<div class="panel"><div class="panel-head"><h2>账号列表</h2><span class="spacer"></span>' +
+      '<span>共 ' + arr.length + ' 个</span></div>' +
+      UI.table(['用户名', '角色', '状态', '创建时间', '操作'], rows) + '</div>';
+
+    document.getElementById('nu-btn').onclick = async () => {
+      const username = document.getElementById('nu-name').value.trim();
+      const password = document.getElementById('nu-pass').value;
+      const role = document.getElementById('nu-role').value;
+      try {
+        await Api.post('/api/v1/users', { username, password, role });
+        UI.toast('已创建 ' + username);
+        this.refresh();
+      } catch (e) { UI.toast('创建失败：' + e.message, true); }
+    };
+    document.querySelectorAll('#page button.pw').forEach(btn => {
+      btn.onclick = async () => {
+        const p = prompt('新密码（' + btn.dataset.name + '，≥8位）');
+        if (!p) return;
+        try { await Api.put('/api/v1/users/' + btn.dataset.id + '/password', { new_password: p }); UI.toast('已修改'); }
+        catch (e) { UI.toast('失败：' + e.message, true); }
+      };
+    });
+    document.querySelectorAll('#page button.st').forEach(btn => {
+      btn.onclick = async () => {
+        try { await Api.put('/api/v1/users/' + btn.dataset.id + '/status', { status: btn.dataset.st }); this.refresh(); }
+        catch (e) { UI.toast('失败：' + e.message, true); }
+      };
+    });
+    document.querySelectorAll('#page button.del').forEach(btn => {
+      btn.onclick = async () => {
+        if (!confirm('删除账号 ' + btn.dataset.name + '？（设备会自动解绑）')) return;
+        try { await Api.del('/api/v1/users/' + btn.dataset.id); this.refresh(); }
+        catch (e) { UI.toast('失败：' + e.message, true); }
+      };
+    });
+  },
+});
+
+// ---------------------------------------------------------------- 认证引导
+const Auth = { me: null };
+
+function authForm(kind) {
+  const nav = document.getElementById('nav');
+  if (nav) nav.innerHTML = '';
+  const el = document.getElementById('page');
+  const isSetup = kind === 'setup';
+  el.innerHTML = '<div class="panel" style="max-width:420px;margin:60px auto"><div class="panel-head"><h2>' +
+    (isSetup ? '初始化超级管理员' : '登录') + '</h2></div><div style="padding:20px;display:flex;flex-direction:column;gap:10px">' +
+    (isSetup ? '<input id="af-token" placeholder="部署 token" type="password">' : '') +
+    '<input id="af-user" placeholder="用户名" autocomplete="username">' +
+    '<input id="af-pass" placeholder="密码" type="password" autocomplete="current-password">' +
+    '<button class="primary" id="af-btn">' + (isSetup ? '创建并登录' : '登录') + '</button>' +
+    '<span id="af-msg" style="color:var(--muted)"></span></div></div>';
+  document.getElementById('af-btn').onclick = async () => {
+    const msg = document.getElementById('af-msg');
+    const body = { username: document.getElementById('af-user').value.trim(),
+                   password: document.getElementById('af-pass').value };
+    try {
+      const call = async (path, data) => {
+        const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify(data), cache: 'no-store' });
+        if (!r.ok) throw new Error((await r.json()).error || ('HTTP ' + r.status));
+      };
+      if (isSetup) {
+        body.token = document.getElementById('af-token').value.trim();
+        await call('/api/v1/setup', body);
+      }
+      await call('/api/v1/login', body);
+      location.reload();
+    } catch (e) { msg.textContent = e.message; }
+  };
+}
+
+async function boot() {
+  try {
+    const st = await (await fetch('/api/v1/setup/status', { cache: 'no-store' })).json();
+    if (st.initialized === false) return authForm('setup');
+  } catch (e) { /* 旧版无此接口，继续 */ }
+  try {
+    Auth.me = await Api.get('/api/v1/me');
+  } catch (e) {
+    return authForm('login');
+  }
+  if (!location.hash) location.hash = '#/overview';
+  Router.start();
+}
+
 Router.register(/^#\/clients$/, ClientsPage, '客户端 A');
 Router.register(/^#\/streams$/, StreamsPage, '会话');
 Router.register(/^#\/certs$/, CertsPage, '证书');
 Router.register(/^#\/acl$/, AclPage, 'ACL');
+Router.register(/^#\/accounts$/, AccountsPage, '账号');
 Router.register(/^#\/audit$/, AuditPage, '审计');
 Router.register(/^#\/files(?:\?.*)?$/, FilesPage, '文件');
 Router.register(/^#\/terminal\/([^/]+)$/, TerminalPage, '终端');
-if (!location.hash) location.hash = '#/overview';
-Router.start();
+boot();

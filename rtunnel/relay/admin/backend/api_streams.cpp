@@ -1,15 +1,20 @@
 // 会话列表与概览（在 relay 线程内取快照）
 #include "admin_server.hpp"
 #include "cpputil/json.hpp"
+
+#include <algorithm>
 #include "hversion.h"
 
 using nlohmann::json;
 
 void AdminServer::handleStreams(const HttpContextPtr& ctx) {
-    std::string body = callRelay([this]() {
+    bool all = currentActor().role != "user";
+    std::vector<std::string> mine = myDevids();
+    std::string body = callRelay([this, all, mine]() {
         json arr = json::array();
         // 按 agent 侧遍历，避免一条流双算
         for (RelayConn* c = relay_->agents; c; c = c->reg_next) {
+            if (!all && std::find(mine.begin(), mine.end(), std::string(c->devid)) == mine.end()) continue;
             for (RelayStream* s = c->streams; s; s = s->next_c) {
                 json st;
                 st["c_devid"] = c->devid;

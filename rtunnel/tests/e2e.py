@@ -314,6 +314,7 @@ def main():
              "--client-users", clientusers, "--shell-users", "admin,tester",
              "--admin", "127.0.0.1:%d" % admin_port,
              "--admin-token", "admintok", "--admin-users", usersfile,
+             "--admin-db", os.path.join(logdir, "admin.db"),
              "--admin-ca-cert", admin_ca_crt, "--admin-ca-key", admin_ca_key,
              "--admin-cert-dir", certout, "--admin-file-dir", filedir] + tls_relay + ["--verbose"],
             stdout=logs["relay"], stderr=subprocess.STDOUT, env=env)

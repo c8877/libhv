@@ -24,6 +24,10 @@ add_custom_command(OUTPUT ${EMBEDDED_CPP}
             ${ADMIN_FRONTEND}/vendor/xterm.js ${ADMIN_FRONTEND}/vendor/xterm.css ${ADMIN_FRONTEND}/vendor/xterm-addon-fit.js
     COMMENT "embed rtunnel admin frontend")
 
+add_library(rtunnel_sqlite STATIC 3rd/sqlite3/sqlite3.c)
+target_compile_definitions(rtunnel_sqlite PRIVATE SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION=1)
+set_target_properties(rtunnel_sqlite PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_log.cpp
                relay/admin/backend/admin_server.cpp
                relay/admin/backend/api_agents.cpp
@@ -31,13 +35,16 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
                relay/admin/backend/api_ops.cpp
                relay/admin/backend/api_certs.cpp
                relay/admin/backend/api_files.cpp
+               relay/admin/backend/admin_db.cpp
+               relay/admin/backend/api_users.cpp
                relay/admin/backend/terminal.cpp
                ${EMBEDDED_CPP})
 add_executable(rtunnel-agent  agent/main.cpp agent/agent_app.cpp)
 add_executable(rtunnel-client client/main.cpp client/client_app.cpp client/shell_client.cpp)
 add_executable(rtnp-codec-test tests/codec_test.cpp)
 
-target_link_libraries(rtunnel-relay  rtnp)
+target_include_directories(rtunnel-relay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/3rd/sqlite3)
+target_link_libraries(rtunnel-relay  rtnp rtunnel_sqlite)
 target_link_libraries(rtunnel-agent  rtunnel_common)
 target_link_libraries(rtunnel-client rtunnel_common)
 target_link_libraries(rtnp-codec-test rtnp)

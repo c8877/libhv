@@ -5,6 +5,7 @@
 // 角色：viewer（只读）/ operator（踢会话、ACL）/ admin（证书）。
 
 #include <functional>
+#include <vector>
 #include <string>
 #include <unordered_map>
 
@@ -14,6 +15,7 @@
 
 #include "relay/relay_server.hpp"
 #include "relay/audit_log.hpp"
+#include "admin_db.hpp"
 
 struct TerminalSession;
 
@@ -30,6 +32,14 @@ struct AdminConfig {
     std::string shell_user = "devuser";  // direct 模式登录 relay 的用户（须被 ACL 授权）
     std::string shell_token;             // 该用户连 relay 的凭证（--admin-shell-token）
     int         shell_relay_port = 8443; // direct 模式连接的 relay 端口（本机）
+    std::string db_path = "rtunnel-admin.db"; // SQLite 账号库
+    std::string emergency_token;              // 初始化后仍允许 token 登录（紧急恢复，可选）
+};
+
+struct AdminActor {
+    long long   id = 0;          // 0 = bootstrap token
+    std::string username;
+    std::string role;            // superadmin / admin / user / token-role
 };
 
 class AdminServer {
@@ -51,6 +61,9 @@ private:
     std::string callRelay(std::function<std::string()> fn);
     std::string roleOf(const HttpContextPtr& ctx);          // "" = 未授权
     int         requireRole(const HttpContextPtr& ctx, int need, std::string& role);
+    AdminActor  currentActor() const;
+    std::vector<std::string> myDevids();
+    bool        ownsDevid(const std::string& devid);
     void        audit(const std::string& role, const std::string& action, const std::string& detail);
     void        registerRoutes();
     int         serveFrontend(const HttpContextPtr& ctx, const char* name, const char* ctype);
@@ -75,6 +88,19 @@ private:
     void handleCertSign(const HttpContextPtr& ctx, const std::string& role);
     void handleShutdown(const HttpContextPtr& ctx, const std::string& role);
     void handleMetrics(const HttpContextPtr& ctx);
+    // api_users.cpp
+    void handleSetupStatus(const HttpContextPtr& ctx);
+    void handleSetup(const HttpContextPtr& ctx);
+    void handleLogin(const HttpContextPtr& ctx);
+    void handleLogout(const HttpContextPtr& ctx);
+    void handleMe(const HttpContextPtr& ctx);
+    void handleUsers(const HttpContextPtr& ctx);
+    void handleUserCreate(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleUserPassword(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleUserStatus(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleUserDelete(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleDeviceList(const HttpContextPtr& ctx);
+    void handleDeviceBind(const HttpContextPtr& ctx, const AdminActor& actor);
     // api_files.cpp
     void handleFiles(const HttpContextPtr& ctx);
     void handleFileDownload(const HttpContextPtr& ctx);
@@ -85,7 +111,8 @@ private:
     hv::HttpService service_;
     hv::HttpServer  server_;
     AdminConfig     cfg_;
-    std::unordered_map<std::string, std::string> users_;   // token -> role
+    std::unordered_map<std::string, std::string> users_;   // token -> role（兼容旧 --admin-users）
+    AdminDb          db_;
     AuditLog        audit_;
 
     // Web 终端

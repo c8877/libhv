@@ -2,6 +2,8 @@
 #include "admin_server.hpp"
 #include "cpputil/json.hpp"
 
+#include <algorithm>
+
 using nlohmann::json;
 
 static void fillConnCommon(RelayConn* c, json& j) {
@@ -16,10 +18,13 @@ static void fillConnCommon(RelayConn* c, json& j) {
 }
 
 void AdminServer::handleAgents(const HttpContextPtr& ctx) {
-    std::string body = callRelay([this]() {
+    bool all = currentActor().role != "user";
+    std::vector<std::string> mine = myDevids();
+    std::string body = callRelay([this, all, mine]() {
         json arr = json::array();
         for (RelayConn* c = relay_->conns; c; c = c->next_all) {
             if (c->role != rtnp::ROLE_AGENT || !c->authed) continue;
+            if (!all && std::find(mine.begin(), mine.end(), std::string(c->devid)) == mine.end()) continue;
             json j;
             j["devid"] = c->devid;
             j["online"] = true;   // 注册表在册即在线
@@ -33,6 +38,11 @@ void AdminServer::handleAgents(const HttpContextPtr& ctx) {
 
 void AdminServer::handleAgentDetail(const HttpContextPtr& ctx) {
     std::string devid = ctx->param("devid");
+    if (!ownsDevid(devid)) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return;
+    }
     int found = 0;
     std::string body = callRelay([this, &devid, &found]() {
         RelayConn* c = relay_->findAgent(devid.c_str());
@@ -65,10 +75,12 @@ void AdminServer::handleAgentDetail(const HttpContextPtr& ctx) {
 }
 
 void AdminServer::handleClients(const HttpContextPtr& ctx) {
-    std::string body = callRelay([this]() {
+    auto actor = currentActor();
+    std::string body = callRelay([this, actor]() {
         json arr = json::array();
         for (RelayConn* c = relay_->conns; c; c = c->next_all) {
             if (c->role != rtnp::ROLE_CLIENT || !c->authed) continue;
+            if (actor.role == "user" && actor.username != c->user) continue;
             json j;
             j["user"] = c->user;
             fillConnCommon(c, j);

@@ -9,11 +9,28 @@ using nlohmann::json;
 
 void AdminServer::handleKickStream(const HttpContextPtr& ctx, const std::string& role) {
     uint32_t a_sid = (uint32_t)atoi(ctx->param("a_sid").c_str());
+    bool all = currentActor().role != "user";
+    std::vector<std::string> mine = myDevids();
     int found = 0;
-    callRelay([this, a_sid, &found]() {
-        found = relay_->kickStream(a_sid) ? 1 : 0;
+    callRelay([this, a_sid, &found, all, mine]() {
+        for (RelayConn* ag = relay_->agents; ag; ag = ag->reg_next) {
+            for (RelayStream* s = ag->streams; s; s = s->next_c) {
+                if (s->a_sid != a_sid) continue;
+                if (!all && std::find(mine.begin(), mine.end(), std::string(ag->devid)) == mine.end()) {
+                    found = 2;
+                    return std::string();
+                }
+                found = relay_->kickStream(a_sid) ? 1 : 0;
+                return std::string();
+            }
+        }
         return std::string();
     });
+    if (found == 2) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return;
+    }
     if (!found) {
         ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
         ctx->send("{\"error\":\"stream not found\"}");
