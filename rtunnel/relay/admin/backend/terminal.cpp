@@ -156,18 +156,24 @@ void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequest
         else if (kv.first == "devid") devid = kv.second;
         else if (kv.first == "user") user = kv.second;
     }
-    auto roleOfToken = [this](const std::string& tok) -> std::string {
-        if (cfg_.token.empty() && users_.empty()) return "admin";
-        if (!cfg_.token.empty() && tok == cfg_.token) return "admin";
-        auto it = users_.find(tok);
-        return it != users_.end() ? it->second : "";
-    };
-    std::string role = roleOfToken(token);
+    // 优先用 Cookie 会话（账号体系）；query token 仅兼容紧急入口
+    std::string role;
+    AdminActor actor;
+    if (!wsAuthorize(req, actor, role)) {
+        if (!token.empty()) {
+            std::string authRole;
+            auto it = users_.find(token);
+            if (it != users_.end()) authRole = it->second;
+            else if (!cfg_.token.empty() && token == cfg_.token && cfg_.emergency_token == token) authRole = "admin";
+            role = authRole;
+        }
+    }
     if (role != "admin" && role != "operator") {
-        logf_("[terminal] reject: bad token (devid=%s)", devid.c_str());
+        logf_("[terminal] reject: unauthorized (devid=%s)", devid.c_str());
         channel->close();
         return;
     }
+    audit(role, "terminal.open", devid);
     if (devid.empty()) {
         logf_("[terminal] reject: bad devid");
         channel->close();
@@ -181,7 +187,6 @@ void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequest
     s->user = user;
     terms_[channel.get()] = s;
 
-    audit(role, "terminal.open.shell", devid);
     directOpen(this, s.get());
 }
 

@@ -64,6 +64,8 @@ private:
     AdminActor  currentActor() const;
     std::vector<std::string> myDevids();
     bool        ownsDevid(const std::string& devid);
+    // WebSocket 握手鉴权（浏览器自动带 Cookie）
+    bool        wsAuthorize(const HttpRequestPtr& req, AdminActor& actor, std::string& role);
     void        audit(const std::string& role, const std::string& action, const std::string& detail);
     void        registerRoutes();
     int         serveFrontend(const HttpContextPtr& ctx, const char* name, const char* ctype);

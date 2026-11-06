@@ -158,6 +158,40 @@ int AdminServer::requireRole(const HttpContextPtr& ctx, int need, std::string& r
     return 0;
 }
 
+bool AdminServer::wsAuthorize(const HttpRequestPtr& req, AdminActor& actor, std::string& role) {
+    actor = AdminActor{};
+    role.clear();
+    const HttpCookie& ck = req->GetCookie("rt_sid");
+    if (!ck.name.empty() && db_.ok()) {
+        DbUser u;
+        if (db_.getSession(AdminDb::sha256Hex(ck.value), u, AdminDb::nowMs())) {
+            actor.id = u.id; actor.username = u.username; actor.role = u.role;
+            role = (u.role == "superadmin") ? "admin" : (u.role == "admin") ? "operator" : "viewer";
+            return true;
+        }
+    }
+    // 兼容：紧急 token / 初始化前的 token
+    std::string auth = req->GetHeader("Authorization");
+    const std::string prefix = "Bearer ";
+    if (auth.compare(0, prefix.size(), prefix) == 0) {
+        std::string tok = auth.substr(prefix.size());
+        bool initialized = db_.ok() && db_.initialized();
+        if (!cfg_.token.empty() && tok == cfg_.token &&
+            (!initialized || (!cfg_.emergency_token.empty() && tok == cfg_.emergency_token))) {
+            actor.id = 0; actor.username = "bootstrap"; actor.role = "superadmin";
+            role = "admin";
+            return true;
+        }
+        auto it = users_.find(tok);
+        if (it != users_.end()) {
+            actor.id = 0; actor.username = "token"; actor.role = it->second;
+            role = it->second;
+            return true;
+        }
+    }
+    return false;
+}
+
 void AdminServer::audit(const std::string& role, const std::string& action, const std::string& detail) {
     audit_.write(role, action, detail);
 }
