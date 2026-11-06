@@ -120,6 +120,14 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 - 线程模型：HTTP 在 admin worker 线程，relay 状态访问经 `hloop_post_event` 投递回
   relay 线程执行（promise/future 同步），relay 数据无锁。
 
+## Web 终端（免密）
+
+「设备 C」「客户端 A」列表的 Shell 入口：admin 作为 RTNP client 直连本机 relay，
+向目标 agent 发 `OPEN_SHELL`（flags=0x0001），agent `forkpty` 起交互 shell，
+经 WebSocket 接到浏览器 xterm.js。不 fork ssh、不经手密码；AUTH 用户即该 A 用户身份，
+relay 按该用户 ACL 校验。终端尺寸经 `RESIZE`(0x17) 帧同步。
+A 端也可在本机执行 `rtunnel-client --server B --user U shell <devid>` 直连设备免密 shell。
+
 ## 实现说明
 
 - **不改动 libhv**：所有能力都在 `rtunnel/` 内实现。

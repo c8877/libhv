@@ -703,7 +703,6 @@ int RelayServer::run(int argc, char** argv) {
     const char* admin_ca_key = NULL;
     const char* admin_cert_dir = NULL;
     const char* admin_file_dir = NULL;
-    const char* admin_shell_client = NULL;
     const char* admin_shell_user = "devuser";
 
     for (int i = 1; i < argc; ++i) {
@@ -749,8 +748,6 @@ int RelayServer::run(int argc, char** argv) {
             admin_cert_dir = argv[++i];
         } else if (strcmp(argv[i], "--admin-file-dir") == 0 && i + 1 < argc) {
             admin_file_dir = argv[++i];
-        } else if (strcmp(argv[i], "--admin-shell-client") == 0 && i + 1 < argc) {
-            admin_shell_client = argv[++i];
         } else if (strcmp(argv[i], "--admin-shell-user") == 0 && i + 1 < argc) {
             admin_shell_user = argv[++i];
         } else {
@@ -808,7 +805,6 @@ int RelayServer::run(int argc, char** argv) {
         cfg.ca_key = admin_ca_key ? admin_ca_key : "";
         cfg.cert_dir = admin_cert_dir ? admin_cert_dir : "";
         cfg.file_dir = admin_file_dir ? admin_file_dir : "";
-        cfg.shell_client_path = admin_shell_client ? admin_shell_client : "";
         cfg.shell_user = admin_shell_user;
         if (adm->start(cfg) != 0) {
             delete adm;

@@ -181,19 +181,12 @@ const AgentsPage = Object.assign(new Page(), {
       UI.ago(a.last_seen_ms) + ' 前活跃',
       a.streams,
       UI.bytes(a.bytes_in) + ' / ' + UI.bytes(a.bytes_out),
-      '<button class="term" data-devid="' + UI.esc(a.devid) + '">终端</button> ' +
-      '<button class="shell" data-devid="' + UI.esc(a.devid) + '">免密 Shell</button> ' +
+      '<button class="shell" data-devid="' + UI.esc(a.devid) + '">Shell</button> ' +
       '<button class="kick" data-devid="' + UI.esc(a.devid) + '">下线</button>',
     ]);
     this.el.innerHTML = '<div class="panel"><div class="panel-head"><h2>设备（C 侧）</h2>' +
       '<span class="spacer"></span><span>共 ' + arr.length + ' 台 · 5s 自动刷新</span></div>' +
       UI.table(['devid', '状态', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'], rows) + '</div>';
-    document.querySelectorAll('#page button.term').forEach(btn => {
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        Router.go('#/terminal/' + encodeURIComponent(btn.dataset.devid));
-      };
-    });
     document.querySelectorAll('#page button.shell').forEach(btn => {
       btn.onclick = (e) => {
         e.stopPropagation();
@@ -500,10 +493,8 @@ const TerminalPage = Object.assign(new Page(), {
   enter(el, params) {
     // 路由捕获组可能带查询串（?direct=1），devid 必须只保留设备名
     this.devid = decodeURIComponent((params[0] || '').split('?')[0]);
-    this.direct = location.hash.indexOf('direct=1') >= 0;
     el.innerHTML = '<div class="panel"><div class="panel-head"><h2>终端：' + UI.esc(this.devid) + '</h2>' +
-      '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">' +
-      (this.direct ? '免密 shell（agent OPEN_SHELL，设备侧直接起 shell）' : '密码在终端内由 SSH 提示输入') + '</span>' +
+      '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">免密 shell（agent OPEN_SHELL，设备侧直接起 shell）</span>' +
       '<button id="term-close">关闭</button></div>' +
       '<div id="term" style="height:calc(100vh - 220px);background:#000;padding:8px"></div></div>';
 
@@ -514,11 +505,10 @@ const TerminalPage = Object.assign(new Page(), {
     this.fit.fit();
 
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const wsPath = this.direct ? '/ws/shell' : '/ws/terminal';
     const q = new URLSearchParams((location.hash.split('?')[1] || ''));
-    // direct 未指定 user 时后端回退到配置的默认 shell_user；ssh 默认 root
-    const wsUser = q.get('user') || (this.direct ? '' : 'root');
-    this.ws = new WebSocket(proto + '://' + location.host + wsPath + '?devid=' +
+    // direct 未指定 user 时后端回退到配置的默认 shell_user
+    const wsUser = q.get('user') || '';
+    this.ws = new WebSocket(proto + '://' + location.host + '/ws/shell?devid=' +
       encodeURIComponent(this.devid) + '&user=' + encodeURIComponent(wsUser) + '&token=' + encodeURIComponent(Api.token));
     this.ws.onmessage = (e) => this.term.write(e.data);
     this.ws.onclose = () => this.term.write('\r\n[连接已关闭]\r\n');

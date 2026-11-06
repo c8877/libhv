@@ -26,10 +26,9 @@ struct AdminConfig {
     std::string ca_key;      // 签发用 CA 私钥
     std::string cert_dir;    // 证书台账目录（index.txt/revoked.txt/audit.log）
     std::string file_dir;    // 文件管理目录（--admin-file-dir）
-    // Web 终端（--admin-shell-client 启用）：fork A 子进程 + forkpty(ssh)
-    std::string shell_client_path;  // rtunnel-client 路径（空 = 不启用终端）
-    std::string shell_user = "devuser";  // A 子进程登录 relay 的用户（须被 ACL 授权）
-    int         shell_relay_port = 8443; // A 子进程连接的 relay 端口（本机）
+    // Web 终端（direct 免密）：admin 作为 RTNP client 直连本机 relay 发 OPEN_SHELL
+    std::string shell_user = "devuser";  // direct 模式登录 relay 的用户（须被 ACL 授权）
+    int         shell_relay_port = 8443; // direct 模式连接的 relay 端口（本机）
 };
 
 class AdminServer {
