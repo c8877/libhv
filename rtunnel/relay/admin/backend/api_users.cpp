@@ -37,14 +37,34 @@ static std::unordered_map<std::string, std::pair<int, time_t>> g_login_fail;
 
 AdminActor AdminServer::currentActor() const { return tl_actor; }
 
+namespace {
+bool roleKnown(const std::string& r) {
+    return r == "admin" || r == "manager" || r == "operator" || r == "viewer";
+}
+// actor 能管理的目标账号（admin 不可被管理）
+bool canManage(const AdminActor& a, const DbUser& t) {
+    if (t.role == "admin") return false;
+    if (a.role == "admin") return roleKnown(t.role);
+    if (a.role == "manager") return t.role == "operator" || t.role == "viewer";
+    return false;
+}
+bool canCreateRole(const AdminActor& a, const std::string& r) {
+    if (a.role == "admin") return r == "manager" || r == "operator" || r == "viewer";
+    if (a.role == "manager") return r == "operator" || r == "viewer";
+    return false;
+}
+} // namespace
+
 std::vector<std::string> AdminServer::myDevids() {
     std::vector<std::string> v;
-    if (tl_actor.role == "user" && db_.ok()) db_.ownedDevids(tl_actor.id, v);
+    if ((tl_actor.role == "operator" || tl_actor.role == "viewer") && db_.ok()) {
+        db_.ownedDevids(tl_actor.id, v);
+    }
     return v;
 }
 
 bool AdminServer::ownsDevid(const std::string& devid) {
-    if (tl_actor.role != "user") return true;
+    if (tl_actor.role != "operator" && tl_actor.role != "viewer") return true;
     long long owner = 0;
     if (!db_.ok() || !db_.deviceOwner(devid, owner)) return false;
     return owner == tl_actor.id;
@@ -78,12 +98,12 @@ void AdminServer::handleSetup(const HttpContextPtr& ctx) {
         return;
     }
     std::string err;
-    if (!db_.createUser(user, pass, "superadmin", err)) {
+    if (!db_.createUser(user, pass, "admin", err)) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"" + err + "\"}");
         return;
     }
-    audit("setup", "account.create", "superadmin " + user);
+    audit("setup", "account.create", "admin " + user);
     ctx->send("{\"ok\":true}");
 }
 
@@ -157,9 +177,10 @@ void AdminServer::handleUsers(const HttpContextPtr& ctx) {
     std::string role;
     if (requireRole(ctx, ROLE_OPERATOR, role)) return;
     std::vector<DbUser> us;
-    db_.listUsers(us, tl_actor.role == "admin" ? "user" : "");
+    db_.listUsers(us);
     json arr = json::array();
     for (auto& u : us) {
+        if (tl_actor.role != "admin" && u.role != "operator" && u.role != "viewer") continue;
         json j;
         j["id"] = u.id;
         j["username"] = u.username;
@@ -175,14 +196,10 @@ void AdminServer::handleUserCreate(const HttpContextPtr& ctx, const AdminActor& 
     json req = json::parse(ctx->body(), nullptr, false);
     std::string user = req.value("username", "");
     std::string pass = req.value("password", "");
-    std::string role = req.value("role", "user");
-    if (actor.role == "superadmin") {
-        if (role != "admin" && role != "user") { ctx->response->status_code = HTTP_STATUS_BAD_REQUEST; ctx->send("{\"error\":\"bad role\"}"); return; }
-    } else if (actor.role == "admin") {
-        role = "user";
-    } else {
+    std::string role = req.value("role", "viewer");
+    if (!canCreateRole(actor, role)) {
         ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
-        ctx->send("{\"error\":\"forbidden\"}");
+        ctx->send("{\"error\":\"cannot create this role\"}");
         return;
     }
     std::string err;
@@ -215,10 +232,8 @@ void AdminServer::handleUserPassword(const HttpContextPtr& ctx, const AdminActor
             ctx->send("{\"error\":\"old password wrong\"}");
             return;
         }
-    } else if (actor.role == "superadmin") {
-        // 可重置任意账号
-    } else if (actor.role == "admin" && target.role == "user") {
-        // 管理员可重置普通账号
+    } else if (canManage(actor, target)) {
+        // 上级可重置下级密码
     } else {
         ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
         ctx->send("{\"error\":\"forbidden\"}");
@@ -250,7 +265,7 @@ void AdminServer::handleUserStatus(const HttpContextPtr& ctx, const AdminActor& 
         ctx->send("{\"error\":\"no such user\"}");
         return;
     }
-    bool allowed = actor.role == "superadmin" || (actor.role == "admin" && target.role == "user");
+    bool allowed = canManage(actor, target);
     if (!allowed || id == actor.id) {
         ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
         ctx->send("{\"error\":\"forbidden\"}");
@@ -270,7 +285,7 @@ void AdminServer::handleUserDelete(const HttpContextPtr& ctx, const AdminActor& 
         ctx->send("{\"error\":\"no such user\"}");
         return;
     }
-    bool allowed = actor.role == "superadmin" || (actor.role == "admin" && target.role == "user");
+    bool allowed = canManage(actor, target);
     if (!allowed || id == actor.id) {
         ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
         ctx->send("{\"error\":\"forbidden\"}");
@@ -278,6 +293,35 @@ void AdminServer::handleUserDelete(const HttpContextPtr& ctx, const AdminActor& 
     }
     db_.removeUser(id);
     audit(actor.username, "account.delete", target.username);
+    ctx->send("{\"ok\":true}");
+}
+
+void AdminServer::handleUserRole(const HttpContextPtr& ctx, const AdminActor& actor) {
+    long long id = atoll(ctx->param("id").c_str());
+    json req = json::parse(ctx->body(), nullptr, false);
+    std::string role = req.value("role", "");
+    if (!roleKnown(role)) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"bad role\"}");
+        return;
+    }
+    DbUser target;
+    if (!db_.findUserById(id, target)) {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"no such user\"}");
+        return;
+    }
+    if (!canManage(actor, target) || id == actor.id || !canCreateRole(actor, role)) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return;
+    }
+    if (!db_.setRole(id, role)) {
+        ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+        ctx->send("{\"error\":\"db error\"}");
+        return;
+    }
+    audit(actor.username, "account.role", target.username + " -> " + role);
     ctx->send("{\"ok\":true}");
 }
 
@@ -302,7 +346,7 @@ void AdminServer::handleDeviceList(const HttpContextPtr& ctx) {
 }
 
 void AdminServer::handleDeviceBind(const HttpContextPtr& ctx, const AdminActor& actor) {
-    if (actor.role != "superadmin" && actor.role != "admin") {
+    if (actor.role != "admin" && actor.role != "manager") {
         ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
         ctx->send("{\"error\":\"forbidden\"}");
         return;

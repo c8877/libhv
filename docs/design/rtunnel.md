@@ -529,7 +529,8 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 | `--admin-db PATH` | SQLite 账号库（users/sessions/devices），需 OpenSSL 构建（PBKDF2） |
 
 账号体系：首次用 `--admin-token` 初始化 superadmin，之后用户名+密码登录（HttpOnly Cookie 会话）。
-角色：superadmin（全部）/ admin（建普通账号、绑设备、踢会话、文件）/ user（只看自己绑定的设备）。
+角色：admin（唯一，全部）/ manager（绑定设备、建 operator/viewer、设备与文件全部操作）/
+operator（Shell、Web、文件上传下载）/ viewer（仅概览与设备列表）。
 口令 PBKDF2-HMAC-SHA256；失败 5 次锁 5 分钟；改密/禁用吊销会话。
 旧的 `--admin-users token:role` 仍作为兼容服务账号。
 

@@ -219,7 +219,7 @@ void AdminServer::handleDeviceProxy(const HttpContextPtr& ctx) {
     }
 
     std::string role;
-    if (requireRole(ctx, ROLE_VIEWER, role)) return;
+    if (requireRole(ctx, ROLE_OPERATOR, role)) return;
     if (g_proxy_active.load() >= MAX_PROXY_ACTIVE) {
         ctx->response->status_code = HTTP_STATUS_SERVICE_UNAVAILABLE;
         ctx->send("{\"error\":\"too many concurrent proxy requests\"}");
@@ -583,7 +583,8 @@ void AdminServer::handleDeviceWsOpen(const WebSocketChannelPtr& channel, const H
 
     std::string role;
     AdminActor actor;
-    if (!wsAuthorize(req, actor, role) || (role != "admin" && role != "operator") || !ownsDevid(devid)) {
+    if (!wsAuthorize(req, actor, role) ||
+        (role != "admin" && role != "manager" && role != "operator") || !ownsDevid(devid)) {
         channel->close();
         return;
     }

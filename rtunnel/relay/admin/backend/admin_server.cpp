@@ -107,8 +107,8 @@ std::string AdminServer::roleOf(const HttpContextPtr& ctx) {
                 bool allow = !initialized;
                 if (allow) {
                     tl_actor.username = "bootstrap";
-                    tl_actor.role = "superadmin";
-                    return "superadmin";
+                    tl_actor.role = "admin";
+                    return "admin";
                 }
             }
         }
@@ -119,9 +119,10 @@ std::string AdminServer::roleOf(const HttpContextPtr& ctx) {
 }
 
 static int roleWeight(const std::string& role) {
-    if (role == "superadmin") return ROLE_ADMIN;
-    if (role == "admin") return ROLE_OPERATOR;
-    if (role == "user") return ROLE_VIEWER;
+    if (role == "admin") return ROLE_ADMIN;
+    if (role == "manager") return ROLE_MANAGER;
+    if (role == "operator") return ROLE_OPERATOR;
+    if (role == "viewer") return ROLE_VIEWER;
     return 0;
 }
 
@@ -151,7 +152,7 @@ bool AdminServer::wsAuthorize(const HttpRequestPtr& req, AdminActor& actor, std:
         DbUser u;
         if (db_.getSession(AdminDb::sha256Hex(ck.value), u, AdminDb::nowMs())) {
             actor.id = u.id; actor.username = u.username; actor.role = u.role;
-            role = (u.role == "superadmin") ? "admin" : (u.role == "admin") ? "operator" : "viewer";
+            role = u.role;
             return true;
         }
     }
@@ -162,7 +163,7 @@ bool AdminServer::wsAuthorize(const HttpRequestPtr& req, AdminActor& actor, std:
         std::string tok = auth.substr(prefix.size());
         bool initialized = db_.ok() && db_.initialized();
         if (!cfg_.token.empty() && tok == cfg_.token && !initialized) {
-            actor.id = 0; actor.username = "bootstrap"; actor.role = "superadmin";
+            actor.id = 0; actor.username = "bootstrap"; actor.role = "admin";
             role = "admin";
             return true;
         }
@@ -211,51 +212,55 @@ int AdminServer::serveFrontend(const HttpContextPtr& ctx, const char* name, cons
 // ---------------------------------------------------------------- 路由与启动
 
 void AdminServer::registerRoutes() {
-    auto viewer = [this](const char* method, const char* path, void (AdminServer::*h)(const HttpContextPtr&)) {
-        service_.Handle(method, path, [this, h](const HttpContextPtr& ctx) {
+    auto access = [this](int need, const char* method, const char* path,
+                         void (AdminServer::*h)(const HttpContextPtr&)) {
+        service_.Handle(method, path, [this, need, h](const HttpContextPtr& ctx) {
             std::string role;
-            int rc = requireRole(ctx, ROLE_VIEWER, role);
+            int rc = requireRole(ctx, need, role);
             if (rc) return rc;
             (this->*h)(ctx);
             return 200;
         });
     };
-    viewer("GET", "/api/v1/overview", &AdminServer::handleOverview);
-    viewer("GET", "/api/v1/agents", &AdminServer::handleAgents);
-    viewer("GET", "/api/v1/agents/:devid", &AdminServer::handleAgentDetail);
-    viewer("GET", "/api/v1/clients", &AdminServer::handleClients);
-    viewer("GET", "/api/v1/streams", &AdminServer::handleStreams);
-    viewer("GET", "/api/v1/acl/file", &AdminServer::handleAclGet);
-    viewer("GET", "/api/v1/audit", &AdminServer::handleAudit);
-    viewer("GET", "/api/v1/certs", &AdminServer::handleCerts);
-    viewer("GET", "/metrics", &AdminServer::handleMetrics);
-    viewer("GET", "/api/v1/files", &AdminServer::handleFiles);
-    viewer("GET", "/api/v1/files/:name", &AdminServer::handleFileDownload);
+    // viewer：概览 + 设备列表
+    access(ROLE_VIEWER, "GET", "/api/v1/overview", &AdminServer::handleOverview);
+    access(ROLE_VIEWER, "GET", "/api/v1/agents", &AdminServer::handleAgents);
+    // operator：详情/会话/文件读写/ACL 读
+    access(ROLE_OPERATOR, "GET", "/api/v1/agents/:devid", &AdminServer::handleAgentDetail);
+    access(ROLE_OPERATOR, "GET", "/api/v1/clients", &AdminServer::handleClients);
+    access(ROLE_OPERATOR, "GET", "/api/v1/streams", &AdminServer::handleStreams);
+    access(ROLE_OPERATOR, "GET", "/api/v1/acl/file", &AdminServer::handleAclGet);
+    access(ROLE_OPERATOR, "GET", "/metrics", &AdminServer::handleMetrics);
+    access(ROLE_OPERATOR, "GET", "/api/v1/files", &AdminServer::handleFiles);
+    access(ROLE_OPERATOR, "GET", "/api/v1/files/:name", &AdminServer::handleFileDownload);
+    // manager：审计/证书列表
+    access(ROLE_MANAGER, "GET", "/api/v1/audit", &AdminServer::handleAudit);
+    access(ROLE_MANAGER, "GET", "/api/v1/certs", &AdminServer::handleCerts);
 
     service_.Handle("DELETE", "/api/v1/streams/:a_sid", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
         if (rc) return rc;
         handleKickStream(ctx, role);
         return 200;
     });
     service_.Handle("POST", "/api/v1/agents/:devid/kick", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
         if (rc) return rc;
         handleKickAgent(ctx, role);
         return 200;
     });
     service_.Handle("PUT", "/api/v1/acl/file", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
         if (rc) return rc;
         handleAclPut(ctx, role);
         return 200;
     });
     service_.Handle("POST", "/api/v1/acl/reload", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
         if (rc) return rc;
         handleAclReload(ctx, role);
         return 200;
@@ -290,7 +295,7 @@ void AdminServer::registerRoutes() {
     });
     service_.Handle("DELETE", "/api/v1/files/:name", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
         if (rc) return rc;
         handleFileDelete(ctx, role);
         return 200;
@@ -324,13 +329,13 @@ void AdminServer::registerRoutes() {
     });
     service_.Handle("GET", "/api/v1/users", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
         if (rc) return rc;
         handleUsers(ctx); return (int)ctx->response->status_code;
     });
     service_.Handle("POST", "/api/v1/users", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
         if (rc) return rc;
         handleUserCreate(ctx, currentActor());
         return 200;
@@ -344,27 +349,34 @@ void AdminServer::registerRoutes() {
     });
     service_.Handle("PUT", "/api/v1/users/:id/status", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
         if (rc) return rc;
         handleUserStatus(ctx, currentActor());
         return 200;
     });
+    service_.Handle("PUT", "/api/v1/users/:id/role", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
+        if (rc) return rc;
+        handleUserRole(ctx, currentActor());
+        return (int)ctx->response->status_code;
+    });
     service_.Handle("DELETE", "/api/v1/users/:id", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
         if (rc) return rc;
         handleUserDelete(ctx, currentActor());
         return 200;
     });
     service_.Handle("GET", "/api/v1/devices", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
         if (rc) return rc;
         handleDeviceList(ctx); return (int)ctx->response->status_code;
     });
     service_.Handle("PUT", "/api/v1/devices/:devid/owner", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requireRole(ctx, ROLE_OPERATOR, role);
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
         if (rc) return rc;
         handleDeviceBind(ctx, currentActor());
         return 200;

@@ -166,7 +166,9 @@ bool AdminDb::migrate(std::string& err) {
         " devid TEXT PRIMARY KEY,"
         " owner_id INTEGER,"
         " bound_ms INTEGER NOT NULL DEFAULT 0);"
-        "CREATE INDEX IF NOT EXISTS idx_dev_owner ON devices(owner_id);",
+        "CREATE INDEX IF NOT EXISTS idx_dev_owner ON devices(owner_id);"
+        "UPDATE users SET role='admin' WHERE role='superadmin';"
+        "UPDATE users SET role='viewer' WHERE role='user';",
         err);
 }
 
@@ -198,7 +200,15 @@ static void fillUser(sqlite3_stmt* st, DbUser& u) {
 bool AdminDb::createUser(const std::string& user, const std::string& pass,
                          const std::string& role, std::string& err, long long* out_id) {
     if (user.empty() || pass.size() < 8) { err = "username empty or password < 8 chars"; return false; }
-    if (role != "superadmin" && role != "admin" && role != "user") { err = "bad role"; return false; }
+    if (role != "admin" && role != "manager" && role != "operator" && role != "viewer") {
+        err = "bad role";
+        return false;
+    }
+    {
+        int n = 0;
+        if (!countUsers(n)) { err = "db error"; return false; }
+        if (role == "admin" && n > 0) { err = "admin already exists"; return false; }
+    }
     std::string hash = hashPassword(pass, err);
     if (hash.empty()) return false;
     std::lock_guard<std::mutex> lk(mu_);
@@ -283,6 +293,17 @@ bool AdminDb::setStatus(long long id, const std::string& status) {
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, "UPDATE users SET status=? WHERE id=?", -1, &st, nullptr) != SQLITE_OK) return false;
     sqlite3_bind_text(st, 1, status.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 2, id);
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE;
+}
+
+bool AdminDb::setRole(long long id, const std::string& role) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, "UPDATE users SET role=? WHERE id=?", -1, &st, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(st, 1, role.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int64(st, 2, id);
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);

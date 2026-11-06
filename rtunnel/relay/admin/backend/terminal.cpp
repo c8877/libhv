@@ -163,7 +163,7 @@ void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequest
     std::string role;
     AdminActor actor;
     if (!wsAuthorize(req, actor, role)) role.clear();
-    if (role != "superadmin" && role != "admin") {
+    if (role != "admin" && role != "manager" && role != "operator") {
         logf_("[terminal] reject: unauthorized (devid=%s)", devid.c_str());
         channel->close();
         return;

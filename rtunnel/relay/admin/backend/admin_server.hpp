@@ -2,7 +2,7 @@
 // relay 管理台后端：HttpServer 独立 worker 线程跑 HTTP，
 // 所有 relay 状态访问经 hloop_post_event 投递回 relay 线程执行
 // （promise/future 同步），relay 状态因此永远只在 relay 线程被访问，无锁。
-// 角色：viewer（只读）/ operator（踢会话、ACL）/ admin（证书）。
+// 角色：admin（唯一）/ manager / operator / viewer，权限见 api_users.cpp。
 
 #include <functional>
 #include <vector>
@@ -99,6 +99,7 @@ private:
     void handleUserCreate(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleUserPassword(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleUserStatus(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleUserRole(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleUserDelete(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleDeviceList(const HttpContextPtr& ctx);
     void handleDeviceBind(const HttpContextPtr& ctx, const AdminActor& actor);
@@ -129,5 +130,5 @@ private:
 };
 
 // 角色权重：viewer=1 operator=2 admin=3
-enum AdminRole { ROLE_VIEWER = 1, ROLE_OPERATOR = 2, ROLE_ADMIN = 3 };
+enum AdminRole { ROLE_VIEWER = 1, ROLE_OPERATOR = 2, ROLE_MANAGER = 3, ROLE_ADMIN = 4 };
 

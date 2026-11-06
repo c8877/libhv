@@ -32,6 +32,7 @@ public:
     bool countUsers(int& n);
     bool setPassword(long long id, const std::string& pass, std::string& err);
     bool setStatus(long long id, const std::string& status);
+    bool setRole(long long id, const std::string& role);
     bool setCanShell(long long id, int can);
     bool setClientToken(long long id, const std::string& token);
     bool removeUser(long long id);

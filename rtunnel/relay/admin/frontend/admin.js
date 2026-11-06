@@ -114,12 +114,14 @@ const Router = {
   register(re, page, title) { this.routes.push({ re, page, title }); },
   go(h) { location.hash = h; },
   renderNav(activeHash) {
-    const role = (Auth.me && Auth.me.role) || 'user';
-    const allow = role === 'user'
-      ? ['#/overview', '#/agents', '#/streams']
-      : role === 'admin'
-        ? ['#/overview', '#/agents', '#/clients', '#/streams', '#/accounts', '#/files', '#/audit']
-        : null;
+    const role = (Auth.me && Auth.me.role) || 'viewer';
+    const allow = role === 'viewer'
+      ? ['#/overview', '#/agents']
+      : role === 'operator'
+        ? ['#/overview', '#/agents', '#/streams', '#/files']
+        : role === 'manager'
+          ? ['#/overview', '#/agents', '#/clients', '#/streams', '#/accounts', '#/acl', '#/files', '#/audit']
+          : null;
     const navs = allow ? this.nav.filter(n => allow.indexOf(n.hash) >= 0) : this.nav;
     document.getElementById('nav').innerHTML = navs.map(n =>
       '<a href="' + n.hash + '"' + (activeHash.indexOf(n.hash) === 0 ? ' class="active"' : '') + '>' +
@@ -167,6 +169,11 @@ class Page {
   leave() { if (this.timer) clearInterval(this.timer); }
 }
 
+// ---------------------------------------------------------------- 权限
+function roleOf() { return (Auth.me && Auth.me.role) || 'viewer'; }
+function canOperate() { return ['admin', 'manager', 'operator'].indexOf(roleOf()) >= 0; }
+function canManage() { return ['admin', 'manager'].indexOf(roleOf()) >= 0; }
+
 // ---------------------------------------------------------------- Pages.概览
 const OverviewPage = Object.assign(new Page(), {
   async refresh() {
@@ -200,11 +207,12 @@ const AgentsPage = Object.assign(new Page(), {
       UI.ago(a.last_seen_ms) + ' 前活跃',
       a.streams,
       UI.bytes(a.bytes_in) + ' / ' + UI.bytes(a.bytes_out),
-      '<button class="web" data-devid="' + UI.esc(a.devid) + '">Web</button> ' +
-      '<button class="shell" data-devid="' + UI.esc(a.devid) + '">Shell</button> ' +
-      ((Auth.me && (Auth.me.role === 'superadmin' || Auth.me.role === 'admin'))
-        ? '<button class="bind" data-devid="' + UI.esc(a.devid) + '">绑定</button> ' : '') +
-      '<button class="kick" data-devid="' + UI.esc(a.devid) + '">下线</button>',
+      (canOperate()
+        ? '<button class="web" data-devid="' + UI.esc(a.devid) + '">Web</button> ' +
+          '<button class="shell" data-devid="' + UI.esc(a.devid) + '">Shell</button> ' : '') +
+      (canManage()
+        ? '<button class="bind" data-devid="' + UI.esc(a.devid) + '">绑定</button> ' +
+          '<button class="kick" data-devid="' + UI.esc(a.devid) + '">下线</button>' : ''),
     ]);
     this.el.innerHTML = '<div class="panel"><div class="panel-head"><h2>设备（C 侧）</h2>' +
       '<span class="spacer"></span><span>共 ' + arr.length + ' 台 · 5s 自动刷新</span></div>' +
@@ -500,7 +508,7 @@ const FilesPage = Object.assign(new Page(), {
       '<b>' + UI.esc(f.name) + '</b>', UI.bytes(f.size),
       new Date(f.mtime_ms).toLocaleString(),
       '<button class="dl" data-name="' + UI.esc(f.name) + '">下载</button> ' +
-      '<button class="del" data-name="' + UI.esc(f.name) + '">删除</button>',
+      (canManage() ? '<button class="del" data-name="' + UI.esc(f.name) + '">删除</button>' : ''),
     ]);
     this.el.innerHTML =
       '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>上传文件</h2>' +
@@ -644,9 +652,12 @@ const AccountsPage = Object.assign(new Page(), {
   async refresh() {
     const me = Auth.me || {};
     const arr = await Api.get('/api/v1/users');
+    const canM = (u) => u.role !== 'admin' && u.username !== me.username &&
+      (me.role === 'admin' || (me.role === 'manager' && (u.role === 'operator' || u.role === 'viewer')));
     const rows = arr.map(u => {
       let ops = '<button class="pw" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">改密</button> ';
-      if (me.role === 'superadmin' || (me.role === 'admin' && u.role === 'user')) {
+      if (canM(u)) {
+        ops += '<button class="role" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">改角色</button> ';
         ops += '<button class="st" data-id="' + u.id + '" data-st="' + (u.status === 'active' ? 'disabled' : 'active') + '">' +
                (u.status === 'active' ? '禁用' : '启用') + '</button> ';
         ops += '<button class="del" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">删除</button>';
@@ -654,9 +665,9 @@ const AccountsPage = Object.assign(new Page(), {
       return ['<b>' + UI.esc(u.username) + '</b>', UI.esc(u.role), UI.esc(u.status),
               new Date(u.created_ms).toLocaleString(), ops];
     });
-    const roleOpts = me.role === 'superadmin'
-      ? '<option value="user">普通账号</option><option value="admin">管理员</option>'
-      : '<option value="user">普通账号</option>';
+    const roleOpts = me.role === 'admin'
+      ? '<option value="viewer">浏览者</option><option value="operator">操作员</option><option value="manager">管理员</option>'
+      : '<option value="viewer">浏览者</option><option value="operator">操作员</option>';
     this.el.innerHTML =
       '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>创建账号</h2></div>' +
       '<div style="padding:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
@@ -685,6 +696,14 @@ const AccountsPage = Object.assign(new Page(), {
         const p = prompt('新密码（' + btn.dataset.name + '，≥8位）');
         if (!p) return;
         try { await Api.put('/api/v1/users/' + btn.dataset.id + '/password', { new_password: p }); UI.toast('已修改'); }
+        catch (e) { UI.toast('失败：' + e.message, true); }
+      };
+    });
+    document.querySelectorAll('#page button.role').forEach(btn => {
+      btn.onclick = async () => {
+        const r = prompt('新角色（viewer/operator/manager）');
+        if (!r) return;
+        try { await Api.put('/api/v1/users/' + btn.dataset.id + '/role', { role: r }); this.refresh(); }
         catch (e) { UI.toast('失败：' + e.message, true); }
       };
     });
@@ -750,7 +769,7 @@ async function boot() {
     return authForm('login');
   }
   // 顶栏当前账号 + 登出菜单
-  const roleName = { superadmin: '超级管理员', admin: '管理员', user: '普通账号' };
+  const roleName = { admin: '超级管理员', manager: '管理员', operator: '操作员', viewer: '浏览者' };
   const ub = document.getElementById('userbox');
   const btn = document.getElementById('userbtn');
   if (ub && btn) {

@@ -18,7 +18,7 @@ static void fillConnCommon(RelayConn* c, json& j) {
 }
 
 void AdminServer::handleAgents(const HttpContextPtr& ctx) {
-    bool all = currentActor().role != "user";
+    bool all = (currentActor().role == "admin" || currentActor().role == "manager");
     std::vector<std::string> mine = myDevids();
     std::string body = callRelay([this, all, mine]() {
         json arr = json::array();
@@ -80,7 +80,7 @@ void AdminServer::handleClients(const HttpContextPtr& ctx) {
         json arr = json::array();
         for (RelayConn* c = relay_->conns; c; c = c->next_all) {
             if (c->role != rtnp::ROLE_CLIENT || !c->authed) continue;
-            if (actor.role == "user" && actor.username != c->user) continue;
+            if ((actor.role == "operator" || actor.role == "viewer") && actor.username != c->user) continue;
             json j;
             j["user"] = c->user;
             fillConnCommon(c, j);

@@ -128,12 +128,13 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 - **首次部署**：浏览器打开管理台 → 初始化页输入 `--admin-token` + 超管用户名/密码 → 创建 superadmin；
   初始化前 token 只能访问 `/api/v1/setup*`
 - **之后登录**：用户名 + 密码，服务端会话（HttpOnly Cookie，12h），不再用 token
-- **角色**：
+- **角色**（admin 唯一，其余可多个）：
   | 角色 | 权限 |
   |---|---|
-  | superadmin | 全部：账号/设备绑定/证书/ACL/文件/审计 |
-  | admin | 创建普通账号、绑定设备、踢会话、文件、审计（不能签发证书/改 ACL） |
-  | user | 只看绑定到自己账号的设备/会话，Shell 需账号有权限且设备开 `--allow-shell` |
+  | admin | 全部权限；创建/切换 manager、operator、viewer |
+  | manager | 绑定设备；创建 operator/viewer；切换其角色；设备与文件全部操作 |
+  | operator | 设备 Shell / Web 代理；文件上传、下载；查看会话 |
+  | viewer | 仅「概览」「设备列表」两个浏览页面 |
 - **设备归属**：`PUT /api/v1/devices/{devid}/owner {"username":"alice"}`（空串=解绑）；
   普通账号的设备/会话列表按归属过滤，未绑定设备仅 admin 可见
 - **账号 API**：`GET/POST /api/v1/users`、`PUT /api/v1/users/{id}/password|status`、
