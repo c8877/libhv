@@ -44,6 +44,17 @@ struct RelayConn {
     char         remote_addr[64] = {0};
 };
 
+// OPEN_SHELL 到 a:<user> 但 agent 尚未注册时挂起，等 A 侧 agent 上线后继续
+struct PendingOpen {
+    RelayConn*  a = nullptr;
+    uint32_t    a_sid = 0;
+    char        devid[128] = {0};
+    uint16_t    port = 0;
+    uint16_t    flags = 0;
+    uint64_t    deadline_ms = 0;
+    PendingOpen* next = nullptr;
+};
+
 struct AclEntry {
     char      user[128] = {0};
     char      pattern[128] = {0};
@@ -73,6 +84,7 @@ public:
     AclEntry*   acl_cli = nullptr;    // --acl 命令行条目（固定）
     AclEntry*   acl_file = nullptr;   // --acl-file 文件条目（SIGHUP 热加载）
     char        acl_file_path[256] = {0};
+    PendingOpen* pending = nullptr;   // 等待 A 侧 agent 上线的 OPEN_SHELL
     hio_t*      listenio = nullptr;
     int         draining = 0;
     uint64_t    drain_deadline = 0;
@@ -82,6 +94,11 @@ private:
     int          aclCheck(const char* user, const char* devid);
     bool         clientAuthEnabled() const { return !client_creds.empty() || !client_token.empty(); }
     bool         shellAllowed(const char* user) const;
+    RelayConn*   findClientByUser(const char* user);
+    void         addPending(RelayConn* a, uint32_t a_sid, const char* devid, uint16_t port, uint16_t flags);
+    void         completePending(const char* devid);
+    void         sweepPending();
+    void         dropPendingFor(RelayConn* a);
     void         aclAddTo(AclEntry** head, const char* user, const char* patterns);
     void         aclFree(AclEntry** head);
     int          aclFileLoad();

@@ -253,9 +253,8 @@ const ClientsPage = Object.assign(new Page(), {
       btn.onclick = async () => {
         const user = btn.dataset.user;
         try {
-          // 进入的是该 A 客户端所在机器的 shell（A 也实现 agent 能力，devid=user）
-          Router.go('#/terminal/' + encodeURIComponent(user) +
-                    '?user=' + encodeURIComponent(user) + '&direct=1');
+          // A 侧按需 agent：devid = a:<user>，relay 会通知该 client 在本机拉起 agent
+          Router.go('#/terminal/' + encodeURIComponent('a:' + user));
         } catch (e) { UI.toast('打开失败：' + e.message, true); }
       };
     });

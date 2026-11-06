@@ -129,6 +129,24 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 relay 按该用户 ACL 校验。终端尺寸经 `RESIZE`(0x17) 帧同步。
 A 端也可在本机执行 `rtunnel-client --server B --user U shell <devid>` 直连设备免密 shell。
 
+## A 侧按需 Shell（client 列表的 Shell 按钮）
+
+client 加 `--allow-shell`（默认关）后：
+
+1. 管理台「客户端 A」点 Shell，admin 对 `a:<user>` 发 `OPEN_SHELL`；
+2. relay 发现 `a:<user>` 未注册且该 user 的 client 在线，向其下发 `SPAWN_AGENT`，并挂起 OPEN（10s 超时）；
+3. client 在本机 `fork/exec` 同目录的 `rtunnel-agent`（可用 `--agent-path` 指定），
+   以 `a:<user>` 注册；relay 把挂起的 OPEN 继续转发给这个 agent；
+4. 无会话空闲 `--agent-idle` 秒（默认 60）后 agent 自行退出，client 退出时也会回收。
+
+client 侧只做「拉起/回收」，shell 逻辑完全复用 agent；relay 侧只多一个挂起状态和新控制帧，
+不需要在 A-B 连接上叠双角色。
+
+```bash
+build/bin/rtunnel-client --server B --port 8443 --user alice --token <token> \
+    --socks5 127.0.0.1:1080 --allow-shell --agent-idle 60
+```
+
 ## 实现说明
 
 - **客户端认证**：relay 配了 `--client-users`（user:token）或 `--client-token` 后，

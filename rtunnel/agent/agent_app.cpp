@@ -385,6 +385,8 @@ int AgentApp::run(int argc, char** argv) {
             allow_all = 1;
         } else if (strcmp(argv[i], "--allow-shell") == 0) {
             allow_shell = 1;
+        } else if (strcmp(argv[i], "--max-idle") == 0 && i + 1 < argc) {
+            max_idle = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--tls-ca") == 0 && i + 1 < argc) {
             snprintf(tls_ca, sizeof(tls_ca), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--tls-cert") == 0 && i + 1 < argc) {
@@ -397,7 +399,8 @@ int AgentApp::run(int argc, char** argv) {
             verbose = 1;
         } else {
             fprintf(stderr,
-                "Usage: %s --devid ID [--server H] [--port P] [--allow 22,80] [--allow-all] [--verbose]\n",
+                "Usage: %s --devid ID [--server H] [--port P] [--allow 22,80] [--allow-all]\n"
+                "          [--allow-shell [--max-idle SEC]] [--verbose]\n",
                 argv[0]);
             return 1;
         }
@@ -408,6 +411,18 @@ int AgentApp::run(int argc, char** argv) {
     }
 
     hloop_t* lp = hloop_new(0);
+    last_active_ms = hloop_now_ms(lp);
+    if (max_idle > 0) {
+        htimer_t* idle_timer = htimer_add(lp, [](htimer_t* t) {
+            auto* app = (AgentApp*)hevent_userdata(t);
+            if (app->streams != NULL) { app->last_active_ms = hloop_now_ms(app->loop); return; }
+            if (hloop_now_ms(app->loop) - app->last_active_ms >= (uint64_t)app->max_idle * 1000) {
+                logf_("[agent] idle %ds, exiting (on-demand agent)", app->max_idle);
+                hloop_stop(app->loop);
+            }
+        }, 5000, INFINITE);
+        hevent_set_userdata(idle_timer, this);
+    }
     init(lp);
     hloop_run(lp);
     hloop_free(&lp);

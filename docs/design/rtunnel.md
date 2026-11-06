@@ -491,6 +491,22 @@ StreamMeta { a_conn_id, a_sid, c_conn_id, c_sid, state, opened_at }
 
 ---
 
+## 12.1 A 侧按需 agent（a:<user>）
+
+开发者机器的 shell 不常驻：
+
+1. admin 以 `shell_user` 身份对 `a:<user>` 发 `OPEN_SHELL`；
+2. B 未命中注册表且 devid 形如 `a:<user>`、该 user 的 client 在线 → 下发 `SPAWN_AGENT`，
+   挂起 OPEN（10s 超时，超时回 `OPEN_FAIL(TIMEOUT)`）；
+3. A 校验 `devid == "a:" + 自身 user` 且开了 `--allow-shell`，在本机 fork/exec
+   `rtunnel-agent --devid a:<user> --allow-shell --max-idle N`；
+4. agent 以 `a:<user>` 注册上线，B 继续挂起的 OPEN；空闲 N 秒后 agent 自退，A 退出时回收。
+
+**为什么不在 A-B 连接上叠双角色**：一条连接只有单一 role/identity/stream 命名空间，
+双角色需要两套身份、两张流表、两套 sid，且 A 的连接会变成 relay 随时可执行命令的入口；
+拆成独立 agent 进程后，身份（user 与 a:user）、授权（`--shell-users`）、生命周期（按需起停）、
+故障域都彼此独立，shell 逻辑与设备 agent 完全复用。
+
 ## 13. 备选方案与取舍
 
 | 方案 | 优点 | 缺点 | 结论 |

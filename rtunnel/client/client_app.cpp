@@ -10,6 +10,9 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <signal.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 #include "hsocket.h"
@@ -291,6 +294,83 @@ ClientStream* ClientApp::streamNew(hio_t* io) {
     return s;
 }
 
+void ClientApp::onSpawnAgent(const rtnp::Frame* f) {
+    rtnp::Reader r(f->payload, f->len);
+    char devid[128] = {0};
+    r.str(devid, sizeof(devid));
+    if (r.err || devid[0] == '\0') return;
+    if (!allow_shell) {
+        logf_("[client] SPAWN_AGENT %s ignored (--allow-shell off)", devid);
+        return;
+    }
+    // 只允许给自己起 agent：devid 必须是 a:<本连接 user>
+    if (strncmp(devid, "a:", 2) != 0 || strcmp(devid + 2, user) != 0) {
+        logf_("[client] SPAWN_AGENT %s rejected (not self)", devid);
+        return;
+    }
+    spawnAgent(devid);
+}
+
+void ClientApp::spawnAgent(const char* devid) {
+    for (auto& c : children) {
+        if (strcmp(c.devid, devid) == 0 && c.pid > 0 && kill(c.pid, 0) == 0) {
+            return;   // 已在运行
+        }
+    }
+    int slot = -1;
+    for (int i = 0; i < 8; ++i) {
+        if (children[i].pid <= 0 || kill(children[i].pid, 0) != 0) { slot = i; break; }
+    }
+    if (slot < 0) { logf_("[client] spawn %s: too many agents", devid); return; }
+
+    char path[600];
+    if (agent_path[0]) {
+        snprintf(path, sizeof(path), "%s", agent_path);
+    } else {
+        char exe[512] = {0};
+        ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+        if (n <= 0) { logf_("[client] readlink /proc/self/exe failed"); return; }
+        exe[n] = '\0';
+        char* slash = strrchr(exe, '/');
+        if (slash) *slash = '\0'; else snprintf(exe, sizeof(exe), ".");
+        snprintf(path, sizeof(path), "%s/rtunnel-agent", exe);
+    }
+
+    char port_s[16], idle_s[16];
+    snprintf(port_s, sizeof(port_s), "%d", port);
+    snprintf(idle_s, sizeof(idle_s), "%d", agent_idle);
+
+    const char* argv[24];
+    int argc = 0;
+    argv[argc++] = path;
+    argv[argc++] = "--server"; argv[argc++] = host;
+    argv[argc++] = "--port";   argv[argc++] = port_s;
+    argv[argc++] = "--devid";  argv[argc++] = devid;
+    argv[argc++] = "--allow-shell";
+    argv[argc++] = "--max-idle"; argv[argc++] = idle_s;
+    if (tls_ca[0])   { argv[argc++] = "--tls-ca";   argv[argc++] = tls_ca; }
+    if (tls_cert[0]) { argv[argc++] = "--tls-cert"; argv[argc++] = tls_cert; }
+    if (tls_key[0])  { argv[argc++] = "--tls-key";  argv[argc++] = tls_key; }
+    if (tls_sni[0])  { argv[argc++] = "--tls-sni";  argv[argc++] = tls_sni; }
+    if (verbose) argv[argc++] = "--verbose";
+    argv[argc] = NULL;
+
+    pid_t pid = fork();
+    if (pid < 0) { logf_("[client] fork agent failed"); return; }
+    if (pid == 0) {
+        setsid();
+        int fd = open("/tmp/rtunnel-agent.log", O_CREAT | O_WRONLY | O_APPEND, 0600);
+        if (fd >= 0) { dup2(fd, 1); dup2(fd, 2); }
+        int nullfd = open("/dev/null", O_RDONLY);
+        if (nullfd >= 0) dup2(nullfd, 0);
+        execv(path, (char* const*)argv);
+        _exit(127);
+    }
+    snprintf(children[slot].devid, sizeof(children[slot].devid), "%s", devid);
+    children[slot].pid = pid;
+    logf_("[client] spawn agent %s pid=%d", devid, (int)pid);
+}
+
 void ClientApp::onLocalAccept(hio_t* io) {
     streamNew(io);   // 初始状态 CS_HANDSHAKE
 }
@@ -324,6 +404,7 @@ void ClientApp::onFwdAccept(hio_t* io) {
 
 // READY 后的会话级帧（连接级 HELLO/AUTH/PING 由 TunnelLink 处理）
 void ClientApp::onFrame(rtnp::Frame* f) {
+    if (f->type == rtnp::SPAWN_AGENT) { onSpawnAgent(f); return; }
     ClientStream* s = streamFind(f->sid);
     if (s == NULL) return;
 
@@ -452,6 +533,12 @@ int ClientApp::run(int argc, char** argv) {
                 fprintf(stderr, "--forward 格式: 127.0.0.1:16022=devid:22\n");
                 return 1;
             }
+        } else if (strcmp(argv[i], "--allow-shell") == 0) {
+            allow_shell = 1;
+        } else if (strcmp(argv[i], "--agent-path") == 0 && i + 1 < argc) {
+            snprintf(agent_path, sizeof(agent_path), "%s", argv[++i]);
+        } else if (strcmp(argv[i], "--agent-idle") == 0 && i + 1 < argc) {
+            agent_idle = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--token") == 0 && i + 1 < argc) {
             snprintf(auth_token, sizeof(auth_token), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--tls-ca") == 0 && i + 1 < argc) {
@@ -467,7 +554,8 @@ int ClientApp::run(int argc, char** argv) {
         } else {
             fprintf(stderr,
                 "Usage: %s --user U [--token T] [--server H] [--port P] [--socks5 HOST:PORT]\n"
-                "          [--forward 127.0.0.1:16022=devid:22 ...] [--verbose]\n"
+                "          [--forward 127.0.0.1:16022=devid:22 ...]\n"
+                "          [--allow-shell [--agent-path P] [--agent-idle S]] [--verbose]\n"
                 "          shell <devid>   # 直连设备免密 shell\n",
                 argv[0]);
             return 1;
@@ -493,6 +581,7 @@ int ClientApp::run(int argc, char** argv) {
         return sc.run(shell_devid);
     }
 
+    signal(SIGCHLD, SIG_IGN);   // 子 agent 退出自动回收
     hloop_t* lp = hloop_new(0);
 
     hio_t* listenio = NULL;
@@ -537,6 +626,9 @@ int ClientApp::run(int argc, char** argv) {
 
     init(lp);
     hloop_run(lp);
+    for (auto& c : children) {
+        if (c.pid > 0) kill(c.pid, SIGTERM);
+    }
     hloop_free(&lp);
     return 0;
 }

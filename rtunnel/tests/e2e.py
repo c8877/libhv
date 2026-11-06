@@ -115,8 +115,8 @@ def socks5_open(ep, devid, dport, timeout=8):
     return s, 0
 
 
-def rtnp_hdr(ftype, sid, payload=b""):
-    return (b"RTNP" + bytes([1, ftype]) + b"\x00\x00" +
+def rtnp_hdr(ftype, sid, payload=b"", flags=0):
+    return (b"RTNP" + bytes([1, ftype]) + struct.pack("!H", flags) +
             struct.pack("!I", sid) + struct.pack("!HH", len(payload), 0) + payload)
 
 
@@ -289,6 +289,7 @@ def main():
                 make_client_cert(certdir, "agent", "dev1")
                 make_client_cert(certdir, "tester", "tester")
                 make_client_cert(certdir, "bob", "bob")
+                make_client_cert(certdir, "admin", "admin")
         else:
             if not os.path.exists(server_crt):
                 _openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
@@ -305,12 +306,12 @@ def main():
         f.write("# initial: no file-based acl\n")
     clientusers = os.path.join(logdir, "client_users.txt")
     with open(clientusers, "w") as f:
-        f.write("# user:token\ntester:tok-tester\nbob:tok-bob\n")
+        f.write("# user:token\ntester:tok-tester\nbob:tok-bob\nadmin:tok-admin\n")
     try:
         relay = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-relay"), "--host", "127.0.0.1", "--port", str(relay_port),
-             "--acl", "tester=*", "--acl-file", aclfile, "--drain-timeout", "500",
-             "--client-users", clientusers, "--shell-users", "tester",
+             "--acl", "tester=*", "--acl", "admin=a:*", "--acl-file", aclfile, "--drain-timeout", "500",
+             "--client-users", clientusers, "--shell-users", "admin,tester",
              "--admin", "127.0.0.1:%d" % admin_port,
              "--admin-token", "admintok", "--admin-users", usersfile,
              "--admin-ca-cert", admin_ca_crt, "--admin-ca-key", admin_ca_key,
@@ -328,7 +329,8 @@ def main():
 
         client = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-client"), "--server", "127.0.0.1", "--port", str(relay_port),
-             "--user", "tester", "--token", "tok-tester", "--socks5", socks1_arg] + tls_tester + ["--verbose"],
+             "--user", "tester", "--token", "tok-tester", "--allow-shell",
+             "--agent-idle", "5", "--socks5", socks1_arg] + tls_tester + ["--verbose"],
             stdout=logs["client"], stderr=subprocess.STDOUT, env=env)
         procs.append(client)
 
@@ -429,6 +431,36 @@ def main():
             check("设备端关闭传播（数据 + FIN）", got == b"bye" and eof,
                   "got=%r eof=%s" % (got, eof))
             s.close()
+
+        # 6.5 A 侧按需 agent：admin 对 a:tester 发 OPEN_SHELL，relay 通知 client 拉起本地 agent
+        try:
+            q = socket.create_connection(("127.0.0.1", relay_port), 5)
+            q.settimeout(15)
+            if tls or mtls:
+                import ssl as ssl_mod
+                ctx = ssl_mod.create_default_context(cafile=ca_crt)
+                if mtls:
+                    ctx.load_cert_chain(os.path.join(certdir, "admin.crt"),
+                                        os.path.join(certdir, "admin.key"))
+                q = ctx.wrap_socket(q, server_hostname="localhost")
+            q.sendall(rtnp_hdr(0x01, 0, bytes([2, 1]) + rtnp_str("e2e") + struct.pack("!I", 0)))
+            t, _ = rtnp_recv(q)
+            q.sendall(rtnp_hdr(0x03, 0, rtnp_str("admin") + b"\x01" + rtnp_str("tok-admin")))
+            t, _ = rtnp_recv(q)      # AUTH_OK
+            q.sendall(rtnp_hdr(0x10, 9, rtnp_str("a:tester") + struct.pack("!H", 0), flags=1))
+            ok = False
+            deadline = time.time() + 12
+            while time.time() < deadline:
+                t, _ = rtnp_recv(q)
+                if t == 0x11:
+                    ok = True
+                    break
+                if t in (0x12, 0x16):
+                    break
+            check("A 侧按需 agent（OPEN_SHELL a:tester）", ok)
+            q.close()
+        except Exception as e:
+            check("A 侧按需 agent（OPEN_SHELL a:tester）", False, repr(e))
 
         # 7. 大流量（256 KiB）
         s, rep = socks5_open(socks1, "dev1", echo_port, timeout=20)
@@ -543,7 +575,7 @@ def main():
 
         try:
             ov = admin_get("/api/v1/overview")
-            check("admin overview", ov.get("agents") == 1 and ov.get("clients") == 2, str(ov))
+            check("admin overview", ov.get("agents") >= 1 and ov.get("clients") == 2, str(ov))
             ag = admin_get("/api/v1/agents")
             check("admin agents 列表", any(a["devid"] == "dev1" for a in ag), str(ag))
             cl = admin_get("/api/v1/clients")

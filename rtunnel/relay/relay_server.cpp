@@ -105,6 +105,73 @@ bool RelayServer::shellAllowed(const char* user) const {
     return false;
 }
 
+RelayConn* RelayServer::findClientByUser(const char* user) {
+    for (RelayConn* c = conns; c; c = c->next_all) {
+        if (c->role == rtnp::ROLE_CLIENT && c->authed && strcmp(c->user, user) == 0) return c;
+    }
+    return NULL;
+}
+
+void RelayServer::addPending(RelayConn* a, uint32_t a_sid, const char* devid, uint16_t port, uint16_t flags) {
+    auto* p = new PendingOpen{};
+    p->a = a;
+    p->a_sid = a_sid;
+    snprintf(p->devid, sizeof(p->devid), "%s", devid);
+    p->port = port;
+    p->flags = flags;
+    p->deadline_ms = hloop_now_ms(loop) + 10000;
+    p->next = pending;
+    pending = p;
+}
+
+void RelayServer::completePending(const char* devid) {
+    RelayConn* agent = findAgent(devid);
+    if (agent == NULL) return;
+    PendingOpen** pp = &pending;
+    while (*pp) {
+        PendingOpen* p = *pp;
+        if (strcmp(p->devid, devid) != 0) { pp = &p->next; continue; }
+        *pp = p->next;
+        if (p->a == NULL || p->a->io == NULL || hio_is_closed(p->a->io)) { delete p; continue; }
+
+        auto* s = new RelayStream{};
+        s->a = p->a; s->a_sid = p->a_sid;
+        s->c = agent; s->c_sid = ++agent->next_c_sid;
+        s->next_a = p->a->streams; p->a->streams = s;
+        s->next_c = agent->streams; agent->streams = s;
+
+        rtnp::Writer w;
+        w.u16(p->port);
+        rtnp::send(agent->io, rtnp::OPEN, s->c_sid, w.data, (uint16_t)w.len, p->flags);
+        logf_("[relay] OPEN_SHELL %s resumed (a_sid=%u c_sid=%u)", devid, s->a_sid, s->c_sid);
+        delete p;
+    }
+}
+
+void RelayServer::sweepPending() {
+    uint64_t now = hloop_now_ms(loop);
+    PendingOpen** pp = &pending;
+    while (*pp) {
+        PendingOpen* p = *pp;
+        if (now < p->deadline_ms) { pp = &p->next; continue; }
+        *pp = p->next;
+        if (p->a && p->a->io && !hio_is_closed(p->a->io)) {
+            sendErr(p->a->io, rtnp::OPEN_FAIL, p->a_sid, rtnp::TIMEOUT, "agent spawn timeout");
+        }
+        logf_("[relay] OPEN_SHELL %s: spawn timeout", p->devid);
+        delete p;
+    }
+}
+
+void RelayServer::dropPendingFor(RelayConn* a) {
+    PendingOpen** pp = &pending;
+    while (*pp) {
+        PendingOpen* p = *pp;
+        if (p->a == a) { *pp = p->next; delete p; }
+        else pp = &p->next;
+    }
+}
+
 int RelayServer::aclCheck(const char* user, const char* devid) {
     if (allow_all) return 1;
     if (user[0] == '\0') return 0;
@@ -409,7 +476,10 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
                 hio_close(c->io);
                 return;
             }
-            if (!checkPeerSan(c, c->devid, "device", "devid")) return;
+            // A 侧按需 agent 用 a:<user> 注册，证书 SAN 仍是 user（复用客户端证书）
+            const char* san_expect = c->devid;
+            if (strncmp(san_expect, "a:", 2) == 0) san_expect += 2;
+            if (!checkPeerSan(c, san_expect, "device", "devid")) return;
             // 顶替旧连接
             RelayConn* old = findAgent(c->devid);
             if (old && old != c) {
@@ -426,6 +496,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             w.u32(15000);
             rtnp::send(c->io, rtnp::AUTH_OK, 0, w.data, (uint16_t)w.len);
             logf_("[relay] agent online: %s (fd=%d)", c->devid, hio_fd(c->io));
+            completePending(c->devid);
         } else {
             r.str(c->user, sizeof(c->user));
             if (r.err || c->user[0] == '\0') {
@@ -521,6 +592,18 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             }
             RelayConn* agent = findAgent(devid);
             if (agent == NULL) {
+                // A 侧按需 agent：a:<user> 未注册时通知该 client 拉起本地 agent，先挂起 OPEN
+                if (is_shell && strncmp(devid, "a:", 2) == 0) {
+                    RelayConn* target = findClientByUser(devid + 2);
+                    if (target != NULL) {
+                        rtnp::Writer w;
+                        w.str(devid);
+                        rtnp::send(target->io, rtnp::SPAWN_AGENT, 0, w.data, (uint16_t)w.len);
+                        addPending(c, f->sid, devid, port, f->flags);
+                        logf_("[relay] OPEN_SHELL %s: ask client %s to spawn agent", devid, target->user);
+                        return;
+                    }
+                }
                 sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::DEVICE_OFFLINE, "device offline");
                 return;
             }
@@ -622,6 +705,7 @@ void RelayServer::onClose(RelayConn* c) {
     if (c->hs_timer) { htimer_del(c->hs_timer); c->hs_timer = NULL; }
     // agent 掉线 = 设备离线；client 掉线 = 会话取消（设备并未离线）
     connCloseAllStreams(c, c->role == rtnp::ROLE_AGENT ? rtnp::DEVICE_OFFLINE : rtnp::CANCELLED);
+    dropPendingFor(c);
     if (c->role == rtnp::ROLE_AGENT) {
         registryRemove(c);
         if (c->devid[0]) logf_("[relay] agent offline: %s", c->devid);
@@ -909,6 +993,8 @@ int RelayServer::run(int argc, char** argv) {
     hevent_set_userdata(sig, this);
     sig = hsignal_add(loop, sighupCb, SIGHUP);
     hevent_set_userdata(sig, this);
+    htimer_t* sweeper = htimer_add(loop, [](htimer_t* t) { ((RelayServer*)hevent_userdata(t))->sweepPending(); }, 1000, INFINITE);
+    hevent_set_userdata(sweeper, this);
     htimer_t* t = htimer_add(loop, statsCb, 60000, INFINITE);
     hevent_set_userdata(t, this);
     hloop_run(loop);

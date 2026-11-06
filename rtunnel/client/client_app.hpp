@@ -51,6 +51,13 @@ public:
     } fwd[8];
     int         nfwd = 0;
     int         socks_port = 1080;
+    int         allow_shell = 0;            // 允许 B 通知本机按需拉起 agent（默认关）
+    char        agent_path[512] = {0};      // rtunnel-agent 路径（默认同目录）
+    int         agent_idle = 60;            // 子 agent 空闲多少秒自退
+    struct AgentChild {
+        char  devid[128] = {0};
+        pid_t pid = -1;
+    } children[8];
     ClientStream* streams = nullptr;
     uint32_t    next_sid = 0;
 
@@ -80,6 +87,8 @@ private:
     ClientStream* streamNew(hio_t* io);
     void          onLocalAccept(hio_t* io);
     void          onFwdAccept(hio_t* io);
+    void          onSpawnAgent(const rtnp::Frame* f);
+    void          spawnAgent(const char* devid);
 
     // libhv C 回调的薄封装（对象经 hio_context / hevent_userdata 取回）
     static void localReadCb(hio_t* io, void* buf, int n);

@@ -38,6 +38,7 @@ enum Type : uint8_t {
     CLOSE          = 0x15,
     RESET          = 0x16,
     RESIZE         = 0x17,   // 会话级：u16 cols + u16 rows（shell 终端尺寸）
+    SPAWN_AGENT    = 0x18,   // 连接级：str devid。B 通知 A 在本机按需拉起 agent
 };
 
 // 错误码
