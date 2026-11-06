@@ -56,8 +56,12 @@ const UI = {
     return (d ? d + 'd ' : '') + String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
   },
   table(cols, rows, onrow) {
-    if (!rows.length) return '<div class="empty">暂无数据</div>';
-    let h = '<table><thead><tr>' + cols.map(c => '<th>' + UI.esc(c) + '</th>').join('') + '</tr></thead><tbody>';
+    // 表头允许传 HTML（如排序链接）；以 '<' 开头的原样输出，其余转义
+    const th = c => '<th>' + (String(c).charAt(0) === '<' ? c : UI.esc(c)) + '</th>';
+    let h = '<table><thead><tr>' + cols.map(th).join('') + '</tr></thead><tbody>';
+    if (!rows.length) {
+      h += '<tr><td colspan="' + cols.length + '" class="empty">暂无数据</td></tr>';
+    }
     rows.forEach((r, i) => {
       h += '<tr data-i="' + i + '">' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>';
     });
