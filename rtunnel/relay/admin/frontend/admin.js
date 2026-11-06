@@ -10,7 +10,7 @@ const Api = {
   async req(path, opt = {}) {
     const headers = Object.assign({ 'X-Requested-With': 'fetch' }, opt.headers || {});
     if (this.token) headers['Authorization'] = 'Bearer ' + this.token;
-    const r = await fetch(path, Object.assign({}, opt, { headers }));
+    const r = await fetch(path, Object.assign({ cache: 'no-store' }, opt, { headers }));
     if (r.status === 401) {
       const t = prompt('需要 admin token（Bearer）：');
       if (t) { this.token = t; localStorage.setItem('rt_admin_token', t); return this.req(path, opt); }
@@ -142,7 +142,8 @@ class Page {
   enter(el, params, hash) {
     this.el = el;
     return this.refresh().then(() => {
-      this.timer = setInterval(() => this.refresh().catch(() => {}), 5000);
+      const ms = typeof this.refreshInterval === 'function' ? this.refreshInterval() : 5000;
+      if (ms > 0) this.timer = setInterval(() => this.refresh().catch(() => {}), ms);
     });
   }
   leave() { if (this.timer) clearInterval(this.timer); }
@@ -292,6 +293,8 @@ const StreamsPage = Object.assign(new Page(), {
 
 // ---------------------------------------------------------------- Pages.证书
 const CertsPage = Object.assign(new Page(), {
+  // 页面有输入框（SAN/CSR），自动重渲染会清空正在输入的内容
+  refreshInterval() { return 0; },
   async refresh() {
     const arr = await Api.get('/api/v1/certs');
     const pill = s => s === 'valid' ? '<span class="pill ok">有效</span>'
@@ -306,7 +309,8 @@ const CertsPage = Object.assign(new Page(), {
       c.status === 'revoked' ? '' : '<button class="revoke" data-san="' + UI.esc(c.san) + '">吊销</button>',
     ]);
     this.el.innerHTML =
-      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>签发新证书</h2></div>' +
+      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>签发新证书</h2>' +
+      '<span class="spacer"></span><button id="certs-refresh">刷新列表</button></div>' +
       '<div style="padding:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
       'SAN <input id="issue-san" placeholder="PILE-000200" size="18">' +
       '类型 <select id="issue-role"><option value="device">设备</option><option value="user">用户</option></select>' +
@@ -321,6 +325,8 @@ const CertsPage = Object.assign(new Page(), {
       '<span class="spacer"></span><span>共 ' + arr.length + ' 张</span></div>' +
       UI.table(['SAN(身份)', '类型', '序列号', '到期日', '状态', '操作'], rows) + '</div>';
 
+    const cr = document.getElementById('certs-refresh');
+    if (cr) cr.onclick = () => this.refresh();
     document.getElementById('issue-btn').onclick = async () => {
       const san = document.getElementById('issue-san').value.trim();
       const role = document.getElementById('issue-role').value;
@@ -373,6 +379,8 @@ const CertsPage = Object.assign(new Page(), {
 
 // ---------------------------------------------------------------- Pages.ACL
 const AclPage = Object.assign(new Page(), {
+  // textarea 正在编辑时不能被 5s 刷新覆盖
+  refreshInterval() { return 0; },
   async refresh() {
     const d = await Api.get('/api/v1/acl/file');
     this.el.innerHTML =
@@ -411,6 +419,8 @@ const AuditPage = Object.assign(new Page(), {
 
 // ---------------------------------------------------------------- Pages.文件
 const FilesPage = Object.assign(new Page(), {
+  // 不做 5s 自动刷新：重渲染会重建 <input type=file>，用户选好的文件会丢
+  refreshInterval() { return 0; },
   enter(el, params, hash) {
     const q = new URLSearchParams((hash || '').split('?')[1] || '');
     this.sort = q.get('sort') || 'name';
@@ -433,7 +443,8 @@ const FilesPage = Object.assign(new Page(), {
       '<button class="del" data-name="' + UI.esc(f.name) + '">删除</button>',
     ]);
     this.el.innerHTML =
-      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>上传文件</h2></div>' +
+      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>上传文件</h2>' +
+      '<span class="spacer"></span><button id="files-refresh">刷新列表</button></div>' +
       '<div style="padding:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
       '<input type="file" id="upload-input"> <button class="primary" id="upload-btn">上传</button>' +
       '<span id="upload-status" style="color:var(--muted)"></span></div></div>' +
@@ -442,6 +453,7 @@ const FilesPage = Object.assign(new Page(), {
       UI.table([this.sortLink('name', '名称'), this.sortLink('size', '大小'),
                 this.sortLink('mtime', '修改时间'), '操作'], rows) + '</div>';
 
+    document.getElementById('files-refresh').onclick = () => this.refresh();
     document.getElementById('upload-btn').onclick = async () => {
       const fi = document.getElementById('upload-input').files[0];
       if (!fi) { UI.toast('请选择文件', true); return; }
@@ -451,7 +463,7 @@ const FilesPage = Object.assign(new Page(), {
         const headers = { 'X-Requested-With': 'fetch' };
         if (Api.token) headers['Authorization'] = 'Bearer ' + Api.token;
         const r = await fetch('/api/v1/files/' + encodeURIComponent(fi.name),
-          { method: 'POST', headers, body: fi });
+          { method: 'POST', headers, body: fi, cache: 'no-store' });
         if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + (await r.text()));
         status.textContent = '已上传 ' + fi.name + '（' + UI.bytes(fi.size) + '）';
         this.refresh();
@@ -462,7 +474,7 @@ const FilesPage = Object.assign(new Page(), {
         try {
           const headers = {};
           if (Api.token) headers['Authorization'] = 'Bearer ' + Api.token;
-          const r = await fetch('/api/v1/files/' + encodeURIComponent(btn.dataset.name), { headers });
+          const r = await fetch('/api/v1/files/' + encodeURIComponent(btn.dataset.name), { headers, cache: 'no-store' });
           if (!r.ok) throw new Error('HTTP ' + r.status);
           const blob = await r.blob();
           const url = URL.createObjectURL(blob);
