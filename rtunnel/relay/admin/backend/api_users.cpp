@@ -1,4 +1,5 @@
 // 账号/会话/设备归属 API（SQLite）
+#include "common/logging.hpp"
 #include "admin_server.hpp"
 #include "cpputil/json.hpp"
 
@@ -186,6 +187,7 @@ void AdminServer::handleUserCreate(const HttpContextPtr& ctx, const AdminActor& 
     }
     std::string err;
     if (!db_.createUser(user, pass, role, err)) {
+        logf_("[admin] create user '%s' failed: %s", user.c_str(), err.c_str());
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"" + err + "\"}");
         return;

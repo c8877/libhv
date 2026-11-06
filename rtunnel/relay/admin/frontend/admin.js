@@ -16,7 +16,11 @@ const Api = {
       if (t) { this.token = t; localStorage.setItem('rt_admin_token', t); return this.req(path, opt); }
       throw new Error('unauthorized');
     }
-    if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + path);
+    if (!r.ok) {
+      let msg = 'HTTP ' + r.status;
+      try { const j = await r.json(); if (j && j.error) msg = j.error; } catch (e) {}
+      throw new Error(msg);
+    }
     return r.json();
   },
   get(p) { return this.req(p); },
@@ -649,6 +653,8 @@ const AccountsPage = Object.assign(new Page(), {
       const username = document.getElementById('nu-name').value.trim();
       const password = document.getElementById('nu-pass').value;
       const role = document.getElementById('nu-role').value;
+      if (!username) { UI.toast('用户名不能为空', true); return; }
+      if (password.length < 8) { UI.toast('密码至少 8 位', true); return; }
       try {
         await Api.post('/api/v1/users', { username, password, role });
         UI.toast('已创建 ' + username);
