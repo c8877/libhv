@@ -432,7 +432,8 @@ const FilesPage = Object.assign(new Page(), {
     return Page.prototype.enter.call(this, el, params, hash);
   },
   sortLink(field, label) {
-    let order = 'asc';
+    // 首次点大小/时间按降序（大的、新的在前），名称按升序
+    let order = (field === 'size' || field === 'mtime') ? 'desc' : 'asc';
     if (this.sort === field) order = this.order === 'asc' ? 'desc' : 'asc';
     const cur = this.sort === field ? (this.order === 'asc' ? ' ▲' : ' ▼') : '';
     return '<a href="#/files?sort=' + field + '&order=' + order +
@@ -451,27 +452,59 @@ const FilesPage = Object.assign(new Page(), {
       '<span class="spacer"></span><button id="files-refresh">刷新列表</button></div>' +
       '<div style="padding:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
       '<input type="file" id="upload-input"> <button class="primary" id="upload-btn">上传</button>' +
-      '<span id="upload-status" style="color:var(--muted)"></span></div></div>' +
+      '<progress id="upload-progress" max="100" value="0" style="width:220px;display:none"></progress>' +
+      '<span id="upload-status" style="color:var(--muted)"></span>' +
+      '<span style="color:var(--muted)">单文件上限 32 MiB</span></div></div>' +
       '<div class="panel"><div class="panel-head"><h2>文件列表</h2><span class="spacer"></span>' +
       '<span>共 ' + arr.length + ' 个</span></div>' +
       UI.table([this.sortLink('name', '名称'), this.sortLink('size', '大小'),
                 this.sortLink('mtime', '修改时间'), '操作'], rows) + '</div>';
 
     document.getElementById('files-refresh').onclick = () => this.refresh();
-    document.getElementById('upload-btn').onclick = async () => {
+    const MAX_UPLOAD = 32 * 1024 * 1024;
+    document.getElementById('upload-btn').onclick = () => {
+      const btn = document.getElementById('upload-btn');
       const fi = document.getElementById('upload-input').files[0];
-      if (!fi) { UI.toast('请选择文件', true); return; }
       const status = document.getElementById('upload-status');
+      const bar = document.getElementById('upload-progress');
+      if (!fi) { UI.toast('请选择文件', true); return; }
+      // 客户端先挡：不要等传完 32MiB 才报错
+      if (fi.size > MAX_UPLOAD) {
+        status.textContent = '文件 ' + UI.bytes(fi.size) + ' 超过 32 MiB 上限';
+        UI.toast('文件太大（' + UI.bytes(fi.size) + '），上限 32 MiB', true);
+        return;
+      }
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/v1/files/' + encodeURIComponent(fi.name));
+      xhr.setRequestHeader('X-Requested-With', 'fetch');
+      if (Api.token) xhr.setRequestHeader('Authorization', 'Bearer ' + Api.token);
+      bar.style.display = '';
+      bar.value = 0;
       status.textContent = '上传中…';
-      try {
-        const headers = { 'X-Requested-With': 'fetch' };
-        if (Api.token) headers['Authorization'] = 'Bearer ' + Api.token;
-        const r = await fetch('/api/v1/files/' + encodeURIComponent(fi.name),
-          { method: 'POST', headers, body: fi, cache: 'no-store' });
-        if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + (await r.text()));
-        status.textContent = '已上传 ' + fi.name + '（' + UI.bytes(fi.size) + '）';
-        this.refresh();
-      } catch (e) { status.textContent = ''; UI.toast('上传失败：' + e.message, true); }
+      btn.disabled = true;
+      xhr.upload.onprogress = (e) => {
+        if (!e.lengthComputable) return;
+        bar.value = Math.floor(e.loaded * 100 / e.total);
+        status.textContent = '上传中… ' + UI.bytes(e.loaded) + ' / ' + UI.bytes(e.total);
+      };
+      xhr.onload = () => {
+        btn.disabled = false;
+        bar.style.display = 'none';
+        if (xhr.status === 200) {
+          status.textContent = '已上传 ' + fi.name + '（' + UI.bytes(fi.size) + '）';
+          this.refresh();
+        } else {
+          status.textContent = '';
+          UI.toast('上传失败：HTTP ' + xhr.status + ' ' + xhr.responseText, true);
+        }
+      };
+      xhr.onerror = () => {
+        btn.disabled = false;
+        bar.style.display = 'none';
+        status.textContent = '';
+        UI.toast('上传失败：网络错误', true);
+      };
+      xhr.send(fi);
     };
     document.querySelectorAll('#page button.dl').forEach(btn => {
       btn.onclick = async () => {

@@ -138,9 +138,16 @@ void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string&
         ctx->send("{\"error\":\"bad file name\"}");
         return;
     }
+    // 先看 Content-Length，避免把超限文件读进内存后才报错
+    std::string clen = ctx->header("Content-Length");
+    if (!clen.empty() && strtoull(clen.c_str(), NULL, 10) > MAX_FILE_BYTES) {
+        ctx->response->status_code = HTTP_STATUS_PAYLOAD_TOO_LARGE;
+        ctx->send("{\"error\":\"file too large (max 32MiB)\"}");
+        return;
+    }
     const std::string& body = ctx->body();
     if (body.size() > MAX_FILE_BYTES) {
-        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->response->status_code = HTTP_STATUS_PAYLOAD_TOO_LARGE;
         ctx->send("{\"error\":\"file too large (max 32MiB)\"}");
         return;
     }
