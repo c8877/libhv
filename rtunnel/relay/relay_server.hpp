@@ -29,6 +29,7 @@ struct RelayConn {
     hio_t*       io = nullptr;
     int          role = 0;           // rtnp::ROLE_*
     int          authed = 0;
+    int          internal = 0;   // 管理台内部链路（终端/代理），不在客户端列表展示
     char         devid[128] = {0};
     char         user[128] = {0};
     rtnp::Decoder in;

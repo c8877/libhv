@@ -79,7 +79,7 @@ void AdminServer::handleClients(const HttpContextPtr& ctx) {
     std::string body = callRelay([this, actor]() {
         json arr = json::array();
         for (RelayConn* c = relay_->conns; c; c = c->next_all) {
-            if (c->role != rtnp::ROLE_CLIENT || !c->authed) continue;
+            if (c->role != rtnp::ROLE_CLIENT || !c->authed || c->internal) continue;
             if ((actor.role == "operator" || actor.role == "viewer") && actor.username != c->user) continue;
             json j;
             j["user"] = c->user;

@@ -452,6 +452,9 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         rtnp::Reader r(f->payload, f->len);
         uint8_t role = r.u8();
         uint8_t ver  = r.u8();
+        char aver[64] = {0};
+        r.str(aver, sizeof(aver));
+        c->internal = (strstr(aver, "admin") != NULL || strstr(aver, "terminal") != NULL);
         if (r.err || ver != rtnp::VERSION || (role != rtnp::ROLE_AGENT && role != rtnp::ROLE_CLIENT)) {
             sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::PROTOCOL_ERROR, "bad hello");
             hio_close(c->io);

@@ -43,7 +43,7 @@ void AdminServer::handleOverview(const HttpContextPtr& ctx) {
                 nagent++;
                 for (RelayStream* s = c->streams; s; s = s->next_c) nstream++;
             } else if (c->role == rtnp::ROLE_CLIENT) {
-                nclient++;
+                if (!c->internal) nclient++;
             }
             in += c->bytes_in;
             out += c->bytes_out;
@@ -73,7 +73,7 @@ void AdminServer::handleMetrics(const HttpContextPtr& ctx) {
                 nagent++;
                 for (RelayStream* s = c->streams; s; s = s->next_c) nstream++;
             } else if (c->role == rtnp::ROLE_CLIENT) {
-                nclient++;
+                if (!c->internal) nclient++;
             }
             in += c->bytes_in;
             out += c->bytes_out;
