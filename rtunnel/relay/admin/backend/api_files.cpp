@@ -14,13 +14,33 @@
 
 using nlohmann::json;
 
-// 文件名白名单：字母数字开头，[A-Za-z0-9._-]{1,127}，不含 ..（防目录穿越）
+// 百分号解码：浏览器会对文件名做 encodeURIComponent（中文/空格等）
+static std::string urlDecode(const std::string& in) {
+    std::string out;
+    out.reserve(in.size());
+    for (size_t i = 0; i < in.size(); ++i) {
+        if (in[i] == '%' && i + 2 < in.size() &&
+            isxdigit((unsigned char)in[i + 1]) && isxdigit((unsigned char)in[i + 2])) {
+            auto hex = [](char c) {
+                return (c <= '9') ? (c - '0') : (tolower((unsigned char)c) - 'a' + 10);
+            };
+            out.push_back((char)((hex(in[i + 1]) << 4) | hex(in[i + 2])));
+            i += 2;
+        } else {
+            out.push_back(in[i]);
+        }
+    }
+    return out;
+}
+
+// 文件名白名单：禁止 / \ .. 开头点 和控制字符，允许 UTF-8（中文/空格等），最长 128 字节
 static bool validFileName(const std::string& s) {
     if (s.empty() || s.size() > 128) return false;
-    if (!isalnum((unsigned char)s[0])) return false;
+    if (s[0] == '.') return false;
     if (s.find("..") != std::string::npos) return false;
-    for (char c : s) {
-        if (!isalnum((unsigned char)c) && c != '.' && c != '_' && c != '-') return false;
+    for (unsigned char c : s) {
+        if (c < 0x20 || c == 0x7f) return false;
+        if (c == '/' || c == '\\') return false;
     }
     return true;
 }
@@ -80,7 +100,7 @@ void AdminServer::handleFiles(const HttpContextPtr& ctx) {
 }
 
 void AdminServer::handleFileDownload(const HttpContextPtr& ctx) {
-    std::string name = ctx->param("name");
+    std::string name = urlDecode(ctx->param("name"));
     if (cfg_.file_dir.empty() || !validFileName(name)) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"bad file name\"}");
@@ -112,7 +132,7 @@ void AdminServer::handleFileDownload(const HttpContextPtr& ctx) {
 }
 
 void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string& role) {
-    std::string name = ctx->param("name");
+    std::string name = urlDecode(ctx->param("name"));
     if (cfg_.file_dir.empty() || !validFileName(name)) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"bad file name\"}");
@@ -155,7 +175,7 @@ void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string&
 }
 
 void AdminServer::handleFileDelete(const HttpContextPtr& ctx, const std::string& role) {
-    std::string name = ctx->param("name");
+    std::string name = urlDecode(ctx->param("name"));
     if (cfg_.file_dir.empty() || !validFileName(name)) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"bad file name\"}");

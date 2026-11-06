@@ -452,7 +452,7 @@ const FilesPage = Object.assign(new Page(), {
         if (Api.token) headers['Authorization'] = 'Bearer ' + Api.token;
         const r = await fetch('/api/v1/files/' + encodeURIComponent(fi.name),
           { method: 'POST', headers, body: fi });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
+        if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + (await r.text()));
         status.textContent = '已上传 ' + fi.name + '（' + UI.bytes(fi.size) + '）';
         this.refresh();
       } catch (e) { status.textContent = ''; UI.toast('上传失败：' + e.message, true); }
