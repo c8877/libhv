@@ -23,6 +23,7 @@ public:
     char        tls_cert[256] = {0};
     char        tls_key[256] = {0};
     char        tls_sni[256] = {0};
+    char        auth_token[256] = {0};   // client 侧凭证（agent 留空）
     int         verbose = 0;
 
     // 状态（子类直接读写，保持与原 C 代码一致的访问方式）

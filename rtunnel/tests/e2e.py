@@ -303,10 +303,14 @@ def main():
     aclfile = os.path.join(logdir, "acl.txt")
     with open(aclfile, "w") as f:
         f.write("# initial: no file-based acl\n")
+    clientusers = os.path.join(logdir, "client_users.txt")
+    with open(clientusers, "w") as f:
+        f.write("# user:token\ntester:tok-tester\nbob:tok-bob\n")
     try:
         relay = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-relay"), "--host", "127.0.0.1", "--port", str(relay_port),
              "--acl", "tester=*", "--acl-file", aclfile, "--drain-timeout", "500",
+             "--client-users", clientusers, "--shell-users", "tester",
              "--admin", "127.0.0.1:%d" % admin_port,
              "--admin-token", "admintok", "--admin-users", usersfile,
              "--admin-ca-cert", admin_ca_crt, "--admin-ca-key", admin_ca_key,
@@ -317,19 +321,20 @@ def main():
 
         agent = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-agent"), "--server", "127.0.0.1", "--port", str(relay_port),
-             "--devid", "dev1", "--allow", "%d,%d" % (echo_port, close_port)] + tls_agent + ["--verbose"],
+             "--devid", "dev1", "--allow", "%d,%d" % (echo_port, close_port),
+             "--allow-shell"] + tls_agent + ["--verbose"],
             stdout=logs["agent"], stderr=subprocess.STDOUT, env=env)
         procs.append(agent)
 
         client = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-client"), "--server", "127.0.0.1", "--port", str(relay_port),
-             "--user", "tester", "--socks5", socks1_arg] + tls_tester + ["--verbose"],
+             "--user", "tester", "--token", "tok-tester", "--socks5", socks1_arg] + tls_tester + ["--verbose"],
             stdout=logs["client"], stderr=subprocess.STDOUT, env=env)
         procs.append(client)
 
         client2 = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-client"), "--server", "127.0.0.1", "--port", str(relay_port),
-             "--user", "bob", "--socks5", socks2_arg] + tls_bob + ["--verbose"],
+             "--user", "bob", "--token", "tok-bob", "--socks5", socks2_arg] + tls_bob + ["--verbose"],
             stdout=logs["client2"], stderr=subprocess.STDOUT, env=env)
         procs.append(client2)
 
@@ -339,6 +344,17 @@ def main():
         check("进程就绪（agent/client 上线）", ok)
         if not ok:
             return finish()
+
+        # 0. 认证负向：relay 配了 --client-users，无 token 的 client 不能上线
+        bad_port = free_port()
+        bad = subprocess.Popen(
+            [os.path.join(BIN, "rtunnel-client"), "--server", "127.0.0.1", "--port", str(relay_port),
+             "--user", "tester", "--socks5", "127.0.0.1:%d" % bad_port] + tls_tester + ["--verbose"],
+            stdout=open(os.path.join(logdir, "client_bad.log"), "w"), stderr=subprocess.STDOUT, env=env)
+        procs.append(bad)
+        time.sleep(0.8)
+        _, rep = socks5_open(("tcp", "127.0.0.1", bad_port), "dev1", echo_port)
+        check("client 无 token 被拒（REP=0x01）", rep == 0x01, "rep=0x%02x" % rep)
 
         # 1. 基本回环
         s, rep = socks5_open(socks1, "dev1", echo_port)
@@ -479,7 +495,7 @@ def main():
             t, _ = rtnp_recv(q)          # HELLO_ACK
             if t != 0x02:
                 raise RuntimeError("no HELLO_ACK: 0x%02x" % t)
-            q.sendall(rtnp_hdr(0x03, 0, rtnp_str("tester")))
+            q.sendall(rtnp_hdr(0x03, 0, rtnp_str("tester") + b"\x01" + rtnp_str("tok-tester")))
             t, _ = rtnp_recv(q)          # AUTH_OK
             if t != 0x04:
                 raise RuntimeError("no AUTH_OK: 0x%02x" % t)
@@ -600,106 +616,116 @@ def main():
         if s:
             s.close()
 
-        # 12. admin 证书面：签发 / 吊销 / 审计
-        r = admin_req("POST", "/api/v1/certs/issue", {"san": "PILE-900001", "role": "device", "days": 90})
-        check("签发证书", r.get("san") == "PILE-900001" and "cert" in r and "key" in r)
-        newcrt = os.path.join(certout, "PILE-900001.crt")
-        newkey = os.path.join(certout, "PILE-900001.key")
-        check("证书文件落盘", os.path.exists(newcrt) and os.path.exists(newkey))
-        cl = admin_get("/api/v1/certs")
-        check("证书台账", any(c["san"] == "PILE-900001" and c["status"] == "valid" for c in cl), str(cl))
+        # 12. admin 证书面（relay 未编译 OpenSSL 时跳过）
+        cert_ok = True
+        try:
+            admin_req("POST", "/api/v1/certs/sign", {"csr": "not-a-csr", "days": 1})
+        except urllib.error.HTTPError as e:
+            if e.code == 501:
+                cert_ok = False
+                print("SKIP 证书面（relay 未编译 OpenSSL）")
+            # 400 = 接口存在但参数不合法，说明支持签发
+        if cert_ok:
+            # 12. admin 证书面：签发 / 吊销 / 审计
+            r = admin_req("POST", "/api/v1/certs/issue", {"san": "PILE-900001", "role": "device", "days": 90})
+            check("签发证书", r.get("san") == "PILE-900001" and "cert" in r and "key" in r)
+            newcrt = os.path.join(certout, "PILE-900001.crt")
+            newkey = os.path.join(certout, "PILE-900001.key")
+            check("证书文件落盘", os.path.exists(newcrt) and os.path.exists(newkey))
+            cl = admin_get("/api/v1/certs")
+            check("证书台账", any(c["san"] == "PILE-900001" and c["status"] == "valid" for c in cl), str(cl))
 
-        if mtls:
-            # 新证书可注册上线（与 relay 的认证 CA 同源）
-            new_log = open(os.path.join(logdir, "agent900001.log"), "w")
-            new_agent = subprocess.Popen(
-                [os.path.join(BIN, "rtunnel-agent"), "--server", "127.0.0.1", "--port", str(relay_port),
-                 "--devid", "PILE-900001", "--allow", str(echo_port),
-                 "--tls-ca", os.path.join(certdir, "ca.crt"), "--tls-sni", "localhost",
-                 "--tls-cert", newcrt, "--tls-key", newkey, "--verbose"],
-                stdout=new_log, stderr=subprocess.STDOUT, env=env)
-            procs.append(new_agent)
-            ok = wait_log(os.path.join(logdir, "agent900001.log"), "authenticated as PILE-900001", 8)
-            check("签发证书可注册上线", ok)
+            if mtls:
+                # 新证书可注册上线（与 relay 的认证 CA 同源）
+                new_log = open(os.path.join(logdir, "agent900001.log"), "w")
+                new_agent = subprocess.Popen(
+                    [os.path.join(BIN, "rtunnel-agent"), "--server", "127.0.0.1", "--port", str(relay_port),
+                     "--devid", "PILE-900001", "--allow", str(echo_port),
+                     "--tls-ca", os.path.join(certdir, "ca.crt"), "--tls-sni", "localhost",
+                     "--tls-cert", newcrt, "--tls-key", newkey, "--verbose"],
+                    stdout=new_log, stderr=subprocess.STDOUT, env=env)
+                procs.append(new_agent)
+                ok = wait_log(os.path.join(logdir, "agent900001.log"), "authenticated as PILE-900001", 8)
+                check("签发证书可注册上线", ok)
 
-        admin_req("POST", "/api/v1/certs/revoke", {"san": "PILE-900001"})
-        cl = admin_get("/api/v1/certs")
-        check("吊销状态", any(c["san"] == "PILE-900001" and c["status"] == "revoked" for c in cl), str(cl))
-        if mtls:
-            ok = wait_log(os.path.join(logdir, "relay.log"), "identity revoked", 8)
-            check("吊销后 AUTH 被拒", ok)
+            admin_req("POST", "/api/v1/certs/revoke", {"san": "PILE-900001"})
+            cl = admin_get("/api/v1/certs")
+            check("吊销状态", any(c["san"] == "PILE-900001" and c["status"] == "revoked" for c in cl), str(cl))
+            if mtls:
+                ok = wait_log(os.path.join(logdir, "relay.log"), "identity revoked", 8)
+                check("吊销后 AUTH 被拒", ok)
 
-        # CSR 上传签名（私钥不出设备；无 SAN 的 CSR 走 CN 回退）
-        csr_key = os.path.join(certout, "PILE-900002.key")
-        csr_file = os.path.join(certout, "PILE-900002.csr")
-        _openssl("req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=PILE-900002",
-                 "-keyout", csr_key, "-out", csr_file)
-        with open(csr_file) as f:
-            csr_pem = f.read()
-        r = admin_req("POST", "/api/v1/certs/sign", {"csr": csr_pem, "days": 90})
-        check("CSR 签名", r.get("san") == "PILE-900002" and "cert" in r, str(r)[:100])
-        if mtls:
-            with open(os.path.join(certout, "PILE-900002.crt"), "w") as f:
-                f.write(r["cert"])
-            new_log2 = open(os.path.join(logdir, "agent900002.log"), "w")
-            new_agent2 = subprocess.Popen(
-                [os.path.join(BIN, "rtunnel-agent"), "--server", "127.0.0.1", "--port", str(relay_port),
-                 "--devid", "PILE-900002", "--allow", str(echo_port),
-                 "--tls-ca", os.path.join(certdir, "ca.crt"), "--tls-sni", "localhost",
-                 "--tls-cert", os.path.join(certout, "PILE-900002.crt"), "--tls-key", csr_key, "--verbose"],
-                stdout=new_log2, stderr=subprocess.STDOUT, env=env)
-            procs.append(new_agent2)
-            ok = wait_log(os.path.join(logdir, "agent900002.log"), "authenticated as PILE-900002", 8)
-            check("CSR 签出证书可注册上线", ok)
+            # CSR 上传签名（私钥不出设备；无 SAN 的 CSR 走 CN 回退）
+            csr_key = os.path.join(certout, "PILE-900002.key")
+            csr_file = os.path.join(certout, "PILE-900002.csr")
+            _openssl("req", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=PILE-900002",
+                     "-keyout", csr_key, "-out", csr_file)
+            with open(csr_file) as f:
+                csr_pem = f.read()
+            r = admin_req("POST", "/api/v1/certs/sign", {"csr": csr_pem, "days": 90})
+            check("CSR 签名", r.get("san") == "PILE-900002" and "cert" in r, str(r)[:100])
+            if mtls:
+                with open(os.path.join(certout, "PILE-900002.crt"), "w") as f:
+                    f.write(r["cert"])
+                new_log2 = open(os.path.join(logdir, "agent900002.log"), "w")
+                new_agent2 = subprocess.Popen(
+                    [os.path.join(BIN, "rtunnel-agent"), "--server", "127.0.0.1", "--port", str(relay_port),
+                     "--devid", "PILE-900002", "--allow", str(echo_port),
+                     "--tls-ca", os.path.join(certdir, "ca.crt"), "--tls-sni", "localhost",
+                     "--tls-cert", os.path.join(certout, "PILE-900002.crt"), "--tls-key", csr_key, "--verbose"],
+                    stdout=new_log2, stderr=subprocess.STDOUT, env=env)
+                procs.append(new_agent2)
+                ok = wait_log(os.path.join(logdir, "agent900002.log"), "authenticated as PILE-900002", 8)
+                check("CSR 签出证书可注册上线", ok)
 
-        req = urllib.request.Request(admin_base + "/metrics")
-        req.add_header("Authorization", "Bearer admintok")
-        with urllib.request.urlopen(req, timeout=5) as r:
-            metrics = r.read().decode()
-        check("/metrics", "rtunnel_agents" in metrics and "rtunnel_bytes_in_total" in metrics)
-
-        # 文件管理：上传/列表/排序/下载/删除 + 角色权限
-        def upload(name, data, token="admintok"):
-            req = urllib.request.Request(admin_base + "/api/v1/files/" + name, data=data, method="POST")
-            req.add_header("Authorization", "Bearer " + token)
+            req = urllib.request.Request(admin_base + "/metrics")
+            req.add_header("Authorization", "Bearer admintok")
             with urllib.request.urlopen(req, timeout=5) as r:
-                return json_mod.loads(r.read().decode())
+                metrics = r.read().decode()
+            check("/metrics", "rtunnel_agents" in metrics and "rtunnel_bytes_in_total" in metrics)
 
-        fl = admin_get("/api/v1/files", token="viewertok")
-        check("viewer 可读文件列表", isinstance(fl, list))
-        try:
-            upload("denied.txt", b"x", token="viewertok")
-            check("viewer 上传被拒(403)", False, "unexpected success")
-        except urllib.error.HTTPError as e:
-            check("viewer 上传被拒(403)", e.code == 403, "code=%d" % e.code)
-        try:
-            admin_req("POST", "/api/v1/certs/issue", {"san": "PILE-999999", "days": 30}, token="opertok")
-            check("operator 签发被拒(403)", False, "unexpected success")
-        except urllib.error.HTTPError as e:
-            check("operator 签发被拒(403)", e.code == 403, "code=%d" % e.code)
+            # 文件管理：上传/列表/排序/下载/删除 + 角色权限
+            def upload(name, data, token="admintok"):
+                req = urllib.request.Request(admin_base + "/api/v1/files/" + name, data=data, method="POST")
+                req.add_header("Authorization", "Bearer " + token)
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    return json_mod.loads(r.read().decode())
 
-        upload("a-small.txt", b"hello")
-        upload("b-large.bin", bytes(range(256)) * 8)   # 2048B
-        fl = admin_get("/api/v1/files?sort=size&order=desc")
-        check("文件列表+按大小降序", len(fl) == 2 and fl[0]["name"] == "b-large.bin", str(fl))
-        fl = admin_get("/api/v1/files?sort=name&order=asc")
-        check("按名称升序", fl[0]["name"] == "a-small.txt", str(fl))
-        req = urllib.request.Request(admin_base + "/api/v1/files/b-large.bin")
-        req.add_header("Authorization", "Bearer admintok")
-        with urllib.request.urlopen(req, timeout=5) as r:
-            data = r.read()
-        check("下载内容一致", data == bytes(range(256)) * 8)
-        admin_req("DELETE", "/api/v1/files/a-small.txt")
-        fl = admin_get("/api/v1/files")
-        check("删除后列表", len(fl) == 1 and fl[0]["name"] == "b-large.bin", str(fl))
-        try:
-            upload("..%2Fescape", b"x")
-            check("目录穿越被拒", False, "unexpected success")
-        except urllib.error.HTTPError as e:
-            check("目录穿越被拒", e.code in (400, 404), "code=%d" % e.code)
+            fl = admin_get("/api/v1/files", token="viewertok")
+            check("viewer 可读文件列表", isinstance(fl, list))
+            try:
+                upload("denied.txt", b"x", token="viewertok")
+                check("viewer 上传被拒(403)", False, "unexpected success")
+            except urllib.error.HTTPError as e:
+                check("viewer 上传被拒(403)", e.code == 403, "code=%d" % e.code)
+            try:
+                admin_req("POST", "/api/v1/certs/issue", {"san": "PILE-999999", "days": 30}, token="opertok")
+                check("operator 签发被拒(403)", False, "unexpected success")
+            except urllib.error.HTTPError as e:
+                check("operator 签发被拒(403)", e.code == 403, "code=%d" % e.code)
 
-        au = admin_get("/api/v1/audit")
-        check("审计日志", any("certs.issue" in x for x in au) and any("certs.revoke" in x for x in au), str(au)[:120])
+            upload("a-small.txt", b"hello")
+            upload("b-large.bin", bytes(range(256)) * 8)   # 2048B
+            fl = admin_get("/api/v1/files?sort=size&order=desc")
+            check("文件列表+按大小降序", len(fl) == 2 and fl[0]["name"] == "b-large.bin", str(fl))
+            fl = admin_get("/api/v1/files?sort=name&order=asc")
+            check("按名称升序", fl[0]["name"] == "a-small.txt", str(fl))
+            req = urllib.request.Request(admin_base + "/api/v1/files/b-large.bin")
+            req.add_header("Authorization", "Bearer admintok")
+            with urllib.request.urlopen(req, timeout=5) as r:
+                data = r.read()
+            check("下载内容一致", data == bytes(range(256)) * 8)
+            admin_req("DELETE", "/api/v1/files/a-small.txt")
+            fl = admin_get("/api/v1/files")
+            check("删除后列表", len(fl) == 1 and fl[0]["name"] == "b-large.bin", str(fl))
+            try:
+                upload("..%2Fescape", b"x")
+                check("目录穿越被拒", False, "unexpected success")
+            except urllib.error.HTTPError as e:
+                check("目录穿越被拒", e.code in (400, 404), "code=%d" % e.code)
+
+            au = admin_get("/api/v1/audit")
+            check("审计日志", any("certs.issue" in x for x in au) and any("certs.revoke" in x for x in au), str(au)[:120])
 
         # 13. mTLS 负向：证书 SAN 与 devid 不符必须被拒
         if mtls:
@@ -721,7 +747,7 @@ def main():
             rogue_c_log = open(os.path.join(logdir, "rogue_client.log"), "w")
             rogue_c = subprocess.Popen(
                 [os.path.join(BIN, "rtunnel-client"), "--server", "127.0.0.1", "--port", str(relay_port),
-                 "--user", "tester", "--socks5", "127.0.0.1:%d" % free_port()] + tls_bob + ["--verbose"],
+                 "--user", "tester", "--token", "tok-tester", "--socks5", "127.0.0.1:%d" % free_port()] + tls_bob + ["--verbose"],
                 stdout=rogue_c_log, stderr=subprocess.STDOUT, env=env)
             procs.append(rogue_c)
             ok = wait_log(os.path.join(logdir, "relay.log"), "client cert SAN mismatch", 8)

@@ -63,6 +63,10 @@ public:
     std::vector<std::string> revoked_sans;  // 已吊销身份（cert_dir/revoked.txt 持久化）
     RelayConn*  conns = nullptr;      // 全局连接表
     RelayConn*  agents = nullptr;     // devid 注册表
+    struct ClientCred { std::string user, token; };
+    std::vector<ClientCred> client_creds;   // --client-users（user:token）
+    std::string client_token;               // --client-token（全局 token）
+    std::vector<std::string> shell_users;   // --shell-users（允许 OPEN_SHELL 的用户）
     int         allow_all = 0;
     int         require_mtls = 0;
     int         verbose = 0;
@@ -76,6 +80,8 @@ public:
 
 private:
     int          aclCheck(const char* user, const char* devid);
+    bool         clientAuthEnabled() const { return !client_creds.empty() || !client_token.empty(); }
+    bool         shellAllowed(const char* user) const;
     void         aclAddTo(AclEntry** head, const char* user, const char* patterns);
     void         aclFree(AclEntry** head);
     int          aclFileLoad();

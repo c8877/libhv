@@ -23,12 +23,13 @@
 ## 运行（明文）
 
 ```bash
-# B
-build/bin/rtunnel-relay --host 0.0.0.0 --port 8443 --acl alice='*' --allow-all
+# B（--client-users: 每行 user:token；--shell-users: 允许 OPEN_SHELL 的用户）
+build/bin/rtunnel-relay --host 0.0.0.0 --port 8443 --acl alice='*' \
+    --client-users /etc/rtunnel/clients.txt --shell-users alice
 # C（设备侧，只允许本地 22 端口）
 build/bin/rtunnel-agent --server B_IP --port 8443 --devid PILE-000123 --allow 22
-# A（开发机）
-build/bin/rtunnel-client --server B_IP --port 8443 --user alice --socks5 127.0.0.1:1080
+# A（开发机，--token 是 relay 下发的客户端凭证）
+build/bin/rtunnel-client --server B_IP --port 8443 --user alice --token <token> --socks5 127.0.0.1:1080
 ```
 
 开发者 `~/.ssh/config`（SOCKS5 方式）：
@@ -130,6 +131,11 @@ A 端也可在本机执行 `rtunnel-client --server B --user U shell <devid>` �
 
 ## 实现说明
 
+- **客户端认证**：relay 配了 `--client-users`（user:token）或 `--client-token` 后，
+  A 端必须带 `--token` 才能上线；未配置时启动日志会打印 warning（开发模式）。
+- **Shell 授权**：`OPEN_SHELL` 需要 relay 的 `--shell-users` 且设备 agent 开 `--allow-shell`，
+  两者缺一即 `OPEN_FAIL`。管理台的 Web 终端固定用 `--admin-shell-user` 身份
+  （`--admin-shell-token` 提供该身份连 relay 的凭证），不再接受浏览器指定用户。
 - **不改动 libhv**：所有能力都在 `rtunnel/` 内实现。
 - **目录结构（C++ 对象化）**：`rtnp/` 协议库（Frame/Decoder/Writer/Reader）、`common/` 共享组件
   （`TunnelLink`：agent/client 长连接的 HELLO/AUTH 状态机、心跳判死、超时、退避重连）、

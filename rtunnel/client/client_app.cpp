@@ -452,6 +452,8 @@ int ClientApp::run(int argc, char** argv) {
                 fprintf(stderr, "--forward 格式: 127.0.0.1:16022=devid:22\n");
                 return 1;
             }
+        } else if (strcmp(argv[i], "--token") == 0 && i + 1 < argc) {
+            snprintf(auth_token, sizeof(auth_token), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--tls-ca") == 0 && i + 1 < argc) {
             snprintf(tls_ca, sizeof(tls_ca), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--tls-cert") == 0 && i + 1 < argc) {
@@ -464,8 +466,9 @@ int ClientApp::run(int argc, char** argv) {
             verbose = 1;
         } else {
             fprintf(stderr,
-                "Usage: %s --user U [--server H] [--port P] [--socks5 HOST:PORT]\n"
-                "          [--forward 127.0.0.1:16022=devid:22 ...] [--verbose]\n",
+                "Usage: %s --user U [--token T] [--server H] [--port P] [--socks5 HOST:PORT]\n"
+                "          [--forward 127.0.0.1:16022=devid:22 ...] [--verbose]\n"
+                "          shell <devid>   # 直连设备免密 shell\n",
                 argv[0]);
             return 1;
         }
@@ -482,6 +485,7 @@ int ClientApp::run(int argc, char** argv) {
         sc.port = port;
         sc.verbose = verbose;
         snprintf(sc.user, sizeof(sc.user), "%s", user);
+        snprintf(sc.auth_token, sizeof(sc.auth_token), "%s", auth_token);
         snprintf(sc.tls_ca, sizeof(sc.tls_ca), "%s", tls_ca);
         snprintf(sc.tls_cert, sizeof(sc.tls_cert), "%s", tls_cert);
         snprintf(sc.tls_key, sizeof(sc.tls_key), "%s", tls_key);

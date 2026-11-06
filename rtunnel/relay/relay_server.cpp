@@ -98,6 +98,13 @@ static int pattern_match(const char* pat, const char* s) {
     return strcmp(pat, s) == 0;
 }
 
+bool RelayServer::shellAllowed(const char* user) const {
+    for (const auto& u : shell_users) {
+        if (u == "*" || u == user) return true;
+    }
+    return false;
+}
+
 int RelayServer::aclCheck(const char* user, const char* devid) {
     if (allow_all) return 1;
     if (user[0] == '\0') return 0;
@@ -426,6 +433,23 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
                 hio_close(c->io);
                 return;
             }
+            // 可选凭证：u8 auth_type(0=none,1=token) + str token
+            uint8_t auth_type = r.u8();
+            char tok[256] = {0};
+            if (!r.err && auth_type == 1) r.str(tok, sizeof(tok));
+            if (clientAuthEnabled()) {
+                std::string expect;
+                for (const auto& cc : client_creds) {
+                    if (cc.user == c->user) { expect = cc.token; break; }
+                }
+                if (expect.empty()) expect = client_token;
+                if (expect.empty() || tok != expect) {
+                    logf_("[relay] client auth rejected: user=%s", c->user);
+                    sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::UNAUTHORIZED, "bad token");
+                    hio_close(c->io);
+                    return;
+                }
+            }
             if (!checkPeerSan(c, c->user, "client", "user")) return;
             c->authed = 1;
             if (c->hs_timer) { htimer_del(c->hs_timer); c->hs_timer = NULL; }
@@ -489,6 +513,10 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             }
             if (!aclCheck(c->user, devid)) {
                 sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::ACL_DENIED, "acl denied");
+                return;
+            }
+            if (is_shell && !shellAllowed(c->user)) {
+                sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::ACL_DENIED, "shell not allowed");
                 return;
             }
             RelayConn* agent = findAgent(devid);
@@ -704,6 +732,10 @@ int RelayServer::run(int argc, char** argv) {
     const char* admin_cert_dir = NULL;
     const char* admin_file_dir = NULL;
     const char* admin_shell_user = "devuser";
+    const char* admin_shell_token = NULL;
+    const char* client_users_file = NULL;
+    const char* client_token_arg = NULL;
+    const char* shell_users_arg = NULL;
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
@@ -718,6 +750,14 @@ int RelayServer::run(int argc, char** argv) {
             tls_ca = argv[++i];
         } else if (strcmp(argv[i], "--allow-all") == 0) {
             allow_all = 1;
+        } else if (strcmp(argv[i], "--client-users") == 0 && i + 1 < argc) {
+            client_users_file = argv[++i];
+        } else if (strcmp(argv[i], "--client-token") == 0 && i + 1 < argc) {
+            client_token_arg = argv[++i];
+        } else if (strcmp(argv[i], "--shell-users") == 0 && i + 1 < argc) {
+            shell_users_arg = argv[++i];
+        } else if (strcmp(argv[i], "--admin-shell-token") == 0 && i + 1 < argc) {
+            admin_shell_token = argv[++i];
         } else if (strcmp(argv[i], "--verbose") == 0) {
             verbose = 1;
         } else if (strcmp(argv[i], "--acl") == 0 && i + 1 < argc) {
@@ -755,6 +795,7 @@ int RelayServer::run(int argc, char** argv) {
                 "Usage: %s [--host H] [--port P] [--acl user=devid[,devid|*]] [--allow-all]\n"
                 "          [--acl-file PATH] [--drain-timeout MS]\n"
                 "          [--tls-cert crt --tls-key key [--tls-ca ca]] [--verbose]\n"
+                "          [--client-users F] [--client-token T] [--shell-users u1,u2]\n"
                 "          [--admin 127.0.0.1:9443 [--admin-token T] [--admin-users F] [--admin-docroot DIR]\n"
                 "            [--admin-ca-cert C --admin-ca-key K --admin-cert-dir D]]\n",
                 argv[0]);
@@ -792,6 +833,38 @@ int RelayServer::run(int argc, char** argv) {
         return 2;
     }
     if (acl_file_path[0]) aclFileLoad();
+    if (client_users_file) {
+        FILE* fp = fopen(client_users_file, "r");
+        if (fp == NULL) {
+            fprintf(stderr, "open %s failed\n", client_users_file);
+            return 5;
+        }
+        char line[512];
+        while (fgets(line, sizeof(line), fp)) {
+            char* p = line;
+            while (*p == ' ' || *p == '\t') ++p;
+            if (*p == '#' || *p == '\n' || *p == '\0') continue;
+            char* nl = strpbrk(p, "\r\n");
+            if (nl) *nl = '\0';
+            char* colon = strchr(p, ':');
+            if (colon == NULL) continue;
+            *colon = '\0';
+            client_creds.push_back({std::string(p), std::string(colon + 1)});
+        }
+        fclose(fp);
+    }
+    if (client_token_arg) this->client_token = client_token_arg;
+    if (shell_users_arg) {
+        std::string all = shell_users_arg;
+        size_t pos = 0;
+        while (pos <= all.size()) {
+            size_t comma = all.find(',', pos);
+            std::string u = all.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+            if (!u.empty()) shell_users.push_back(u);
+            if (comma == std::string::npos) break;
+            pos = comma + 1;
+        }
+    }
     started_at_ms = hloop_now_ms(loop);
     if (admin_addr) {
         auto* adm = new AdminServer(this);
@@ -806,6 +879,7 @@ int RelayServer::run(int argc, char** argv) {
         cfg.cert_dir = admin_cert_dir ? admin_cert_dir : "";
         cfg.file_dir = admin_file_dir ? admin_file_dir : "";
         cfg.shell_user = admin_shell_user;
+        cfg.shell_token = admin_shell_token ? admin_shell_token : "";
         if (adm->start(cfg) != 0) {
             delete adm;
             admin = NULL;
@@ -819,6 +893,14 @@ int RelayServer::run(int argc, char** argv) {
         logf_("[relay] WARNING: no peer identity verification (--tls-ca off); "
               "peers can claim any devid/user");
     }
+    if (clientAuthEnabled()) {
+        logf_("[relay] client auth: on (%zu users, global token %s)",
+              client_creds.size(), client_token.empty() ? "off" : "on");
+    } else {
+        logf_("[relay] WARNING: client auth disabled (--client-users/--client-token off); "
+              "anyone who can reach this port can claim any user");
+    }
+    logf_("[relay] shell users: %s", shell_users.empty() ? "none (OPEN_SHELL denied)" : "configured");
     hsignal_t* sig;
     sig = hsignal_add(loop, shutdownCb, SIGTERM);
     hevent_set_userdata(sig, this);

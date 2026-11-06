@@ -28,6 +28,7 @@ struct AdminConfig {
     std::string file_dir;    // 文件管理目录（--admin-file-dir）
     // Web 终端（direct 免密）：admin 作为 RTNP client 直连本机 relay 发 OPEN_SHELL
     std::string shell_user = "devuser";  // direct 模式登录 relay 的用户（须被 ACL 授权）
+    std::string shell_token;             // 该用户连 relay 的凭证（--admin-shell-token）
     int         shell_relay_port = 8443; // direct 模式连接的 relay 端口（本机）
 };
 

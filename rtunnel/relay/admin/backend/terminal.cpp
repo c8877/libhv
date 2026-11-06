@@ -66,10 +66,13 @@ static void directFrame(TerminalSession* s, rtnp::Frame* f) {
     switch (f->type) {
     case rtnp::HELLO_ACK: {
         rtnp::Writer w;
-        // AUTH 用户来自 WS query 的 user（A 端列表点谁的 Shell 就用谁的身份），
-        // 未指定时回退到配置的默认 shell_user
-        const char* auth_user = s->user.empty() ? s->admin->config().shell_user.c_str() : s->user.c_str();
-        w.str(auth_user);
+        // 身份固定为配置的 shell_user：不再接受浏览器传 user，
+        // 否则 operator 可以冒用任意用户身份开 shell。
+        const std::string& auth_user = s->admin->config().shell_user;
+        const std::string& auth_token = s->admin->config().shell_token;
+        w.str(auth_user.c_str());
+        w.u8(auth_token.empty() ? 0 : 1);
+        w.str(auth_token.c_str());
         rtnp::send(s->link_io, rtnp::AUTH, 0, w.data, (uint16_t)w.len);
         return;
     }
