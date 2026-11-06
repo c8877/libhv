@@ -172,6 +172,25 @@ build/bin/rtunnel-client --server B --port 8443 --user alice --token <token> \
     --socks5 127.0.0.1:1080 --allow-shell --agent-idle 60
 ```
 
+## 设备 Web 代理（路径式）
+
+板子/设备上的 Web 服务可通过管理台直接访问，不需要 A 端或本地代理：
+
+```
+http://B:9443/device/<devid>/<port>/<path>
+例：http://192.168.1.133:9443/device/board01/8080/
+```
+
+- **认证**：管理台 Cookie 会话；普通账号只能访问绑定到自己账号的设备
+- **端口**：必须在 agent 的 `--allow` 列表里（如 `--allow 22,8080`）
+- **数据面**：admin 作为 RTNP client 连本机 relay，`OPEN(devid, port)` 后转发
+- **HTTP**：响应流式转发（chunked），不限制大小；`Location` 与 HTML/CSS 绝对路径做前缀改写
+- **WebSocket**：`/device/<devid>/<port>/...` 同时支持 WS，帧级转发
+- **Cookie**：设备 Cookie 加 `d_<devid>_<port>_` 前缀，与管理台会话隔离
+- **限制**：同时最多 32 条代理请求（超出 503）；不支持设备侧 HTTPS；路径式对部分 SPA 仍可能缺资源；relay 需明文部署
+
+设备列表的 **Web** 按钮会提示输入端口并新开窗口。
+
 ## 参数速查
 
 **relay（B）**

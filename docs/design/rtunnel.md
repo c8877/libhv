@@ -567,6 +567,16 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 - 输入/输出走 `DATA`，尺寸走 `RESIZE`；
 - 管理台是 **HTTP 明文**：非回环部署建议加 TLS 反代或只绑回环。
 
+### 13.4 设备 Web 代理
+
+`/device/<devid>/<port>/<path>`：admin 用会话身份做一次 `OPEN(devid, port)`，把 HTTP/WS 双向转发。
+
+- 鉴权：Cookie 会话 + 设备归属；普通账号仅限自己设备
+- HTTP：响应头到达即 `EndHeaders(chunked)`，DATA 帧边收边写；上游 chunked 增量解码
+- WS：向设备做二次握手（不协商压缩扩展），浏览器帧 ↔ RTNP DATA 双向封装
+- Cookie：`d_<devid>_<port>_` 前缀隔离，避免与管理台及其他设备串味
+- 上限：32 并发；HEAD/204/304 无响应体；不支持设备 HTTPS
+
 ## 14. 备选方案与取舍
 
 | 方案 | 优点 | 缺点 | 结论 |
