@@ -139,7 +139,6 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 - **账号 API**：`GET/POST /api/v1/users`、`PUT /api/v1/users/{id}/password|status`、
   `DELETE /api/v1/users/{id}`；`POST /api/v1/login|logout`、`GET /api/v1/me`
 - 口令策略：最短 8 位；连续 5 次失败锁定 5 分钟；改密/禁用会吊销该账号全部会话
-- 旧 `--admin-users token:role` 仍兼容（可作为服务账号）
 
 ## Web 终端（免密）
 
@@ -204,7 +203,6 @@ http://B:9443/device/<devid>/<port>/<path>
 | `--shell-users u1,u2` / `*` | 允许 `OPEN_SHELL` 的用户；默认空 = 全部拒绝 |
 | `--tls-cert/--tls-key [--tls-ca]` | 服务端 TLS；给 `--tls-ca` 即要求客户端证书（mTLS） |
 | `--admin ADDR --admin-token T` | 管理台监听与 Bearer token |
-| `--admin-users F` | 每行 `token:role`（viewer/operator/admin，兼容旧配置） |
 | `--admin-db PATH` | SQLite 账号库，默认 `rtunnel-admin.db`（需 OpenSSL 构建） |
 | `--admin-shell-user U --admin-shell-token T` | Web 终端连本机 relay 的身份与凭证 |
 | `--admin-ca-cert/--admin-ca-key/--admin-cert-dir` | 证书签发 CA 与台账目录 |

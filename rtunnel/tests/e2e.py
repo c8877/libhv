@@ -254,9 +254,6 @@ def main():
     filedir = os.path.join(logdir, "files")
     shutil.rmtree(filedir, ignore_errors=True)
     os.makedirs(filedir, exist_ok=True)
-    usersfile = os.path.join(logdir, "admin_users")
-    with open(usersfile, "w") as f:
-        f.write("viewertok:viewer\nopertok:operator\n")
     tls_relay, tls_agent, tls_tester, tls_bob = [], [], [], []
     if tls or mtls:
         certdir = os.path.join(logdir, "cert")
@@ -313,7 +310,7 @@ def main():
              "--acl", "tester=*", "--acl", "admin=a:*", "--acl-file", aclfile, "--drain-timeout", "500",
              "--client-users", clientusers, "--shell-users", "admin,tester",
              "--admin", "127.0.0.1:%d" % admin_port,
-             "--admin-token", "admintok", "--admin-users", usersfile,
+             "--admin-token", "admintok",
              "--admin-db", os.path.join(logdir, "admin.db"),
              "--admin-ca-cert", admin_ca_crt, "--admin-ca-key", admin_ca_key,
              "--admin-cert-dir", certout, "--admin-file-dir", filedir] + tls_relay + ["--verbose"],
@@ -735,19 +732,6 @@ def main():
                 with urllib.request.urlopen(req, timeout=5) as r:
                     return json_mod.loads(r.read().decode())
 
-            fl = admin_get("/api/v1/files", token="viewertok")
-            check("viewer 可读文件列表", isinstance(fl, list))
-            try:
-                upload("denied.txt", b"x", token="viewertok")
-                check("viewer 上传被拒(403)", False, "unexpected success")
-            except urllib.error.HTTPError as e:
-                check("viewer 上传被拒(403)", e.code == 403, "code=%d" % e.code)
-            try:
-                admin_req("POST", "/api/v1/certs/issue", {"san": "PILE-999999", "days": 30}, token="opertok")
-                check("operator 签发被拒(403)", False, "unexpected success")
-            except urllib.error.HTTPError as e:
-                check("operator 签发被拒(403)", e.code == 403, "code=%d" % e.code)
-
             upload("a-small.txt", b"hello")
             upload("b-large.bin", bytes(range(256)) * 8)   # 2048B
             fl = admin_get("/api/v1/files?sort=size&order=desc")
@@ -806,12 +790,13 @@ def main():
         relay2 = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-relay"), "--host", "127.0.0.1", "--port", str(r2_port),
              "--acl", "tester=*", "--drain-timeout", "200",
-             "--admin", "127.0.0.1:%d" % a2_port],
+             "--admin", "127.0.0.1:%d" % a2_port, "--admin-token", "admintok"],
             stdout=r2log, stderr=subprocess.STDOUT, env=env)
         procs.append(relay2)
         time.sleep(0.5)
         req = urllib.request.Request("http://127.0.0.1:%d/api/v1/shutdown" % a2_port, data=b"{}", method="POST")
         req.add_header("Content-Type", "application/json")
+        req.add_header("Authorization", "Bearer admintok")
         with urllib.request.urlopen(req, timeout=5) as r:
             resp = json_mod.loads(r.read().decode())
         try:

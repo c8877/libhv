@@ -810,7 +810,6 @@ int RelayServer::run(int argc, char** argv) {
     const char* admin_addr = NULL;
     const char* admin_token = NULL;
     const char* admin_docroot = NULL;
-    const char* admin_users = NULL;
     const char* admin_ca_cert = NULL;
     const char* admin_ca_key = NULL;
     const char* admin_cert_dir = NULL;
@@ -865,8 +864,6 @@ int RelayServer::run(int argc, char** argv) {
             admin_token = argv[++i];
         } else if (strcmp(argv[i], "--admin-docroot") == 0 && i + 1 < argc) {
             admin_docroot = argv[++i];
-        } else if (strcmp(argv[i], "--admin-users") == 0 && i + 1 < argc) {
-            admin_users = argv[++i];
         } else if (strcmp(argv[i], "--admin-ca-cert") == 0 && i + 1 < argc) {
             admin_ca_cert = argv[++i];
         } else if (strcmp(argv[i], "--admin-ca-key") == 0 && i + 1 < argc) {
@@ -883,7 +880,7 @@ int RelayServer::run(int argc, char** argv) {
                 "          [--acl-file PATH] [--drain-timeout MS]\n"
                 "          [--tls-cert crt --tls-key key [--tls-ca ca]] [--verbose]\n"
                 "          [--client-users F] [--client-token T] [--shell-users u1,u2]\n"
-                "          [--admin 127.0.0.1:9443 [--admin-token T] [--admin-users F] [--admin-db PATH]\n"
+                "          [--admin 127.0.0.1:9443 [--admin-token T] [--admin-db PATH]\n"
                 "            [--admin-docroot DIR]\n"
                 "            [--admin-ca-cert C --admin-ca-key K --admin-cert-dir D]]\n",
                 argv[0]);
@@ -961,7 +958,6 @@ int RelayServer::run(int argc, char** argv) {
         cfg.addr = admin_addr;
         cfg.shell_relay_port = port;   // 终端 direct 模式连本机 relay 的端口，必须跟 --port 一致
         cfg.token = admin_token ? admin_token : "";
-        cfg.users = admin_users ? admin_users : "";
         cfg.docroot = admin_docroot ? admin_docroot : "";
         cfg.ca_cert = admin_ca_cert ? admin_ca_cert : "";
         cfg.ca_key = admin_ca_key ? admin_ca_key : "";

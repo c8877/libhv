@@ -117,7 +117,6 @@ private:
     hv::HttpService service_;
     hv::HttpServer  server_;
     AdminConfig     cfg_;
-    std::unordered_map<std::string, std::string> users_;   // token -> role（兼容旧 --admin-users）
     AdminDb          db_;
     AuditLog        audit_;
 

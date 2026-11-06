@@ -92,37 +92,24 @@ std::string AdminServer::roleOf(const HttpContextPtr& ctx) {
             tl_actor.id = u.id;
             tl_actor.username = u.username;
             tl_actor.role = u.role;
-            if (u.role == "superadmin") return "admin";
-            if (u.role == "admin") return "operator";
-            return "viewer";
+            return u.role;
         }
     }
 
     // 2) 首次初始化前，或显式配置了紧急 token 时，允许 Bearer
     bool initialized = db_.ok() && db_.initialized();
-    if (!cfg_.token.empty() || !users_.empty()) {
+    if (!cfg_.token.empty()) {
         std::string auth = ctx->header("Authorization");
         const std::string prefix = "Bearer ";
         if (auth.compare(0, prefix.size(), prefix) == 0) {
             std::string tok = auth.substr(prefix.size());
             if (!cfg_.token.empty() && tok == cfg_.token) {
                 bool allow = !initialized;
-                if (allow && !initialized) {
-                    // 初始化窗口只放行 setup 相关接口，其余仍需账号登录
-                    const std::string& path = ctx->request->path;
-                    if (path.find("/api/v1/setup") != 0) allow = false;
-                }
                 if (allow) {
                     tl_actor.username = "bootstrap";
                     tl_actor.role = "superadmin";
-                    return "admin";
+                    return "superadmin";
                 }
-            }
-            auto it = users_.find(tok);
-            if (it != users_.end()) {
-                tl_actor.username = "token";
-                tl_actor.role = it->second;
-                return it->second;
             }
         }
         return "";
@@ -132,9 +119,9 @@ std::string AdminServer::roleOf(const HttpContextPtr& ctx) {
 }
 
 static int roleWeight(const std::string& role) {
-    if (role == "admin") return ROLE_ADMIN;
-    if (role == "operator") return ROLE_OPERATOR;
-    if (role == "viewer") return ROLE_VIEWER;
+    if (role == "superadmin") return ROLE_ADMIN;
+    if (role == "admin") return ROLE_OPERATOR;
+    if (role == "user") return ROLE_VIEWER;
     return 0;
 }
 
@@ -177,12 +164,6 @@ bool AdminServer::wsAuthorize(const HttpRequestPtr& req, AdminActor& actor, std:
         if (!cfg_.token.empty() && tok == cfg_.token && !initialized) {
             actor.id = 0; actor.username = "bootstrap"; actor.role = "superadmin";
             role = "admin";
-            return true;
-        }
-        auto it = users_.find(tok);
-        if (it != users_.end()) {
-            actor.id = 0; actor.username = "token"; actor.role = it->second;
-            role = it->second;
             return true;
         }
     }
@@ -429,26 +410,6 @@ int AdminServer::start(const AdminConfig& cfg) {
         }
     }
 
-    // 账户文件：每行 token:role（viewer/operator/admin），# 注释
-    if (!cfg_.users.empty()) {
-        FILE* fp = fopen(cfg_.users.c_str(), "r");
-        if (fp == NULL) {
-            logf_("[admin] cannot open users file %s", cfg_.users.c_str());
-            return -1;
-        }
-        char line[512];
-        while (fgets(line, sizeof(line), fp)) {
-            std::string s(line);
-            while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ')) s.pop_back();
-            if (s.empty() || s[0] == '#') continue;
-            size_t colon = s.rfind(':');
-            if (colon == std::string::npos) continue;
-            std::string tok = s.substr(0, colon), role = s.substr(colon + 1);
-            if (roleWeight(role) > 0 && !tok.empty()) users_[tok] = role;
-        }
-        fclose(fp);
-    }
-
     if (!cfg_.cert_dir.empty()) {
         relay_->cert_dir = cfg_.cert_dir;
         mkdir(cfg_.cert_dir.c_str(), 0700);
@@ -468,7 +429,7 @@ int AdminServer::start(const AdminConfig& cfg) {
     // 安全护栏：非回环监听必须配置凭据
     bool loopback = strcmp(host, "127.0.0.1") == 0 || strcmp(host, "localhost") == 0 ||
                     strcmp(host, "::1") == 0;
-    if (!loopback && cfg_.token.empty() && users_.empty()) {
+    if (!loopback && cfg_.token.empty()) {
         logf_("[admin] refuse to listen on %s without credentials", host);
         return -1;
     }
@@ -484,7 +445,7 @@ int AdminServer::start(const AdminConfig& cfg) {
         return rc;
     }
     logf_("[admin] listening on http://%s:%d/ (%s, users=%zu)", host, port,
-          (cfg_.token.empty() && users_.empty()) ? "no auth (loopback)" : "bearer token", users_.size());
+          cfg_.token.empty() ? "no auth (loopback)" : "bearer token", 0);
     return 0;
 }
 

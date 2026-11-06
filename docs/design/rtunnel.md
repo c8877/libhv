@@ -522,7 +522,6 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 |---|---|
 | `--admin ADDR` | 监听地址，如 `127.0.0.1:9443`；启动时不带凭据且非回环会被拒绝 |
 | `--admin-token T` | 单 token，全权（等价 admin 角色） |
-| `--admin-users F` | 每行 `token:role`，role = viewer / operator / admin |
 | `--admin-docroot D` | 前端改从磁盘读（调试用）；默认编译期内嵌 |
 | `--admin-ca-cert/--admin-ca-key/--admin-cert-dir` | 签发 CA 与台账目录 |
 | `--admin-file-dir D` | 文件管理根目录 |
