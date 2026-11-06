@@ -600,45 +600,100 @@ const FilesPage = Object.assign(new Page(), {
 });
 
 // ---------------------------------------------------------------- Pages.终端（xterm.js + WebSocket）
+// 终端会话管理器：切页面不断开，支持多个 tab
+const TermMgr = {
+  sessions: new Map(),
+  seq: 0,
+  open(devid) {
+    const id = devid + '#' + (++this.seq);
+    const box = document.createElement('div');
+    box.style.cssText = 'height:100%;width:100%';
+    const term = new Terminal({ cursorBlink: true, fontSize: 14 });
+    const fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(proto + '://' + location.host + '/ws/shell?devid=' + encodeURIComponent(devid));
+    const s = { id, devid, term, fit, ws, box, opened: false, alive: true };
+    ws.onmessage = e => term.write(e.data);
+    ws.onclose = () => { s.alive = false; try { term.write('\r\n[连接已关闭]\r\n'); } catch (e) {} };
+    term.onData(d => { if (ws.readyState === 1) ws.send(d); });
+    term.onResize(({ cols, rows }) => {
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+    });
+    this.sessions.set(id, s);
+    return s;
+  },
+  aliveOf(devid) {
+    let found = null;
+    for (const s of this.sessions.values()) if (s.devid === devid && s.alive) found = s;
+    return found;
+  },
+  close(id) {
+    const s = this.sessions.get(id);
+    if (!s) return;
+    s.alive = false;
+    try { s.ws.close(); } catch (e) {}
+    try { s.term.dispose(); } catch (e) {}
+    s.box.remove();
+    this.sessions.delete(id);
+  },
+};
+
 const TerminalPage = Object.assign(new Page(), {
   enter(el, params) {
-    // 路由捕获组可能带查询串（?direct=1），devid 必须只保留设备名
-    this.devid = decodeURIComponent((params[0] || '').split('?')[0]);
-    el.innerHTML = '<div class="panel"><div class="panel-head"><h2>终端：' + UI.esc(this.devid) + '</h2>' +
-      '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">免密 shell（agent OPEN_SHELL，设备侧直接起 shell）</span>' +
-      '<button id="term-close">关闭</button></div>' +
-      '<div id="term" style="height:calc(100vh - 220px);background:#000;padding:8px"></div></div>';
-
-    this.term = new Terminal({ cursorBlink: true, fontSize: 14 });
-    this.fit = new FitAddon.FitAddon();
-    this.term.loadAddon(this.fit);
-    this.term.open(document.getElementById('term'));
-    this.fit.fit();
-
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const q = new URLSearchParams((location.hash.split('?')[1] || ''));
-    // direct 未指定 user 时后端回退到配置的默认 shell_user
-    const wsUser = q.get('user') || '';
-    this.ws = new WebSocket(proto + '://' + location.host + '/ws/shell?devid=' +
-      encodeURIComponent(this.devid) + '&user=' + encodeURIComponent(wsUser) + '&token=' + encodeURIComponent(Api.token));
-    this.ws.onmessage = (e) => this.term.write(e.data);
-    this.ws.onclose = () => this.term.write('\r\n[连接已关闭]\r\n');
-    this.term.onData(d => { if (this.ws.readyState === 1) this.ws.send(d); });
-    this.term.onResize(({ cols, rows }) => {
-      if (this.ws.readyState === 1) this.ws.send(JSON.stringify({ type: 'resize', cols, rows }));
-    });
-    this._rs = () => this.fit.fit();
+    this.el = el;
+    const devid = decodeURIComponent((params[0] || '').split('?')[0]);
+    if (devid) {
+      let target = TermMgr.aliveOf(devid);
+      if (!target) target = TermMgr.open(devid);
+      this.active = target.id;
+    }
+    this.render();
+    this._rs = () => this.fitActive();
     window.addEventListener('resize', this._rs);
-    document.getElementById('term-close').onclick = () => {
-      this.ws.close();
-      Router.go('#/agents');
+  },
+  fitActive() {
+    const s = TermMgr.sessions.get(this.active);
+    if (!s) return;
+    try { s.fit.fit(); } catch (e) {}
+  },
+  render() {
+    const ids = [...TermMgr.sessions.keys()];
+    if (!ids.length) { Router.go('#/agents'); return; }
+    if (!TermMgr.sessions.has(this.active)) this.active = ids[ids.length - 1];
+    const cur = TermMgr.sessions.get(this.active);
+    const tabs = ids.map(id => {
+      const s = TermMgr.sessions.get(id);
+      return '<button class="term-tab' + (id === this.active ? ' active' : '') + '" data-id="' + id + '">' +
+        UI.esc(s.devid) + (s.alive ? '' : ' ✕') + '</button>';
+    }).join('');
+    this.el.innerHTML = '<div class="panel"><div class="panel-head"><h2>终端</h2>' +
+      '<span class="spacer"></span><span class="term-tabs">' + tabs + '</span> ' +
+      '<button id="term-new">新开</button> <button id="term-close">关闭当前</button></div>' +
+      '<div id="term-host" style="height:calc(100vh - 220px);background:#000;padding:8px"></div></div>';
+    const host = document.getElementById('term-host');
+    if (!cur.opened) { cur.term.open(cur.box); cur.opened = true; }
+    host.appendChild(cur.box);
+    document.querySelectorAll('#page button.term-tab').forEach(btn => {
+      btn.onclick = () => { this.active = btn.dataset.id; this.render(); };
+    });
+    document.getElementById('term-new').onclick = () => {
+      const d = prompt('设备 devid', cur.devid);
+      if (!d) return;
+      this.active = TermMgr.open(d.trim()).id;
+      this.render();
     };
+    document.getElementById('term-close').onclick = () => {
+      TermMgr.close(this.active);
+      this.active = null;
+      this.render();
+    };
+    setTimeout(() => this.fitActive(), 0);
   },
   leave() {
-    if (this.ws) this.ws.close();
-    if (this._rs) window.removeEventListener('resize', this._rs);
-    if (this.term) this.term.dispose();
-    if (this.timer) clearInterval(this.timer);
+    if (this._rs) { window.removeEventListener('resize', this._rs); this._rs = null; }
+    const s = TermMgr.sessions.get(this.active);
+    if (s && s.box.parentNode) s.box.parentNode.removeChild(s.box);   // 仅摘 DOM，会话保留
   },
 });
 

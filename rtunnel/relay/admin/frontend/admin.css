@@ -107,3 +107,9 @@ button:hover { filter: brightness(.96); }
 #usermenu #logout { display: block; width: 100%; text-align: left; background: transparent;
   border: 0; color: inherit; padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
 #usermenu #logout:hover { background: rgba(255,255,255,.08); }
+
+/* 终端 tab */
+.term-tabs { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.term-tab { background: transparent; border: 1px solid rgba(255,255,255,.16); color: inherit;
+  padding: 3px 10px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.term-tab.active { border-color: #4a9eff; color: #4a9eff; }
