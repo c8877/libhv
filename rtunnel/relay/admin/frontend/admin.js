@@ -1436,10 +1436,15 @@ const TasksPage = Object.assign(new Page(), {
     if (this.tab !== 'all') url += '&status=' + this.tab;
     if (this.q) url += '&q=' + encodeURIComponent(this.q);
     if (this.batch) url += '&batch=' + encodeURIComponent(this.batch);
-    const r = await Api.get(url);
+    const [r, sum] = await Promise.all([
+      Api.get(url),
+      Api.get('/api/v1/distributions/summary').catch(() => ({ all: 0, active: 0, done: 0, failed: 0 })),
+    ]);
     const items = r.items || [];
     const pages = Math.max(1, Math.ceil(r.total / this.per));
-    const tabs = [['all', '全部'], ['active', '进行中'], ['done', '已完成'], ['failed_group', '失败']];
+    const tabCount = { all: sum.all, active: sum.active, done: sum.done, failed_group: sum.failed };
+    const tabs = [['all', '全部'], ['active', '进行中'], ['done', '已完成'], ['failed_group', '失败']]
+      .map(([k, n]) => [k, n + ' ' + (tabCount[k] || 0)]);
 
     const rows = items.map(t => {
       const size = Number(t.file_size) || 0;
@@ -1448,7 +1453,7 @@ const TasksPage = Object.assign(new Page(), {
       const st = STATUS_LABEL[t.status] || t.status;
       const cls = t.status === 'success' ? 'ok' : (t.status === 'failed' || t.status === 'timeout') ? 'bad'
         : (t.status === 'canceled' ? 'info' : 'warn');
-      let ops = '';
+      let ops = '<a href="#/tasks/' + t.id + '">详情</a> ';
       if (t.status === 'failed') ops += '<button class="tr" data-id="' + t.id + '">重试</button> ';
       if (t.status === 'scheduled' || t.status === 'queued') ops += '<button class="tc" data-id="' + t.id + '">取消</button> ';
       if (t.status === 'timeout' && t.extend_count === 0) ops += '<button class="te" data-id="' + t.id + '">延长</button> ';
@@ -1521,6 +1526,67 @@ const TasksPage = Object.assign(new Page(), {
         catch (e) { UI.toast('延长失败：' + e.message, true); }
       };
     });
+  },
+});
+
+
+// ---------------------------------------------------------------- Pages.任务详情
+const TaskDetailPage = Object.assign(new Page(), {
+  refreshInterval() { return 3000; },
+  enter(el, params) {
+    this.el = el;
+    this.id = params[0];
+    return this.refresh();
+  },
+  async refresh() {
+    const t = await Api.get('/api/v1/distributions/' + this.id);
+    const st = STATUS_LABEL[t.status] || t.status;
+    const size = Number(t.file_size) || 0;
+    const sent = Number(t.sent) || 0;
+    const pct = size ? Math.min(100, Math.floor(sent * 100 / size)) : 0;
+    this.el.innerHTML =
+      '<div class="panel" style="max-width:760px"><div class="panel-head"><h2>任务 #' + t.id +
+        '</h2><span class="spacer"></span><a href="#/tasks"><button>返回列表</button></a></div>' +
+      '<div class="cfg-body">' +
+        '<table class="si-table">' +
+        '<tr><th>文件</th><td>' + UI.esc(t.file_name) + '</td></tr>' +
+        '<tr><th>设备</th><td>' + UI.esc(t.devid) + '</td></tr>' +
+        '<tr><th>目标路径</th><td>' + UI.esc(t.target_path || '—') + '</td></tr>' +
+        '<tr><th>状态</th><td>' + st + '</td></tr>' +
+        '<tr><th>进度</th><td><progress max="100" value="' + pct + '"></progress> ' +
+          UI.bytes(sent) + ' / ' + UI.bytes(size) + '</td></tr>' +
+        '<tr><th>重试</th><td>' + t.retry_count + ' / ' + t.max_retries + '</td></tr>' +
+        '<tr><th>开始时间</th><td>' + new Date(t.start_at_ms).toLocaleString() + '</td></tr>' +
+        '<tr><th>截止时间</th><td>' + new Date(t.deadline_at_ms).toLocaleString() + '</td></tr>' +
+        '<tr><th>创建时间</th><td>' + new Date(t.created_ms).toLocaleString() + '</td></tr>' +
+        '<tr><th>操作人</th><td>' + UI.esc(t.actor) + '</td></tr>' +
+        '<tr><th>批次</th><td>' + UI.esc(t.batch_id) + '</td></tr>' +
+        '<tr><th>错误</th><td>' + UI.esc(t.error || '—') + '</td></tr>' +
+        '</table>' +
+      '</div><div class="cfg-actions">' +
+        (t.status === 'failed' ? '<button class="primary" id="td-retry">重试</button> ' : '') +
+        (t.status === 'scheduled' || t.status === 'queued' ? '<button id="td-cancel">取消</button> ' : '') +
+        (t.status === 'timeout' && t.extend_count === 0 ? '<button id="td-extend">延长截止时间</button>' : '') +
+      '</div></div>';
+    const rt = document.getElementById('td-retry');
+    if (rt) rt.onclick = async () => {
+      try { await Api.post('/api/v1/distributions/' + this.id + '/retry', {}); this.refresh(); }
+      catch (e) { UI.toast('重试失败：' + e.message, true); }
+    };
+    const cc = document.getElementById('td-cancel');
+    if (cc) cc.onclick = async () => {
+      try { await Api.post('/api/v1/distributions/' + this.id + '/cancel', {}); this.refresh(); }
+      catch (e) { UI.toast('取消失败：' + e.message, true); }
+    };
+    const ex = document.getElementById('td-extend');
+    if (ex) ex.onclick = async () => {
+      const v = prompt('新的截止时间（本地时间，最多 +24h）',
+        toLocalInput(Date.now() + 24 * 3600 * 1000));
+      if (!v) return;
+      try { await Api.post('/api/v1/distributions/' + this.id + '/extend',
+        { deadline_at_ms: new Date(v).getTime() }); this.refresh(); }
+      catch (e) { UI.toast('延长失败：' + e.message, true); }
+    };
   },
 });
 
@@ -1714,4 +1780,5 @@ Router.register(/^#\/settings$/, SettingsPage, '设置');
 Router.register(/^#\/profile$/, ProfilePage, '个人设置');
 Router.register(/^#\/distribute(?:\?.*)?$/, DistributePage, '分发文件');
 Router.register(/^#\/tasks(?:\?.*)?$/, TasksPage, '任务');
+Router.register(/^#\/tasks\/(\d+)$/, TaskDetailPage, '任务详情');
 boot();

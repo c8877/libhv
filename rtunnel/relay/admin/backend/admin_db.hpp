@@ -58,6 +58,7 @@ public:
                   int page, int per_page, std::string& json_out, int& total);
     bool distGet(long long id, std::string& json_out);
     bool distDue(std::string& json_out);   // status/start/deadline/retry 字段列表
+    bool distSummary(std::string& json_out);
 
     bool bindDevice(const std::string& devid, long long owner_id);
     bool unbindDevice(const std::string& devid);

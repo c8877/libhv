@@ -273,6 +273,7 @@ void AdminServer::registerRoutes() {
         return (int)ctx->response->status_code;
     });
     access(ROLE_MANAGER, "GET", "/api/v1/distributions", &AdminServer::handleDistList);
+    access(ROLE_MANAGER, "GET", "/api/v1/distributions/summary", &AdminServer::handleDistSummary);
     access(ROLE_MANAGER, "GET", "/api/v1/distributions/:id", &AdminServer::handleDistGet);
     service_.Handle("POST", "/api/v1/distributions/:id/retry", [this](const HttpContextPtr& ctx) {
         std::string role;

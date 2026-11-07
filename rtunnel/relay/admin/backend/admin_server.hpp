@@ -83,6 +83,7 @@ private:
     // api_dist.cpp
     void handleDistCreate(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleDistList(const HttpContextPtr& ctx);
+    void handleDistSummary(const HttpContextPtr& ctx);
     void handleDistGet(const HttpContextPtr& ctx);
     void handleDistRetry(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleDistCancel(const HttpContextPtr& ctx, const AdminActor& actor);

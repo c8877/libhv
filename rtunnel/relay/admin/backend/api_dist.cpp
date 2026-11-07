@@ -136,6 +136,16 @@ void AdminServer::handleDistList(const HttpContextPtr& ctx) {
               ",\"per_page\":" + std::to_string(per) + ",\"items\":" + arr + "}");
 }
 
+void AdminServer::handleDistSummary(const HttpContextPtr& ctx) {
+    std::string j;
+    if (!db_.distSummary(j)) {
+        ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+        ctx->send("{\"error\":\"db error\"}");
+        return;
+    }
+    ctx->send(j);
+}
+
 void AdminServer::handleDistGet(const HttpContextPtr& ctx) {
     long long id = atoll(ctx->param("id").c_str());
     std::string j;

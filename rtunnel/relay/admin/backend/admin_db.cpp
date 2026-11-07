@@ -663,6 +663,31 @@ bool AdminDb::distDue(std::string& json_out) {
     return true;
 }
 
+bool AdminDb::distSummary(std::string& json_out) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, "SELECT status,COUNT(*) FROM distribution_tasks GROUP BY status",
+                           -1, &st, nullptr) != SQLITE_OK) return false;
+    long long all = 0, active = 0, done = 0, failed = 0;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        std::string s = (const char*)sqlite3_column_text(st, 0);
+        long long n = sqlite3_column_int64(st, 1);
+        all += n;
+        if (s == "success") done += n;
+        else if (s == "failed" || s == "timeout") failed += n;
+        else if (s == "canceled") { /* 归入全部，不计进行中 */ }
+        else active += n;
+    }
+    sqlite3_finalize(st);
+    nlohmann::json j;
+    j["all"] = all;
+    j["active"] = active;
+    j["done"] = done;
+    j["failed"] = failed;
+    json_out = j.dump();
+    return true;
+}
+
 bool AdminDb::bindDevice(const std::string& devid, long long owner_id) {
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
