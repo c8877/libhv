@@ -63,7 +63,7 @@ void AgentApp::closeTimeoutCb(htimer_t* t) {
 
 int AgentApp::portAllowed(int port) {
     if (allow_all) return 1;
-    for (int i = 0; i < nallow; ++i) {
+    for (int i = 0; i < 32 && allow_ports[i] > 0; ++i) {
         if (allow_ports[i] == port) return 1;
     }
     return 0;
@@ -365,6 +365,7 @@ void AgentApp::loadConfig() {
             if (p > 0 && p < 65536 && idx < 31) allow_ports[idx++] = p;
         }
         allow_ports[idx] = 0;
+        nallow = idx;
     }
     if (j.contains("shell") && j["shell"].is_boolean()) allow_shell = j["shell"].get<bool>() ? 1 : 0;
     logf_("[agent] config loaded from %s (allow=%d shell=%d)", config_file.c_str(),
@@ -445,7 +446,11 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
         new_shell = r["shell"].get<bool>() ? 1 : 0;
         shell_set = true;
     }
-    if (ports_set) memcpy(allow_ports, new_ports, sizeof(allow_ports));
+    if (ports_set) {
+        memcpy(allow_ports, new_ports, sizeof(allow_ports));
+        nallow = 0;
+        while (nallow < 32 && allow_ports[nallow] > 0) nallow++;
+    }
     if (shell_set) allow_shell = new_shell;
     bool persisted = saveConfig();
     nlohmann::json ack;
