@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <ctime>
 
 class AgentApp;
 
@@ -82,6 +83,7 @@ private:
     void         handleConfigSet(const rtnp::Frame* f);
     void         handleFileFrame(const rtnp::Frame* f);
     std::string  sha256File(const std::string& path);
+    void         cleanupParts(const std::string& dir, time_t cutoff);
 
     // libhv C 回调的薄封装（对象经 hio_context / hevent_userdata 取回）
     static void localReadCb(hio_t* io, void* buf, int n);

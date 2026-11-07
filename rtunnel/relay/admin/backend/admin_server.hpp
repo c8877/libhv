@@ -8,6 +8,7 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <set>
 #include <mutex>
 #include <unordered_map>
 
@@ -77,6 +78,7 @@ private:
     void handleAgentSysinfo(const HttpContextPtr& ctx);
     void handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleAgentFilePush(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleAgentFileStatus(const HttpContextPtr& ctx, const AdminActor& actor);
     // api_settings.cpp
     void loadSettings();
     int  settingInt(const std::string& key, int def);
@@ -137,6 +139,8 @@ private:
     AuditLog        audit_;
     std::map<std::string, std::string> settings_;
     std::mutex settings_mu_;
+    std::set<uint32_t> pushed_done;
+    std::mutex push_mu_;
 
     // Web 终端
     hv::WebSocketService ws_service_;

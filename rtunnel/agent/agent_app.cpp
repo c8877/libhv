@@ -8,6 +8,8 @@
 #include <stdio.h>
 #include <sys/utsname.h>
 #include <sys/statvfs.h>
+#include <dirent.h>
+#include <ctype.h>
 #include <sys/sysinfo.h>
 #include <ifaddrs.h>
 #include <netinet/in.h>
@@ -577,20 +579,32 @@ void AgentApp::handleFileFrame(const rtnp::Frame* f) {
     };
     if (f->type == rtnp::FILE_BEGIN) {
         rtnp::Reader r(f->payload, f->len);
+        char dir[256] = {0};
+        r.str(dir, sizeof(dir));
         char name[256] = {0};
         r.str(name, sizeof(name));
         uint64_t size = r.u64();
         char sha[80] = {0};
         r.str(sha, sizeof(sha));
-        if (r.err || name[0] == '\0' || strstr(name, "..") || strchr(name, '/') || size == 0) {
+        bool bad_dir = false;
+        for (const char* p = dir; *p; ++p) {
+            if (!(isalnum((unsigned char)*p) || *p == '/' || *p == '.' || *p == '_' || *p == '-')) {
+                bad_dir = true; break;
+            }
+        }
+        if (strstr(dir, "..") || dir[0] == '/') bad_dir = true;
+        if (r.err || name[0] == '\0' || strstr(name, "..") || strchr(name, '/') ||
+            size == 0 || bad_dir) {
             sendAck(false, 0, "bad begin");
             return;
         }
-        if (!file_dir.empty()) {
-            std::string cmd = "mkdir -p '" + file_dir + "'";
+        std::string target = file_dir;
+        if (dir[0]) target += "/" + std::string(dir);
+        if (!target.empty()) {
+            std::string cmd = "mkdir -p '" + target + "'";
             system(cmd.c_str());
         }
-        std::string dest = file_dir + "/" + name;
+        std::string dest = target + "/" + name;
         std::string part = dest + ".part";
         uint64_t have = 0;
         struct stat st{};
@@ -643,6 +657,25 @@ void AgentApp::handleFileFrame(const rtnp::Frame* f) {
     logf_("[agent] file received: %s (%llu bytes)", rx.dest.c_str(), (unsigned long long)rx.written);
     g_file_rx.erase(it);
     sendAck(true, rx.written, "");
+}
+
+void AgentApp::cleanupParts(const std::string& dir, time_t cutoff) {
+    DIR* d = opendir(dir.c_str());
+    if (!d) return;
+    struct dirent* e;
+    while ((e = readdir(d)) != NULL) {
+        if (e->d_name[0] == '.') continue;
+        std::string p = dir + "/" + e->d_name;
+        struct stat st{};
+        if (stat(p.c_str(), &st) != 0) continue;
+        if (S_ISDIR(st.st_mode)) {
+            cleanupParts(p, cutoff);
+        } else if (st.st_mtime < cutoff) {
+            size_t n = strlen(e->d_name);
+            if (n > 5 && strcmp(e->d_name + n - 5, ".part") == 0) unlink(p.c_str());
+        }
+    }
+    closedir(d);
 }
 
 void AgentApp::sendSysinfo() {
@@ -946,6 +979,11 @@ int AgentApp::run(int argc, char** argv) {
             agentSampleCpu((AgentApp*)hevent_userdata(t));
         }, 1000, INFINITE);
         hevent_set_userdata(cpu_timer, this);
+        htimer_t* part_timer = htimer_add(lp, [](htimer_t* t) {
+            auto* app = (AgentApp*)hevent_userdata(t);
+            app->cleanupParts(app->file_dir, time(NULL) - 24 * 3600);
+        }, 3600 * 1000, INFINITE);
+        hevent_set_userdata(part_timer, this);
         htimer_t* idle_timer = htimer_add(lp, [](htimer_t* t) {
             auto* app = (AgentApp*)hevent_userdata(t);
             uint64_t now = hloop_now_ms(app->loop);

@@ -441,8 +441,8 @@ static bool pumpFile(RelayConn* a, uint32_t tid, FilePush& p) {
     return true;
 }
 
-bool RelayServer::startFilePush(const char* devid, const char* path, const char* name,
-                                uint64_t size, const std::string& sha,
+bool RelayServer::startFilePush(const char* devid, const char* path, const char* dir,
+                                const char* name, uint64_t size, const std::string& sha,
                                 std::string& err, uint32_t& tid) {
     RelayConn* a = findAgent(devid);
     if (!a || !a->io) { err = "device offline"; return false; }
@@ -458,11 +458,37 @@ bool RelayServer::startFilePush(const char* devid, const char* path, const char*
     p.phase = 0;
     pushes[tid] = p;
     rtnp::Writer w;
+    w.str(dir && dir[0] ? dir : "");
     w.str(name);
     w.u64(size);
     w.str(sha.c_str());
     rtnp::send(a->io, rtnp::FILE_BEGIN, tid, w.data, (uint16_t)w.len);
     return true;
+}
+
+std::string RelayServer::pushProgress(uint32_t tid) {
+    nlohmann::json j;
+    auto pit = pushes.find(tid);
+    if (pit != pushes.end()) {
+        j["found"] = true;
+        j["done"] = false;
+        j["sent"] = pit->second.sent;
+        j["size"] = pit->second.size;
+        return j.dump();
+    }
+    auto rit = push_results.find(tid);
+    if (rit != push_results.end()) {
+        auto r = nlohmann::json::parse(rit->second, nullptr, false);
+        j["found"] = true;
+        j["done"] = true;
+        j["ok"] = r.is_discarded() ? false : r.value("ok", false);
+        j["received"] = r.is_discarded() ? 0 : r.value("received", (uint64_t)0);
+        j["size"] = j["received"];
+        if (!r.is_discarded() && r.contains("error")) j["error"] = r["error"];
+        return j.dump();
+    }
+    j["found"] = false;
+    return j.dump();
 }
 
 std::string RelayServer::pushResult(uint32_t tid) {

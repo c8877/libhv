@@ -8,6 +8,7 @@
 #include "openssl/evp.h"
 #endif
 #include <set>
+#include <ctype.h>
 
 #include <algorithm>
 
@@ -205,6 +206,19 @@ void AdminServer::handleAgentFilePush(const HttpContextPtr& ctx, const AdminActo
     }
     auto req = nlohmann::json::parse(ctx->body(), nullptr, false);
     std::string name = req.is_discarded() ? "" : req.value("name", "");
+    std::string dir = req.is_discarded() ? "" : req.value("dir", "");
+    if (dir.size() > 128 || dir.find("..") != std::string::npos || (!dir.empty() && dir[0] == '/')) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"bad target dir\"}");
+        return;
+    }
+    for (char c : dir) {
+        if (!(isalnum((unsigned char)c) || c == '/' || c == '.' || c == '_' || c == '-')) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"bad target dir\"}");
+            return;
+        }
+    }
     if (cfg_.file_dir.empty() || name.empty() || name.find("..") != std::string::npos ||
         name.find('/') != std::string::npos) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
@@ -226,8 +240,8 @@ void AdminServer::handleAgentFilePush(const HttpContextPtr& ctx, const AdminActo
     }
     uint32_t tid = 0;
     std::string err;
-    std::string started = callRelay([this, &devid, &path, &name, &st, &sha, &err, &tid]() {
-        return relay_->startFilePush(devid.c_str(), path.c_str(), name.c_str(),
+    std::string started = callRelay([this, &devid, &path, &dir, &name, &st, &sha, &err, &tid]() {
+        return relay_->startFilePush(devid.c_str(), path.c_str(), dir.c_str(), name.c_str(),
                                      (uint64_t)st.st_size, sha, err, tid)
             ? std::string("1") : std::string("0");
     });
@@ -236,25 +250,42 @@ void AdminServer::handleAgentFilePush(const HttpContextPtr& ctx, const AdminActo
         ctx->send("{\"error\":\"" + err + "\"}");
         return;
     }
-    std::string result;
-    long long wait_ms = (long long)(st.st_size / (1 << 20)) * 5000 + 10000;
-    if (wait_ms > 600000) wait_ms = 600000;
-    for (long long i = 0; i < wait_ms / 100 && result.empty(); ++i) {
-        usleep(100000);
-        result = callRelay([this, tid]() { return relay_->pushResult(tid); });
-    }
-    if (result.empty()) {
-        ctx->response->status_code = HTTP_STATUS_GATEWAY_TIMEOUT;
-        ctx->send("{\"error\":\"device did not confirm\"}");
+    audit(actor.username, "agent.file_push_start", devid + " " + name + " -> " + dir);
+    nlohmann::json j;
+    j["tid"] = tid;
+    j["name"] = name;
+    j["size"] = (uint64_t)st.st_size;
+    ctx->response->status_code = HTTP_STATUS_ACCEPTED;
+    ctx->send(j.dump());
+}
+
+void AdminServer::handleAgentFileStatus(const HttpContextPtr& ctx, const AdminActor& actor) {
+    std::string devid = ctx->param("devid");
+    if (!ownsDevid(devid)) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
         return;
     }
-    if (!nlohmann::json::parse(result, nullptr, false).value("ok", false)) {
-        ctx->response->status_code = HTTP_STATUS_BAD_GATEWAY;
-        ctx->send(result);
+    uint32_t tid = (uint32_t)strtoul(ctx->param("tid").c_str(), NULL, 10);
+    if (!tid) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"bad tid\"}");
         return;
     }
-    audit(actor.username, "agent.file_push", devid + " " + name + " " + result);
-    ctx->send(result);
+    std::string p = callRelay([this, tid]() { return relay_->pushProgress(tid); });
+    auto j = nlohmann::json::parse(p, nullptr, false);
+    if (j.is_discarded()) {
+        ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+        ctx->send("{\"error\":\"bad state\"}");
+        return;
+    }
+    if (j.value("done", false) && j.value("ok", false)) {
+        std::lock_guard<std::mutex> lk(push_mu_);
+        if (pushed_done.insert(tid).second) {
+            audit(actor.username, "agent.file_push_done", devid + " tid=" + std::to_string(tid));
+        }
+    }
+    ctx->send(p);
 }
 
 void AdminServer::handleAgentSysinfo(const HttpContextPtr& ctx) {

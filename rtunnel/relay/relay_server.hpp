@@ -151,9 +151,10 @@ private:
     std::string  sysinfoOf(const char* devid, uint64_t* ts);
     bool         sendConfig(const char* devid, uint32_t sid, const std::string& json);
     std::string  configAck(const char* devid, uint32_t sid, uint64_t* ts);
-    bool         startFilePush(const char* devid, const char* path, const char* name,
-                               uint64_t size, const std::string& sha,
+    bool         startFilePush(const char* devid, const char* path, const char* dir,
+                               const char* name, uint64_t size, const std::string& sha,
                                std::string& err, uint32_t& tid);
+    std::string  pushProgress(uint32_t tid);
     std::string  pushResult(uint32_t tid);
     void         onFileAck(RelayConn* c, const rtnp::Frame* f);
     void         onHsTimeout(RelayConn* c);
