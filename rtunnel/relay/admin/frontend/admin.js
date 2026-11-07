@@ -497,11 +497,11 @@ const AgentDetailPage = Object.assign(new Page(), {
         '<div class="si-body"><canvas id="si-cpu" height="56"></canvas>' +
         '<div class="si-legend">load ' + (si.load1 || 0).toFixed(2) + ' / ' +
         (si.load5 || 0).toFixed(2) + ' / ' + (si.load15 || 0).toFixed(2) +
-        ' · ' + (cpu.cores || []).length + ' 核</div></div></div></div>';
-
-      html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>存储</h2>' +
-        '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">条长 = 分区总量 / 最大分区总量</span></div>' +
-        '<div class="si-body"><canvas id="si-disk" height="100"></canvas>' + diskLegend + '</div></div>';
+        ' · ' + (cpu.cores || []).length + ' 核</div></div></div>' +
+        '<div class="panel"><div class="panel-head"><h2>存储</h2>' +
+        '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">条长按最大分区归一</span></div>' +
+        '<div class="si-body"><canvas id="si-disk" height="100"></canvas>' + diskLegend + '</div></div>' +
+        '</div>';
 
       const certText = si.mtls
         ? UI.kv({ '证书主体': UI.esc(si.cert_subject || ''), '签发者': UI.esc(si.cert_issuer || ''),
