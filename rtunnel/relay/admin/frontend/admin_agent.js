@@ -125,8 +125,8 @@ const AgentDetailPage = Object.assign(new Page(), {
       }) + '</div>';
 
     if (si) {
-      this.charts.forEach(c => { try { c.destroy(); } catch (e) {} });
-      this.charts = [];
+      Object.values(this.charts || {}).forEach(c => { try { c.destroy(); } catch (e) {} });
+      this.charts = {};
       const kb = n => UI.bytes((Number(n) || 0) * 1024);
       const total = Number(si.mem_total_kb) || 0;
       const avail = Number(si.mem_available_kb) || 0;
