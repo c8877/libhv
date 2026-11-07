@@ -12,6 +12,12 @@
 | `rtunnel-agent` | C：连 B、上报 devid、执行 OPEN、透传字节 |
 | `rtunnel-client` | A：连 B、本地 SOCKS5 入口、把 `devid:port` 转成 OPEN |
 
+## 文档
+
+- 设计文档：`docs/design/rtunnel.md`
+- 全部拓扑/流程/时序/状态图（Mermaid + ASCII）与协议/配置/状态/参数表：
+  `docs/design/rtunnel-diagrams.md`
+
 ## 构建
 
 ```bash

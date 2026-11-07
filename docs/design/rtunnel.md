@@ -1,5 +1,8 @@
 # 反向通道 rtunnel 设计（A → B → C）
 
+> 拓扑/流程/时序/状态图（Mermaid + ASCII）与配置、状态、参数表见
+> [`rtunnel-diagrams.md`](rtunnel-diagrams.md)。
+
 > 一句话：设备与开发机都主动外连跳板，跳板按设备 ID 转发字节，形成一条**反向通道**。
 > 承载范围：任意 TCP 应用——SSH / scp / HTTP / HTTPS / WebSocket / HTTP/2 / gRPC / 数据库协议等；
 > 隧道不解析上层协议，只搬字节。不支持 UDP：HTTP/3、QUIC、DNS over UDP 都无法承载。
@@ -329,6 +332,10 @@ sequenceDiagram
 | `0x09` | `DEVICE_STATUS` | B→A | `str devid + u8 online + u32 active_streams` |
 | `0x0F` | `ERROR` | 双向 | `u16 code + str msg`（非致命） |
 | `0x18` | `SPAWN_AGENT` | B→A | `str devid`：要求 A 在本机按需拉起 agent（§12.1） |
+| `0x19` | `SYSINFO_REQ` | B→C | 空：要求上报系统信息 |
+| `0x1A` | `SYSINFO` | C→B | `str json`：运行时/系统快照 |
+| `0x1B` | `CONFIG_SET` | B→C | `str json {ports?,shell?}`，sid 为请求号 |
+| `0x1C` | `CONFIG_ACK` | C→B | `str json {ok,ports,shell,persisted}`，sid 回显 |
 
 **会话级（stream_id > 0）**
 
