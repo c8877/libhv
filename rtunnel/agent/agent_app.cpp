@@ -706,16 +706,18 @@ void AgentApp::sampleMetric() {
     agentSampleCpu(this);
     double mem = 0;
     std::ifstream mf("/proc/meminfo");
-    std::string k;
-    long long v = 0;
-    std::string unit;
-    long long total = 0, avail = 0;
-    while (mf >> k >> v >> unit) {
-        if (k == "MemTotal:") total = v;
-        else if (k == "MemAvailable:") avail = v;
-        mf.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    std::string line;
+    long long total = 0, avail = 0, free_kb = 0;
+    while (std::getline(mf, line)) {
+        long long v = 0;
+        if (sscanf(line.c_str(), "MemTotal: %lld", &v) == 1) total = v;
+        else if (sscanf(line.c_str(), "MemAvailable: %lld", &v) == 1) avail = v;
+        else if (sscanf(line.c_str(), "MemFree: %lld", &v) == 1) free_kb = v;
     }
+    if (avail <= 0) avail = free_kb;
     if (total > 0) mem = (double)(total - avail) * 100.0 / total;
+    if (mem < 0) mem = 0;
+    if (mem > 100) mem = 100;
     double load1 = 0;
     double la[3] = {0, 0, 0};
     if (getloadavg(la, 3) > 0) load1 = la[0];
