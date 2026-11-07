@@ -65,7 +65,7 @@ function fmtKbPair(usedKb, totalKb) {
     const s = n.toFixed(unit === 'B' ? 0 : 1);
     return s.endsWith('.0') ? s.slice(0, -2) : s;
   };
-  return fmt(usedKb) + ' / ' + fmt(totalKb) + unit;
+  return fmt(usedKb) + unit + ' / ' + fmt(totalKb) + unit;
 }
 
 function applyTheme(mode, color) {
