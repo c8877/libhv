@@ -264,24 +264,31 @@ const AgentDetailPage = Object.assign(new Page(), {
   enter(el, params) {
     this.devid = decodeURIComponent(params[0] || '');
     this.cpuHist = [];
+    this.memHist = [];
     this.charts = [];
     return Page.prototype.enter.call(this, el, params);
   },
-  chart(id, cfg) {
+  spark(id, data, color) {
     const c = document.getElementById(id);
     if (!c || !window.Chart) return;
-    this.charts.push(new Chart(c.getContext('2d'), cfg));
+    this.charts.push(new Chart(c.getContext('2d'), {
+      type: 'line',
+      data: { labels: data.map((_, i) => i),
+        datasets: [{ data: data, borderColor: color, backgroundColor: color + '26',
+          fill: true, pointRadius: 0, borderWidth: 2, tension: .3 }] },
+      options: { animation: false, responsive: true,
+        scales: { x: { display: false }, y: { display: false, min: 0, max: 100 } },
+        plugins: { legend: { display: false }, tooltip: { enabled: false } } }
+    }));
   },
-  ringColor(pct) {
-    return pct >= 85 ? '#e5534b' : pct >= 70 ? '#f5a623' : '#4a9eff';
-  },
+  diskColor(p) { return p >= 85 ? '#e5534b' : p >= 70 ? '#f5a623' : '#4a9eff'; },
   async refresh() {
     const d = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid));
     let si = null, siTs = 0;
     try {
       const r = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/sysinfo?refresh=1');
       si = r.sysinfo; siTs = r.ts;
-    } catch (e) { /* 离线 */ }
+    } catch (e) {}
 
     const rows = (d.streams || []).map(s => [
       UI.esc(s.a_user) + ':' + s.a_sid, s.c_sid,
@@ -302,34 +309,46 @@ const AgentDetailPage = Object.assign(new Page(), {
       this.charts.forEach(c => { try { c.destroy(); } catch (e) {} });
       this.charts = [];
       const kb = n => UI.bytes((Number(n) || 0) * 1024);
-      const pct = (used, total) => total > 0 ? Math.round(used * 100 / total) : 0;
-      const memUsed = (si.mem_total_kb || 0) - (si.mem_available_kb || 0);
-      const memPct = pct(memUsed, si.mem_total_kb);
+      const total = Number(si.mem_total_kb) || 0;
+      const avail = Number(si.mem_available_kb) || 0;
+      const memPct = total > 0 ? Math.round((total - avail) * 100 / total) : 0;
       const cpu = si.cpu || { usage: 0, cores: [] };
-      this.cpuHist.push(cpu.usage || 0);
-      if (this.cpuHist.length > 60) this.cpuHist.shift();
-      const disks = (si.mounts || []);
+      this.memHist.push(memPct); if (this.memHist.length > 60) this.memHist.shift();
+      this.cpuHist.push(cpu.usage || 0); if (this.cpuHist.length > 60) this.cpuHist.shift();
+
+      const mounts = si.mounts || [];
+      const maxTotal = mounts.reduce((m, x) => Math.max(m, Number(x.total_kb) || 0), 1);
+      const labels = mounts.map(m => m.mount);
+      const usedData = mounts.map(m => (Number(m.total_kb) || 0) - (Number(m.free_kb) || 0));
+      const freeData = mounts.map(m => Number(m.free_kb) || 0);
+      const usedColors = mounts.map(m => {
+        const t = Number(m.total_kb) || 0;
+        return this.diskColor(t > 0 ? Math.round((t - (Number(m.free_kb) || 0)) * 100 / t) : 0);
+      });
+      const diskLegend = mounts.map(m => {
+        const t = Number(m.total_kb) || 0, f = Number(m.free_kb) || 0;
+        const p = t > 0 ? Math.round((t - f) * 100 / t) : 0;
+        return '<div class="si-disk-row"><span class="nm">' + UI.esc(m.mount) + '</span>' +
+          '<span class="val">' + kb(t - f) + ' / ' + kb(t) + '</span>' +
+          '<span class="pct" style="color:' + this.diskColor(p) + '">' + p + '%</span></div>';
+      }).join('');
 
       html += '<div class="si-grid">' +
-        '<div class="panel"><div class="panel-head"><h2>内存</h2></div>' +
-        '<div class="si-body"><canvas id="si-mem" height="150"></canvas>' +
-        '<div class="si-legend">已用 <b>' + kb(memUsed) + '</b> / ' + kb(si.mem_total_kb) +
-        '<br>Swap ' + kb(si.swap_total_kb) + ' / 可用 ' + kb(si.swap_free_kb) + '</div></div></div>' +
+        '<div class="panel"><div class="panel-head"><h2>内存</h2>' +
+        '<span class="spacer"></span><span class="si-num">' + memPct + '%</span></div>' +
+        '<div class="si-body"><canvas id="si-mem" height="56"></canvas>' +
+        '<div class="si-legend">已用 ' + kb(total - avail) + ' / ' + kb(total) +
+        ' · Swap ' + kb(si.swap_total_kb) + '</div></div></div>' +
         '<div class="panel"><div class="panel-head"><h2>CPU</h2>' +
-        '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">load ' +
-        (si.load1 || 0).toFixed(2) + ' / ' + (si.load5 || 0).toFixed(2) + ' / ' + (si.load15 || 0).toFixed(2) +
-        '</span></div><div class="si-body"><canvas id="si-cpu" height="130"></canvas>' +
-        '<div class="si-cores">' + (cpu.cores || []).map((u, i) =>
-          '<span>cpu' + i + ' <i style="width:' + Math.min(100, u) + '%"></i>' + u.toFixed(0) + '%</span>').join('') +
-        '</div></div></div></div>';
+        '<span class="spacer"></span><span class="si-num">' + (cpu.usage || 0).toFixed(0) + '%</span></div>' +
+        '<div class="si-body"><canvas id="si-cpu" height="56"></canvas>' +
+        '<div class="si-legend">load ' + (si.load1 || 0).toFixed(2) + ' / ' +
+        (si.load5 || 0).toFixed(2) + ' / ' + (si.load15 || 0).toFixed(2) +
+        ' · ' + (cpu.cores || []).length + ' 核</div></div></div></div>';
 
-      html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>存储</h2></div>' +
-        '<div class="si-disks">' + disks.map((m, i) => {
-          const used = (m.total_kb || 0) - (m.free_kb || 0);
-          return '<div class="si-disk"><canvas id="si-disk-' + i + '" height="120"></canvas>' +
-            '<div class="si-legend"><b>' + UI.esc(m.mount) + '</b> (' + UI.esc(m.fstype) + ')<br>' +
-            kb(used) + ' / ' + kb(m.total_kb) + '</div></div>';
-        }).join('') + '</div></div>';
+      html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>存储</h2>' +
+        '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">条长 = 分区总量 / 最大分区总量</span></div>' +
+        '<div class="si-body"><canvas id="si-disk" height="100"></canvas>' + diskLegend + '</div></div>';
 
       const certText = si.mtls
         ? UI.kv({ '证书主体': UI.esc(si.cert_subject || ''), '签发者': UI.esc(si.cert_issuer || ''),
@@ -339,8 +358,9 @@ const AgentDetailPage = Object.assign(new Page(), {
         'agent 版本': UI.esc(si.version || ''), 'pid': si.pid,
         '启动时间': new Date(si.started_ms).toLocaleString(),
         '启动参数': '<code style="font-size:12px">' + UI.esc(si.args || '') + '</code>',
-        '架构/内核': UI.esc((si.machine || '') + ' / ' + (si.kernel || '')),
-        'CPU 型号': UI.esc((si.cpu_model || '') + ' · ' + ((si.cpu && si.cpu.cores) ? si.cpu.cores.length : 0) + ' 核'),
+        '架构 / 内核': UI.esc((si.machine || '') + ' / ' + (si.kernel || '')),
+        'CPU 型号': UI.esc((si.cpu_model || '') + ' · ' + (cpu.cores || []).length + ' 核'),
+        '板卡型号': UI.esc(si.board || '—'),
       });
       const nics = (si.nics || []).map(n => [UI.esc(n.name), UI.esc(n.ip), UI.esc(n.netmask),
         n.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>']);
@@ -358,34 +378,30 @@ const AgentDetailPage = Object.assign(new Page(), {
 
     if (si) {
       const self = this;
-      const memUsed2 = (si.mem_total_kb || 0) - (si.mem_available_kb || 0);
-      const memPct2 = si.mem_total_kb ? Math.round(memUsed2 * 100 / si.mem_total_kb) : 0;
-      this.chart('si-mem', {
-        type: 'pie',
-        data: { labels: ['已用', '空闲'], datasets: [{ data: [memUsed2, Math.max(0, (si.mem_total_kb || 0) - memUsed2)],
-          backgroundColor: [self.ringColor(memPct2), '#2b3038'], borderWidth: 0 }] },
-        options: { plugins: { legend: { labels: { color: '#c9ced6', boxWidth: 12 } } }, animation: false }
-      });
-      const cpu = si.cpu || { usage: 0 };
-      this.chart('si-cpu', {
-        type: 'line',
-        data: { labels: self.cpuHist.map((_, i) => i + 1),
-          datasets: [{ data: self.cpuHist, borderColor: '#4a9eff', backgroundColor: 'rgba(74,158,255,.15)',
-            fill: true, pointRadius: 0, tension: .25 }] },
-        options: { scales: { x: { display: false }, y: { min: 0, max: 100,
-          ticks: { color: '#8b929c', callback: v => v + '%' }, grid: { color: 'rgba(255,255,255,.06)' } } },
-          plugins: { legend: { display: false } }, animation: false }
-      });
-      (si.mounts || []).forEach((m, i) => {
-        const used = (m.total_kb || 0) - (m.free_kb || 0);
-        const p = m.total_kb ? Math.round(used * 100 / m.total_kb) : 0;
-        self.chart('si-disk-' + i, {
-          type: 'pie',
-          data: { labels: ['已用', '空闲'], datasets: [{ data: [used, Math.max(0, (m.total_kb || 0) - used)],
-            backgroundColor: [self.ringColor(p), '#2b3038'], borderWidth: 0 }] },
-          options: { plugins: { legend: { labels: { color: '#c9ced6', boxWidth: 12 } } }, animation: false }
+      this.spark('si-mem', this.memHist, '#4a9eff');
+      this.spark('si-cpu', this.cpuHist, '#f5a623');
+      const c = document.getElementById('si-disk');
+      if (c && window.Chart) {
+        const labels = (si.mounts || []).map(m => m.mount);
+        const used = (si.mounts || []).map(m => (Number(m.total_kb) || 0) - (Number(m.free_kb) || 0));
+        const free = (si.mounts || []).map(m => Number(m.free_kb) || 0);
+        const maxT = (si.mounts || []).reduce((a, m) => Math.max(a, Number(m.total_kb) || 0), 1);
+        const colors = (si.mounts || []).map(m => {
+          const t = Number(m.total_kb) || 0, f = Number(m.free_kb) || 0;
+          return self.diskColor(t > 0 ? Math.round((t - f) * 100 / t) : 0);
         });
-      });
+        this.charts.push(new Chart(c.getContext('2d'), {
+          type: 'bar',
+          data: { labels: labels, datasets: [
+            { label: '已用', data: used, backgroundColor: colors, minBarLength: 2, stack: 's' },
+            { label: '空闲', data: free, backgroundColor: '#2b3038', stack: 's' },
+          ] },
+          options: { indexAxis: 'y', animation: false, responsive: true,
+            scales: { x: { stacked: true, max: maxT, display: false },
+                      y: { stacked: true, ticks: { color: '#8b929c' }, grid: { display: false } } },
+            plugins: { legend: { display: false } } }
+        }));
+      }
       const btn = document.getElementById('si-export');
       if (btn) btn.onclick = () => {
         const blob = new Blob([JSON.stringify(si, null, 2)], { type: 'application/json' });
