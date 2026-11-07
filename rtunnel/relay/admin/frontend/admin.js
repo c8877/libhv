@@ -533,16 +533,6 @@ const AgentDetailPage = Object.assign(new Page(), {
         '<tr><th>' + UI.esc(r[0]) + '</th><td>' + UI.esc(r[1]) + '</td></tr>').join('') + '</table>';
       const nics = (si.nics || []).map(n => [UI.esc(n.name), UI.esc(n.ip), UI.esc(n.netmask),
         n.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>']);
-      if (canManage()) {
-        html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>文件下发</h2>' +
-          '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">从 B 的文件库推送到设备</span></div>' +
-          '<div class="cfg-body" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
-          '<input type="text" id="push-name" placeholder="B 端文件名" style="flex:1;min-width:160px">' +
-          '<input type="text" id="push-dir" placeholder="目标子目录（可选，如 firmware/1.0）" style="flex:1;min-width:180px">' +
-          '<button class="primary" id="push-btn">下发到设备</button>' +
-          '<progress id="push-bar" max="100" value="0" style="width:220px;display:none"></progress>' +
-          '<span id="push-status" style="color:var(--muted);font-size:12px"></span></div></div>';
-      }
       html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>网卡</h2></div>' +
         UI.table(['接口', 'IP', '掩码', '状态'], nics) + '</div>' +
         '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>系统</h2></div>' + sysTable + '</div>' +
@@ -620,47 +610,6 @@ const AgentDetailPage = Object.assign(new Page(), {
             this.refresh();
           } catch (e) { msg.textContent = '失败：' + e.message; }
         };
-      };
-      const pb = document.getElementById('push-btn');
-      if (pb) pb.onclick = async () => {
-        const name = document.getElementById('push-name').value.trim();
-        const dir = document.getElementById('push-dir').value.trim();
-        const bar = document.getElementById('push-bar');
-        const stx = document.getElementById('push-status');
-        if (!name) { UI.toast('请输入 B 端文件名', true); return; }
-        pb.disabled = true;
-        bar.style.display = '';
-        bar.value = 0;
-        stx.textContent = '准备下发…';
-        try {
-          const r = await Api.post('/api/v1/agents/' + encodeURIComponent(this.devid) + '/files',
-                                   { name: name, dir: dir });
-          const started = Date.now();
-          while (Date.now() - started < 10 * 60 * 1000) {
-            await new Promise(res => setTimeout(res, 600));
-            const st = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) +
-                                     '/files/' + r.tid);
-            if (!st.found) { stx.textContent = '传输状态丢失'; UI.toast('下发失败：状态丢失', true); break; }
-            const done = st.size ? Math.min(100, Math.floor((st.sent || 0) * 100 / st.size)) : 0;
-            bar.value = done;
-            stx.textContent = UI.bytes(st.sent || 0) + ' / ' + UI.bytes(st.size || 0);
-            if (st.done) {
-              if (st.ok) {
-                stx.textContent = '已下发 ' + name + '（' + UI.bytes(st.received) + '）';
-                UI.toast('已下发 ' + name);
-              } else {
-                stx.textContent = '';
-                UI.toast('下发失败：' + (st.error || 'unknown'), true);
-              }
-              break;
-            }
-          }
-        } catch (e) {
-          UI.toast('下发失败：' + e.message, true);
-        } finally {
-          pb.disabled = false;
-          bar.style.display = 'none';
-        }
       };
       const cb = document.getElementById('si-auto');
       if (cb) cb.onchange = () => {

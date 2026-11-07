@@ -78,8 +78,6 @@ private:
     void handleAgentDetail(const HttpContextPtr& ctx);
     void handleAgentSysinfo(const HttpContextPtr& ctx);
     void handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& actor);
-    void handleAgentFilePush(const HttpContextPtr& ctx, const AdminActor& actor);
-    void handleAgentFileStatus(const HttpContextPtr& ctx, const AdminActor& actor);
     // api_dist.cpp
     void handleDistCreate(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleDistList(const HttpContextPtr& ctx);
@@ -151,8 +149,6 @@ private:
     AuditLog        audit_;
     std::map<std::string, std::string> settings_;
     std::mutex settings_mu_;
-    std::set<uint32_t> pushed_done;
-    std::mutex push_mu_;
     std::map<long long, uint32_t> dist_active;   // task id -> relay tid
     std::set<std::string> dist_busy_dev;
 

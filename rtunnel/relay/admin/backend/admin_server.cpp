@@ -310,20 +310,6 @@ void AdminServer::registerRoutes() {
         handleDistExtend(ctx, currentActor());
         return (int)ctx->response->status_code;
     });
-    service_.Handle("POST", "/api/v1/agents/:devid/files", [this](const HttpContextPtr& ctx) {
-        std::string role;
-        int rc = requireRole(ctx, ROLE_MANAGER, role);
-        if (rc) return rc;
-        handleAgentFilePush(ctx, currentActor());
-        return (int)ctx->response->status_code;
-    });
-    service_.Handle("GET", "/api/v1/agents/:devid/files/:tid", [this](const HttpContextPtr& ctx) {
-        std::string role;
-        int rc = requireRole(ctx, ROLE_MANAGER, role);
-        if (rc) return rc;
-        handleAgentFileStatus(ctx, currentActor());
-        return (int)ctx->response->status_code;
-    });
     service_.Handle("PUT", "/api/v1/agents/:devid/caps", [this](const HttpContextPtr& ctx) {
         std::string role;
         int rc = requireRole(ctx, ROLE_MANAGER, role);

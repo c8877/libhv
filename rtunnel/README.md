@@ -151,10 +151,10 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 - `CONFIG_SET(0x1B)` / `CONFIG_ACK(0x1C)`：在线修改端口与 Shell 能力，
   agent 原子生效并写入 `--config-file`（默认 `/opt/data/etc/agent.json`），重启后保持
 - API：`GET /api/v1/agents/{devid}/sysinfo?refresh=1`、`PUT /api/v1/agents/{devid}/caps`
-- 文件下发：`POST /api/v1/agents/{devid}/files {"name":"x.bin","dir":"fw/1.0"}`，
-  `202 {tid}` + `GET /api/v1/agents/{devid}/files/{tid}` 查询进度；经 RTNP 推到
-  设备 `--file-dir/dir`（默认 `/opt/data/files`），32KiB 分片、256KiB 窗口、
-  sha256 校验、断点续传；`.part` 超过 24h 自动清理
+- 文件分发：文件页「分发」选择设备与时间窗，创建 `POST /api/v1/distributions`，
+  `GET /api/v1/distributions` 查询进度；经 RTNP 推到设备 `--file-dir/dir`
+  （默认 `/opt/data/files`），32KiB 分片、256KiB 窗口、sha256 校验、断点续传、
+  冲突校验；`.part` 超过 24h 自动清理
   （端口 manager/admin；Shell 仅 admin；设备离线直接报错）
 
 ## Web 终端（免密）
