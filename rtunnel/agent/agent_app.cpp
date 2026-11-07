@@ -346,6 +346,120 @@ static void agentSampleCpu(AgentApp* app) {
     app->cpu_last_idle = idl;
 }
 
+void AgentApp::loadConfig() {
+    if (config_file.empty()) return;
+    FILE* fp = fopen(config_file.c_str(), "r");
+    if (!fp) return;
+    std::string js;
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) js.append(buf, n);
+    fclose(fp);
+    auto j = nlohmann::json::parse(js, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) return;
+    if (j.contains("allow") && j["allow"].is_array()) {
+        int idx = 0;
+        for (auto& v : j["allow"]) {
+            if (!v.is_number_integer()) continue;
+            int p = v.get<int>();
+            if (p > 0 && p < 65536 && idx < 31) allow_ports[idx++] = p;
+        }
+        allow_ports[idx] = 0;
+    }
+    if (j.contains("shell") && j["shell"].is_boolean()) allow_shell = j["shell"].get<bool>() ? 1 : 0;
+    logf_("[agent] config loaded from %s (allow=%d shell=%d)", config_file.c_str(),
+          allow_ports[0], allow_shell);
+}
+
+bool AgentApp::saveConfig() {
+    if (config_file.empty()) return false;
+    std::string dir = config_file.substr(0, config_file.find_last_of('/'));
+    if (!dir.empty()) {
+        std::string cmd = "mkdir -p '" + dir + "'";
+        if (system(cmd.c_str()) != 0) { /* 目录可能已存在 */ }
+    }
+    nlohmann::json j;
+    j["allow"] = nlohmann::json::array();
+    for (int i = 0; i < 32 && allow_ports[i] > 0; ++i) j["allow"].push_back(allow_ports[i]);
+    j["shell"] = allow_shell != 0;
+    std::string tmp = config_file + ".tmp";
+    FILE* fp = fopen(tmp.c_str(), "w");
+    if (!fp) return false;
+    std::string body = j.dump(2);
+    bool ok = fwrite(body.data(), 1, body.size(), fp) == body.size();
+    fclose(fp);
+    if (!ok) { unlink(tmp.c_str()); return false; }
+    return rename(tmp.c_str(), config_file.c_str()) == 0;
+}
+
+void AgentApp::handleConfigSet(const rtnp::Frame* f) {
+    rtnp::Reader rr(f->payload, f->len);
+    static char cfg[8192];
+    rr.str(cfg, sizeof(cfg));
+    auto r = nlohmann::json::parse(rr.err ? std::string() : std::string(cfg), nullptr, false);
+    if (r.is_discarded() || !r.is_object()) {
+        std::string e = "{\"ok\":false,\"error\":\"bad json\"}";
+        rtnp::Writer w; w.str(e.c_str());
+        rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+        return;
+    }
+    int new_ports[32] = {0};
+    bool ports_set = false, shell_set = false;
+    int new_shell = allow_shell;
+    if (r.contains("ports")) {
+        if (!r["ports"].is_array()) {
+            std::string e = "{\"ok\":false,\"error\":\"ports must be array\"}";
+            rtnp::Writer w; w.str(e.c_str());
+            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
+        int idx = 0;
+        for (auto& v : r["ports"]) {
+            if (!v.is_number_integer()) {
+                std::string e = "{\"ok\":false,\"error\":\"bad port\"}";
+                rtnp::Writer w; w.str(e.c_str());
+                rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+                return;
+            }
+            int p = v.get<int>();
+            if (p <= 0 || p > 65535 || idx >= 32) {
+                std::string e = "{\"ok\":false,\"error\":\"port out of range or too many\"}";
+                rtnp::Writer w; w.str(e.c_str());
+                rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+                return;
+            }
+            bool dup = false;
+            for (int k = 0; k < idx; ++k) if (new_ports[k] == p) dup = true;
+            if (!dup) new_ports[idx++] = p;
+        }
+        ports_set = true;
+        new_ports[idx] = 0;
+    }
+    if (r.contains("shell")) {
+        if (!r["shell"].is_boolean()) {
+            std::string e = "{\"ok\":false,\"error\":\"shell must be bool\"}";
+            rtnp::Writer w; w.str(e.c_str());
+            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
+        new_shell = r["shell"].get<bool>() ? 1 : 0;
+        shell_set = true;
+    }
+    if (ports_set) memcpy(allow_ports, new_ports, sizeof(allow_ports));
+    if (shell_set) allow_shell = new_shell;
+    bool persisted = saveConfig();
+    nlohmann::json ack;
+    ack["ok"] = true;
+    ack["persisted"] = persisted;
+    ack["ports"] = nlohmann::json::array();
+    for (int i = 0; i < 32 && allow_ports[i] > 0; ++i) ack["ports"].push_back(allow_ports[i]);
+    ack["shell"] = allow_shell != 0;
+    std::string body = ack.dump();
+    logf_("[agent] config set: ports=%d shell=%d persisted=%d", allow_ports[0], allow_shell, (int)persisted);
+    rtnp::Writer w; w.str(body.c_str());
+    rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+}
+
 void AgentApp::sendSysinfo() {
     using nlohmann::json;
     agentSampleCpu(this);
@@ -501,6 +615,9 @@ void AgentApp::onFrame(rtnp::Frame* f) {
     case rtnp::SYSINFO_REQ:
         sendSysinfo();
         return;
+    case rtnp::CONFIG_SET:
+        handleConfigSet(f);
+        return;
     case rtnp::OPEN:
         handleOpen(f);
         return;
@@ -600,6 +717,8 @@ int AgentApp::run(int argc, char** argv) {
             }
         } else if (strcmp(argv[i], "--allow-all") == 0) {
             allow_all = 1;
+        } else if (strcmp(argv[i], "--config-file") == 0 && i + 1 < argc) {
+            config_file = argv[++i];
         } else if (strcmp(argv[i], "--allow-shell") == 0) {
             allow_shell = 1;
         } else if (strcmp(argv[i], "--max-idle") == 0 && i + 1 < argc) {
@@ -660,6 +779,7 @@ int AgentApp::run(int argc, char** argv) {
         }, 1000, INFINITE);
         hevent_set_userdata(idle_timer, this);
     }
+    loadConfig();
     init(lp);
     hloop_run(lp);
     hloop_free(&lp);

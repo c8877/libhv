@@ -419,6 +419,22 @@ bool RelayServer::revokeSan(const std::string& san) {
     return true;
 }
 
+bool RelayServer::sendConfig(const char* devid, uint32_t sid, const std::string& json) {
+    RelayConn* a = findAgent(devid);
+    if (!a || !a->io) return false;
+    rtnp::Writer w;
+    w.str(json.c_str());
+    rtnp::send(a->io, rtnp::CONFIG_SET, sid, w.data, (uint16_t)w.len);
+    return true;
+}
+
+std::string RelayServer::configAck(const char* devid, uint32_t sid, uint64_t* ts) {
+    auto it = config_acks.find(devid);
+    if (it == config_acks.end() || it->second.sid != sid) { if (ts) *ts = 0; return std::string(); }
+    if (ts) *ts = it->second.ts;
+    return it->second.json;
+}
+
 bool RelayServer::sendSysinfoReq(const char* devid) {
     RelayConn* a = findAgent(devid);
     if (!a || !a->io) return false;
@@ -482,6 +498,20 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         w.u32(0);
         rtnp::send(c->io, rtnp::HELLO_ACK, 0, w.data, (uint16_t)w.len);
         if (verbose) logf_("[relay] HELLO role=%d fd=%d", role, hio_fd(c->io));
+        return;
+    }
+    case rtnp::CONFIG_ACK: {
+        if (c->role != rtnp::ROLE_AGENT) return;
+        rtnp::Reader r(f->payload, f->len);
+        static char buf[4096];
+        r.str(buf, sizeof(buf));
+        if (!r.err) {
+            ConfigAck a;
+            a.sid = f->sid;
+            a.json = std::string(buf);
+            a.ts = (uint64_t)time(NULL) * 1000;
+            config_acks[c->devid] = a;
+        }
         return;
     }
     case rtnp::SYSINFO: {

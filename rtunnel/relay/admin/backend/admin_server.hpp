@@ -74,6 +74,7 @@ private:
     void handleAgents(const HttpContextPtr& ctx);
     void handleAgentDetail(const HttpContextPtr& ctx);
     void handleAgentSysinfo(const HttpContextPtr& ctx);
+    void handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleClients(const HttpContextPtr& ctx);
     void handleStreams(const HttpContextPtr& ctx);
     // api_ops.cpp

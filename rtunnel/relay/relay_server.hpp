@@ -17,6 +17,12 @@ struct SysinfoEntry {
     uint64_t    ts = 0;
 };
 
+struct ConfigAck {
+    uint32_t    sid = 0;
+    std::string json;
+    uint64_t    ts = 0;
+};
+
 struct RelayStream {
     uint32_t     a_sid = 0;
     uint32_t     c_sid = 0;
@@ -82,6 +88,7 @@ public:
     RelayConn*  conns = nullptr;      // 全局连接表
     RelayConn*  agents = nullptr;     // devid 注册表
     std::unordered_map<std::string, SysinfoEntry> sysinfo_cache;
+    std::unordered_map<std::string, ConfigAck> config_acks;
     struct ClientCred { std::string user, token; };
     std::vector<ClientCred> client_creds;   // --client-users（user:token）
     std::string client_token;               // --client-token（全局 token）
@@ -127,6 +134,8 @@ private:
     void         loadRevoked();                       // 启动时读 revoked.txt
     bool         sendSysinfoReq(const char* devid);   // 要求 agent 立即上报
     std::string  sysinfoOf(const char* devid, uint64_t* ts);
+    bool         sendConfig(const char* devid, uint32_t sid, const std::string& json);
+    std::string  configAck(const char* devid, uint32_t sid, uint64_t* ts);
     void         onHsTimeout(RelayConn* c);
     void         handleFrame(RelayConn* c, rtnp::Frame* f);
     void         onRead(RelayConn* c, void* buf, int readbytes);

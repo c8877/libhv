@@ -2,6 +2,9 @@
 #include "admin_server.hpp"
 #include "cpputil/json.hpp"
 
+#include <atomic>
+#include <set>
+
 #include <algorithm>
 
 using nlohmann::json;
@@ -72,6 +75,90 @@ void AdminServer::handleAgentDetail(const HttpContextPtr& ctx) {
         return;
     }
     ctx->send(body);
+}
+
+static std::atomic<uint32_t> g_cfg_sid{0};
+
+void AdminServer::handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& actor) {
+    std::string devid = ctx->param("devid");
+    if (!ownsDevid(devid)) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return;
+    }
+    auto req = nlohmann::json::parse(ctx->body(), nullptr, false);
+    if (req.is_discarded() || !req.is_object()) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"bad json\"}");
+        return;
+    }
+    nlohmann::json out = nlohmann::json::object();
+    bool has_ports = req.contains("ports");
+    bool has_shell = req.contains("shell");
+    if (!has_ports && !has_shell) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"nothing to update\"}");
+        return;
+    }
+    if (has_ports) {
+        if (!req["ports"].is_array() || req["ports"].size() > 32) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"ports must be array (max 32)\"}");
+            return;
+        }
+        nlohmann::json arr = nlohmann::json::array();
+        std::set<int> seen;
+        for (auto& v : req["ports"]) {
+            if (!v.is_number_integer()) { ctx->response->status_code = HTTP_STATUS_BAD_REQUEST; ctx->send("{\"error\":\"bad port\"}"); return; }
+            int p = v.get<int>();
+            if (p <= 0 || p > 65535) { ctx->response->status_code = HTTP_STATUS_BAD_REQUEST; ctx->send("{\"error\":\"port out of range\"}"); return; }
+            if (seen.insert(p).second) arr.push_back(p);
+        }
+        out["ports"] = arr;
+    }
+    if (has_shell) {
+        if (actor.role != "admin") {
+            ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+            ctx->send("{\"error\":\"shell capability requires admin\"}");
+            return;
+        }
+        if (!req["shell"].is_boolean()) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"shell must be bool\"}");
+            return;
+        }
+        out["shell"] = req["shell"].get<bool>();
+    }
+    uint32_t sid = ++g_cfg_sid;
+    std::string body = out.dump();
+    std::string sent = callRelay([this, &devid, sid, &body]() {
+        return relay_->sendConfig(devid.c_str(), sid, body) ? std::string("1") : std::string("0");
+    });
+    if (sent != "1") {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"device offline\"}");
+        return;
+    }
+    std::string ack;
+    for (int i = 0; i < 40 && ack.empty(); ++i) {
+        usleep(50000);
+        ack = callRelay([this, &devid, sid]() {
+            return relay_->configAck(devid.c_str(), sid, nullptr);
+        });
+    }
+    if (ack.empty()) {
+        ctx->response->status_code = HTTP_STATUS_GATEWAY_TIMEOUT;
+        ctx->send("{\"error\":\"device did not respond\"}");
+        return;
+    }
+    auto a = nlohmann::json::parse(ack, nullptr, false);
+    if (a.is_discarded() || !a.value("ok", false)) {
+        ctx->response->status_code = HTTP_STATUS_BAD_GATEWAY;
+        ctx->send("{\"error\":\"" + a.value("error", std::string("agent rejected")) + "\"}");
+        return;
+    }
+    audit(actor.username, "agent.caps", devid + " " + body);
+    ctx->send(ack);
 }
 
 void AdminServer::handleAgentSysinfo(const HttpContextPtr& ctx) {

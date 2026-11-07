@@ -41,6 +41,8 @@ enum Type : uint8_t {
     SPAWN_AGENT    = 0x18,   // 连接级：str devid
     SYSINFO_REQ    = 0x19,   // 连接级：空，B 要求 C 立即上报系统信息
     SYSINFO        = 0x1A,   // 连接级：str json（设备运行时/系统快照）
+    CONFIG_SET     = 0x1B,   // 连接级：str json {ports?,shell?}，sid 作请求号
+    CONFIG_ACK     = 0x1C,   // 连接级：str json {ok,...}，sid 回显请求号
 };
 
 // 错误码

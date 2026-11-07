@@ -228,6 +228,13 @@ void AdminServer::registerRoutes() {
     // operator：详情/会话/文件读写/ACL 读
     access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid", &AdminServer::handleAgentDetail);
     access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid/sysinfo", &AdminServer::handleAgentSysinfo);
+    service_.Handle("PUT", "/api/v1/agents/:devid/caps", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
+        if (rc) return rc;
+        handleAgentCaps(ctx, currentActor());
+        return (int)ctx->response->status_code;
+    });
     access(ROLE_OPERATOR, "GET", "/api/v1/clients", &AdminServer::handleClients);
     access(ROLE_OPERATOR, "GET", "/api/v1/streams", &AdminServer::handleStreams);
     access(ROLE_OPERATOR, "GET", "/api/v1/acl/file", &AdminServer::handleAclGet);
