@@ -1283,36 +1283,48 @@ const DistributePage = Object.assign(new Page(), {
       this.el.innerHTML = '<div class="empty">缺少文件参数，<a href="#/files">返回文件列表</a></div>';
       return;
     }
-    const agents = await Api.get('/api/v1/agents');
-    let rows = agents.slice().sort((a, b) => (a.devid < b.devid ? -1 : 1));
+    const focused = document.activeElement && document.activeElement.id === 'dist-q';
+    const caret = focused ? document.activeElement.selectionStart : 0;
+    const [agents, devs] = await Promise.all([
+      Api.get('/api/v1/agents'),
+      Api.get('/api/v1/devices').catch(() => []),
+    ]);
+    const online = new Set(agents.map(a => a.devid));
+    const map = new Map();
+    agents.forEach(a => map.set(a.devid, { devid: a.devid, online: true, remote_addr: a.remote_addr || '', owner: '' }));
+    (devs || []).forEach(d => {
+      if (!map.has(d.devid)) map.set(d.devid, { devid: d.devid, online: false, remote_addr: '', owner: d.owner || '' });
+      else map.get(d.devid).owner = d.owner || '';
+    });
+    let rows = Array.from(map.values());
     if (this.q) {
       const q = this.q.toLowerCase();
-      rows = rows.filter(a => a.devid.toLowerCase().includes(q));
+      rows = rows.filter(a => a.devid.toLowerCase().includes(q) || (a.owner || '').toLowerCase().includes(q));
     }
     const dir = this.sortAsc ? 1 : -1;
     rows.sort((a, b) => {
-      const x = String(a[this.sortKey] || ''), y = String(b[this.sortKey] || '');
+      const x = String(a[this.sortKey] == null ? '' : a[this.sortKey]);
+      const y = String(b[this.sortKey] == null ? '' : b[this.sortKey]);
       return (x < y ? -1 : x > y ? 1 : 0) * dir;
     });
     const total = rows.length;
     const pages = Math.max(1, Math.ceil(total / this.per));
     if (this.page > pages) this.page = pages;
     const view = rows.slice((this.page - 1) * this.per, this.page * this.per);
-    const visibleOnline = rows.map(a => a.devid);
-    const allChecked = visibleOnline.length > 0 && visibleOnline.every(d => this.sel.has(d));
+    const onlineIds = rows.filter(a => a.online).map(a => a.devid);
+    const allChecked = onlineIds.length > 0 && onlineIds.every(d => this.sel.has(d));
 
-    const head = k => '<th class="sortable" data-k="' + k + '">' +
-      ({ devid: '设备', remote_addr: '远端地址' }[k] || k) +
+    const head = (k, label) => '<th class="sortable" data-k="' + k + '">' + label +
       (this.sortKey === k ? (this.sortAsc ? ' ▲' : ' ▼') : '') + '</th>';
 
     this.el.innerHTML =
       '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>分发文件：' +
         UI.esc(this.file) + '</h2><span class="spacer"></span>' +
         '<span style="color:var(--muted);font-size:12px">已选 ' + this.sel.size +
-        ' / 共 ' + total + '</span></div>' +
+        ' / 在线 ' + onlineIds.length + ' / 共 ' + total + '</span></div>' +
       '<div class="cfg-body">' +
         '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">' +
-          '<input type="text" id="dist-q" placeholder="搜索设备" value="' + UI.esc(this.q) + '" style="width:220px">' +
+          '<input type="text" id="dist-q" placeholder="搜索设备 / 归属" value="' + UI.esc(this.q) + '" style="width:220px">' +
           '<input type="text" id="dist-dir" placeholder="目标子目录（可选）" style="width:220px">' +
         '</div>' +
         '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px">' +
@@ -1325,12 +1337,14 @@ const DistributePage = Object.assign(new Page(), {
         '</div>' +
       '</div>' +
       '<div style="padding:0 16px 16px"><table class="tbl"><thead><tr><th style="width:36px"><input type="checkbox" id="dist-all"' +
-        (allChecked ? ' checked' : '') + '></th>' + head('devid') + head('remote_addr') +
-        '<th>状态</th></tr></thead><tbody>' +
-        view.map(a => '<tr><td><input type="checkbox" class="dist-pick" data-dev="' + UI.esc(a.devid) + '"' +
-          (this.sel.has(a.devid) ? ' checked' : '') + '></td><td>' + UI.esc(a.devid) +
-          '</td><td>' + UI.esc(a.remote_addr || '') + '</td><td><span class="pill ok">在线</span></td></tr>').join('') +
-        (view.length ? '' : '<tr><td colspan="4" class="empty">没有匹配的设备</td></tr>') +
+        (allChecked ? ' checked' : '') + '></th>' + head('devid', '设备') + head('online', '状态') +
+        head('owner', '归属') + head('remote_addr', '远端地址') + '</tr></thead><tbody>' +
+        view.map(a => '<tr' + (a.online ? '' : ' style="opacity:.55"') + '><td><input type="checkbox" class="dist-pick" data-dev="' +
+          UI.esc(a.devid) + '"' + (this.sel.has(a.devid) ? ' checked' : '') +
+          (a.online ? '' : ' disabled') + '></td><td>' + UI.esc(a.devid) + '</td><td>' +
+          (a.online ? '<span class="pill ok">在线</span>' : '<span class="pill bad">离线</span>') +
+          '</td><td>' + UI.esc(a.owner || '—') + '</td><td>' + UI.esc(a.remote_addr || '—') + '</td></tr>').join('') +
+        (view.length ? '' : '<tr><td colspan="5" class="empty">没有匹配的设备</td></tr>') +
       '</tbody></table>' +
       '<div style="display:flex;align-items:center;gap:8px;margin-top:12px">' +
         '<button id="dist-prev"' + (this.page <= 1 ? ' disabled' : '') + '>上一页</button>' +
@@ -1341,10 +1355,6 @@ const DistributePage = Object.assign(new Page(), {
         '<button class="primary" id="dist-submit">创建分发任务（' + this.sel.size + '）</button>' +
       '</div></div></div>';
 
-    const ds = document.getElementById('dist-start');
-    const de = document.getElementById('dist-end');
-    if (ds) ds.onchange = () => { this.startMs = new Date(ds.value).getTime() || this.startMs; };
-    if (de) de.onchange = () => { this.endMs = new Date(de.value).getTime() || this.endMs; };
     const q = document.getElementById('dist-q');
     q.oninput = () => {
       clearTimeout(this._qt);
@@ -1354,6 +1364,11 @@ const DistributePage = Object.assign(new Page(), {
         this.refresh();
       }, 200);
     };
+    if (focused) { q.focus(); q.setSelectionRange(caret, caret); }
+    const ds = document.getElementById('dist-start');
+    const de = document.getElementById('dist-end');
+    if (ds) ds.onchange = () => { this.startMs = new Date(ds.value).getTime() || this.startMs; };
+    if (de) de.onchange = () => { this.endMs = new Date(de.value).getTime() || this.endMs; };
     document.querySelectorAll('#page th.sortable').forEach(th => {
       th.onclick = () => {
         const k = th.dataset.k;
@@ -1363,7 +1378,7 @@ const DistributePage = Object.assign(new Page(), {
       };
     });
     document.getElementById('dist-all').onchange = (e) => {
-      rows.forEach(a => e.target.checked ? this.sel.add(a.devid) : this.sel.delete(a.devid));
+      onlineIds.forEach(d => e.target.checked ? this.sel.add(d) : this.sel.delete(d));
       this.refresh();
     };
     document.querySelectorAll('#page .dist-pick').forEach(cb => {
@@ -1415,6 +1430,8 @@ const TasksPage = Object.assign(new Page(), {
     return this.refresh();
   },
   async refresh() {
+    if (document.hidden) return;
+    if (document.activeElement && document.activeElement.id === 'task-q') return;
     let url = '/api/v1/distributions?page=' + this.page + '&per_page=' + this.per;
     if (this.tab !== 'all') url += '&status=' + this.tab;
     if (this.q) url += '&q=' + encodeURIComponent(this.q);
@@ -1438,7 +1455,7 @@ const TasksPage = Object.assign(new Page(), {
       return '<tr><td>' + t.id + '</td><td>' + UI.esc(t.file_name) + '</td><td>' + UI.esc(t.devid) +
         '</td><td>' + UI.esc(t.target_path || '') + '</td>' +
         '<td>' + (t.status === 'running' ? UI.bytes(sent) + ' / ' + UI.bytes(size) + ' ' + pct + '%' : UI.bytes(size)) + '</td>' +
-        '<td><span class="pill ' + cls + '">' + st + '</span></td>' +
+        '<td><span class="pill ' + cls + '" title="' + UI.esc(t.error || '') + '">' + st + '</span></td>' +
         '<td>' + t.retry_count + ' / ' + t.max_retries + '</td>' +
         '<td>' + new Date(t.start_at_ms).toLocaleString() + '</td>' +
         '<td>' + new Date(t.deadline_at_ms).toLocaleString() + '</td>' +
