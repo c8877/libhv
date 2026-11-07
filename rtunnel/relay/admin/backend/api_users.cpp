@@ -132,7 +132,9 @@ void AdminServer::handleLogin(const HttpContextPtr& ctx) {
     if (!ok) {
         std::lock_guard<std::mutex> lk(g_login_mu);
         auto& st = g_login_fail[user];
-        if (++st.first >= 5) { st.first = 0; st.second = time(NULL) + 300; }
+        int lf = settingInt("auth.lock_fails", 5);
+        int lm = settingInt("auth.lock_minutes", 5);
+        if (++st.first >= lf) { st.first = 0; st.second = time(NULL) + lm * 60; }
         ctx->response->status_code = HTTP_STATUS_UNAUTHORIZED;
         ctx->send("{\"error\":\"bad username or password\"}");
         return;
@@ -142,13 +144,14 @@ void AdminServer::handleLogin(const HttpContextPtr& ctx) {
         g_login_fail.erase(user);
     }
     std::string sid = AdminDb::randomHex(32);
-    if (sid.empty() || !db_.createSession(AdminDb::sha256Hex(sid), u.id, AdminDb::nowMs() + 12LL * 3600 * 1000)) {
+    int hours = settingInt("auth.session_hours", 12);
+    if (sid.empty() || !db_.createSession(AdminDb::sha256Hex(sid), u.id, AdminDb::nowMs() + (long long)hours * 3600 * 1000)) {
         ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
         ctx->send("{\"error\":\"session create failed\"}");
         return;
     }
     ctx->response->headers["Set-Cookie"] =
-        "rt_sid=" + sid + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200";
+        "rt_sid=" + sid + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + std::to_string(hours * 3600);
     json j;
     j["username"] = u.username;
     j["role"] = u.role;
@@ -170,6 +173,13 @@ void AdminServer::handleMe(const HttpContextPtr& ctx) {
     j["id"] = tl_actor.id;
     j["username"] = tl_actor.username;
     j["role"] = tl_actor.role.empty() ? role : tl_actor.role;
+    {
+        std::map<std::string, std::string> p;
+        db_.getUserPrefs(tl_actor.id, p);
+        std::string dn = p.count("display_name") ? p["display_name"] : tl_actor.username;
+        j["display_name"] = dn.empty() ? tl_actor.username : dn;
+        j["avatar_color"] = p.count("avatar_color") ? p["avatar_color"] : "";
+    }
     ctx->send(j.dump());
 }
 
@@ -218,6 +228,11 @@ void AdminServer::handleUserPassword(const HttpContextPtr& ctx, const AdminActor
     json req = json::parse(ctx->body(), nullptr, false);
     std::string oldp = req.value("old_password", "");
     std::string newp = req.value("new_password", "");
+    if ((int)newp.size() < settingInt("auth.password_min", 8)) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"password too short\"}");
+        return;
+    }
     DbUser target;
     if (!db_.findUserById(id, target)) {
         ctx->response->status_code = HTTP_STATUS_NOT_FOUND;

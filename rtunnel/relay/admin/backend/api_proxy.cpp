@@ -24,7 +24,7 @@
 namespace {
 
 const size_t MAX_PROXY_BODY = 64 * 1024 * 1024;
-const int MAX_PROXY_ACTIVE = 32;
+
 std::atomic<int> g_proxy_active{0};
 
 struct ProxyGuard {
@@ -220,7 +220,7 @@ void AdminServer::handleDeviceProxy(const HttpContextPtr& ctx) {
 
     std::string role;
     if (requireRole(ctx, ROLE_OPERATOR, role)) return;
-    if (g_proxy_active.load() >= MAX_PROXY_ACTIVE) {
+    if (g_proxy_active.load() >= settingInt("proxy.max_concurrent", 32)) {
         ctx->response->status_code = HTTP_STATUS_SERVICE_UNAVAILABLE;
         ctx->send("{\"error\":\"too many concurrent proxy requests\"}");
         return;

@@ -2,6 +2,7 @@
 // 管理台账号/会话/设备归属（SQLite）。仅供 admin worker 线程访问，内部加锁。
 #include <string>
 #include <vector>
+#include <map>
 #include <mutex>
 
 struct sqlite3;
@@ -21,6 +22,10 @@ public:
     bool open(const std::string& path, std::string& err);
     bool ok() const { return db_ != nullptr; }
 
+    bool getSettings(std::map<std::string, std::string>& out);
+    bool setSetting(const std::string& key, const std::string& value, const std::string& by);
+    bool getUserPrefs(long long uid, std::map<std::string, std::string>& out);
+    bool setUserPref(long long uid, const std::string& key, const std::string& value);
     bool initialized();                       // users 非空
     bool createUser(const std::string& user, const std::string& pass,
                     const std::string& role, std::string& err, long long* out_id = nullptr);

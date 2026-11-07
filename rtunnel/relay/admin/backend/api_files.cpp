@@ -45,7 +45,6 @@ static bool validFileName(const std::string& s) {
     return true;
 }
 
-static const size_t MAX_FILE_BYTES = 32 * 1024 * 1024;   // 上传/下载单文件上限 32 MiB
 
 struct FileEnt {
     std::string name;
@@ -116,7 +115,8 @@ void AdminServer::handleFileDownload(const HttpContextPtr& ctx) {
     fseek(fp, 0, SEEK_END);
     long n = ftell(fp);
     fseek(fp, 0, SEEK_SET);
-    if (n < 0 || (size_t)n > MAX_FILE_BYTES) {
+    size_t max_dl = (size_t)settingInt("file.max_download_mb", 32) * 1024 * 1024;
+    if (n < 0 || (size_t)n > max_dl) {
         fclose(fp);
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"file too large\"}");
@@ -140,13 +140,14 @@ void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string&
     }
     // 先看 Content-Length，避免把超限文件读进内存后才报错
     std::string clen = ctx->header("Content-Length");
-    if (!clen.empty() && strtoull(clen.c_str(), NULL, 10) > MAX_FILE_BYTES) {
+    size_t max_ul = (size_t)settingInt("file.max_upload_mb", 32) * 1024 * 1024;
+    if (!clen.empty() && strtoull(clen.c_str(), NULL, 10) > max_ul) {
         ctx->response->status_code = HTTP_STATUS_PAYLOAD_TOO_LARGE;
         ctx->send("{\"error\":\"file too large (max 32MiB)\"}");
         return;
     }
     const std::string& body = ctx->body();
-    if (body.size() > MAX_FILE_BYTES) {
+    if (body.size() > max_ul) {
         ctx->response->status_code = HTTP_STATUS_PAYLOAD_TOO_LARGE;
         ctx->send("{\"error\":\"file too large (max 32MiB)\"}");
         return;

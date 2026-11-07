@@ -7,6 +7,8 @@
 #include <functional>
 #include <vector>
 #include <string>
+#include <map>
+#include <mutex>
 #include <unordered_map>
 
 #include "http/server/HttpServer.h"
@@ -75,6 +77,16 @@ private:
     void handleAgentDetail(const HttpContextPtr& ctx);
     void handleAgentSysinfo(const HttpContextPtr& ctx);
     void handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& actor);
+    // api_settings.cpp
+    void loadSettings();
+    int  settingInt(const std::string& key, int def);
+    std::string settingStr(const std::string& key, const std::string& def);
+    void handleSettingsGet(const HttpContextPtr& ctx);
+    void handleSettingsSet(const HttpContextPtr& ctx);
+    void handleProfileGet(const HttpContextPtr& ctx);
+    void handleProfileSet(const HttpContextPtr& ctx);
+    void handleLogoutAll(const HttpContextPtr& ctx);
+    void cleanupAudit(int days);
     void handleClients(const HttpContextPtr& ctx);
     void handleStreams(const HttpContextPtr& ctx);
     // api_ops.cpp
@@ -122,6 +134,8 @@ private:
     AdminConfig     cfg_;
     AdminDb          db_;
     AuditLog        audit_;
+    std::map<std::string, std::string> settings_;
+    std::mutex settings_mu_;
 
     // Web 终端
     hv::WebSocketService ws_service_;

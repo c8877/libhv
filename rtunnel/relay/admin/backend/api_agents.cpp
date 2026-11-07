@@ -146,7 +146,8 @@ void AdminServer::handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& a
         return;
     }
     std::string ack;
-    for (int i = 0; i < 40 && ack.empty(); ++i) {
+    int waits = settingInt("proxy.config_wait_ms", 2000) / 50;
+    for (int i = 0; i < waits && ack.empty(); ++i) {
         usleep(50000);
         ack = callRelay([this, &devid, sid]() {
             return relay_->configAck(devid.c_str(), sid, nullptr);
@@ -179,7 +180,8 @@ void AdminServer::handleAgentSysinfo(const HttpContextPtr& ctx) {
     });
     std::string js;
     uint64_t ts = 0;
-    for (int i = 0; i < 40 && js.empty(); ++i) {
+    int waits = settingInt("proxy.sysinfo_wait_ms", 2000) / 50;
+    for (int i = 0; i < waits && js.empty(); ++i) {
         usleep(50000);
         js = callRelay([this, &devid, &ts]() {
             return relay_->sysinfoOf(devid.c_str(), &ts);

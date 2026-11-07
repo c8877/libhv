@@ -1,5 +1,7 @@
 #include "admin_server.hpp"
 #include "common/logging.hpp"
+#include <thread>
+#include <chrono>
 
 #include <chrono>
 #include <future>
@@ -231,7 +233,30 @@ void AdminServer::registerRoutes() {
     access(ROLE_VIEWER, "GET", "/api/v1/agents", &AdminServer::handleAgents);
     // operator：详情/会话/文件读写/ACL 读
     access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid", &AdminServer::handleAgentDetail);
+    access(ROLE_VIEWER, "GET", "/api/v1/settings", &AdminServer::handleSettingsGet);
+    access(ROLE_VIEWER, "GET", "/api/v1/me/profile", &AdminServer::handleProfileGet);
     access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid/sysinfo", &AdminServer::handleAgentSysinfo);
+    service_.Handle("PUT", "/api/v1/settings", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_ADMIN, role);
+        if (rc) return rc;
+        handleSettingsSet(ctx);
+        return (int)ctx->response->status_code;
+    });
+    service_.Handle("PUT", "/api/v1/me/profile", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_VIEWER, role);
+        if (rc) return rc;
+        handleProfileSet(ctx);
+        return (int)ctx->response->status_code;
+    });
+    service_.Handle("POST", "/api/v1/me/logout-all", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_VIEWER, role);
+        if (rc) return rc;
+        handleLogoutAll(ctx);
+        return (int)ctx->response->status_code;
+    });
     service_.Handle("PUT", "/api/v1/agents/:devid/caps", [this](const HttpContextPtr& ctx) {
         std::string role;
         int rc = requireRole(ctx, ROLE_MANAGER, role);
@@ -428,6 +453,7 @@ int AdminServer::start(const AdminConfig& cfg) {
     {
         std::string db_err;
         if (db_.open(cfg_.db_path, db_err)) {
+            loadSettings();
             logf_("[admin] db: %s", cfg_.db_path.c_str());
         } else {
             logf_("[admin] db open failed: %s (%s)", cfg_.db_path.c_str(), db_err.c_str());
@@ -439,6 +465,12 @@ int AdminServer::start(const AdminConfig& cfg) {
         mkdir(cfg_.cert_dir.c_str(), 0700);
         relay_->loadRevoked();
         audit_.init(cfg_.cert_dir + "/audit.log");
+        std::thread([this]() {
+            for (;;) {
+                std::this_thread::sleep_for(std::chrono::hours(1));
+                cleanupAudit(settingInt("audit.retention_days", 30));
+            }
+        }).detach();
     }
 
     char host[64] = "127.0.0.1";

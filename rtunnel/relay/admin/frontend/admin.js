@@ -8,7 +8,6 @@
 const Api = {
   async req(path, opt = {}) {
     const headers = Object.assign({ 'X-Requested-With': 'fetch' }, opt.headers || {});
-    if (this.token) headers['Authorization'] = 'Bearer ' + this.token;
     const r = await fetch(path, Object.assign({ cache: 'no-store' }, opt, { headers }));
     if (r.status === 401) {
       // 账号体系下不再弹 token；回到登录页
@@ -33,10 +32,32 @@ const Api = {
 };
 
 // ---------------------------------------------------------------- UI 组件
+const ROLE_NAMES = { admin: '超级管理员', manager: '管理员', operator: '操作员', viewer: '浏览者' };
+
+function avatarColor(name) {
+    const palette = ['#4a9eff', '#57ab5a', '#f5a623', '#e5534b', '#b083f0', '#39c5cf', '#d4a72c', '#8b949e'];
+    let h = 0;
+    for (const ch of String(name || '?')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return palette[h % palette.length];
+}
+
 const UI = {
   esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g,
       c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  },
+  renderUser() {
+    const me = (typeof Auth !== 'undefined' && Auth.me) || {};
+    const name = me.display_name || me.username || '?';
+    const color = me.avatar_color || avatarColor(me.username);
+    const btn = document.getElementById('userbtn');
+    if (btn) {
+      btn.innerHTML = '<span class="avatar" style="background:' + color + '">' +
+        UI.esc(String(name).slice(0, 1).toUpperCase()) + '</span><span class="uname">' +
+        UI.esc(name) + '</span><span class="caret">▾</span>';
+    }
+    const info = document.getElementById('userinfo');
+    if (info) info.textContent = name + ' · ' + (ROLE_NAMES[me.role] || me.role || '');
   },
   bytes(n) {
     n = Number(n) || 0;
@@ -107,6 +128,7 @@ const Router = {
     { hash: '#/accounts', title: '账号', icon: '☺' },
     { hash: '#/files', title: '文件', icon: '⬇' },
     { hash: '#/audit', title: '审计', icon: '≣' },
+    { hash: '#/settings', title: '系统配置', icon: '⚙' },
   ],
   register(re, page, title) { this.routes.push({ re, page, title }); },
   go(h) { location.hash = h; },
@@ -118,7 +140,8 @@ const Router = {
         ? ['#/overview', '#/agents', '#/streams', '#/files']
         : role === 'manager'
           ? ['#/overview', '#/agents', '#/clients', '#/streams', '#/accounts', '#/acl', '#/files', '#/audit']
-          : null;
+          : ['#/overview', '#/agents', '#/clients', '#/streams', '#/certs', '#/acl', '#/accounts',
+             '#/files', '#/audit', '#/settings'];
     const navs = allow ? this.nav.filter(n => allow.indexOf(n.hash) >= 0) : this.nav;
     document.getElementById('nav').innerHTML = navs.map(n =>
       '<a href="' + n.hash + '"' + (activeHash.indexOf(n.hash) === 0 ? ' class="active"' : '') + '>' +
@@ -265,8 +288,10 @@ const AgentDetailPage = Object.assign(new Page(), {
     this.cpuHist = [];
     this.memHist = [];
     this.charts = [];
-    this.auto = false;
-    return Page.prototype.enter.call(this, el, params);
+    this.auto = Number((window.SETTINGS || {})['ui.refresh_seconds'] || 0) > 0;
+    const p = Page.prototype.enter.call(this, el, params);
+    if (this.auto && !this.timer) this.timer = setInterval(() => this.refresh().catch(() => {}), 5000);
+    return p;
   },
   leave() {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
@@ -801,7 +826,7 @@ const TermMgr = {
     const id = devid + '#' + (++this.seq);
     const box = document.createElement('div');
     box.style.cssText = 'height:100%;width:100%';
-    const term = new Terminal({ cursorBlink: true, fontSize: 14 });
+    const term = new Terminal({ cursorBlink: true, fontSize: parseInt((Auth.profile && Auth.profile.term_font) || 14, 10) });
     const fit = new FitAddon.FitAddon();
     term.loadAddon(fit);
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -888,6 +913,119 @@ const TerminalPage = Object.assign(new Page(), {
     const s = TermMgr.sessions.get(this.active);
     if (s && s.box.parentNode) s.box.parentNode.removeChild(s.box);   // 仅摘 DOM，会话保留
   },
+});
+
+
+// ---------------------------------------------------------------- Pages.系统配置
+const SettingsPage = Object.assign(new Page(), {
+  refreshInterval() { return 0; },
+  async refresh() {
+    const st = await Api.get('/api/v1/settings');
+    const num = (k, label, lo, hi, unit) =>
+      '<label class="cfg-row"><span>' + label + '</span><input type="number" data-k="' + k +
+      '" value="' + UI.esc(st[k] || '') + '" min="' + lo + '" max="' + hi + '"><em>' + unit + '</em></label>';
+    this.el.innerHTML =
+      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>文件</h2></div><div class="cfg-body">' +
+        num('file.max_upload_mb', '单文件上传上限', 1, 512, 'MiB') +
+        num('file.max_download_mb', '单文件下载上限', 1, 512, 'MiB') + '</div></div>' +
+      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>代理</h2></div><div class="cfg-body">' +
+        num('proxy.max_concurrent', '并发上限', 1, 256, '条') +
+        num('proxy.sysinfo_wait_ms', 'SYSINFO 等待', 500, 10000, 'ms') +
+        num('proxy.config_wait_ms', 'CONFIG_ACK 等待', 500, 10000, 'ms') + '</div></div>' +
+      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>账号安全</h2></div><div class="cfg-body">' +
+        num('auth.session_hours', '会话有效期', 1, 168, '小时') +
+        num('auth.password_min', '密码最小长度', 6, 32, '位') +
+        num('auth.lock_fails', '登录失败锁定', 1, 20, '次') +
+        num('auth.lock_minutes', '锁定时长', 1, 120, '分钟') + '</div></div>' +
+      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>终端</h2></div><div class="cfg-body">' +
+        num('term.max_sessions', '单账号最大终端数', 1, 32, '个') + '</div></div>' +
+      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>审计</h2></div><div class="cfg-body">' +
+        num('audit.retention_days', '审计保留', 7, 365, '天') + '</div></div>' +
+      '<div class="panel"><div class="panel-head"><h2>展示</h2></div><div class="cfg-body">' +
+        '<label class="cfg-row"><span>站点标题</span><input type="text" data-k="ui.site_title" value="' +
+        UI.esc(st['ui.site_title'] || 'rtunnel') + '"></label>' +
+        num('ui.refresh_seconds', '详情默认刷新', 0, 300, '秒（0=关闭）') +
+        '</div><div class="cfg-actions"><button class="primary" id="cfg-save">保存</button></div></div>';
+    document.getElementById('cfg-save').onclick = async () => {
+      const body = {};
+      document.querySelectorAll('#page .cfg-body [data-k]').forEach(inp => { body[inp.dataset.k] = inp.value; });
+      try {
+        await Api.put('/api/v1/settings', body);
+        UI.toast('已保存，立即生效');
+        this.refresh();
+      } catch (e) { UI.toast('保存失败：' + e.message, true); }
+    };
+  },
+  enter(el) { this.el = el; return Page.prototype.enter.call(this, el, []); },
+});
+
+// ---------------------------------------------------------------- Pages.个人设置
+const ProfilePage = Object.assign(new Page(), {
+  refreshInterval() { return 0; },
+  async refresh() {
+    const p = await Api.get('/api/v1/me/profile');
+    const colors = ['#4a9eff', '#57ab5a', '#f5a623', '#e5534b', '#b083f0', '#39c5cf', '#d4a72c', '#8b949e'];
+    this.el.innerHTML =
+      '<div class="panel" style="max-width:560px"><div class="panel-head"><h2>个人设置</h2></div>' +
+      '<div class="cfg-body">' +
+        '<label class="cfg-row"><span>头像颜色</span><input type="color" id="pf-color" value="' +
+          UI.esc(p.avatar_color || colors[0]) + '"><em>首字母 ' + UI.esc(p.username.slice(0, 1).toUpperCase()) + '</em></label>' +
+        '<label class="cfg-row"><span>显示名</span><input type="text" id="pf-name" value="' +
+          UI.esc(p.display_name || '') + '"></label>' +
+        '<label class="cfg-row"><span>默认页面</span><select id="pf-page">' +
+          '<option value="overview"' + (p.default_page === 'overview' ? ' selected' : '') + '>概览</option>' +
+          '<option value="agents"' + (p.default_page === 'agents' ? ' selected' : '') + '>设备列表</option></select></label>' +
+        '<label class="cfg-row"><span>时间格式</span><select id="pf-time">' +
+          '<option value="local"' + (p.time_format === 'local' ? ' selected' : '') + '>本地时间</option>' +
+          '<option value="relative"' + (p.time_format === 'relative' ? ' selected' : '') + '>相对时间</option></select></label>' +
+        '<label class="cfg-row"><span>终端字号</span><input type="number" id="pf-font" value="' +
+          UI.esc(p.term_font || '14') + '" min="10" max="24"><em>px</em></label>' +
+      '</div><div class="cfg-actions"><button class="primary" id="pf-save">保存</button></div></div>' +
+
+      '<div class="panel" style="max-width:560px;margin-top:16px"><div class="panel-head"><h2>修改密码</h2></div>' +
+      '<div class="cfg-body">' +
+        '<label class="cfg-row"><span>当前密码</span><input type="password" id="pw-old"></label>' +
+        '<label class="cfg-row"><span>新密码</span><input type="password" id="pw-new"></label>' +
+      '</div><div class="cfg-actions"><button id="pw-save">修改密码</button></div></div>' +
+
+      '<div class="panel" style="max-width:560px;margin-top:16px"><div class="panel-head"><h2>会话</h2></div>' +
+      '<div class="cfg-body"><div style="color:var(--muted);font-size:12px">吊销本账号全部登录会话（含当前）</div></div>' +
+      '<div class="cfg-actions"><button class="danger" id="sess-drop">登出所有会话</button></div></div>';
+
+    document.getElementById('pf-save').onclick = async () => {
+      const body = {
+        avatar_color: document.getElementById('pf-color').value,
+        display_name: document.getElementById('pf-name').value,
+        default_page: document.getElementById('pf-page').value,
+        time_format: document.getElementById('pf-time').value,
+        term_font: document.getElementById('pf-font').value,
+      };
+      try {
+        Auth.profile = await Api.put('/api/v1/me/profile', body);
+        Auth.me.display_name = Auth.profile.display_name;
+        Auth.me.avatar_color = Auth.profile.avatar_color;
+        UI.renderUser();
+        UI.toast('已保存');
+      } catch (e) { UI.toast('保存失败：' + e.message, true); }
+    };
+    document.getElementById('pw-save').onclick = async () => {
+      try {
+        await Api.put('/api/v1/users/' + Auth.me.id + '/password', {
+          old_password: document.getElementById('pw-old').value,
+          new_password: document.getElementById('pw-new').value,
+        });
+        UI.toast('密码已修改');
+        document.getElementById('pw-old').value = '';
+        document.getElementById('pw-new').value = '';
+      } catch (e) { UI.toast('修改失败：' + e.message, true); }
+    };
+    document.getElementById('sess-drop').onclick = async () => {
+      if (!confirm('确定登出所有会话？')) return;
+      try { await Api.post('/api/v1/me/logout-all', {}); location.reload(); }
+      catch (e) { UI.toast('失败：' + e.message, true); }
+    };
+  },
+  enter(el) { this.el = el; return Page.prototype.enter.call(this, el, []); },
 });
 
 // ---------------------------------------------------------------- 启动
@@ -1017,22 +1155,31 @@ async function boot() {
     return authForm('login');
   }
   // 顶栏当前账号 + 登出菜单
-  const roleName = { admin: '超级管理员', manager: '管理员', operator: '操作员', viewer: '浏览者' };
   const ub = document.getElementById('userbox');
   const btn = document.getElementById('userbtn');
   if (ub && btn) {
     ub.style.display = '';
-    btn.textContent = Auth.me.username + ' ▾';
-    const info = document.getElementById('userinfo');
-    if (info) info.textContent = Auth.me.username + ' · ' + (roleName[Auth.me.role] || Auth.me.role);
+    try {
+      Auth.profile = await Api.get('/api/v1/me/profile');
+      Auth.me.display_name = Auth.profile.display_name;
+      Auth.me.avatar_color = Auth.profile.avatar_color;
+    } catch (e) {}
+    try {
+      window.SETTINGS = await Api.get('/api/v1/settings');
+      const t = window.SETTINGS['ui.site_title'];
+      if (t) document.title = t;
+    } catch (e) {}
+    const menu = document.getElementById('usermenu');
+    if (menu && !document.getElementById('menu-profile')) {
+      menu.insertAdjacentHTML('afterbegin', '<a href="#/profile" id="menu-profile">个人设置</a>');
+    }
+    UI.renderUser();
     btn.onclick = (e) => {
       e.stopPropagation();
-      const m = document.getElementById('usermenu');
-      if (m) m.style.display = m.style.display === 'none' ? '' : 'none';
+      if (menu) menu.style.display = menu.style.display === 'none' ? '' : 'none';
     };
     document.addEventListener('click', () => {
-      const m = document.getElementById('usermenu');
-      if (m) m.style.display = 'none';
+      if (menu) menu.style.display = 'none';
     });
     const lo = document.getElementById('logout');
     if (lo) lo.onclick = async () => {
@@ -1040,7 +1187,10 @@ async function boot() {
       location.reload();
     };
   }
-  if (!location.hash) location.hash = '#/overview';
+  if (!location.hash) {
+    const want = (Auth.profile && Auth.profile.default_page) === 'agents' ? '#/agents' : '#/overview';
+    location.hash = want;
+  }
   Router.start();
 }
 
@@ -1052,4 +1202,6 @@ Router.register(/^#\/accounts$/, AccountsPage, '账号');
 Router.register(/^#\/audit$/, AuditPage, '审计');
 Router.register(/^#\/files(?:\?.*)?$/, FilesPage, '文件');
 Router.register(/^#\/terminal\/([^/]+)$/, TerminalPage, '终端');
+Router.register(/^#\/settings$/, SettingsPage, '系统配置');
+Router.register(/^#\/profile$/, ProfilePage, '个人设置');
 boot();

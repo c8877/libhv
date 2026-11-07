@@ -165,9 +165,72 @@ bool AdminDb::migrate(std::string& err) {
         " owner_id INTEGER,"
         " bound_ms INTEGER NOT NULL DEFAULT 0);"
         "CREATE INDEX IF NOT EXISTS idx_dev_owner ON devices(owner_id);"
+        "CREATE TABLE IF NOT EXISTS settings("
+        " key TEXT PRIMARY KEY,"
+        " value TEXT NOT NULL DEFAULT '',"
+        " updated_ms INTEGER NOT NULL DEFAULT 0,"
+        " updated_by TEXT NOT NULL DEFAULT '');"
+        "CREATE TABLE IF NOT EXISTS user_prefs("
+        " user_id INTEGER NOT NULL,"
+        " key TEXT NOT NULL,"
+        " value TEXT NOT NULL DEFAULT '',"
+        " PRIMARY KEY(user_id,key));"
         "UPDATE users SET role='admin' WHERE role='superadmin';"
         "UPDATE users SET role='viewer' WHERE role='user';",
         err);
+}
+
+bool AdminDb::getSettings(std::map<std::string, std::string>& out) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, "SELECT key,value FROM settings", -1, &st, nullptr) != SQLITE_OK) return false;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        out[(const char*)sqlite3_column_text(st, 0)] = (const char*)sqlite3_column_text(st, 1);
+    }
+    sqlite3_finalize(st);
+    return true;
+}
+
+bool AdminDb::setSetting(const std::string& key, const std::string& value, const std::string& by) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    const char* sql = "INSERT INTO settings(key,value,updated_ms,updated_by) VALUES(?,?,?,?) "
+                      "ON CONFLICT(key) DO UPDATE SET value=excluded.value,"
+                      " updated_ms=excluded.updated_ms, updated_by=excluded.updated_by";
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(st, 1, key.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, value.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 3, nowMs());
+    sqlite3_bind_text(st, 4, by.c_str(), -1, SQLITE_TRANSIENT);
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE;
+}
+
+bool AdminDb::getUserPrefs(long long uid, std::map<std::string, std::string>& out) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, "SELECT key,value FROM user_prefs WHERE user_id=?", -1, &st, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_int64(st, 1, uid);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        out[(const char*)sqlite3_column_text(st, 0)] = (const char*)sqlite3_column_text(st, 1);
+    }
+    sqlite3_finalize(st);
+    return true;
+}
+
+bool AdminDb::setUserPref(long long uid, const std::string& key, const std::string& value) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    const char* sql = "INSERT INTO user_prefs(user_id,key,value) VALUES(?,?,?) "
+                      "ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value";
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_int64(st, 1, uid);
+    sqlite3_bind_text(st, 2, key.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 3, value.c_str(), -1, SQLITE_TRANSIENT);
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE;
 }
 
 bool AdminDb::initialized() {
@@ -195,7 +258,7 @@ static void fillUser(sqlite3_stmt* st, DbUser& u) {
 
 bool AdminDb::createUser(const std::string& user, const std::string& pass,
                          const std::string& role, std::string& err, long long* out_id) {
-    if (user.empty() || pass.size() < 8) { err = "username empty or password < 8 chars"; return false; }
+    if (user.empty() || pass.size() < 6) { err = "username empty or password < 8 chars"; return false; }
     if (role != "admin" && role != "manager" && role != "operator" && role != "viewer") {
         err = "bad role";
         return false;
@@ -267,7 +330,7 @@ bool AdminDb::listUsers(std::vector<DbUser>& out, const std::string& only_role) 
 }
 
 bool AdminDb::setPassword(long long id, const std::string& pass, std::string& err) {
-    if (pass.size() < 8) { err = "password < 8 chars"; return false; }
+    if (pass.size() < 6) { err = "password < 8 chars"; return false; }
     std::string hash = hashPassword(pass, err);
     if (hash.empty()) return false;
     std::lock_guard<std::mutex> lk(mu_);

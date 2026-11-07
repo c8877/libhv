@@ -19,6 +19,7 @@ struct TerminalSession {
     uint32_t             sid = 0;
     std::string          devid;
     std::string          user;                // RTNP AUTH 用户（空则用默认 shell_user）
+    std::string          actor;               // 管理台账号（用于并发限制）
     bool                 closed = false;
     rtnp::Buffer         pending_input;       // OPEN_OK 前的输入先缓冲
 };
@@ -163,6 +164,16 @@ void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequest
     std::string role;
     AdminActor actor;
     if (!wsAuthorize(req, actor, role)) role.clear();
+    {
+        int maxs = settingInt("term.max_sessions", 4);
+        int cur = 0;
+        for (auto& kv : terms_) if (kv.second && kv.second->actor == actor.username) cur++;
+        if (cur >= maxs) {
+            logf_("[terminal] reject: too many sessions for %s", actor.username.c_str());
+            channel->close();
+            return;
+        }
+    }
     if (role != "admin" && role != "manager" && role != "operator") {
         logf_("[terminal] reject: unauthorized (devid=%s)", devid.c_str());
         channel->close();
@@ -176,6 +187,7 @@ void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequest
     }
 
     auto s = std::make_shared<TerminalSession>();
+    s->actor = actor.username;
     s->admin = this;
     s->ws = channel;
     s->devid = devid;
