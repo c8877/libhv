@@ -1281,7 +1281,6 @@ async function boot() {
     UI.renderUser();
     themeMenu();
     updateThemeBtn();
-    themeMenu();
     btn.onclick = (e) => {
       e.stopPropagation();
       if (menu) menu.style.display = menu.style.display === 'none' ? '' : 'none';
