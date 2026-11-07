@@ -498,6 +498,10 @@ const AgentDetailPage = Object.assign(new Page(), {
                  pct: t > 0 ? Math.round((t - f) * 100 / t) : 0 };
       });
       this.diskRows = diskRows;
+      const nics = (si.nics || []).map(n => [UI.esc(n.name), UI.esc(n.ip), UI.esc(n.netmask),
+        n.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>']);
+      const nicPanel = '<div class="panel si-nic"><div class="panel-head"><h2>网卡</h2></div>' +
+        UI.table(['接口', 'IP', '掩码', '状态'], nics) + '</div>';
 
       html += '<div class="si-grid">' +
         '<div class="panel si-mem"><div class="panel-head"><h2>内存</h2>' +
@@ -505,16 +509,17 @@ const AgentDetailPage = Object.assign(new Page(), {
         '<div class="si-body"><canvas id="si-mem" height="56"></canvas>' +
         '<div class="si-legend">已用 ' + kb(total - avail) + ' / ' + kb(total) +
         ' · Swap ' + kb(si.swap_total_kb) + '</div></div></div>' +
+        '<div class="panel si-disk"><div class="panel-head"><h2>存储</h2>' +
+        '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">条长按最大分区归一</span></div>' +
+        '<div class="si-body"><canvas id="si-disk" height="' +
+          Math.max(60, (si.mounts || []).length * 24 + 16) + '"></canvas></div></div>' +
         '<div class="panel si-cpu"><div class="panel-head"><h2>CPU</h2>' +
         '<span class="spacer"></span><span class="si-num">' + ((cpu.cores || []).length ? (cpu.usage || 0).toFixed(0) + '%' : '—') + '</span></div>' +
         '<div class="si-body"><canvas id="si-cpu" height="56"></canvas>' +
         '<div class="si-legend">load ' + (si.load1 || 0).toFixed(2) + ' / ' +
         (si.load5 || 0).toFixed(2) + ' / ' + (si.load15 || 0).toFixed(2) +
         ' · ' + (cpu.cores || []).length + ' 核</div></div></div>' +
-        '<div class="panel si-disk-card"><div class="panel-head"><h2>存储</h2>' +
-        '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">条长按最大分区归一</span></div>' +
-        '<div class="si-body"><canvas id="si-disk" height="' +
-          Math.max(60, (si.mounts || []).length * 24 + 16) + '"></canvas></div></div>' +
+        nicPanel +
         '</div>';
 
       const certText = si.mtls
@@ -545,11 +550,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       ];
       const sysTable = '<table class="si-table">' + sysRows.map(r =>
         '<tr><th>' + UI.esc(r[0]) + '</th><td>' + UI.esc(r[1]) + '</td></tr>').join('') + '</table>';
-      const nics = (si.nics || []).map(n => [UI.esc(n.name), UI.esc(n.ip), UI.esc(n.netmask),
-        n.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>']);
-      html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>网卡</h2></div>' +
-        UI.table(['接口', 'IP', '掩码', '状态'], nics) + '</div>' +
-        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>系统</h2></div>' + sysTable + '</div>' +
+      html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>系统</h2></div>' + sysTable + '</div>' +
         '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>运行时</h2></div>' + runtimeTable + '</div>' +
         '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>证书</h2></div>' + certText + '</div>';
     }
