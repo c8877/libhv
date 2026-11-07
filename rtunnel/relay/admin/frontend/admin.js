@@ -69,6 +69,17 @@ function applyTheme(mode, color) {
   updateThemeBtn();
 }
 
+function applySiteTitle() {
+  const t = (window.SETTINGS || {})['ui.site_title'];
+  if (t) {
+    document.title = t;
+    const logo = document.querySelector('#sidebar .logo');
+    if (logo && logo.firstChild && logo.firstChild.nodeType === 3) {
+      logo.firstChild.nodeValue = t;
+    }
+  }
+}
+
 function themeMenu() {
   const old = document.getElementById('themebox');
   if (old) old.remove();
@@ -1081,7 +1092,7 @@ const SettingsPage = Object.assign(new Page(), {
         await Api.put('/api/v1/settings', body);
         try {
           window.SETTINGS = await Api.get('/api/v1/settings');
-          if (window.SETTINGS['ui.site_title']) document.title = window.SETTINGS['ui.site_title'];
+          applySiteTitle();
         } catch (e) {}
         UI.toast('已保存，立即生效');
         this.refresh();
@@ -1154,7 +1165,11 @@ const ProfilePage = Object.assign(new Page(), {
     };
     document.getElementById('sess-drop').onclick = async () => {
       if (!confirm('确定登出所有会话？')) return;
-      try { await Api.post('/api/v1/me/logout-all', {}); location.reload(); }
+      try {
+        await Api.post('/api/v1/me/logout-all', {});
+        try { localStorage.removeItem('rt_theme'); localStorage.removeItem('rt_theme_color'); } catch (e) {}
+        location.reload();
+      }
       catch (e) { UI.toast('失败：' + e.message, true); }
     };
   },
@@ -1299,8 +1314,7 @@ async function boot() {
     } catch (e) {}
     try {
       window.SETTINGS = await Api.get('/api/v1/settings');
-      const t = window.SETTINGS['ui.site_title'];
-      if (t) document.title = t;
+      applySiteTitle();
     } catch (e) {}
     const menu = document.getElementById('usermenu');
     if (menu && !document.getElementById('menu-profile')) {
@@ -1329,6 +1343,7 @@ async function boot() {
     const lo = document.getElementById('logout');
     if (lo) lo.onclick = async () => {
       try { await fetch('/api/v1/logout', { method: 'POST', cache: 'no-store' }); } catch (e) {}
+      try { localStorage.removeItem('rt_theme'); localStorage.removeItem('rt_theme_color'); } catch (e) {}
       location.reload();
     };
   }
