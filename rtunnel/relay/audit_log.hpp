@@ -9,6 +9,7 @@ public:
     void init(const std::string& path);   // 空 path = 仅内存，不落盘
     void write(const std::string& role, const std::string& action, const std::string& detail);
     std::string tailJson(int n) const;    // 最近 n 条，JSON 数组（新到旧）
+    void rotate(size_t max_bytes);        // 超过阈值转存 .1，下次写入新建
 
 private:
     std::string              path_;

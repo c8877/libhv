@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <time.h>
+#include <sys/stat.h>
 
 void AuditLog::init(const std::string& path) {
     path_ = path;
@@ -28,6 +29,13 @@ void AuditLog::write(const std::string& role, const std::string& action, const s
     }
     ring_.push_back(line);
     if (ring_.size() > 1000) ring_.erase(ring_.begin());
+}
+
+void AuditLog::rotate(size_t max_bytes) {
+    if (path_.empty()) return;
+    struct stat st{};
+    if (stat(path_.c_str(), &st) != 0 || (size_t)st.st_size < max_bytes) return;
+    rename(path_.c_str(), (path_ + ".1").c_str());
 }
 
 std::string AuditLog::tailJson(int n) const {

@@ -886,6 +886,7 @@ const FilesPage = Object.assign(new Page(), {
       btn.disabled = true;
       try {
         const url = '/api/v1/files/' + encodeURIComponent(fi.name);
+        const uid = Math.random().toString(36).slice(2) + Date.now().toString(36);
         if (fi.size <= CHUNK) {
           await send(url, fi, (loaded) => {
             bar.value = Math.floor(loaded * 100 / fi.size);
@@ -895,14 +896,14 @@ const FilesPage = Object.assign(new Page(), {
           let off = 0;
           while (off < fi.size) {
             const chunk = fi.slice(off, off + CHUNK);
-            await send(url + '?append=1&offset=' + off, chunk, (loaded) => {
+            await send(url + '?append=1&upload=' + uid + '&offset=' + off, chunk, (loaded) => {
               const cur = off + loaded;
               bar.value = Math.floor(cur * 100 / fi.size);
               status.textContent = '上传中… ' + UI.bytes(cur) + ' / ' + UI.bytes(fi.size);
             });
             off += chunk.size;
           }
-          await send(url + '?finalize=1', new Blob([]));
+          await send(url + '?finalize=1&upload=' + uid, new Blob([]));
         }
         status.textContent = '已上传 ' + fi.name + '（' + UI.bytes(fi.size) + '）';
         this.refresh();

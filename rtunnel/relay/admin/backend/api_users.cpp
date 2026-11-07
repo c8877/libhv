@@ -34,6 +34,7 @@ static std::string cookieVal(const HttpContextPtr& ctx, const std::string& key) 
 // 登录失败限流：username -> (fails, lock_until)
 static std::mutex g_login_mu;
 static std::unordered_map<std::string, std::pair<int, time_t>> g_login_fail;
+static std::unordered_map<std::string, std::pair<int, time_t>> g_ip_fail;
 
 AdminActor AdminServer::currentActor() const { return tl_actor; }
 
@@ -116,12 +117,19 @@ void AdminServer::handleLogin(const HttpContextPtr& ctx) {
     json req = json::parse(ctx->body(), nullptr, false);
     std::string user = req.value("username", "");
     std::string pass = req.value("password", "");
+    std::string ip = ctx->request->client_addr.ip;
     {
         std::lock_guard<std::mutex> lk(g_login_mu);
         auto it = g_login_fail.find(user);
         if (it != g_login_fail.end() && it->second.second > time(NULL)) {
             ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
             ctx->send("{\"error\":\"locked, try later\"}");
+            return;
+        }
+        auto ii = g_ip_fail.find(ip);
+        if (ii != g_ip_fail.end() && ii->second.second > time(NULL)) {
+            ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+            ctx->send("{\"error\":\"too many attempts, try later\"}");
             return;
         }
     }
@@ -135,6 +143,10 @@ void AdminServer::handleLogin(const HttpContextPtr& ctx) {
         int lf = settingInt("auth.lock_fails", 5);
         int lm = settingInt("auth.lock_minutes", 5);
         if (++st.first >= lf) { st.first = 0; st.second = time(NULL) + lm * 60; }
+        if (!ip.empty()) {
+            auto& is = g_ip_fail[ip];
+            if (++is.first >= lf * 3) { is.first = 0; is.second = time(NULL) + lm * 60; }
+        }
         ctx->response->status_code = HTTP_STATUS_UNAUTHORIZED;
         ctx->send("{\"error\":\"bad username or password\"}");
         return;
@@ -142,6 +154,7 @@ void AdminServer::handleLogin(const HttpContextPtr& ctx) {
     {
         std::lock_guard<std::mutex> lk(g_login_mu);
         g_login_fail.erase(user);
+        if (!ip.empty()) g_ip_fail.erase(ip);
     }
     std::string sid = AdminDb::randomHex(32);
     int hours = settingInt("auth.session_hours", 12);

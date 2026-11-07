@@ -156,7 +156,21 @@ void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string&
     size_t max_ul = (size_t)settingInt("file.max_upload_mb", 32) * 1024 * 1024;
     mkdir(cfg_.file_dir.c_str(), 0700);
     std::string path = cfg_.file_dir + "/" + name;
-    std::string tmp = path + ".uploading";
+    std::string uid = ctx->param("upload");
+    if (!uid.empty() &&
+        (uid.size() > 64 || uid.find_first_not_of(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != std::string::npos)) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"bad upload id\"}");
+        return;
+    }
+    bool chunked_req = (ctx->param("append") == "1" || ctx->param("finalize") == "1");
+    if (chunked_req && uid.empty()) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"missing upload id\"}");
+        return;
+    }
+    std::string tmp = path + (uid.empty() ? ".uploading" : "." + uid + ".uploading");
 
     // 分片上传：?append=1&offset=N 追加到临时文件；?finalize=1 落盘
     if (ctx->param("finalize") == "1") {
@@ -217,6 +231,12 @@ void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string&
         return;
     }
     const std::string& body = ctx->body();
+    const size_t MAX_SINGLE = 8 * 1024 * 1024;
+    if (body.size() > MAX_SINGLE) {
+        ctx->response->status_code = HTTP_STATUS_PAYLOAD_TOO_LARGE;
+        ctx->send("{\"error\":\"use chunked upload for files > 8MiB\"}");
+        return;
+    }
     if (body.size() > max_ul) {
         ctx->response->status_code = HTTP_STATUS_PAYLOAD_TOO_LARGE;
         ctx->send("{\"error\":\"file too large (max " +
