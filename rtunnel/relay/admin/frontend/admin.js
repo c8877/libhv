@@ -596,13 +596,23 @@ const AgentDetailPage = Object.assign(new Page(), {
               ctx2.textAlign = 'left';
               ctx2.fillStyle = cssVar('--chart-axis', '#8b929c');
               ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
-              const nm = row.mount.length > 14 ? row.mount.slice(0, 13) + '…' : row.mount;
-              ctx2.fillText(nm, 6, y0);
               const fs = row.fstype || '—';
               const fsShort = fs.length > 8 ? fs.slice(0, 7) + '…' : fs;
               ctx2.font = '10px -apple-system, "Segoe UI", sans-serif';
               const tw = ctx2.measureText(fsShort).width;
-              const bx = 128, by = y0 - 9, bh = 18, bw = 64;
+              const bw = tw + 10;
+              const maxRight = 192;
+              let nm = row.mount;
+              ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
+              while (nm.length > 1 && 6 + ctx2.measureText(nm).width + 6 + bw > maxRight) {
+                nm = nm.slice(0, -1);
+              }
+              if (nm !== row.mount) nm = nm.replace(/.$/, '…');
+              ctx2.fillStyle = cssVar('--chart-axis', '#8b929c');
+              ctx2.fillText(nm, 6, y0);
+              const nmW = ctx2.measureText(nm).width;
+              const bx = 6 + nmW + 6, by = y0 - 9, bh = 18;
+              ctx2.font = '10px -apple-system, "Segoe UI", sans-serif';
               ctx2.fillStyle = fsColors[row.fstype] || 'rgba(139,146,156,.14)';
               if (ctx2.roundRect) {
                 ctx2.beginPath(); ctx2.roundRect(bx, by, bw, bh, 4); ctx2.fill();
@@ -610,7 +620,7 @@ const AgentDetailPage = Object.assign(new Page(), {
                 ctx2.fillRect(bx, by, bw, bh);
               }
               ctx2.fillStyle = cssVar('--fg', '#e6e9ee');
-              ctx2.fillText(fsShort, bx + (bw - tw) / 2, y0);
+              ctx2.fillText(fsShort, bx + 5, y0);
               ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
               ctx2.fillStyle = cssVar('--muted', '#8b929c');
               const x = xScale.getPixelForValue(row.total);
