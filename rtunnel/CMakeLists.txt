@@ -21,7 +21,7 @@ set(EMBEDDED_CPP ${CMAKE_CURRENT_BINARY_DIR}/embedded_frontend.cpp)
 add_custom_command(OUTPUT ${EMBEDDED_CPP}
     COMMAND ${Python3_EXECUTABLE} ${ADMIN_FRONTEND}/embed.py ${ADMIN_FRONTEND} ${EMBEDDED_CPP}
     DEPENDS ${ADMIN_FRONTEND}/admin.html ${ADMIN_FRONTEND}/admin.js ${ADMIN_FRONTEND}/admin_agent.js ${ADMIN_FRONTEND}/admin_pages.js ${ADMIN_FRONTEND}/admin_dist.js ${ADMIN_FRONTEND}/admin.css ${ADMIN_FRONTEND}/embed.py
-            ${ADMIN_FRONTEND}/vendor/xterm.js ${ADMIN_FRONTEND}/vendor/xterm.css ${ADMIN_FRONTEND}/vendor/xterm-addon-fit.js
+            ${ADMIN_FRONTEND}/vendor/xterm.js ${ADMIN_FRONTEND}/vendor/xterm.css ${ADMIN_FRONTEND}/vendor/xterm-addon-fit.js ${ADMIN_FRONTEND}/vendor/uplot.js ${ADMIN_FRONTEND}/vendor/uplot.css
     COMMENT "embed rtunnel admin frontend")
 
 add_library(rtunnel_sqlite STATIC 3rd/sqlite3/sqlite3.c)

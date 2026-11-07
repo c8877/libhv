@@ -1,15 +1,104 @@
 // 设备详情页（admin.js 之后加载，共享其全局工具）
 // ---------------------------------------------------------------- Pages.设备详情
+function diskColorOf(p) {
+  return p >= 85 ? cssVar('--bad', '#e5534b') : p >= 70 ? cssVar('--warn', '#f5a623') : cssVar('--accent', '#4a9eff');
+}
+
+function drawDiskChart(canvas, rows) {
+  if (!canvas || !rows) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.parentElement.clientWidth || 600;
+  const H = Math.max(40, rows.length * 24 + 16);
+  canvas.style.width = '100%';
+  canvas.style.height = H + 'px';
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, W, H);
+
+  const left = 200, right = 155;
+  const bw = Math.max(30, W - left - right);
+  const maxT = Math.max(...rows.map(r => r.total), 1);
+  const fsColors = {
+    ext4: 'rgba(74,158,255,.16)', vfat: 'rgba(245,166,35,.18)',
+    tmpfs: 'rgba(139,146,156,.18)', overlay: 'rgba(176,131,240,.18)',
+    squashfs: 'rgba(87,171,90,.18)'
+  };
+
+  rows.forEach((r, i) => {
+    const y = 14 + i * 24;
+    // 名称 + 类型标签
+    const fs = r.fstype || '—';
+    const fsShort = fs.length > 8 ? fs.slice(0, 7) + '…' : fs;
+    ctx.font = '11px -apple-system, "Segoe UI", sans-serif';
+    const tagW = tagTextWidth(ctx, fsShort);
+    let nm = r.mount;
+    while (nm.length > 1 && 6 + ctx.measureText(nm).width + 6 + tagW > 192) nm = nm.slice(0, -1);
+    if (nm !== r.mount) nm = nm.replace(/.$/, '…');
+    ctx.textAlign = 'left';
+    ctx.fillStyle = cssVar('--chart-axis', '#8b929c');
+    ctx.fillText(nm, 6, y);
+    const nmW = ctx.measureText(nm).width;
+    drawTagPill(ctx, 6 + nmW + 6, y, fsShort,
+                fsColors[r.fstype] || 'rgba(139,146,156,.14)', cssVar('--fg', '#e6e9ee'));
+
+    // 条形
+    const totalW = bw * (r.total / maxT);
+    const usedW = bw * (r.used / maxT);
+    ctx.fillStyle = cssVar('--border', '#2b3038');
+    ctx.fillRect(left, y - 5, totalW, 10);
+    ctx.fillStyle = diskColorOf(r.pct);
+    ctx.fillRect(left, y - 5, usedW, 10);
+
+    // 百分比
+    ctx.font = '11px -apple-system, "Segoe UI", sans-serif';
+    ctx.fillStyle = cssVar('--muted', '#8b929c');
+    ctx.textAlign = 'left';
+    ctx.fillText(r.pct + '%', left + totalW + 6, y);
+
+    // 已用/总量（右对齐，斜杠与单位用标签）
+    const pair = fmtKbPair(r.used, r.total);
+    const usedWtx = ctx.measureText(pair.used).width;
+    const totalWtx = ctx.measureText(pair.total).width;
+    const slashW = tagTextWidth(ctx, '/');
+    const unitW = tagTextWidth(ctx, pair.unit);
+    const gap = 4;
+    const groupW = usedWtx + gap + slashW + gap + totalWtx + gap + unitW;
+    let gx = W - 8 - groupW;
+    ctx.fillStyle = cssVar('--muted', '#8b929c');
+    ctx.fillText(pair.used, gx, y);
+    gx += usedWtx + gap;
+    gx += drawTagPill(ctx, gx, y, '/', 'rgba(139,146,156,.18)', cssVar('--fg', '#e6e9ee')) + gap;
+    ctx.fillStyle = cssVar('--muted', '#8b929c');
+    ctx.fillText(pair.total, gx, y);
+    gx += totalWtx + gap;
+    drawTagPill(ctx, gx, y, pair.unit, 'rgba(139,146,156,.18)', cssVar('--fg', '#e6e9ee'));
+  });
+
+  canvas.onmousemove = (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const i = Math.floor((e.clientY - rect.top - 2) / 24);
+    const r = rows[i];
+    canvas.title = r ? (r.mount + ' [' + (r.fstype || '—') + ']\n已用 ' +
+      fmtKbPair(r.used, r.total).used + fmtKbPair(r.used, r.total).unit + ' / ' +
+      fmtKbPair(r.used, r.total).total + fmtKbPair(r.used, r.total).unit) : '';
+  };
+}
+
 const AgentDetailPage = Object.assign(new Page(), {
   refreshInterval() { return 0; },   // 由「每 5s 刷新」勾选框控制
   async enter(el, params) {
     this.el = el;
     el.innerHTML = '<div class="panel"><div class="empty">图表组件加载中…</div></div>';
-    try { await loadScriptOnce('/vendor/chart.umd.min.js'); } catch (e) {}
+    try {
+      await loadCssOnce('/vendor/uplot.css');
+      await loadScriptOnce('/vendor/uplot.js');
+    } catch (e) {}
     this.devid = decodeURIComponent(params[0] || '');
     this.cpuHist = [];
     this.memHist = [];
-    this.charts = [];
+    this.uplots = {};
     this.period = Number((window.SETTINGS || {})['ui.refresh_seconds'] || 0);
     this.auto = this.period > 0;
     const p = Page.prototype.enter.call(this, el, params);
@@ -21,19 +110,20 @@ const AgentDetailPage = Object.assign(new Page(), {
   leave() {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
     if (this._retry) { clearTimeout(this._retry); this._retry = null; }
+    Object.values(this.uplots || {}).forEach(u => { try { u.destroy(); } catch (e) {} });
+    this.uplots = {};
   },
   spark(id, data, color) {
-    const c = document.getElementById(id);
-    if (!c || !window.Chart) return;
-    this.charts.push(new Chart(c.getContext('2d'), {
-      type: 'line',
-      data: { labels: data.map((_, i) => i),
-        datasets: [{ data: data, borderColor: color, backgroundColor: color + '26',
-          fill: true, pointRadius: 0, borderWidth: 2, tension: .3 }] },
-      options: { animation: false, responsive: true,
-        scales: { x: { display: false }, y: { display: false, min: 0, max: 100 } },
-        plugins: { legend: { display: false }, tooltip: { enabled: false } } }
-    }));
+    const el = document.getElementById(id);
+    if (!el || !window.uPlot) return;
+    if (this.uplots[id]) { try { this.uplots[id].destroy(); } catch (e) {} }
+    const w = el.clientWidth || 300;
+    this.uplots[id] = new uPlot({
+      width: w, height: 56, legend: { show: false }, cursor: { show: false },
+      axes: [{ show: false }, { show: false }],
+      scales: { x: { time: false }, y: { range: [0, 100] } },
+      series: [{}, { stroke: color, width: 1.5, fill: color + '26' }],
+    }, [data.map((_, i) => i), data], el);
   },
   diskColor(p) { return p >= 85 ? cssVar('--bad', '#e5534b') : p >= 70 ? cssVar('--warn', '#f5a623') : cssVar('--accent', '#4a9eff'); },
   async refresh() {
@@ -61,8 +151,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       }) + '</div>';
 
     if (si) {
-      this.charts.forEach(c => { try { c.destroy(); } catch (e) {} });
-      this.charts = [];
+      this.uplots = {};
       const kb = n => UI.bytes((Number(n) || 0) * 1024);
       const total = Number(si.mem_total_kb) || 0;
       const avail = Number(si.mem_available_kb) || 0;
@@ -94,7 +183,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       html += '<div class="si-grid">' +
         '<div class="panel si-mem"><div class="panel-head"><h2>内存</h2>' +
         '<span class="spacer"></span><span class="si-num">' + memPct + '%</span></div>' +
-        '<div class="si-body"><canvas id="si-mem" height="56"></canvas>' +
+        '<div class="si-body"><div id="si-mem" class="si-spark"></div>' +
         '<div class="si-legend">已用 ' + kb(total - avail) + ' / ' + kb(total) +
         ' · Swap ' + kb(si.swap_total_kb) + '</div></div></div>' +
         '<div class="panel si-disk"><div class="panel-head"><h2>存储</h2>' +
@@ -103,7 +192,7 @@ const AgentDetailPage = Object.assign(new Page(), {
           Math.max(60, (si.mounts || []).length * 24 + 16) + '"></canvas></div></div>' +
         '<div class="panel si-cpu"><div class="panel-head"><h2>CPU</h2>' +
         '<span class="spacer"></span><span class="si-num">' + ((cpu.cores || []).length ? (cpu.usage || 0).toFixed(0) + '%' : '—') + '</span></div>' +
-        '<div class="si-body"><canvas id="si-cpu" height="56"></canvas>' +
+        '<div class="si-body"><div id="si-cpu" class="si-spark"></div>' +
         '<div class="si-legend">load ' + (si.load1 || 0).toFixed(2) + ' / ' +
         (si.load5 || 0).toFixed(2) + ' / ' + (si.load15 || 0).toFixed(2) +
         ' · ' + (cpu.cores || []).length + ' 核</div></div></div>' +
@@ -152,117 +241,8 @@ const AgentDetailPage = Object.assign(new Page(), {
       this.spark('si-mem', this.memHist, cssVar('--accent', '#4a9eff'));
       this.spark('si-cpu', this.cpuHist, cssVar('--warn', '#f5a623'));
       const c = document.getElementById('si-disk');
-      if (c && window.Chart) {
-        const labels = (si.mounts || []).map(m =>
-          m.mount.length > 16 ? m.mount.slice(0, 15) + '…' : m.mount);
-        const used = (si.mounts || []).map(m => (Number(m.total_kb) || 0) - (Number(m.free_kb) || 0));
-        const free = (si.mounts || []).map(m => Number(m.free_kb) || 0);
-        const maxT = (si.mounts || []).reduce((a, m) => Math.max(a, Number(m.total_kb) || 0), 1);
-        const colors = (si.mounts || []).map(m => {
-          const t = Number(m.total_kb) || 0, f = Number(m.free_kb) || 0;
-          return self.diskColor(t > 0 ? Math.round((t - f) * 100 / t) : 0);
-        });
-        const pctPlugin = {
-          id: 'diskPct',
-          afterDatasetsDraw(chart) {
-            const ctx2 = chart.ctx;
-            const xScale = chart.scales.x;
-            const meta = chart.getDatasetMeta(0);
-            const rows = self.diskRows || [];
-            ctx2.save();
-            ctx2.fillStyle = cssVar('--muted', '#8b929c');
-            ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
-            ctx2.textBaseline = 'middle';
-            const fsColors = {
-              ext4: 'rgba(74,158,255,.16)', vfat: 'rgba(245,166,35,.18)',
-              tmpfs: 'rgba(139,146,156,.18)', overlay: 'rgba(176,131,240,.18)',
-              squashfs: 'rgba(87,171,90,.18)'
-            };
-            meta.data.forEach((bar, i) => {
-              const row = rows[i];
-              if (!row) return;
-              const y0 = bar.y;
-              ctx2.textAlign = 'left';
-              ctx2.fillStyle = cssVar('--chart-axis', '#8b929c');
-              ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
-              const fs = row.fstype || '—';
-              const fsShort = fs.length > 8 ? fs.slice(0, 7) + '…' : fs;
-              const bw = tagTextWidth(ctx2, fsShort);
-              const maxRight = 192;
-              let nm = row.mount;
-              ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
-              while (nm.length > 1 && 6 + ctx2.measureText(nm).width + 6 + bw > maxRight) {
-                nm = nm.slice(0, -1);
-              }
-              if (nm !== row.mount) nm = nm.replace(/.$/, '…');
-              ctx2.fillStyle = cssVar('--chart-axis', '#8b929c');
-              ctx2.fillText(nm, 6, y0);
-              const nmW = ctx2.measureText(nm).width;
-              const bx = 6 + nmW + 6;
-              drawTagPill(ctx2, bx, y0, fsShort,
-                          fsColors[row.fstype] || 'rgba(139,146,156,.14)',
-                          cssVar('--fg', '#e6e9ee'));
-              ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
-              ctx2.fillStyle = cssVar('--muted', '#8b929c');
-              const x = xScale.getPixelForValue(row.total);
-              const y = bar.y;
-              ctx2.fillText(row.pct + '%', x + 6, y);
-              const pair = fmtKbPair(row.used, row.total);
-              ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
-              const usedW = ctx2.measureText(pair.used).width;
-              const totalW = ctx2.measureText(pair.total).width;
-              const slashW = tagTextWidth(ctx2, '/');
-              const unitW = tagTextWidth(ctx2, pair.unit);
-              const gap = 4;
-              const groupW = usedW + gap + slashW + gap + totalW + gap + unitW;
-              let gx = chart.width - 8 - groupW;
-              ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
-              ctx2.fillStyle = cssVar('--muted', '#8b929c');
-              ctx2.fillText(pair.used, gx, y);
-              gx += usedW + gap;
-              gx += drawTagPill(ctx2, gx, y, '/', 'rgba(139,146,156,.18)',
-                                cssVar('--fg', '#e6e9ee')) + gap;
-              ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
-              ctx2.fillStyle = cssVar('--muted', '#8b929c');
-              ctx2.fillText(pair.total, gx, y);
-              gx += totalW + gap;
-              drawTagPill(ctx2, gx, y, pair.unit, 'rgba(139,146,156,.18)',
-                          cssVar('--fg', '#e6e9ee'));
-            });
-            ctx2.restore();
-          }
-        };
-        this.charts.push(new Chart(c.getContext('2d'), {
-          type: 'bar',
-          data: { labels: labels, datasets: [
-            { label: '已用', data: used, backgroundColor: colors, minBarLength: 2, stack: 's' },
-            { label: '空闲', data: free, backgroundColor: cssVar('--border', '#2b3038'), stack: 's' },
-          ] },
-          options: { indexAxis: 'y', animation: false, responsive: true, maintainAspectRatio: false,
-            layout: { padding: { left: 200, right: 150 } },
-            interaction: { mode: 'index', intersect: false },
-            scales: { x: { stacked: true, max: maxT, display: false },
-                      y: { stacked: true, display: false } },
-            plugins: {
-              legend: { display: false },
-              tooltip: {
-                callbacks: {
-                  title: items => {
-                    const r = items[0] ? (self.diskRows || [])[items[0].dataIndex] : null;
-                    return r ? (r.mount + (r.fstype ? '  [' + r.fstype + ']' : '')) : '';
-                  },
-                  label: ctx => {
-                    const row = (self.diskRows || [])[ctx.dataIndex];
-                    if (!row) return '';
-                    return ['已用 ' + kb(row.used) + ' / ' + kb(row.total),
-                            '空闲 ' + kb(row.free) + ' · ' + row.pct + '%'].join('\n');
-                  }
-                }
-              }
-            } },
-          plugins: [pctPlugin]
-        }));
-      }
+      if (c) drawDiskChart(c, this.diskRows);
+
       const ce = document.getElementById('caps-edit');
       if (ce) ce.onclick = () => {
         const caps = si.caps || {};

@@ -284,3 +284,5 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 /* 任务页 Tab */
 .tab { padding: 4px 12px; font-size: 12px; }
 .tab.active { border-color: var(--accent); color: var(--accent); }
+
+.si-spark { height: 56px; }
