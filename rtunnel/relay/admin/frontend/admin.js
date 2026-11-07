@@ -261,12 +261,17 @@ const AgentsPage = Object.assign(new Page(), {
 
 // ---------------------------------------------------------------- Pages.设备详情
 const AgentDetailPage = Object.assign(new Page(), {
+  refreshInterval() { return 0; },   // 由「每 5s 刷新」勾选框控制
   enter(el, params) {
     this.devid = decodeURIComponent(params[0] || '');
     this.cpuHist = [];
     this.memHist = [];
     this.charts = [];
+    this.auto = false;
     return Page.prototype.enter.call(this, el, params);
+  },
+  leave() {
+    if (this.timer) { clearInterval(this.timer); this.timer = null; }
   },
   spark(id, data, color) {
     const c = document.getElementById(id);
@@ -298,7 +303,8 @@ const AgentDetailPage = Object.assign(new Page(), {
 
     let html = '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>' + UI.esc(d.devid) + '</h2>' +
       '<span class="pill ok">在线</span><span class="spacer"></span>' +
-      (si ? '<button id="si-export">导出 JSON</button>' : '') + '</div>' + UI.kv({
+      (si ? '<label class="si-auto"><input type="checkbox" id="si-auto"' + (this.auto ? ' checked' : '') +
+            '> 每 5s 刷新</label> <button id="si-export">导出 JSON</button>' : '') + '</div>' + UI.kv({
         '远端地址': UI.esc(d.remote_addr),
         '接入时间': new Date(d.connected_at_ms).toLocaleString(),
         '最近活跃': UI.ago(d.last_seen_ms) + ' 前',
@@ -407,6 +413,17 @@ const AgentDetailPage = Object.assign(new Page(), {
             plugins: { legend: { display: false } } }
         }));
       }
+      const cb = document.getElementById('si-auto');
+      if (cb) cb.onchange = () => {
+        this.auto = cb.checked;
+        if (this.auto) {
+          this.timer = setInterval(() => this.refresh().catch(() => {}), 5000);
+          this.refresh().catch(() => {});
+        } else if (this.timer) {
+          clearInterval(this.timer);
+          this.timer = null;
+        }
+      };
       const btn = document.getElementById('si-export');
       if (btn) btn.onclick = () => {
         const blob = new Blob([JSON.stringify(si, null, 2)], { type: 'application/json' });

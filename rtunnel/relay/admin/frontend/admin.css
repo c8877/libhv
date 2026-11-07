@@ -138,3 +138,4 @@ button:hover { filter: brightness(.96); }
 .si-table td { text-align: left; padding: 7px 16px 7px 0; border-bottom: 1px solid rgba(255,255,255,.06);
   word-break: break-word; }
 .si-table tr:last-child td { border-bottom: 0; }
+.si-auto { font-size: 12px; color: var(--muted); margin-right: 8px; user-select: none; }
