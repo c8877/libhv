@@ -11,8 +11,6 @@ struct DbUser {
     std::string username;
     std::string role;        // superadmin / admin / user
     std::string status;      // active / disabled
-    int         can_shell = 1;
-    std::string client_token;
     long long   created_ms = 0;
 };
 
@@ -33,8 +31,6 @@ public:
     bool setPassword(long long id, const std::string& pass, std::string& err);
     bool setStatus(long long id, const std::string& status);
     bool setRole(long long id, const std::string& role);
-    bool setCanShell(long long id, int can);
-    bool setClientToken(long long id, const std::string& token);
     bool removeUser(long long id);
 
     bool createSession(const std::string& sid_hash, long long user_id, long long expire_ms);

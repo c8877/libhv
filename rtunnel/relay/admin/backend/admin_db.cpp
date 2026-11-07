@@ -155,8 +155,6 @@ bool AdminDb::migrate(std::string& err) {
         " pass_hash TEXT NOT NULL,"
         " role TEXT NOT NULL,"
         " status TEXT NOT NULL DEFAULT 'active',"
-        " can_shell INTEGER NOT NULL DEFAULT 1,"
-        " client_token TEXT NOT NULL DEFAULT '',"
         " created_ms INTEGER NOT NULL);"
         "CREATE TABLE IF NOT EXISTS sessions("
         " sid_hash TEXT PRIMARY KEY,"
@@ -192,9 +190,7 @@ static void fillUser(sqlite3_stmt* st, DbUser& u) {
     u.username = (const char*)sqlite3_column_text(st, 1);
     u.role = (const char*)sqlite3_column_text(st, 2);
     u.status = (const char*)sqlite3_column_text(st, 3);
-    u.can_shell = sqlite3_column_int(st, 4);
-    u.client_token = (const char*)sqlite3_column_text(st, 5);
-    u.created_ms = sqlite3_column_int64(st, 6);
+    u.created_ms = sqlite3_column_int64(st, 4);
 }
 
 bool AdminDb::createUser(const std::string& user, const std::string& pass,
@@ -213,15 +209,13 @@ bool AdminDb::createUser(const std::string& user, const std::string& pass,
     if (hash.empty()) return false;
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
-    const char* sql = "INSERT INTO users(username,pass_hash,role,status,can_shell,client_token,created_ms)"
-                      " VALUES(?,?,?,'active',1,?,?)";
+    const char* sql = "INSERT INTO users(username,pass_hash,role,status,created_ms)"
+                      " VALUES(?,?,?,'active',?)";
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) { err = sqlite3_errmsg(db_); return false; }
-    std::string ctoken = randomHex(16);
     sqlite3_bind_text(st, 1, user.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 2, hash.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 3, role.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 4, ctoken.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 5, nowMs());
+    sqlite3_bind_int64(st, 4, nowMs());
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
     if (rc != SQLITE_DONE) { err = (rc == SQLITE_CONSTRAINT) ? "username exists" : sqlite3_errmsg(db_); return false; }
@@ -232,13 +226,13 @@ bool AdminDb::createUser(const std::string& user, const std::string& pass,
 bool AdminDb::findUser(const std::string& name, DbUser& out, std::string* pass_hash) {
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, "SELECT id,username,role,status,can_shell,client_token,created_ms,pass_hash"
+    if (sqlite3_prepare_v2(db_, "SELECT id,username,role,status,created_ms,pass_hash"
                                 " FROM users WHERE username=?", -1, &st, nullptr) != SQLITE_OK) return false;
     sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
     bool ok = sqlite3_step(st) == SQLITE_ROW;
     if (ok) {
         fillUser(st, out);
-        if (pass_hash) *pass_hash = (const char*)sqlite3_column_text(st, 7);
+        if (pass_hash) *pass_hash = (const char*)sqlite3_column_text(st, 5);
     }
     sqlite3_finalize(st);
     return ok;
@@ -247,7 +241,7 @@ bool AdminDb::findUser(const std::string& name, DbUser& out, std::string* pass_h
 bool AdminDb::findUserById(long long id, DbUser& out) {
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, "SELECT id,username,role,status,can_shell,client_token,created_ms"
+    if (sqlite3_prepare_v2(db_, "SELECT id,username,role,status,created_ms"
                                 " FROM users WHERE id=?", -1, &st, nullptr) != SQLITE_OK) return false;
     sqlite3_bind_int64(st, 1, id);
     bool ok = sqlite3_step(st) == SQLITE_ROW;
@@ -261,8 +255,8 @@ bool AdminDb::listUsers(std::vector<DbUser>& out, const std::string& only_role) 
     out.clear();
     sqlite3_stmt* st = nullptr;
     const char* sql = only_role.empty()
-        ? "SELECT id,username,role,status,can_shell,client_token,created_ms FROM users ORDER BY id"
-        : "SELECT id,username,role,status,can_shell,client_token,created_ms FROM users WHERE role=? ORDER BY id";
+        ? "SELECT id,username,role,status,created_ms FROM users ORDER BY id"
+        : "SELECT id,username,role,status,created_ms FROM users WHERE role=? ORDER BY id";
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
     if (!only_role.empty()) sqlite3_bind_text(st, 1, only_role.c_str(), -1, SQLITE_TRANSIENT);
     while (sqlite3_step(st) == SQLITE_ROW) {
@@ -310,28 +304,6 @@ bool AdminDb::setRole(long long id, const std::string& role) {
     return rc == SQLITE_DONE;
 }
 
-bool AdminDb::setCanShell(long long id, int can) {
-    std::lock_guard<std::mutex> lk(mu_);
-    sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, "UPDATE users SET can_shell=? WHERE id=?", -1, &st, nullptr) != SQLITE_OK) return false;
-    sqlite3_bind_int(st, 1, can);
-    sqlite3_bind_int64(st, 2, id);
-    int rc = sqlite3_step(st);
-    sqlite3_finalize(st);
-    return rc == SQLITE_DONE;
-}
-
-bool AdminDb::setClientToken(long long id, const std::string& token) {
-    std::lock_guard<std::mutex> lk(mu_);
-    sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, "UPDATE users SET client_token=? WHERE id=?", -1, &st, nullptr) != SQLITE_OK) return false;
-    sqlite3_bind_text(st, 1, token.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 2, id);
-    int rc = sqlite3_step(st);
-    sqlite3_finalize(st);
-    return rc == SQLITE_DONE;
-}
-
 bool AdminDb::removeUser(long long id) {
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
@@ -367,7 +339,7 @@ bool AdminDb::createSession(const std::string& sid_hash, long long user_id, long
 bool AdminDb::getSession(const std::string& sid_hash, DbUser& out, long long now_ms) {
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
-    const char* sql = "SELECT u.id,u.username,u.role,u.status,u.can_shell,u.client_token,u.created_ms"
+    const char* sql = "SELECT u.id,u.username,u.role,u.status,u.created_ms"
                       " FROM sessions s JOIN users u ON u.id=s.user_id"
                       " WHERE s.sid_hash=? AND s.expire_ms>? AND u.status='active'";
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;

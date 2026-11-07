@@ -592,7 +592,13 @@ def main():
                     ("/api/v1/login", {"username": "root", "password": "rootpass1"})):
                 req = urllib.request.Request(base + path, data=json_mod.dumps(body).encode(), method="POST")
                 req.add_header("Content-Type", "application/json")
-                op.open(req, timeout=5).read()
+                try:
+                    op.open(req, timeout=5).read()
+                except urllib.error.HTTPError as e:
+                    if path.endswith("/setup") and e.code in (403, 400):
+                        pass   # 库已初始化（历史测试残留）
+                    else:
+                        raise
             return op, call
 
         admin_opener, admin_call = make_admin(admin_base)
