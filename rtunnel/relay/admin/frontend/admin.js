@@ -59,7 +59,10 @@ function fmtKbPair(usedKb, totalKb) {
   let unit = 'K', div = 1;
   if (k >= 100 * 1024) { unit = 'G'; div = 1024 * 1024; }
   else if (k >= 1024) { unit = 'M'; div = 1024; }
-  const f = v => ((Number(v) || 0) / div).toFixed(2);
+  const f = v => {
+    const n = (Number(v) || 0) / div;
+    return Math.abs(n) >= 10 ? n.toFixed(1) : n.toFixed(2);
+  };
   return f(usedKb) + '/' + f(totalKb) + unit;
 }
 
