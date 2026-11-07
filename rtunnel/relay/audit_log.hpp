@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <mutex>
 
 class AuditLog {
 public:
@@ -14,4 +15,5 @@ public:
 private:
     std::string              path_;
     std::vector<std::string> ring_;
+    mutable std::mutex mu_;
 };

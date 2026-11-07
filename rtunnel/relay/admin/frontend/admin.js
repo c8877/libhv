@@ -406,6 +406,7 @@ const AgentDetailPage = Object.assign(new Page(), {
   },
   leave() {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    if (this._retry) { clearTimeout(this._retry); this._retry = null; }
   },
   spark(id, data, color) {
     const c = document.getElementById(id);
@@ -605,6 +606,9 @@ const AgentDetailPage = Object.assign(new Page(), {
           this.timer = null;
         }
       };
+      if (si && (!si.cpu || !(si.cpu.cores || []).length) && !this._retry) {
+        this._retry = setTimeout(() => { this._retry = null; this.refresh().catch(() => {}); }, 1200);
+      }
       const btn = document.getElementById('si-export');
       if (btn) btn.onclick = () => {
         const blob = new Blob([JSON.stringify(si, null, 2)], { type: 'application/json' });

@@ -10,6 +10,7 @@ void AuditLog::init(const std::string& path) {
 }
 
 void AuditLog::write(const std::string& role, const std::string& action, const std::string& detail) {
+    std::lock_guard<std::mutex> lk(mu_);
     char ts[32];
     time_t now = time(NULL);
     struct tm tm_utc;
@@ -32,6 +33,7 @@ void AuditLog::write(const std::string& role, const std::string& action, const s
 }
 
 void AuditLog::rotate(size_t max_bytes) {
+    std::lock_guard<std::mutex> lk(mu_);
     if (path_.empty()) return;
     struct stat st{};
     if (stat(path_.c_str(), &st) != 0 || (size_t)st.st_size < max_bytes) return;
@@ -39,6 +41,7 @@ void AuditLog::rotate(size_t max_bytes) {
 }
 
 std::string AuditLog::tailJson(int n) const {
+    std::lock_guard<std::mutex> lk(mu_);
     nlohmann::json arr = nlohmann::json::array();
     int count = 0;
     for (auto it = ring_.rbegin(); it != ring_.rend() && count < n; ++it, ++count) {
