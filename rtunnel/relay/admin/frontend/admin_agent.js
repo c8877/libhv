@@ -1,5 +1,7 @@
 // 设备详情页（admin.js 之后加载，共享其全局工具）
 // ---------------------------------------------------------------- Pages.设备详情
+const AGENT_HIST = new Map();   // devid -> { mem: [], cpu: [] }
+
 const AgentDetailPage = Object.assign(new Page(), {
   refreshInterval() { return 0; },   // 由「每 5s 刷新」勾选框控制
   async enter(el, params) {
@@ -7,26 +9,55 @@ const AgentDetailPage = Object.assign(new Page(), {
     el.innerHTML = '<div class="panel"><div class="empty">图表组件加载中…</div></div>';
     try { await loadScriptOnce('/vendor/chart.umd.min.js'); } catch (e) {}
     this.devid = decodeURIComponent(params[0] || '');
-    this.cpuHist = [];
-    this.memHist = [];
-    this.charts = [];
+    let hist = AGENT_HIST.get(this.devid);
+    if (!hist) { hist = { mem: [], cpu: [] }; AGENT_HIST.set(this.devid, hist); }
+    this.memHist = hist.mem;
+    this.cpuHist = hist.cpu;
+    this.charts = {};
     this.period = Number((window.SETTINGS || {})['ui.refresh_seconds'] || 0);
     this.auto = this.period > 0;
     const p = Page.prototype.enter.call(this, el, params);
     if (this.auto && !this.timer) {
       this.timer = setInterval(() => this.refresh().catch(() => {}), this.period * 1000);
     }
+    if (this._sampler) clearInterval(this._sampler);
+    this._sampler = setInterval(() => this.sampleOnly().catch(() => {}), 5000);
     return p;
   },
   leave() {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    if (this._sampler) { clearInterval(this._sampler); this._sampler = null; }
     if (this._retry) { clearTimeout(this._retry); this._retry = null; }
+    Object.values(this.charts || {}).forEach(c => { try { c.destroy(); } catch (e) {} });
+    this.charts = {};
+  },
+  pushSample(si) {
+    const now = Date.now();
+    if (now - (this._lastSample || 0) < 1500) return;
+    this._lastSample = now;
+    const mem = si.mem || {};
+    const total = Number(mem.total_kb) || 0;
+    const avail = Number(mem.available_kb) || 0;
+    const memPct = total > 0 ? Math.round((total - avail) * 100 / total) : 0;
+    this.memHist.push(memPct);
+    this.cpuHist.push((si.cpu || {}).usage || 0);
+    if (this.memHist.length > 60) this.memHist.shift();
+    if (this.cpuHist.length > 60) this.cpuHist.shift();
+  },
+  async sampleOnly() {
+    if (!this.devid) return;
+    const r = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/sysinfo?refresh=1');
+    if (!r.sysinfo) return;
+    this.pushSample(r.sysinfo);
+    this.spark('si-mem', this.memHist, cssVar('--accent', '#4a9eff'));
+    this.spark('si-cpu', this.cpuHist, cssVar('--warn', '#f5a623'));
   },
   spark(id, data, color) {
     const c = document.getElementById(id);
     if (!c || !window.Chart) return;
+    if (this.charts[id]) { try { this.charts[id].destroy(); } catch (e) {} }
     const maxY = (id === 'si-cpu' && Math.max(...(data.length ? data : [0])) <= 5) ? 10 : 100;
-    this.charts.push(new Chart(c.getContext('2d'), {
+    this.charts[id] = new Chart(c.getContext('2d'), {
       type: 'line',
       data: { labels: (data.length > 1 ? data : [data[0] || 0, data[0] || 0]).map((_, i) => i),
         datasets: [{ data: data.length > 1 ? data : [data[0] || 0, data[0] || 0], borderColor: color, backgroundColor: color + '26',
@@ -66,7 +97,7 @@ const AgentDetailPage = Object.assign(new Page(), {
           g.restore();
         }
       }]
-    }));
+    });
   },
   diskColor(p) { return p >= 85 ? cssVar('--bad', '#e5534b') : p >= 70 ? cssVar('--warn', '#f5a623') : cssVar('--accent', '#4a9eff'); },
   async refresh() {
@@ -101,8 +132,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       const avail = Number(si.mem_available_kb) || 0;
       const memPct = total > 0 ? Math.round((total - avail) * 100 / total) : 0;
       const cpu = si.cpu || { usage: 0, cores: [] };
-      this.memHist.push(memPct); if (this.memHist.length > 60) this.memHist.shift();
-      this.cpuHist.push(cpu.usage || 0); if (this.cpuHist.length > 60) this.cpuHist.shift();
+      this.pushSample(si);
 
       const mounts = si.mounts || [];
       const maxTotal = mounts.reduce((m, x) => Math.max(m, Number(x.total_kb) || 0), 1);
@@ -265,7 +295,7 @@ const AgentDetailPage = Object.assign(new Page(), {
             ctx2.restore();
           }
         };
-        this.charts.push(new Chart(c.getContext('2d'), {
+        this.charts[id] = new Chart(c.getContext('2d'), {
           type: 'bar',
           data: { labels: labels, datasets: [
             { label: '已用', data: used, backgroundColor: colors, minBarLength: 2, stack: 's' },
@@ -294,7 +324,7 @@ const AgentDetailPage = Object.assign(new Page(), {
               }
             } },
           plugins: [pctPlugin]
-        }));
+        });
       }
       const ce = document.getElementById('caps-edit');
       if (ce) ce.onclick = () => {
