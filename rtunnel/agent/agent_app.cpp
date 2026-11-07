@@ -460,6 +460,15 @@ void AgentApp::sendSysinfo() {
         j["nics"] = nics;
     }
     j["mtls"] = (tls_cert[0] != '\0');
+    {
+        nlohmann::json caps;
+        caps["ports"] = nlohmann::json::array();
+        for (int i = 0; i < 32 && allow_ports[i] > 0; ++i) caps["ports"].push_back(allow_ports[i]);
+        caps["shell"] = allow_shell != 0;
+        caps["sysinfo"] = true;
+        caps["mtls"] = (tls_cert[0] != '\0');
+        j["caps"] = caps;
+    }
 
 #if defined(WITH_OPENSSL)
     if (tls_cert[0]) {

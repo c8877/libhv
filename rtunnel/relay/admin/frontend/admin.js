@@ -360,8 +360,16 @@ const AgentDetailPage = Object.assign(new Page(), {
         ? UI.kv({ '证书主体': UI.esc(si.cert_subject || ''), '签发者': UI.esc(si.cert_issuer || ''),
                   '序列号': UI.esc(String(si.cert_serial || '')), '状态': si.cert_valid ? '有效' : '已过期' })
         : '<div style="padding:12px;color:var(--muted)">未启用 mTLS</div>';
+      const caps = si.caps || {};
+      const chips = [];
+      (caps.ports || []).forEach(p => chips.push('TCP ' + p));
+      if (caps.shell) chips.push('Shell');
+      if (caps.sysinfo) chips.push('SYSINFO');
+      chips.push(caps.mtls ? 'mTLS' : 'mTLS 未启用');
+      const capHtml = chips.map(c => '<span class="chip">' + UI.esc(c) + '</span>').join(' ');
       const runtimeTable = '<table class="si-table">' +
         '<tr><th>agent 版本</th><td>' + UI.esc(si.version || '') + '</td></tr>' +
+        '<tr><th>能力</th><td>' + capHtml + '</td></tr>' +
         '<tr><th>启动参数</th><td><code style="font-size:12px">' + UI.esc(si.args || '') + '</code></td></tr>' +
         '</table>';
       const sysRows = [
