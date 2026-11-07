@@ -57,7 +57,7 @@ const AgentDetailPage = Object.assign(new Page(), {
     if (!c || !window.Chart) return;
     if (this.charts[id]) { try { this.charts[id].destroy(); } catch (e) {} }
     const maxY = (id === 'si-cpu' && Math.max(...(data.length ? data : [0])) <= 5) ? 10 : 100;
-    this.charts[id] = new Chart(c.getContext('2d'), {
+    this.charts['disk'] = new Chart(c.getContext('2d'), {
       type: 'line',
       data: { labels: (data.length > 1 ? data : [data[0] || 0, data[0] || 0]).map((_, i) => i),
         datasets: [{ data: data.length > 1 ? data : [data[0] || 0, data[0] || 0], borderColor: color, backgroundColor: color + '26',
@@ -295,7 +295,7 @@ const AgentDetailPage = Object.assign(new Page(), {
             ctx2.restore();
           }
         };
-        this.charts[id] = new Chart(c.getContext('2d'), {
+        this.charts['disk'] = new Chart(c.getContext('2d'), {
           type: 'bar',
           data: { labels: labels, datasets: [
             { label: '已用', data: used, backgroundColor: colors, minBarLength: 2, stack: 's' },
