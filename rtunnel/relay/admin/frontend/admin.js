@@ -857,48 +857,61 @@ const FilesPage = Object.assign(new Page(), {
 
     document.getElementById('files-refresh').onclick = () => this.refresh();
     const MAX_UPLOAD = uploadLimitMb() * 1024 * 1024;
-    document.getElementById('upload-btn').onclick = () => {
+    const CHUNK = 8 * 1024 * 1024;
+    document.getElementById('upload-btn').onclick = async () => {
       const btn = document.getElementById('upload-btn');
       const fi = document.getElementById('upload-input').files[0];
       const status = document.getElementById('upload-status');
       const bar = document.getElementById('upload-progress');
       if (!fi) { UI.toast('请选择文件', true); return; }
-      // 客户端先挡：不要等传完才报错
       if (fi.size > MAX_UPLOAD) {
         status.textContent = '文件 ' + UI.bytes(fi.size) + ' 超过 ' + uploadLimitMb() + ' MiB 上限';
         UI.toast('文件太大（' + UI.bytes(fi.size) + '），上限 ' + uploadLimitMb() + ' MiB', true);
         return;
       }
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', '/api/v1/files/' + encodeURIComponent(fi.name));
-      xhr.setRequestHeader('X-Requested-With', 'fetch');
+      const send = (url, blob, onprog) => new Promise((res, rej) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', url);
+        xhr.setRequestHeader('X-Requested-With', 'fetch');
+        xhr.upload.onprogress = (e) => { if (e.lengthComputable && onprog) onprog(e.loaded); };
+        xhr.onload = () => xhr.status === 200 ? res(xhr.responseText)
+          : rej(new Error('HTTP ' + xhr.status + ' ' + xhr.responseText));
+        xhr.onerror = () => rej(new Error('网络错误'));
+        xhr.send(blob);
+      });
       bar.style.display = '';
       bar.value = 0;
       status.textContent = '上传中…';
       btn.disabled = true;
-      xhr.upload.onprogress = (e) => {
-        if (!e.lengthComputable) return;
-        bar.value = Math.floor(e.loaded * 100 / e.total);
-        status.textContent = '上传中… ' + UI.bytes(e.loaded) + ' / ' + UI.bytes(e.total);
-      };
-      xhr.onload = () => {
-        btn.disabled = false;
-        bar.style.display = 'none';
-        if (xhr.status === 200) {
-          status.textContent = '已上传 ' + fi.name + '（' + UI.bytes(fi.size) + '）';
-          this.refresh();
+      try {
+        const url = '/api/v1/files/' + encodeURIComponent(fi.name);
+        if (fi.size <= CHUNK) {
+          await send(url, fi, (loaded) => {
+            bar.value = Math.floor(loaded * 100 / fi.size);
+            status.textContent = '上传中… ' + UI.bytes(loaded) + ' / ' + UI.bytes(fi.size);
+          });
         } else {
-          status.textContent = '';
-          UI.toast('上传失败：HTTP ' + xhr.status + ' ' + xhr.responseText, true);
+          let off = 0;
+          while (off < fi.size) {
+            const chunk = fi.slice(off, off + CHUNK);
+            await send(url + '?append=1&offset=' + off, chunk, (loaded) => {
+              const cur = off + loaded;
+              bar.value = Math.floor(cur * 100 / fi.size);
+              status.textContent = '上传中… ' + UI.bytes(cur) + ' / ' + UI.bytes(fi.size);
+            });
+            off += chunk.size;
+          }
+          await send(url + '?finalize=1', new Blob([]));
         }
-      };
-      xhr.onerror = () => {
+        status.textContent = '已上传 ' + fi.name + '（' + UI.bytes(fi.size) + '）';
+        this.refresh();
+      } catch (e) {
+        status.textContent = '';
+        UI.toast('上传失败：' + e.message, true);
+      } finally {
         btn.disabled = false;
         bar.style.display = 'none';
-        status.textContent = '';
-        UI.toast('上传失败：网络错误', true);
-      };
-      xhr.send(fi);
+      }
     };
     document.querySelectorAll('#page button.dl').forEach(btn => {
       btn.onclick = async () => {

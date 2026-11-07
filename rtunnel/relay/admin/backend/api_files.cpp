@@ -138,9 +138,61 @@ void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string&
         ctx->send("{\"error\":\"bad file name\"}");
         return;
     }
-    // 先看 Content-Length，避免把超限文件读进内存后才报错
-    std::string clen = ctx->header("Content-Length");
     size_t max_ul = (size_t)settingInt("file.max_upload_mb", 32) * 1024 * 1024;
+    mkdir(cfg_.file_dir.c_str(), 0700);
+    std::string path = cfg_.file_dir + "/" + name;
+    std::string tmp = path + ".uploading";
+
+    // 分片上传：?append=1&offset=N 追加到临时文件；?finalize=1 落盘
+    if (ctx->param("finalize") == "1") {
+        if (rename(tmp.c_str(), path.c_str()) != 0) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"no upload in progress\"}");
+            return;
+        }
+        struct stat st{};
+        long long sz = (stat(path.c_str(), &st) == 0) ? (long long)st.st_size : 0;
+        ctx->send("{\"name\":\"" + name + "\",\"size\":" + std::to_string(sz) + "}");
+        return;
+    }
+    if (ctx->param("append") == "1") {
+        size_t off = (size_t)strtoull(ctx->param("offset", "0").c_str(), NULL, 10);
+        const std::string& body = ctx->body();
+        if (off + body.size() > max_ul) {
+            ctx->response->status_code = HTTP_STATUS_PAYLOAD_TOO_LARGE;
+            ctx->send("{\"error\":\"file too large (max " +
+                      std::to_string(settingInt("file.max_upload_mb", 32)) + "MiB)\"}");
+            return;
+        }
+        FILE* fp = fopen(tmp.c_str(), off ? "r+b" : "wb");
+        if (!fp) {
+            ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+            ctx->send("{\"error\":\"write failed\"}");
+            return;
+        }
+        if (off) {
+            fseek(fp, 0, SEEK_END);
+            if ((size_t)ftell(fp) != off) {
+                fclose(fp);
+                ctx->response->status_code = HTTP_STATUS_CONFLICT;
+                ctx->send("{\"error\":\"offset mismatch\"}");
+                return;
+            }
+        }
+        size_t written = body.empty() ? 0 : fwrite(body.data(), 1, body.size(), fp);
+        long long sz = (long long)ftell(fp);
+        fclose(fp);
+        if (written != body.size()) {
+            unlink(tmp.c_str());
+            ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+            ctx->send("{\"error\":\"short write\"}");
+            return;
+        }
+        ctx->send("{\"name\":\"" + name + "\",\"received\":" + std::to_string(sz) + "}");
+        return;
+    }
+
+    std::string clen = ctx->header("Content-Length");
     if (!clen.empty() && strtoull(clen.c_str(), NULL, 10) > max_ul) {
         ctx->response->status_code = HTTP_STATUS_PAYLOAD_TOO_LARGE;
         ctx->send("{\"error\":\"file too large (max " +
@@ -154,9 +206,6 @@ void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string&
                   std::to_string(settingInt("file.max_upload_mb", 32)) + "MiB)\"}");
         return;
     }
-    mkdir(cfg_.file_dir.c_str(), 0700);
-    std::string path = cfg_.file_dir + "/" + name;
-    std::string tmp = path + ".uploading";
     FILE* fp = fopen(tmp.c_str(), "wb");
     if (!fp) {
         ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
