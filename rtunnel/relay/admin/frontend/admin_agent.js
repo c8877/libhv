@@ -25,13 +25,14 @@ const AgentDetailPage = Object.assign(new Page(), {
   spark(id, data, color) {
     const c = document.getElementById(id);
     if (!c || !window.Chart) return;
+    const maxY = (id === 'si-cpu' && Math.max(...(data.length ? data : [0])) <= 5) ? 10 : 100;
     this.charts.push(new Chart(c.getContext('2d'), {
       type: 'line',
       data: { labels: (data.length > 1 ? data : [data[0] || 0, data[0] || 0]).map((_, i) => i),
         datasets: [{ data: data.length > 1 ? data : [data[0] || 0, data[0] || 0], borderColor: color, backgroundColor: color + '26',
           fill: true, pointRadius: 0, borderWidth: 2, tension: .3 }] },
       options: { animation: false, responsive: true,
-        scales: { x: { display: false }, y: { display: false, min: 0, max: 100 } },
+        scales: { x: { display: false }, y: { display: false, min: 0, max: maxY } },
         plugins: { legend: { display: false }, tooltip: { enabled: false } } }
     }));
   },
@@ -232,7 +233,8 @@ const AgentDetailPage = Object.assign(new Page(), {
             ctx2.restore();
           }
         };
-        this.charts.push(new Chart(c.getContext('2d'), {
+        const maxY = (id === 'si-cpu' && Math.max(...(data.length ? data : [0])) <= 5) ? 10 : 100;
+    this.charts.push(new Chart(c.getContext('2d'), {
           type: 'bar',
           data: { labels: labels, datasets: [
             { label: '已用', data: used, backgroundColor: colors, minBarLength: 2, stack: 's' },
