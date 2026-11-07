@@ -500,18 +500,18 @@ const AgentDetailPage = Object.assign(new Page(), {
       this.diskRows = diskRows;
 
       html += '<div class="si-grid">' +
-        '<div class="panel"><div class="panel-head"><h2>内存</h2>' +
+        '<div class="panel si-mem"><div class="panel-head"><h2>内存</h2>' +
         '<span class="spacer"></span><span class="si-num">' + memPct + '%</span></div>' +
         '<div class="si-body"><canvas id="si-mem" height="56"></canvas>' +
         '<div class="si-legend">已用 ' + kb(total - avail) + ' / ' + kb(total) +
         ' · Swap ' + kb(si.swap_total_kb) + '</div></div></div>' +
-        '<div class="panel"><div class="panel-head"><h2>CPU</h2>' +
+        '<div class="panel si-cpu"><div class="panel-head"><h2>CPU</h2>' +
         '<span class="spacer"></span><span class="si-num">' + ((cpu.cores || []).length ? (cpu.usage || 0).toFixed(0) + '%' : '—') + '</span></div>' +
         '<div class="si-body"><canvas id="si-cpu" height="56"></canvas>' +
         '<div class="si-legend">load ' + (si.load1 || 0).toFixed(2) + ' / ' +
         (si.load5 || 0).toFixed(2) + ' / ' + (si.load15 || 0).toFixed(2) +
         ' · ' + (cpu.cores || []).length + ' 核</div></div></div>' +
-        '<div class="panel"><div class="panel-head"><h2>存储</h2>' +
+        '<div class="panel si-disk-card"><div class="panel-head"><h2>存储</h2>' +
         '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">条长按最大分区归一</span></div>' +
         '<div class="si-body"><canvas id="si-disk" height="100"></canvas></div></div>' +
         '</div>';
