@@ -77,6 +77,7 @@ private:
     void handleAgents(const HttpContextPtr& ctx);
     void handleAgentDetail(const HttpContextPtr& ctx);
     void handleAgentSysinfo(const HttpContextPtr& ctx);
+    void handleAgentMetrics(const HttpContextPtr& ctx);
     void handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& actor);
     // api_dist.cpp
     void handleDistCreate(const HttpContextPtr& ctx, const AdminActor& actor);

@@ -49,6 +49,8 @@ enum Type : uint8_t {
     FILE_ACK       = 0x20,   // C→B：str json {ok,received,error}；sid 回显
     FILE_CHECK_REQ = 0x21,   // B→C：str dir + str name；sid=检查号
     FILE_CHECK_ACK = 0x22,   // C→B：str json {exists,size,sha256,error}
+    METRICS_REQ    = 0x23,   // B→C：u64 limit；sid=请求号
+    METRICS_ACK    = 0x24,   // C→B：str json [{ts,cpu,mem,load1}...]
 };
 
 // 错误码

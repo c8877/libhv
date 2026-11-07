@@ -188,6 +188,38 @@ void AdminServer::handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& a
     ctx->send(ack);
 }
 
+void AdminServer::handleAgentMetrics(const HttpContextPtr& ctx) {
+    std::string devid = ctx->param("devid");
+    if (!ownsDevid(devid)) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return;
+    }
+    int limit = atoi(ctx->param("limit").c_str());
+    if (limit <= 0 || limit > 720) limit = 120;
+    uint32_t rid = 0;
+    std::string err;
+    std::string ok = callRelay([this, &devid, limit, &rid, &err]() {
+        return relay_->startMetricsReq(devid.c_str(), (uint64_t)limit, rid, err) ? "1" : "0";
+    });
+    if (ok != "1") {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"" + err + "\"}");
+        return;
+    }
+    std::string acc;
+    for (int i = 0; i < 30 && acc.empty(); ++i) {
+        usleep(100000);
+        acc = callRelay([this, rid]() { return relay_->takeMetricsResult(rid); });
+    }
+    if (acc.empty()) {
+        ctx->response->status_code = HTTP_STATUS_GATEWAY_TIMEOUT;
+        ctx->send("[]");
+        return;
+    }
+    ctx->send(acc);
+}
+
 void AdminServer::handleAgentSysinfo(const HttpContextPtr& ctx) {
     std::string devid = ctx->param("devid");
     if (!ownsDevid(devid)) {

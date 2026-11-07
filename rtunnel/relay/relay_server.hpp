@@ -107,6 +107,8 @@ public:
     uint32_t push_seq = 0;
     std::unordered_map<uint32_t, std::string> check_results;
     uint32_t check_seq = 0;
+    std::unordered_map<uint32_t, std::string> metrics_results;
+    uint32_t metrics_seq = 0;
     struct ClientCred { std::string user, token; };
     std::vector<ClientCred> client_creds;   // --client-users（user:token）
     std::string client_token;               // --client-token（全局 token）
@@ -162,6 +164,8 @@ private:
     bool         startFileCheck(const char* devid, const char* dir, const char* name,
                                 uint32_t& cid, std::string& err);
     std::string  takeCheckResult(uint32_t cid);
+    bool         startMetricsReq(const char* devid, uint64_t limit, uint32_t& rid, std::string& err);
+    std::string  takeMetricsResult(uint32_t rid);
     bool         agentOnline(const char* devid) { return findAgent(devid) != nullptr; }
     std::string  fileDirOf(const char* devid);
     void         onFileAck(RelayConn* c, const rtnp::Frame* f);

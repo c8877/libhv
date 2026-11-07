@@ -702,6 +702,31 @@ void AgentApp::cleanupParts(const std::string& dir, time_t cutoff) {
     closedir(d);
 }
 
+void AgentApp::sampleMetric() {
+    double mem = 0;
+    std::ifstream mf("/proc/meminfo");
+    std::string k;
+    long long v = 0;
+    std::string unit;
+    long long total = 0, avail = 0;
+    while (mf >> k >> v >> unit) {
+        if (k == "MemTotal:") total = v;
+        else if (k == "MemAvailable:") avail = v;
+        mf.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    }
+    if (total > 0) mem = (double)(total - avail) * 100.0 / total;
+    double load1 = 0;
+    double la[3] = {0, 0, 0};
+    if (getloadavg(la, 3) > 0) load1 = la[0];
+    nlohmann::json j;
+    j["ts"] = (long long)time(NULL) * 1000;
+    j["cpu"] = cpu_usage;
+    j["mem"] = (int)(mem + 0.5);
+    j["load1"] = load1;
+    metrics_.push_back(j.dump());
+    while (metrics_.size() > 720) metrics_.pop_front();
+}
+
 void AgentApp::sendSysinfo() {
     using nlohmann::json;
     agentSampleCpu(this);
@@ -866,6 +891,22 @@ void AgentApp::onFrame(rtnp::Frame* f) {
     case rtnp::FILE_END:
         handleFileFrame(f);
         return;
+    case rtnp::METRICS_REQ: {
+        rtnp::Reader r(f->payload, f->len);
+        uint64_t limit = r.u64();
+        if (limit == 0 || limit > 720) limit = 720;
+        nlohmann::json arr = nlohmann::json::array();
+        size_t n = metrics_.size();
+        size_t start = n > limit ? n - (size_t)limit : 0;
+        for (size_t i = start; i < n; ++i) {
+            auto j = nlohmann::json::parse(metrics_[i], nullptr, false);
+            if (!j.is_discarded()) arr.push_back(j);
+        }
+        std::string out = arr.dump();
+        rtnp::Writer w; w.str(out.c_str());
+        rtnp::send(io, rtnp::METRICS_ACK, f->sid, w.data, (uint16_t)w.len);
+        return;
+    }
     case rtnp::FILE_CHECK_REQ: {
         rtnp::Reader r(f->payload, f->len);
         char dir[256] = {0}, name[256] = {0};
@@ -1034,6 +1075,11 @@ int AgentApp::run(int argc, char** argv) {
             app->cleanupParts(app->file_dir, time(NULL) - 24 * 3600);
         }, 3600 * 1000, INFINITE);
         hevent_set_userdata(part_timer, this);
+        htimer_t* metric_timer = htimer_add(lp, [](htimer_t* t) {
+            auto* app = (AgentApp*)hevent_userdata(t);
+            app->sampleMetric();
+        }, 5000, INFINITE);
+        hevent_set_userdata(metric_timer, this);
         htimer_t* idle_timer = htimer_add(lp, [](htimer_t* t) {
             auto* app = (AgentApp*)hevent_userdata(t);
             uint64_t now = hloop_now_ms(app->loop);

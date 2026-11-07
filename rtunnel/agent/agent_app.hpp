@@ -9,6 +9,7 @@
 #include <vector>
 #include <map>
 #include <ctime>
+#include <deque>
 
 class AgentApp;
 
@@ -82,6 +83,8 @@ private:
     bool         saveConfig();
     void         handleConfigSet(const rtnp::Frame* f);
     void         handleFileFrame(const rtnp::Frame* f);
+    void         sampleMetric();
+    std::deque<std::string> metrics_;
     std::string  sha256File(const std::string& path);
     void         cleanupParts(const std::string& dir, time_t cutoff);
 

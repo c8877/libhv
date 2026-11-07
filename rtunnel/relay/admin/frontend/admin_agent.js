@@ -14,6 +14,15 @@ const AgentDetailPage = Object.assign(new Page(), {
     this.memHist = hist.mem;
     this.cpuHist = hist.cpu;
     this.charts = {};
+    try {
+      const hist2 = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/metrics?limit=60');
+      if (Array.isArray(hist2) && hist2.length) {
+        hist.mem.length = 0;
+        hist.cpu.length = 0;
+        hist2.forEach(p => { hist.mem.push(Number(p.mem) || 0); hist.cpu.push(Number(p.cpu) || 0); });
+        this._lastSample = Date.now();
+      }
+    } catch (e) {}
     this.period = Number((window.SETTINGS || {})['ui.refresh_seconds'] || 0);
     this.auto = this.period > 0;
     const p = Page.prototype.enter.call(this, el, params);
