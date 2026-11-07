@@ -844,7 +844,8 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             uint16_t port = r.u16();
             // OPEN_SHELL 无目标端口（设备侧 forkpty），port=0 合法；普通 OPEN 必须非 0
             bool is_shell = (f->flags & rtnp::OPEN_SHELL) != 0;
-            if (r.err || devid[0] == '\0' || (!is_shell && port == 0)) {
+            bool is_tty = (f->flags & rtnp::OPEN_TTY) != 0;
+            if (r.err || devid[0] == '\0' || (!is_shell && !is_tty && port == 0)) {
                 sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::PROTOCOL_ERROR, "bad open");
                 return;
             }
@@ -883,9 +884,13 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             s->next_a = c->streams; c->streams = s;
             s->next_c = agent->streams; agent->streams = s;
 
-            rtnp::Writer w;
-            w.u16(port);
-            rtnp::send(agent->io, rtnp::OPEN, s->c_sid, w.data, (uint16_t)w.len, f->flags);
+            if (is_tty) {
+                rtnp::send(agent->io, rtnp::OPEN, s->c_sid, f->payload, f->len, f->flags);
+            } else {
+                rtnp::Writer w;
+                w.u16(port);
+                rtnp::send(agent->io, rtnp::OPEN, s->c_sid, w.data, (uint16_t)w.len, f->flags);
+            }
             if (verbose) logf_("[relay] OPEN %s:%u a_sid=%u c_sid=%u flags=0x%04x", devid, port, s->a_sid, s->c_sid, f->flags);
             return;
         }

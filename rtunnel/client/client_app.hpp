@@ -61,6 +61,12 @@ public:
         char  devid[128] = {0};
         pid_t pid = -1;
     } children[8];
+    ClientStream* tty_stream = nullptr;
+    char        tty_spec[512] = {0};
+    char        tty_path[256] = {0};   // agent 侧串口
+    char        tty_link[256] = {0};   // 本地 pts 链接
+    char        tty_devid[128] = {0};
+    int         tty_baud = 115200, tty_db = 8, tty_par = 0, tty_stop = 1;
     ClientStream* streams = nullptr;
     uint32_t    next_sid = 0;
 
@@ -69,6 +75,7 @@ protected:
     const char* identity() const override { return user; }
     const char* logTag() const override { return "client"; }
     void        onFrame(rtnp::Frame* f) override;
+    void        onReady() override;
     void        onLinkDown() override;
 
 private:
@@ -88,6 +95,7 @@ private:
     void          onLocalWrite(ClientStream* s);
     void          onLocalClose(ClientStream* s);
     ClientStream* streamNew(hio_t* io);
+    int           openTty();
     void          onLocalAccept(hio_t* io);
     void          onFwdAccept(hio_t* io);
     void          onSpawnAgent(const rtnp::Frame* f);

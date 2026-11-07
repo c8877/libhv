@@ -40,7 +40,8 @@ public:
     int          allow_ports[32] = {0};
     int          nallow = 0;
     int          allow_all = 0;
-    int          allow_shell = 0;   // 允许 OPEN_SHELL（forkpty 起 shell，默认禁用）
+    int          allow_shell = 0;
+    char         allow_tty[512] = {0};   // 逗号分隔的串口白名单   // 允许 OPEN_SHELL（forkpty 起 shell，默认禁用）
     std::string  config_file = "/opt/data/etc/agent.json";
     std::string  file_dir = "/opt/data/files";
     double       cpu_usage = 0;

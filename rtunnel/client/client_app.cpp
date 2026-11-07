@@ -78,6 +78,7 @@ void ClientApp::streamFree(ClientStream* s) {
         hio_set_context(s->local, NULL);
         hio_close(s->local);
     }
+    if (s == tty_stream) tty_stream = nullptr;
     delete s;
 }
 
@@ -294,6 +295,75 @@ ClientStream* ClientApp::streamNew(hio_t* io) {
     return s;
 }
 
+void ClientApp::onReady() {
+    if (tty_spec[0] && tty_stream == nullptr) openTty();
+}
+
+int ClientApp::openTty() {
+    // devid:/dev/ttyUSB0@115200,8N1:/tmp/board01-tty
+    std::string spec = tty_spec;
+    size_t c1 = spec.find(':');
+    size_t at = spec.find('@', c1);
+    size_t c2 = spec.rfind(':');
+    if (c1 == std::string::npos || at == std::string::npos || c2 == std::string::npos || c2 <= at) {
+        fprintf(stderr, "bad --tty spec, want devid:/dev/ttyUSB0@115200,8N1:/tmp/link\n");
+        return -1;
+    }
+    std::string devid = spec.substr(0, c1);
+    std::string path = spec.substr(c1 + 1, at - c1 - 1);
+    std::string rest = spec.substr(at + 1, c2 - at - 1);
+    std::string link = spec.substr(c2 + 1);
+    int baud = 115200, db = 8, par = 0, stop = 1;
+    char ps = 'N';
+    if (sscanf(rest.c_str(), "%d,%d%c%d", &baud, &db, &ps, &stop) < 3) {
+        fprintf(stderr, "bad --tty termios, want 115200,8N1\n");
+        return -1;
+    }
+    if (ps == 'E' || ps == 'e') par = 1;
+    else if (ps == 'O' || ps == 'o') par = 2;
+    snprintf(tty_devid, sizeof(tty_devid), "%s", devid.c_str());
+    snprintf(tty_path, sizeof(tty_path), "%s", path.c_str());
+    snprintf(tty_link, sizeof(tty_link), "%s", link.c_str());
+    tty_baud = baud; tty_db = db; tty_par = par; tty_stop = stop;
+
+    int master = posix_openpt(O_RDWR | O_NOCTTY);
+    if (master < 0 || grantpt(master) != 0 || unlockpt(master) != 0) {
+        fprintf(stderr, "openpty failed: %s\n", strerror(errno));
+        if (master >= 0) close(master);
+        return -1;
+    }
+    const char* slave = ptsname(master);
+    if (!slave) { close(master); return -1; }
+    if (tty_link[0]) {
+        unlink(tty_link);
+        if (symlink(slave, tty_link) != 0) {
+            fprintf(stderr, "link %s failed: %s\n", tty_link, strerror(errno));
+            close(master);
+            return -1;
+        }
+    }
+    hio_t* io = hio_get(loop, master);
+    if (!io) { close(master); return -1; }
+    ClientStream* s = streamNew(io);
+    s->is_forward = 1;
+    s->state = CS_OPEN;
+    s->sid = ++next_sid;
+    tty_stream = s;
+
+    rtnp::Writer w;
+    w.str(tty_devid);
+    w.str(tty_path);
+    w.u32((uint32_t)tty_baud);
+    w.u8((uint8_t)tty_db);
+    w.u8((uint8_t)tty_par);
+    w.u8((uint8_t)tty_stop);
+    rtnp::send(this->io, rtnp::OPEN, s->sid, w.data, (uint16_t)w.len, rtnp::OPEN_TTY);
+    if (verbose) logf_("[client] tty %s -> %s (%d,%d%c%d)", tty_path,
+        tty_link[0] ? tty_link : slave, tty_baud, tty_db,
+        par == 1 ? 'E' : par == 2 ? 'O' : 'N', tty_stop);
+    return 0;
+}
+
 void ClientApp::onSpawnAgent(const rtnp::Frame* f) {
     rtnp::Reader r(f->payload, f->len);
     char devid[128] = {0};
@@ -407,6 +477,7 @@ void ClientApp::onFwdAccept(hio_t* io) {
 void ClientApp::onFrame(rtnp::Frame* f) {
     if (f->type == rtnp::SPAWN_AGENT) { onSpawnAgent(f); return; }
     ClientStream* s = streamFind(f->sid);
+    if (verbose) logf_("[client] frame type=0x%02x sid=%u found=%d", f->type, f->sid, s ? 1 : 0);
     if (s == NULL) return;
 
     switch (f->type) {
@@ -439,7 +510,8 @@ void ClientApp::onFrame(rtnp::Frame* f) {
     case rtnp::DATA:
         if (s->state != CS_OPEN || s->local == NULL) return;
         if (f->len > 0) {
-            hio_write(s->local, f->payload, f->len);
+            int wr = hio_write(s->local, f->payload, f->len);
+            if (verbose && s == tty_stream) logf_("[client] tty write %d -> %d", f->len, wr);
             s->unacked += f->len;
         }
         maybeGrantWindow(s);
@@ -475,6 +547,7 @@ void ClientApp::onFrame(rtnp::Frame* f) {
 }
 
 void ClientApp::onLinkDown() {
+    tty_stream = nullptr;
     while (streams) {
         ClientStream* s = streams;
         streams = s->next;
@@ -500,6 +573,8 @@ int ClientApp::run(int argc, char** argv) {
             port = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--user") == 0 && i + 1 < argc) {
             snprintf(user, sizeof(user), "%s", argv[++i]);
+        } else if (strcmp(argv[i], "--tty") == 0 && i + 1 < argc) {
+            snprintf(tty_spec, sizeof(tty_spec), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--socks5") == 0 && i + 1 < argc) {
             socks_enabled = 1;
             char buf[256];
@@ -569,8 +644,8 @@ int ClientApp::run(int argc, char** argv) {
         fprintf(stderr, "--user is required\n");
         return 1;
     }
-    if (!shell_devid && !socks_enabled && nfwd == 0) {
-        fprintf(stderr, "need --socks5 or --forward (or 'shell <devid>')\n");
+    if (!shell_devid && !socks_enabled && nfwd == 0 && !tty_spec[0]) {
+        fprintf(stderr, "need --socks5, --forward, --tty or 'shell <devid>'\n");
         return 1;
     }
 

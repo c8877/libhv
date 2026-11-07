@@ -231,6 +231,87 @@ void AgentApp::onLocalConnect(LocalStream* s) {
 void AgentApp::handleOpen(const rtnp::Frame* f) {
     if (verbose) logf_("[agent] OPEN sid=%u flags=0x%04x", f->sid, f->flags);
     // OPEN_SHELL：设备侧直接起 shell（forkpty），独立于端口白名单，须 --allow-shell 显式开启
+    if (f->flags & rtnp::OPEN_TTY) {
+        rtnp::Reader tr(f->payload, f->len);
+        char tdev[128] = {0};
+        char path[256] = {0};
+        tr.str(tdev, sizeof(tdev));
+        tr.str(path, sizeof(path));
+        uint32_t baud = tr.u32();
+        uint8_t db = tr.u8(), par = tr.u8(), stop = tr.u8();
+        if (tr.err || path[0] != '/') {
+            sendOpenFail(f->sid, rtnp::PROTOCOL_ERROR, "bad tty");
+            return;
+        }
+        if (verbose) logf_("[agent] tty req path=%s allow=%s baud=%u", path, allow_tty, baud);
+        bool allowed = false;
+        std::string list = allow_tty;
+        size_t pos = 0;
+        while (pos <= list.size()) {
+            size_t comma = list.find(',', pos);
+            std::string one = list.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+            if (!one.empty() && one == path) { allowed = true; break; }
+            if (comma == std::string::npos) break;
+            pos = comma + 1;
+        }
+        if (!allowed) {
+            sendOpenFail(f->sid, rtnp::TARGET_NOT_ALLOWED, "tty not allowed");
+            return;
+        }
+        if (streamFind(f->sid) != NULL) {
+            sendOpenFail(f->sid, rtnp::PROTOCOL_ERROR, "sid in use");
+            return;
+        }
+        int fd = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK);
+        if (fd < 0) {
+            sendOpenFail(f->sid, rtnp::TARGET_REFUSED, "open tty failed");
+            return;
+        }
+        struct termios tio{};
+        if (tcgetattr(fd, &tio) != 0) { close(fd); sendOpenFail(f->sid, rtnp::TARGET_REFUSED, "termios failed"); return; }
+        cfmakeraw(&tio);
+        speed_t sp = B115200;
+        switch (baud) {
+            case 9600: sp = B9600; break; case 19200: sp = B19200; break;
+            case 38400: sp = B38400; break; case 57600: sp = B57600; break;
+            case 115200: sp = B115200; break; case 230400: sp = B230400; break;
+            case 460800: sp = B460800; break; case 921600: sp = B921600; break;
+            default: sp = B115200; break;
+        }
+        cfsetispeed(&tio, sp); cfsetospeed(&tio, sp);
+        tio.c_cflag &= ~CSIZE;
+        tio.c_cflag |= (db == 5 ? CS5 : db == 6 ? CS6 : db == 7 ? CS7 : CS8);
+        if (par == 1) { tio.c_cflag |= PARENB; tio.c_cflag &= ~PARODD; }
+        else if (par == 2) { tio.c_cflag |= PARENB | PARODD; }
+        else tio.c_cflag &= ~PARENB;
+        if (stop == 2) tio.c_cflag |= CSTOPB; else tio.c_cflag &= ~CSTOPB;
+        tio.c_cflag |= CLOCAL | CREAD;
+        tio.c_cc[VMIN] = 0; tio.c_cc[VTIME] = 0;
+        if (tcsetattr(fd, TCSANOW, &tio) != 0) { close(fd); sendOpenFail(f->sid, rtnp::TARGET_REFUSED, "termios set failed"); return; }
+
+        auto* s = new LocalStream{};
+        s->app = this;
+        s->sid = f->sid;
+        s->credit = rtnp::DEFAULT_CREDIT;
+        had_stream = 1;
+        s->next = streams;
+        streams = s;
+        hio_t* io = hio_get(loop, fd);
+        if (!io) { close(fd); streamFree(s); sendOpenFail(f->sid, rtnp::TARGET_REFUSED, "hio failed"); return; }
+        s->local = io;
+        s->connected = 1;
+        hio_set_context(io, s);
+        hio_setcb_read(io, localReadCb);
+        hio_setcb_close(io, localCloseCb);
+        hio_set_max_write_bufsize(io, rtnp::CONN_INFLIGHT + rtnp::MAX_PAYLOAD);
+        rtnp::Writer w;
+        w.str("tty");
+        w.u16(0);
+        rtnp::send(io == NULL ? NULL : this->io, rtnp::OPEN_OK, f->sid, w.data, (uint16_t)w.len);
+        hio_read(io);
+        if (verbose) logf_("[agent] tty %s opened fd=%d", path, fd);
+        return;
+    }
     if (f->flags & rtnp::OPEN_SHELL) {
         if (!allow_shell) {
             sendOpenFail(f->sid, rtnp::TARGET_NOT_ALLOWED, "shell disabled");
@@ -1038,6 +1119,8 @@ int AgentApp::run(int argc, char** argv) {
             config_file = argv[++i];
         } else if (strcmp(argv[i], "--file-dir") == 0 && i + 1 < argc) {
             file_dir = argv[++i];
+        } else if (strcmp(argv[i], "--allow-tty") == 0 && i + 1 < argc) {
+            snprintf(allow_tty, sizeof(allow_tty), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--allow-shell") == 0) {
             allow_shell = 1;
         } else if (strcmp(argv[i], "--max-idle") == 0 && i + 1 < argc) {
