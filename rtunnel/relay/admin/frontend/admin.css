@@ -28,10 +28,10 @@
 
 html[data-theme="dark"] {
   --bg: #0f1216;
-  --card: #171b21;
+  --card: #1b2028;
   --fg: #e6e9ee;
   --muted: #8b929c;
-  --border: #2a3038;
+  --border: #2f3742;
   --side-bg: #11161d;
   --side-fg: #9aa4b2;
   --side-active: #ffffff;
@@ -39,9 +39,9 @@ html[data-theme="dark"] {
   --ok: #3fb950;
   --warn: #d29922;
   --bad: #f85149;
-  --input-bg: #0d1117;
+  --input-bg: #0b0f14;
   --input-fg: #e6e9ee;
-  --input-border: #3d4754;
+  --input-border: #46505e;
   --hover: #1d232b;
   --th-bg: #1a1f26;
   --modal-bg: #1b1f26;
@@ -65,7 +65,9 @@ body { font: 14px/1.5 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei
 #nav a { display: flex; align-items: center; gap: 10px; padding: 11px 18px; color: var(--side-fg);
          text-decoration: none; border-left: 3px solid transparent; }
 #nav a:hover { color: #fff; background: rgba(255,255,255,.05); }
-#nav a.active { color: var(--side-active); background: rgba(59,130,246,.18); border-left-color: var(--accent); }
+#nav a.active { color: var(--side-active);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-left-color: var(--accent); }
 #nav a .badge { margin-left: auto; background: var(--accent); color: #fff; border-radius: 9px;
                 font-size: 11px; padding: 0 7px; line-height: 18px; }
 .side-foot { padding: 14px 18px; font-size: 12px; border-top: 1px solid rgba(255,255,255,.08); }
@@ -232,18 +234,18 @@ button.danger { border-color: #e5534b; color: #e5534b; }
 /* 主题切换 */
 #themebox { position: relative; }
 #themebtn { padding: 3px 8px; font-size: 14px; }
-#thememenu { position: absolute; right: 0; top: calc(100% + 6px); width: 190px; z-index: 60;
+#thememenu { position: absolute; right: 0; top: calc(100% + 6px); width: 224px; z-index: 60;
   background: var(--card); border: 1px solid var(--border); border-radius: 8px;
   padding: 10px; display: none; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
 .th-modes { display: flex; gap: 4px; }
-.th-modes button { flex: 1; padding: 4px 0; font-size: 12px; }
+.th-modes button { flex: 1; padding: 6px 0; font-size: 12px; }
 .th-modes button.active { border-color: var(--accent); color: var(--accent); }
 .th-swatches { display: flex; gap: 6px; margin: 10px 0; }
 .th-swatches i { width: 18px; height: 18px; border-radius: 50%; cursor: pointer;
   border: 2px solid transparent; }
 .th-swatches i:hover { border-color: var(--fg); }
 .th-custom { display: flex; align-items: center; justify-content: space-between;
-  font-size: 12px; color: var(--muted); }
+  font-size: 12px; color: var(--muted); gap: 10px; }
 #themebtn .th-dot { display: block; width: 14px; height: 14px; border-radius: 50%; }
 
 /* 纯色主题：以所选颜色派生 */
@@ -264,3 +266,11 @@ html[data-theme="color"] {
   --chart-grid: color-mix(in srgb, var(--accent) 15%, transparent);
   --chart-axis: #5a6472;
 }
+
+/* 原生取色器统一为圆形色块 */
+input[type=color] { -webkit-appearance: none; appearance: none; width: 28px; height: 28px;
+  border-radius: 50%; padding: 0; border: 1px solid var(--input-border); overflow: hidden;
+  background: transparent; }
+input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
+#themebtn svg { display: block; }
