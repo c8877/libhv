@@ -434,8 +434,8 @@ stateDiagram-v2
 |---|---|
 | 角色 | admin（唯一）/ manager / operator / viewer |
 | 口令 | 最短 8 位，PBKDF2-HMAC-SHA256 |
-| 会话 | HttpOnly `rt_sid`，12h |
-| 锁定 | 连续 5 次失败锁 5 分钟 |
+| 会话 | HttpOnly `rt_sid`，默认 12h（可配置） |
+| 锁定 | 默认 5 次失败锁 5 分钟（可配置） |
 | 初始化 | `--admin-token` 仅放行 `/api/v1/setup*` |
 
 ---
@@ -470,7 +470,7 @@ stateDiagram-v2
 | 账号 | active | 可登录 |
 | | disabled | 禁止登录、会话吊销 |
 | 会话 | valid | 未过期且账号 active |
-| | expired/revoked | 12h 或改密/禁用 |
+| | expired/revoked | 超时或改密/禁用 |
 
 ### 8.3 设备代理
 
@@ -505,6 +505,6 @@ stateDiagram-v2
 | SYSINFO 等待 | 2s | 管理台 |
 | CONFIG_ACK 等待 | 2s | 管理台 |
 | sparkline 采样 | 5s × 60 点 | 前端 |
-| 文件上传上限 | 32 MiB | 管理台 |
-| 会话有效期 | 12h | 账号 |
-| 登录失败锁定 | 5 次 / 5 分钟 | 账号 |
+| 文件上传上限 | 默认 32 MiB（可配置） | 管理台 |
+| 会话有效期 | 默认 12h（可配置） | 账号 |
+| 登录失败锁定 | 默认 5 次 / 5 分钟（可配置） | 账号 |

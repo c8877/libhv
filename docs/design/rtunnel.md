@@ -509,7 +509,7 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 账号体系：首次用 `--admin-token` 初始化 admin，之后用户名+密码登录（HttpOnly Cookie 会话）。
 角色：admin（唯一，全部）/ manager（绑定设备、建 operator/viewer、设备与文件全部操作）/
 operator（Shell、Web、文件上传下载）/ viewer（仅概览与设备列表）。
-口令 PBKDF2-HMAC-SHA256；失败 5 次锁 5 分钟；改密/禁用吊销会话。
+口令 PBKDF2-HMAC-SHA256；失败锁定与会话时长可配置（默认 5 次/5 分钟、12h）；改密/禁用吊销会话。
 
 ### 13.2 系统信息与能力配置
 
@@ -532,7 +532,7 @@ operator（Shell、Web、文件上传下载）/ viewer（仅概览与设备列�
 | GET/PUT | `/api/v1/acl/file`、`POST /api/v1/acl/reload` | ACL 读写与热加载 |
 | GET | `/api/v1/audit` | 审计（登录、OPEN、踢、证书、文件、终端） |
 | GET/POST | `/api/v1/certs`、`/api/v1/certs/issue`、`/sign`、`/revoke` | 证书台账/签发/CSR 签名/吊销（admin） |
-| GET/POST/DELETE | `/api/v1/files[/{name}]` | 文件列表/上传/下载/删除（≤32 MiB，文件名白名单） |
+| GET/POST/DELETE | `/api/v1/files[/{name}]` | 文件列表/上传/下载/删除（上限可配置，默认 32 MiB；文件名白名单） |
 | GET | `/metrics` | Prometheus 文本指标 |
 | WS | `/ws/shell?devid=..&token=..` | 浏览器终端（xterm.js） |
 | POST | `/api/v1/shutdown` | 优雅退出 |

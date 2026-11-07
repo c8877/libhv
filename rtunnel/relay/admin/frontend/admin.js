@@ -396,9 +396,12 @@ const AgentDetailPage = Object.assign(new Page(), {
     this.cpuHist = [];
     this.memHist = [];
     this.charts = [];
-    this.auto = Number((window.SETTINGS || {})['ui.refresh_seconds'] || 0) > 0;
+    this.period = Number((window.SETTINGS || {})['ui.refresh_seconds'] || 0);
+    this.auto = this.period > 0;
     const p = Page.prototype.enter.call(this, el, params);
-    if (this.auto && !this.timer) this.timer = setInterval(() => this.refresh().catch(() => {}), 5000);
+    if (this.auto && !this.timer) {
+      this.timer = setInterval(() => this.refresh().catch(() => {}), this.period * 1000);
+    }
     return p;
   },
   leave() {
@@ -593,7 +596,8 @@ const AgentDetailPage = Object.assign(new Page(), {
       if (cb) cb.onchange = () => {
         this.auto = cb.checked;
         if (this.auto) {
-          this.timer = setInterval(() => this.refresh().catch(() => {}), 5000);
+          const sec = this.period > 0 ? this.period : 5;
+          this.timer = setInterval(() => this.refresh().catch(() => {}), sec * 1000);
           this.refresh().catch(() => {});
         } else if (this.timer) {
           clearInterval(this.timer);
@@ -1059,7 +1063,10 @@ const SettingsPage = Object.assign(new Page(), {
       document.querySelectorAll('#page .cfg-body [data-k]').forEach(inp => { body[inp.dataset.k] = inp.value; });
       try {
         await Api.put('/api/v1/settings', body);
-        try { window.SETTINGS = await Api.get('/api/v1/settings'); } catch (e) {}
+        try {
+          window.SETTINGS = await Api.get('/api/v1/settings');
+          if (window.SETTINGS['ui.site_title']) document.title = window.SETTINGS['ui.site_title'];
+        } catch (e) {}
         UI.toast('已保存，立即生效');
         this.refresh();
       } catch (e) { UI.toast('保存失败：' + e.message, true); }

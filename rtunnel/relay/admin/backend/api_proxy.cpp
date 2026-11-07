@@ -23,7 +23,6 @@
 
 namespace {
 
-const size_t MAX_PROXY_BODY = 64 * 1024 * 1024;
 
 std::atomic<int> g_proxy_active{0};
 

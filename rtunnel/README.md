@@ -122,7 +122,7 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 
 - **首次部署**：浏览器打开管理台 → 初始化页输入 `--admin-token` + 管理员用户名/密码 → 创建 admin；
   初始化前 token 只能访问 `/api/v1/setup*`
-- **之后登录**：用户名 + 密码，服务端会话（HttpOnly Cookie，12h），不再用 token
+- **之后登录**：用户名 + 密码，服务端会话（HttpOnly Cookie，默认 12h，可在设置中调整），不再用 token
 - **角色**（admin 唯一，其余可多个）：
   | 角色 | 权限 |
   |---|---|
@@ -134,7 +134,7 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
   operator/viewer 的设备与会话按归属过滤，未绑定设备仅 manager/admin 可见
 - **账号 API**：`GET/POST /api/v1/users`、`PUT /api/v1/users/{id}/password|status`、
   `DELETE /api/v1/users/{id}`；`POST /api/v1/login|logout`、`GET /api/v1/me`
-- 口令策略：最短 8 位；连续 5 次失败锁定 5 分钟；改密/禁用会吊销该账号全部会话
+- 口令策略：默认最短 8 位、连续 5 次失败锁定 5 分钟（均可在「设置」调整）；改密/禁用会吊销全部会话
 
 ## 设备系统信息与能力
 
