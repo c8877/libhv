@@ -130,3 +130,11 @@ button:hover { filter: brightness(.96); }
 .si-disk-row { display: flex; gap: 12px; font-size: 12px; color: var(--muted); padding: 2px 0; }
 .si-disk-row .nm { width: 80px; color: inherit; }
 .si-disk-row .val { flex: 1; }
+
+/* 设备详情：系统两列表格 */
+.si-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.si-table th { width: 110px; text-align: left; font-weight: normal; color: var(--muted);
+  padding: 7px 16px; vertical-align: top; white-space: nowrap; }
+.si-table td { text-align: left; padding: 7px 16px 7px 0; border-bottom: 1px solid rgba(255,255,255,.06);
+  word-break: break-word; }
+.si-table tr:last-child td { border-bottom: 0; }

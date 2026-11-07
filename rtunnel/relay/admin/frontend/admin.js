@@ -357,16 +357,22 @@ const AgentDetailPage = Object.assign(new Page(), {
       const runtime = UI.kv({
         'agent 版本': UI.esc(si.version || ''),
         '启动参数': '<code style="font-size:12px">' + UI.esc(si.args || '') + '</code>',
-        '架构 / 内核': UI.esc((si.machine || '') + ' / ' + (si.kernel || '')),
-        'CPU 型号': UI.esc((si.cpu_model || '') + ' · ' + (cpu.cores || []).length + ' 核'),
-        '板卡型号': UI.esc(si.board || '—'),
       });
+      const sysRows = [
+        ['架构', si.machine || '—'],
+        ['内核', si.kernel || '—'],
+        ['CPU 型号', si.cpu_model || '—'],
+        ['核心数', ((cpu.cores || []).length) + ' 核'],
+        ['板卡型号', si.board || '—'],
+        ['采集时间', new Date(siTs).toLocaleString()],
+      ];
+      const sysTable = '<table class="si-table">' + sysRows.map(r =>
+        '<tr><th>' + UI.esc(r[0]) + '</th><td>' + UI.esc(r[1]) + '</td></tr>').join('') + '</table>';
       const nics = (si.nics || []).map(n => [UI.esc(n.name), UI.esc(n.ip), UI.esc(n.netmask),
         n.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>']);
-      html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>证书</h2></div>' + certText + '</div>' +
-        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>系统</h2>' +
-        '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">采集于 ' +
-        new Date(siTs).toLocaleTimeString() + '</span></div>' + runtime + '</div>' +
+      html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>运行时</h2></div>' + runtime + '</div>' +
+        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>证书</h2></div>' + certText + '</div>' +
+        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>系统</h2></div>' + sysTable + '</div>' +
         '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>网络</h2></div>' +
         UI.table(['接口', 'IP', '掩码', '状态'], nics) + '</div>';
     }
