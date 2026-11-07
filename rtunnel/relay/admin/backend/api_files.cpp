@@ -9,6 +9,9 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#if defined(WITH_OPENSSL)
+#include "openssl/evp.h"
+#endif
 #include <algorithm>
 #include <vector>
 
@@ -45,6 +48,30 @@ static bool validFileName(const std::string& s) {
     return true;
 }
 
+
+static std::string fileSha256(const std::string& path) {
+#if defined(WITH_OPENSSL)
+    FILE* fp = fopen(path.c_str(), "rb");
+    if (!fp) return std::string();
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    EVP_DigestInit_ex(ctx, EVP_sha256(), NULL);
+    char buf[64 * 1024];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) EVP_DigestUpdate(ctx, buf, n);
+    unsigned char md[32];
+    unsigned int mdlen = 0;
+    EVP_DigestFinal_ex(ctx, md, &mdlen);
+    EVP_MD_CTX_free(ctx);
+    fclose(fp);
+    static const char* hex = "0123456789abcdef";
+    std::string out;
+    for (unsigned int i = 0; i < mdlen; ++i) { out += hex[md[i] >> 4]; out += hex[md[i] & 0xF]; }
+    return out;
+#else
+    (void)path;
+    return std::string();
+#endif
+}
 
 struct FileEnt {
     std::string name;
@@ -93,6 +120,12 @@ void AdminServer::handleFiles(const HttpContextPtr& ctx) {
         j["name"] = f.name;
         j["size"] = f.size;
         j["mtime_ms"] = f.mtime_ms;
+        std::string sha;
+        if (!db_.fileMetaGet(f.name, (long long)f.size, (long long)f.mtime_ms, sha)) {
+            sha = fileSha256(cfg_.file_dir + "/" + f.name);
+            if (!sha.empty()) db_.fileMetaPut(f.name, (long long)f.size, (long long)f.mtime_ms, sha);
+        }
+        j["sha256"] = sha;
         arr.push_back(j);
     }
     ctx->send(arr.dump());
@@ -228,7 +261,10 @@ void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string&
         }
         struct stat st{};
         long long sz = (stat(path.c_str(), &st) == 0) ? (long long)st.st_size : 0;
-        ctx->send("{\"name\":\"" + name + "\",\"size\":" + std::to_string(sz) + "}");
+        std::string sha = fileSha256(path);
+        if (!sha.empty()) db_.fileMetaPut(name, sz, (long long)st.st_mtime * 1000, sha);
+        ctx->send("{\"name\":\"" + name + "\",\"size\":" + std::to_string(sz) +
+                  ",\"sha256\":\"" + sha + "\"}");
         return;
     }
     if (ctx->param("append") == "1") {

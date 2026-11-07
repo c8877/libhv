@@ -471,6 +471,26 @@ std::string RelayServer::fileDirOf(const char* devid) {
     return it == caps_file_dir.end() ? std::string() : it->second;
 }
 
+bool RelayServer::startFileCheck(const char* devid, const char* dir, const char* name,
+                                 uint32_t& cid, std::string& err) {
+    RelayConn* a = findAgent(devid);
+    if (!a || !a->io) { err = "device offline"; return false; }
+    cid = ++check_seq;
+    rtnp::Writer w;
+    w.str(dir && dir[0] ? dir : "");
+    w.str(name);
+    rtnp::send(a->io, rtnp::FILE_CHECK_REQ, cid, w.data, (uint16_t)w.len);
+    return true;
+}
+
+std::string RelayServer::takeCheckResult(uint32_t cid) {
+    auto it = check_results.find(cid);
+    if (it == check_results.end()) return std::string();
+    std::string s = it->second;
+    check_results.erase(it);
+    return s;
+}
+
 bool RelayServer::cancelFilePush(uint32_t tid) {
     auto it = pushes.find(tid);
     if (it == pushes.end()) return false;
@@ -651,6 +671,13 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
     case rtnp::FILE_ACK:
         onFileAck(c, f);
         return;
+    case rtnp::FILE_CHECK_ACK: {
+        rtnp::Reader rr(f->payload, f->len);
+        static char buf[1024];
+        rr.str(buf, sizeof buf);
+        if (!rr.err) check_results[f->sid] = std::string(buf);
+        return;
+    }
     case rtnp::CONFIG_ACK: {
         if (c->role != rtnp::ROLE_AGENT) return;
         rtnp::Reader r(f->payload, f->len);

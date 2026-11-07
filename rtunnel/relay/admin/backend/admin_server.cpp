@@ -289,6 +289,20 @@ void AdminServer::registerRoutes() {
         handleDistCancel(ctx, currentActor());
         return (int)ctx->response->status_code;
     });
+    service_.Handle("POST", "/api/v1/distributions/:id/verify", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
+        if (rc) return rc;
+        handleDistVerify(ctx, currentActor());
+        return (int)ctx->response->status_code;
+    });
+    service_.Handle("POST", "/api/v1/distributions/:id/force", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
+        if (rc) return rc;
+        handleDistVerify(ctx, currentActor());
+        return (int)ctx->response->status_code;
+    });
     service_.Handle("POST", "/api/v1/distributions/:id/extend", [this](const HttpContextPtr& ctx) {
         std::string role;
         int rc = requireRole(ctx, ROLE_MANAGER, role);

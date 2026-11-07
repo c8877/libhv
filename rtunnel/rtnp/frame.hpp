@@ -47,6 +47,8 @@ enum Type : uint8_t {
     FILE_DATA      = 0x1E,   // B→C：原始字节；sid=传输号
     FILE_END       = 0x1F,   // B→C：str sha256；sid=传输号
     FILE_ACK       = 0x20,   // C→B：str json {ok,received,error}；sid 回显
+    FILE_CHECK_REQ = 0x21,   // B→C：str dir + str name；sid=检查号
+    FILE_CHECK_ACK = 0x22,   // C→B：str json {exists,size,sha256,error}
 };
 
 // 错误码

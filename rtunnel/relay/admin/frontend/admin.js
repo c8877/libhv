@@ -911,6 +911,7 @@ const FilesPage = Object.assign(new Page(), {
     const arr = await Api.get('/api/v1/files?sort=' + this.sort + '&order=' + this.order);
     const rows = arr.map(f => [
       '<b>' + UI.esc(f.name) + '</b>', UI.bytes(f.size),
+      '<code title="' + UI.esc(f.sha256 || '') + '">' + UI.esc((f.sha256 || '').slice(0, 8)) + '</code>',
       new Date(f.mtime_ms).toLocaleString(),
       '<button class="dl" data-name="' + UI.esc(f.name) + '">下载</button> ' +
       (canManage() ? '<button class="push" data-name="' + UI.esc(f.name) + '">分发</button> ' : '') +
@@ -926,7 +927,7 @@ const FilesPage = Object.assign(new Page(), {
       '<span style="color:var(--muted)">单文件上限 ' + uploadLimitMb() + ' MiB</span></div></div>' +
       '<div class="panel"><div class="panel-head"><h2>文件列表</h2><span class="spacer"></span>' +
       '<span>共 ' + arr.length + ' 个</span></div>' +
-      UI.table([this.sortLink('name', '名称'), this.sortLink('size', '大小'),
+      UI.table([this.sortLink('name', '名称'), this.sortLink('size', '大小'), '哈希',
                 this.sortLink('mtime', '修改时间'), '操作'], rows) + '</div>';
 
     document.getElementById('files-refresh').onclick = () => this.refresh();
@@ -1413,7 +1414,7 @@ const DistributePage = Object.assign(new Page(), {
 // ---------------------------------------------------------------- Pages.任务
 const STATUS_LABEL = {
   scheduled: '等待开始', queued: '排队中', running: '传输中',
-  success: '成功', failed: '失败', timeout: '超时', canceled: '已取消',
+  success: '成功', failed: '失败', timeout: '超时', canceled: '已取消', conflict: '冲突',
 };
 
 const TasksPage = Object.assign(new Page(), {
@@ -1442,8 +1443,9 @@ const TasksPage = Object.assign(new Page(), {
     ]);
     const items = r.items || [];
     const pages = Math.max(1, Math.ceil(r.total / this.per));
-    const tabCount = { all: sum.all, active: sum.active, done: sum.done, failed_group: sum.failed };
-    const tabs = [['all', '全部'], ['active', '进行中'], ['done', '已完成'], ['failed_group', '失败']]
+    const tabCount = { all: sum.all, active: sum.active, done: sum.done, failed_group: sum.failed, conflict: sum.conflict };
+    const tabs = [['all', '全部'], ['active', '进行中'], ['done', '已完成'],
+                  ['failed_group', '失败'], ['conflict', '冲突']]
       .map(([k, n]) => [k, n + ' ' + (tabCount[k] || 0)]);
 
     const rows = items.map(t => {
@@ -1457,6 +1459,8 @@ const TasksPage = Object.assign(new Page(), {
       if (t.status === 'failed') ops += '<button class="tr" data-id="' + t.id + '">重试</button> ';
       if (t.status === 'scheduled' || t.status === 'queued') ops += '<button class="tc" data-id="' + t.id + '">取消</button> ';
       if (t.status === 'timeout' && t.extend_count === 0) ops += '<button class="te" data-id="' + t.id + '">延长</button> ';
+      if (t.status === 'conflict') ops += '<button class="tv" data-id="' + t.id + '">校验</button> ' +
+        '<button class="tf" data-id="' + t.id + '">强制重发</button> ';
       return '<tr><td>' + t.id + '</td><td>' + UI.esc(t.file_name) + '</td><td>' + UI.esc(t.devid) +
         '</td><td>' + UI.esc(t.target_path || '') + '</td>' +
         '<td>' + (t.status === 'running' ? UI.bytes(sent) + ' / ' + UI.bytes(size) + ' ' + pct + '%' : UI.bytes(size)) + '</td>' +
@@ -1515,6 +1519,16 @@ const TasksPage = Object.assign(new Page(), {
         catch (e) { UI.toast('取消失败：' + e.message, true); }
       };
     });
+    document.querySelectorAll('#page .tv, #page .tf').forEach(b => {
+      b.onclick = async () => {
+        const api = b.classList.contains('tv') ? 'verify' : 'force';
+        try {
+          const r = await Api.post('/api/v1/distributions/' + b.dataset.id + '/' + api, {});
+          UI.toast(r.same ? '设备文件一致，已标记成功' : '设备文件不一致，已重新排队');
+          this.refresh();
+        } catch (e) { UI.toast('操作失败：' + e.message, true); }
+      };
+    });
     document.querySelectorAll('#page .te').forEach(b => {
       b.onclick = async () => {
         const cur = new Date().getTime() + 24 * 3600 * 1000;
@@ -1552,6 +1566,7 @@ const TaskDetailPage = Object.assign(new Page(), {
         '<tr><th>文件</th><td>' + UI.esc(t.file_name) + '</td></tr>' +
         '<tr><th>设备</th><td>' + UI.esc(t.devid) + '</td></tr>' +
         '<tr><th>目标路径</th><td>' + UI.esc(t.target_path || '—') + '</td></tr>' +
+        '<tr><th>文件哈希</th><td><code>' + UI.esc(t.file_sha || '') + '</code></td></tr>' +
         '<tr><th>状态</th><td>' + st + '</td></tr>' +
         '<tr><th>进度</th><td><progress max="100" value="' + pct + '"></progress> ' +
           UI.bytes(sent) + ' / ' + UI.bytes(size) + '</td></tr>' +
@@ -1567,6 +1582,8 @@ const TaskDetailPage = Object.assign(new Page(), {
         (t.status === 'failed' ? '<button class="primary" id="td-retry">重试</button> ' : '') +
         (t.status === 'scheduled' || t.status === 'queued' ? '<button id="td-cancel">取消</button> ' : '') +
         (t.status === 'timeout' && t.extend_count === 0 ? '<button id="td-extend">延长截止时间</button>' : '') +
+        (t.status === 'conflict' ? '<button id="td-verify">校验设备</button> ' +
+          '<button id="td-force">强制重发</button>' : '') +
       '</div></div>';
     const rt = document.getElementById('td-retry');
     if (rt) rt.onclick = async () => {
@@ -1578,6 +1595,17 @@ const TaskDetailPage = Object.assign(new Page(), {
       try { await Api.post('/api/v1/distributions/' + this.id + '/cancel', {}); this.refresh(); }
       catch (e) { UI.toast('取消失败：' + e.message, true); }
     };
+    const tv = document.getElementById('td-verify');
+    const tf = document.getElementById('td-force');
+    const doCheck = async (api) => {
+      try {
+        const r = await Api.post('/api/v1/distributions/' + this.id + '/' + api, {});
+        UI.toast(r.same ? '设备文件一致，已标记成功' : '设备文件不一致，已重新排队');
+        this.refresh();
+      } catch (e) { UI.toast('操作失败：' + e.message, true); }
+    };
+    if (tv) tv.onclick = () => doCheck('verify');
+    if (tf) tf.onclick = () => doCheck('force');
     const ex = document.getElementById('td-extend');
     if (ex) ex.onclick = async () => {
       const v = prompt('新的截止时间（本地时间，最多 +24h）',

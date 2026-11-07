@@ -196,6 +196,11 @@ bool AdminDb::migrate(std::string& err) {
         " finished_ms INTEGER NOT NULL DEFAULT 0);"
         "CREATE INDEX IF NOT EXISTS idx_dist_due ON distribution_tasks(status, start_at_ms);"
         "CREATE INDEX IF NOT EXISTS idx_dist_dead ON distribution_tasks(status, deadline_at_ms);"
+        "CREATE TABLE IF NOT EXISTS file_meta("
+        " name TEXT PRIMARY KEY,"
+        " size INTEGER NOT NULL DEFAULT 0,"
+        " mtime_ms INTEGER NOT NULL DEFAULT 0,"
+        " sha256 TEXT NOT NULL DEFAULT '');"
         "CREATE TABLE IF NOT EXISTS user_prefs("
         " user_id INTEGER NOT NULL,"
         " key TEXT NOT NULL,"
@@ -668,13 +673,14 @@ bool AdminDb::distSummary(std::string& json_out) {
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, "SELECT status,COUNT(*) FROM distribution_tasks GROUP BY status",
                            -1, &st, nullptr) != SQLITE_OK) return false;
-    long long all = 0, active = 0, done = 0, failed = 0;
+    long long all = 0, active = 0, done = 0, failed = 0, conflict = 0;
     while (sqlite3_step(st) == SQLITE_ROW) {
         std::string s = (const char*)sqlite3_column_text(st, 0);
         long long n = sqlite3_column_int64(st, 1);
         all += n;
         if (s == "success") done += n;
         else if (s == "failed" || s == "timeout") failed += n;
+        else if (s == "conflict") conflict += n;
         else if (s == "canceled") { /* 归入全部，不计进行中 */ }
         else active += n;
     }
@@ -684,8 +690,56 @@ bool AdminDb::distSummary(std::string& json_out) {
     j["active"] = active;
     j["done"] = done;
     j["failed"] = failed;
+    j["conflict"] = conflict;
     json_out = j.dump();
     return true;
+}
+
+bool AdminDb::fileMetaGet(const std::string& name, long long size, long long mtime_ms,
+                          std::string& sha) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, "SELECT size,mtime_ms,sha256 FROM file_meta WHERE name=?",
+                           -1, &st, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+    bool ok = false;
+    if (sqlite3_step(st) == SQLITE_ROW &&
+        sqlite3_column_int64(st, 0) == size && sqlite3_column_int64(st, 1) == mtime_ms) {
+        sha = (const char*)sqlite3_column_text(st, 2);
+        ok = !sha.empty();
+    }
+    sqlite3_finalize(st);
+    return ok;
+}
+
+bool AdminDb::fileMetaPut(const std::string& name, long long size, long long mtime_ms,
+                          const std::string& sha) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    const char* sql = "INSERT INTO file_meta(name,size,mtime_ms,sha256) VALUES(?,?,?,?) "
+                      "ON CONFLICT(name) DO UPDATE SET size=excluded.size,"
+                      " mtime_ms=excluded.mtime_ms, sha256=excluded.sha256";
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 2, size);
+    sqlite3_bind_int64(st, 3, mtime_ms);
+    sqlite3_bind_text(st, 4, sha.c_str(), -1, SQLITE_TRANSIENT);
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE;
+}
+
+bool AdminDb::distAlreadyPushed(const std::string& devid, const std::string& sha) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    const char* sql = "SELECT 1 FROM distribution_tasks WHERE devid=? AND file_sha=?"
+                      " AND status IN ('success','conflict') LIMIT 1";
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(st, 1, devid.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, sha.c_str(), -1, SQLITE_TRANSIENT);
+    bool found = (sqlite3_step(st) == SQLITE_ROW);
+    sqlite3_finalize(st);
+    return found;
 }
 
 bool AdminDb::bindDevice(const std::string& devid, long long owner_id) {

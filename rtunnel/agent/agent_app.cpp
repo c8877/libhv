@@ -866,6 +866,31 @@ void AgentApp::onFrame(rtnp::Frame* f) {
     case rtnp::FILE_END:
         handleFileFrame(f);
         return;
+    case rtnp::FILE_CHECK_REQ: {
+        rtnp::Reader r(f->payload, f->len);
+        char dir[256] = {0}, name[256] = {0};
+        r.str(dir, sizeof(dir));
+        r.str(name, sizeof(name));
+        nlohmann::json j;
+        j["exists"] = false;
+        j["size"] = 0;
+        j["sha256"] = "";
+        std::string target = file_dir;
+        if (dir[0]) target += "/" + std::string(dir);
+        std::string path = target + "/" + name;
+        bool ok = !r.err && name[0] && !strstr(name, "..") && !strchr(name, '/') &&
+                  !strstr(dir, "..") && dir[0] != '/';
+        struct stat st{};
+        if (ok && stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+            j["exists"] = true;
+            j["size"] = (long long)st.st_size;
+            j["sha256"] = sha256File(path);
+        }
+        std::string out = j.dump();
+        rtnp::Writer w; w.str(out.c_str());
+        rtnp::send(io, rtnp::FILE_CHECK_ACK, f->sid, w.data, (uint16_t)w.len);
+        return;
+    }
     case rtnp::OPEN:
         handleOpen(f);
         return;

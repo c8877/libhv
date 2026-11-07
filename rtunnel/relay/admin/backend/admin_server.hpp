@@ -88,6 +88,7 @@ private:
     void handleDistRetry(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleDistCancel(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleDistExtend(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleDistVerify(const HttpContextPtr& ctx, const AdminActor& actor);
     void distLoop();
     void distTick();
     // api_settings.cpp

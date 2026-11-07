@@ -59,6 +59,9 @@ public:
     bool distGet(long long id, std::string& json_out);
     bool distDue(std::string& json_out);   // status/start/deadline/retry 字段列表
     bool distSummary(std::string& json_out);
+    bool fileMetaGet(const std::string& name, long long size, long long mtime_ms, std::string& sha);
+    bool fileMetaPut(const std::string& name, long long size, long long mtime_ms, const std::string& sha);
+    bool distAlreadyPushed(const std::string& devid, const std::string& sha);
 
     bool bindDevice(const std::string& devid, long long owner_id);
     bool unbindDevice(const std::string& devid);

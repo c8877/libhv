@@ -96,7 +96,8 @@ void AdminServer::handleDistCreate(const HttpContextPtr& ctx, const AdminActor& 
         if (!online) { bad += (bad.empty() ? "" : ",") + devid; continue; }
         std::string base = callRelay([this, &devid]() { return relay_->fileDirOf(devid.c_str()); });
         std::string target = base.empty() ? ("/" + sub) : (base + (sub.empty() ? "" : "/" + sub));
-        std::string status = (start <= now) ? "queued" : "scheduled";
+        bool dup = db_.distAlreadyPushed(devid, sha);
+        std::string status = dup ? "conflict" : ((start <= now) ? "queued" : "scheduled");
         long long id = 0;
         if (!db_.distInsert(batch, devid, file, (long long)st.st_size, sha, sub, target,
                             status, start, deadline, max_retries, actor.username, &id)) {
@@ -117,6 +118,15 @@ void AdminServer::handleDistCreate(const HttpContextPtr& ctx, const AdminActor& 
     out["tasks"] = ids;
     out["size"] = (long long)st.st_size;
     if (!bad.empty()) out["skipped_offline"] = bad;
+    int conflicts = 0;
+    for (auto id : ids) {
+        std::string tj;
+        if (db_.distGet(id, tj)) {
+            auto tjx = json::parse(tj, nullptr, false);
+            if (!tjx.is_discarded() && tjx.value("status", "") == "conflict") conflicts++;
+        }
+    }
+    out["conflicts"] = conflicts;
     ctx->response->status_code = HTTP_STATUS_ACCEPTED;
     ctx->send(out.dump());
 }
@@ -202,6 +212,63 @@ void AdminServer::handleDistCancel(const HttpContextPtr& ctx, const AdminActor& 
                    j.value("retry_count", 0));
     audit(actor.username, "distribution.cancel", std::to_string(id));
     ctx->send("{\"ok\":true}");
+}
+
+void AdminServer::handleDistVerify(const HttpContextPtr& ctx, const AdminActor& actor) {
+    long long id = atoll(ctx->param("id").c_str());
+    std::string js;
+    if (!db_.distGet(id, js)) {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"not found\"}");
+        return;
+    }
+    auto j = json::parse(js);
+    if (j.value("status", "") != "conflict") {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"only conflict tasks can verify/force\"}");
+        return;
+    }
+    std::string devid = j.value("devid", std::string());
+    std::string dir = j.value("sub_dir", std::string());
+    std::string name = j.value("file_name", std::string());
+    std::string want = j.value("file_sha", std::string());
+    uint32_t cid = 0;
+    std::string err;
+    std::string started = callRelay([this, &devid, &dir, &name, &err, &cid]() {
+        return relay_->startFileCheck(devid.c_str(), dir.c_str(), name.c_str(), cid, err) ? "1" : "0";
+    });
+    if (started != "1") {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"" + err + "\"}");
+        return;
+    }
+    std::string acc;
+    for (int i = 0; i < 30 && acc.empty(); ++i) {
+        usleep(100000);
+        acc = callRelay([this, cid]() { return relay_->takeCheckResult(cid); });
+    }
+    if (acc.empty()) {
+        ctx->response->status_code = HTTP_STATUS_GATEWAY_TIMEOUT;
+        ctx->send("{\"error\":\"device check timeout\"}");
+        return;
+    }
+    auto a = json::parse(acc, nullptr, false);
+    bool exists = !a.is_discarded() && a.value("exists", false);
+    std::string got = a.is_discarded() ? std::string() : a.value("sha256", std::string());
+    long long now = nowMs();
+    if (exists && !want.empty() && got == want) {
+        db_.distUpdate(id, "success", "", j.value("file_size", 0LL), 0, now, 0,
+                       j.value("retry_count", 0));
+        audit(actor.username, "distribution.verify_same", std::to_string(id));
+        ctx->send("{\"ok\":true,\"same\":true,\"status\":\"success\"}");
+        return;
+    }
+    db_.distUpdate(id, "queued", "device file differs; queued", 0, 0, 0, 0,
+                   j.value("retry_count", 0));
+    audit(actor.username, "distribution.verify_diff", std::to_string(id) + " exists=" +
+          (exists ? "1" : "0"));
+    ctx->send("{\"ok\":true,\"same\":false,\"exists\":" + std::string(exists ? "true" : "false") +
+              ",\"status\":\"queued\"}");
 }
 
 void AdminServer::handleDistExtend(const HttpContextPtr& ctx, const AdminActor& actor) {

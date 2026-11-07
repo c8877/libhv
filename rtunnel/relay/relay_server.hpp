@@ -105,6 +105,8 @@ public:
     std::unordered_map<uint32_t, FilePush> pushes;
     std::unordered_map<uint32_t, std::string> push_results;
     uint32_t push_seq = 0;
+    std::unordered_map<uint32_t, std::string> check_results;
+    uint32_t check_seq = 0;
     struct ClientCred { std::string user, token; };
     std::vector<ClientCred> client_creds;   // --client-users（user:token）
     std::string client_token;               // --client-token（全局 token）
@@ -157,6 +159,9 @@ private:
                                std::string& err, uint32_t& tid);
     std::string  pushProgress(uint32_t tid);
     bool         cancelFilePush(uint32_t tid);
+    bool         startFileCheck(const char* devid, const char* dir, const char* name,
+                                uint32_t& cid, std::string& err);
+    std::string  takeCheckResult(uint32_t cid);
     bool         agentOnline(const char* devid) { return findAgent(devid) != nullptr; }
     std::string  fileDirOf(const char* devid);
     std::string  pushResult(uint32_t tid);
