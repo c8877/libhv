@@ -63,7 +63,7 @@ function fmtKbPair(usedKb, totalKb) {
     const n = (Number(v) || 0) / div;
     return Math.abs(n) >= 10 ? n.toFixed(1) : n.toFixed(2);
   };
-  return f(usedKb) + '/' + f(totalKb) + unit;
+  return { used: f(usedKb), total: f(totalKb), unit: unit };
 }
 
 function applyTheme(mode, color) {
@@ -625,9 +625,41 @@ const AgentDetailPage = Object.assign(new Page(), {
               const x = xScale.getPixelForValue(row.total);
               const y = bar.y;
               ctx2.fillText(row.pct + '%', x + 6, y);
-              ctx2.textAlign = 'right';
-              ctx2.fillText(fmtKbPair(row.used, row.total), chart.width - 8, y);
-              ctx2.textAlign = 'left';
+              const pair = fmtKbPair(row.used, row.total);
+              const drawTag = (tx, ty, text) => {
+                ctx2.font = '10px -apple-system, "Segoe UI", sans-serif';
+                const tw = ctx2.measureText(text).width + 8;
+                ctx2.fillStyle = 'rgba(139,146,156,.18)';
+                if (ctx2.roundRect) {
+                  ctx2.beginPath(); ctx2.roundRect(tx, ty - 8, tw, 16, 3); ctx2.fill();
+                } else {
+                  ctx2.fillRect(tx, ty - 8, tw, 16);
+                }
+                ctx2.fillStyle = cssVar('--fg', '#e6e9ee');
+                ctx2.textAlign = 'center';
+                ctx2.fillText(text, tx + tw / 2, ty);
+                ctx2.textAlign = 'left';
+                return tw;
+              };
+              ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
+              const usedW = ctx2.measureText(pair.used).width;
+              const totalW = ctx2.measureText(pair.total).width;
+              ctx2.font = '10px -apple-system, "Segoe UI", sans-serif';
+              const slashW = ctx2.measureText('/').width + 8;
+              const unitW = ctx2.measureText(pair.unit).width + 8;
+              const gap = 4;
+              const groupW = usedW + gap + slashW + gap + totalW + gap + unitW;
+              let gx = chart.width - 8 - groupW;
+              ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
+              ctx2.fillStyle = cssVar('--muted', '#8b929c');
+              ctx2.fillText(pair.used, gx, y);
+              gx += usedW + gap;
+              gx += drawTag(gx, y, '/') + gap;
+              ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
+              ctx2.fillStyle = cssVar('--muted', '#8b929c');
+              ctx2.fillText(pair.total, gx, y);
+              gx += totalW + gap;
+              drawTag(gx, y, pair.unit);
             });
             ctx2.restore();
           }
