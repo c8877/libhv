@@ -233,8 +233,7 @@ const AgentDetailPage = Object.assign(new Page(), {
             ctx2.restore();
           }
         };
-        const maxY = (id === 'si-cpu' && Math.max(...(data.length ? data : [0])) <= 5) ? 10 : 100;
-    this.charts.push(new Chart(c.getContext('2d'), {
+        this.charts.push(new Chart(c.getContext('2d'), {
           type: 'bar',
           data: { labels: labels, datasets: [
             { label: '已用', data: used, backgroundColor: colors, minBarLength: 2, stack: 's' },
