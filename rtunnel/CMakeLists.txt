@@ -41,6 +41,8 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
                relay/admin/backend/admin_db_dist.cpp
                relay/admin/backend/api_users.cpp
                relay/admin/backend/api_proxy.cpp
+               relay/admin/backend/api_proxy_ws.cpp
+               relay/admin/backend/proxy_util.cpp
                relay/admin/backend/api_settings.cpp
                relay/admin/backend/api_dist.cpp
                relay/admin/backend/hash_util.cpp
