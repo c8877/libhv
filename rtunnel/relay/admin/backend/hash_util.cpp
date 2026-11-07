@@ -5,6 +5,7 @@
 #endif
 
 #include <stdio.h>
+#include <ctype.h>
 
 bool adminValidFileName(const std::string& s) {
     if (s.empty() || s.size() > 128) return false;
@@ -15,6 +16,24 @@ bool adminValidFileName(const std::string& s) {
         if (c == '/' || c == '\\') return false;
     }
     return true;
+}
+
+std::string adminUrlDecode(const std::string& in) {
+    std::string out;
+    out.reserve(in.size());
+    for (size_t i = 0; i < in.size(); ++i) {
+        if (in[i] == '%' && i + 2 < in.size() &&
+            isxdigit((unsigned char)in[i + 1]) && isxdigit((unsigned char)in[i + 2])) {
+            auto hex = [](char c) {
+                return (c <= '9') ? (c - '0') : (tolower((unsigned char)c) - 'a' + 10);
+            };
+            out.push_back((char)((hex(in[i + 1]) << 4) | hex(in[i + 2])));
+            i += 2;
+        } else {
+            out.push_back(in[i]);
+        }
+    }
+    return out;
 }
 
 std::string adminSha256File(const std::string& path) {

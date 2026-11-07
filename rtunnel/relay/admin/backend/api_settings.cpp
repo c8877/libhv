@@ -233,22 +233,6 @@ void AdminServer::cleanupAudit(int days) {
     rename(tmp.c_str(), path.c_str());
 }
 
-void AdminServer::cleanupUploads() {
-    if (cfg_.file_dir.empty()) return;
-    DIR* d = opendir(cfg_.file_dir.c_str());
-    if (!d) return;
-    time_t cutoff = time(NULL) - 3600;
-    struct dirent* e;
-    while ((e = readdir(d)) != NULL) {
-        std::string n = e->d_name;
-        if (n.size() < 11 || n.compare(n.size() - 10, 10, ".uploading") != 0) continue;
-        std::string path = cfg_.file_dir + "/" + n;
-        struct stat st{};
-        if (stat(path.c_str(), &st) == 0 && st.st_mtime < cutoff) unlink(path.c_str());
-    }
-    closedir(d);
-}
-
 void AdminServer::handleLogoutAll(const HttpContextPtr& ctx) {
     AdminActor actor = currentActor();
     db_.dropUserSessions(actor.id);
