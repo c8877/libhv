@@ -587,10 +587,17 @@ const AgentDetailPage = Object.assign(new Page(), {
               if (!row) return;
               const x = xScale.getPixelForValue(row.total);
               const y = bar.y;
-              ctx2.fillText(row.pct + '%', x + 6, y);
-              ctx2.textAlign = 'right';
-              ctx2.fillText(fmtKbPair(row.used, row.total), chart.width - 8, y);
-              ctx2.textAlign = 'left';
+              const pctText = row.pct + '%';
+              ctx2.fillText(pctText, x + 6, y);
+              const pair = fmtKbPair(row.used, row.total);
+              const after = x + 6 + ctx2.measureText(pctText).width + 8;
+              if (after + ctx2.measureText(pair).width <= chart.width - 6) {
+                ctx2.fillText(pair, after, y);
+              } else {
+                ctx2.textAlign = 'right';
+                ctx2.fillText(pair, chart.width - 6, y);
+                ctx2.textAlign = 'left';
+              }
             });
             ctx2.restore();
           }
