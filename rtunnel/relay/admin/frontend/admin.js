@@ -354,10 +354,10 @@ const AgentDetailPage = Object.assign(new Page(), {
         ? UI.kv({ '证书主体': UI.esc(si.cert_subject || ''), '签发者': UI.esc(si.cert_issuer || ''),
                   '序列号': UI.esc(String(si.cert_serial || '')), '状态': si.cert_valid ? '有效' : '已过期' })
         : '<div style="padding:12px;color:var(--muted)">未启用 mTLS</div>';
-      const runtime = UI.kv({
-        'agent 版本': UI.esc(si.version || ''),
-        '启动参数': '<code style="font-size:12px">' + UI.esc(si.args || '') + '</code>',
-      });
+      const runtimeTable = '<table class="si-table">' +
+        '<tr><th>agent 版本</th><td>' + UI.esc(si.version || '') + '</td></tr>' +
+        '<tr><th>启动参数</th><td><code style="font-size:12px">' + UI.esc(si.args || '') + '</code></td></tr>' +
+        '</table>';
       const sysRows = [
         ['架构', si.machine || '—'],
         ['内核', si.kernel || '—'],
@@ -370,11 +370,11 @@ const AgentDetailPage = Object.assign(new Page(), {
         '<tr><th>' + UI.esc(r[0]) + '</th><td>' + UI.esc(r[1]) + '</td></tr>').join('') + '</table>';
       const nics = (si.nics || []).map(n => [UI.esc(n.name), UI.esc(n.ip), UI.esc(n.netmask),
         n.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>']);
-      html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>运行时</h2></div>' + runtime + '</div>' +
-        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>证书</h2></div>' + certText + '</div>' +
+      html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>网卡</h2></div>' +
+        UI.table(['接口', 'IP', '掩码', '状态'], nics) + '</div>' +
         '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>系统</h2></div>' + sysTable + '</div>' +
-        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>网络</h2></div>' +
-        UI.table(['接口', 'IP', '掩码', '状态'], nics) + '</div>';
+        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>运行时</h2></div>' + runtimeTable + '</div>' +
+        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>证书</h2></div>' + certText + '</div>';
     }
 
     html += '<div class="panel"><div class="panel-head"><h2>当前会话</h2></div>' +
