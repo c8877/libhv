@@ -30,10 +30,42 @@ const AgentDetailPage = Object.assign(new Page(), {
       type: 'line',
       data: { labels: (data.length > 1 ? data : [data[0] || 0, data[0] || 0]).map((_, i) => i),
         datasets: [{ data: data.length > 1 ? data : [data[0] || 0, data[0] || 0], borderColor: color, backgroundColor: color + '26',
-          fill: true, pointRadius: 0, borderWidth: 2, tension: .3 }] },
+          fill: true, pointRadius: 2, pointHoverRadius: 5, pointBackgroundColor: color,
+          pointBorderWidth: 0, borderWidth: 2, tension: .3 }] },
       options: { animation: false, responsive: true,
+        interaction: { mode: 'index', intersect: false },
         scales: { x: { display: false }, y: { display: false, min: 0, max: maxY } },
-        plugins: { legend: { display: false }, tooltip: { enabled: false } } }
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            displayColors: false,
+            callbacks: {
+              title: items => items.length ? '采样 #' + (items[0].dataIndex + 1) : '',
+              label: ctx => (id === 'si-mem' ? '内存 ' : 'CPU ') +
+                            Number(ctx.parsed.y || 0).toFixed(1) + '%',
+            }
+          }
+        } },
+      plugins: [{
+        id: 'crosshair',
+        afterDraw(chart) {
+          const act = chart.tooltip && chart.tooltip.getActiveElements
+            ? chart.tooltip.getActiveElements() : [];
+          if (!act.length) return;
+          const x = act[0].element.x;
+          const a = chart.chartArea;
+          const g = chart.ctx;
+          g.save();
+          g.strokeStyle = cssVar('--muted', '#8b929c');
+          g.setLineDash([3, 3]);
+          g.lineWidth = 1;
+          g.beginPath();
+          g.moveTo(x, a.top);
+          g.lineTo(x, a.bottom);
+          g.stroke();
+          g.restore();
+        }
+      }]
     }));
   },
   diskColor(p) { return p >= 85 ? cssVar('--bad', '#e5534b') : p >= 70 ? cssVar('--warn', '#f5a623') : cssVar('--accent', '#4a9eff'); },
