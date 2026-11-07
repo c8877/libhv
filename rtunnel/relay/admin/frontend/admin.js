@@ -126,6 +126,11 @@ function themeMenu() {
   });
 }
 
+function uploadLimitMb() {
+  const mb = parseInt((window.SETTINGS || {})['file.max_upload_mb'] || '32', 10);
+  return mb > 0 ? mb : 32;
+}
+
 async function saveTheme(patch, mode, color) {
   try {
     Auth.profile = Object.assign(Auth.profile || {}, patch);
@@ -840,14 +845,14 @@ const FilesPage = Object.assign(new Page(), {
       '<input type="file" id="upload-input"> <button class="primary" id="upload-btn">上传</button>' +
       '<progress id="upload-progress" max="100" value="0" style="width:220px;display:none"></progress>' +
       '<span id="upload-status" style="color:var(--muted)"></span>' +
-      '<span style="color:var(--muted)">单文件上限 32 MiB</span></div></div>' +
+      '<span style="color:var(--muted)">单文件上限 ' + uploadLimitMb() + ' MiB</span></div></div>' +
       '<div class="panel"><div class="panel-head"><h2>文件列表</h2><span class="spacer"></span>' +
       '<span>共 ' + arr.length + ' 个</span></div>' +
       UI.table([this.sortLink('name', '名称'), this.sortLink('size', '大小'),
                 this.sortLink('mtime', '修改时间'), '操作'], rows) + '</div>';
 
     document.getElementById('files-refresh').onclick = () => this.refresh();
-    const MAX_UPLOAD = 32 * 1024 * 1024;
+    const MAX_UPLOAD = uploadLimitMb() * 1024 * 1024;
     document.getElementById('upload-btn').onclick = () => {
       const btn = document.getElementById('upload-btn');
       const fi = document.getElementById('upload-input').files[0];
@@ -856,8 +861,8 @@ const FilesPage = Object.assign(new Page(), {
       if (!fi) { UI.toast('请选择文件', true); return; }
       // 客户端先挡：不要等传完 32MiB 才报错
       if (fi.size > MAX_UPLOAD) {
-        status.textContent = '文件 ' + UI.bytes(fi.size) + ' 超过 32 MiB 上限';
-        UI.toast('文件太大（' + UI.bytes(fi.size) + '），上限 32 MiB', true);
+        status.textContent = '文件 ' + UI.bytes(fi.size) + ' 超过 ' + uploadLimitMb() + ' MiB 上限';
+        UI.toast('文件太大（' + UI.bytes(fi.size) + '），上限 ' + uploadLimitMb() + ' MiB', true);
         return;
       }
       const xhr = new XMLHttpRequest();
@@ -1054,6 +1059,7 @@ const SettingsPage = Object.assign(new Page(), {
       document.querySelectorAll('#page .cfg-body [data-k]').forEach(inp => { body[inp.dataset.k] = inp.value; });
       try {
         await Api.put('/api/v1/settings', body);
+        try { window.SETTINGS = await Api.get('/api/v1/settings'); } catch (e) {}
         UI.toast('已保存，立即生效');
         this.refresh();
       } catch (e) { UI.toast('保存失败：' + e.message, true); }

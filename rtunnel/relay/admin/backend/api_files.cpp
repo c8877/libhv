@@ -143,13 +143,15 @@ void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string&
     size_t max_ul = (size_t)settingInt("file.max_upload_mb", 32) * 1024 * 1024;
     if (!clen.empty() && strtoull(clen.c_str(), NULL, 10) > max_ul) {
         ctx->response->status_code = HTTP_STATUS_PAYLOAD_TOO_LARGE;
-        ctx->send("{\"error\":\"file too large (max 32MiB)\"}");
+        ctx->send("{\"error\":\"file too large (max " +
+                  std::to_string(settingInt("file.max_upload_mb", 32)) + "MiB)\"}");
         return;
     }
     const std::string& body = ctx->body();
     if (body.size() > max_ul) {
         ctx->response->status_code = HTTP_STATUS_PAYLOAD_TOO_LARGE;
-        ctx->send("{\"error\":\"file too large (max 32MiB)\"}");
+        ctx->send("{\"error\":\"file too large (max " +
+                  std::to_string(settingInt("file.max_upload_mb", 32)) + "MiB)\"}");
         return;
     }
     mkdir(cfg_.file_dir.c_str(), 0700);
