@@ -237,8 +237,8 @@ void AdminServer::handleAgentFilePush(const HttpContextPtr& ctx, const AdminActo
         return;
     }
     std::string result;
-    long long wait_ms = (long long)(st.st_size / (1 << 20)) * 3000 + 10000;
-    if (wait_ms > 300000) wait_ms = 300000;
+    long long wait_ms = (long long)(st.st_size / (1 << 20)) * 5000 + 10000;
+    if (wait_ms > 600000) wait_ms = 600000;
     for (long long i = 0; i < wait_ms / 100 && result.empty(); ++i) {
         usleep(100000);
         result = callRelay([this, tid]() { return relay_->pushResult(tid); });

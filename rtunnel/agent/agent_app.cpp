@@ -592,12 +592,18 @@ void AgentApp::handleFileFrame(const rtnp::Frame* f) {
         }
         std::string dest = file_dir + "/" + name;
         std::string part = dest + ".part";
-        FILE* fp = fopen(part.c_str(), "wb");
+        uint64_t have = 0;
+        struct stat st{};
+        if (stat(part.c_str(), &st) == 0 && st.st_size > 0 && (uint64_t)st.st_size <= size) {
+            have = (uint64_t)st.st_size;
+        }
+        FILE* fp = fopen(part.c_str(), have ? "ab" : "wb");
         if (!fp) { sendAck(false, 0, "open failed"); return; }
         FileRx rx;
-        rx.fp = fp; rx.expect = size; rx.written = 0; rx.name = name; rx.dest = dest;
+        rx.fp = fp; rx.expect = size; rx.written = have; rx.name = name; rx.dest = dest;
         g_file_rx[f->sid] = rx;
-        sendAck(true, 0, "");
+        if (have) logf_("[agent] resume %s at %llu", name, (unsigned long long)have);
+        sendAck(true, have, "");
         return;
     }
     auto it = g_file_rx.find(f->sid);

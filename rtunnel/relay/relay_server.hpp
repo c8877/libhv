@@ -21,6 +21,7 @@ struct FilePush {
     FILE*       fp = nullptr;
     uint64_t    size = 0;
     uint64_t    sent = 0;
+    uint64_t    received = 0;
     int         phase = 0;         // 0=等 BEGIN ACK，1=传数据，2=等 END ACK
     std::string devid;
     std::string name;

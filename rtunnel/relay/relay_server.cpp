@@ -420,14 +420,24 @@ bool RelayServer::revokeSan(const std::string& san) {
     return true;
 }
 
+static const uint64_t FILE_WINDOW = 256 * 1024;
+static const size_t   FILE_CHUNK  = rtnp::MAX_PAYLOAD;
+
 static bool sendFileChunk(RelayConn* a, uint32_t tid, FilePush& p) {
     if (!p.fp || p.sent >= p.size) return false;
-    size_t want = (size_t)((p.size - p.sent) > (32u << 10) ? (32u << 10) : (p.size - p.sent));
+    size_t want = (size_t)((p.size - p.sent) > FILE_CHUNK ? FILE_CHUNK : (p.size - p.sent));
     std::vector<char> buf(want);
     size_t got = fread(buf.data(), 1, want, p.fp);
     if (got == 0) return false;
     rtnp::send(a->io, rtnp::FILE_DATA, tid, buf.data(), (uint16_t)got);
     p.sent += got;
+    return true;
+}
+
+static bool pumpFile(RelayConn* a, uint32_t tid, FilePush& p) {
+    while (p.sent < p.size && p.sent - p.received < FILE_WINDOW) {
+        if (!sendFileChunk(a, tid, p)) return false;
+    }
     return true;
 }
 
@@ -484,24 +494,25 @@ void RelayServer::onFileAck(RelayConn* c, const rtnp::Frame* f) {
     }
     uint64_t received = j.value("received", (uint64_t)0);
     if (p.phase == 0) {
+        if (received > p.size) { fail("received > size"); return; }
+        p.received = received;
+        p.sent = received;
+        if (p.fp) fseek(p.fp, (long)received, SEEK_SET);
         p.phase = 1;
-        if (!sendFileChunk(c, f->sid, p)) fail("read failed");
+        if (!pumpFile(c, f->sid, p)) fail("read failed");
         return;
     }
     if (p.phase == 1) {
-        if (received != p.sent) {
-            fail("received mismatch recv=" + std::to_string(received) +
-                 " sent=" + std::to_string(p.sent));
-            return;
-        }
-        if (p.sent >= p.size) {
+        if (received > p.sent) { fail("received mismatch"); return; }
+        p.received = received;
+        if (p.sent >= p.size && p.received >= p.size) {
             p.phase = 2;
             rtnp::Writer w;
             w.str(p.sha.c_str());
             rtnp::send(c->io, rtnp::FILE_END, f->sid, w.data, (uint16_t)w.len);
             return;
         }
-        if (!sendFileChunk(c, f->sid, p)) fail("read failed");
+        if (!pumpFile(c, f->sid, p)) fail("read failed");
         return;
     }
     // phase 2：完成
