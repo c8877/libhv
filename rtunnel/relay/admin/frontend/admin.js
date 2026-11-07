@@ -514,7 +514,7 @@ const AgentDetailPage = Object.assign(new Page(), {
         '<div class="panel si-disk-card"><div class="panel-head"><h2>存储</h2>' +
         '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">条长按最大分区归一</span></div>' +
         '<div class="si-body"><canvas id="si-disk" height="' +
-          Math.min(260, Math.max(120, (si.mounts || []).length * 26 + 24)) + '"></canvas></div></div>' +
+          Math.max(60, (si.mounts || []).length * 24 + 16) + '"></canvas></div></div>' +
         '</div>';
 
       const certText = si.mtls
@@ -639,7 +639,7 @@ const AgentDetailPage = Object.assign(new Page(), {
             { label: '已用', data: used, backgroundColor: colors, minBarLength: 2, stack: 's' },
             { label: '空闲', data: free, backgroundColor: cssVar('--border', '#2b3038'), stack: 's' },
           ] },
-          options: { indexAxis: 'y', animation: false, responsive: true,
+          options: { indexAxis: 'y', animation: false, responsive: true, maintainAspectRatio: false,
             layout: { padding: { left: 200, right: 150 } },
             interaction: { mode: 'index', intersect: false },
             scales: { x: { stacked: true, max: maxT, display: false },
