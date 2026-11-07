@@ -125,6 +125,7 @@ private:
     void handleFiles(const HttpContextPtr& ctx);
     void handleFileDownload(const HttpContextPtr& ctx);
     void handleFileUpload(const HttpContextPtr& ctx, const std::string& role);
+    void handleUploadStatus(const HttpContextPtr& ctx);
     void handleFileDelete(const HttpContextPtr& ctx, const std::string& role);
 
     RelayServer*    relay_;

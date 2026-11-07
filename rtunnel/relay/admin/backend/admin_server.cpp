@@ -278,6 +278,7 @@ void AdminServer::registerRoutes() {
     access(ROLE_OPERATOR, "GET", "/metrics", &AdminServer::handleMetrics);
     access(ROLE_OPERATOR, "GET", "/api/v1/files", &AdminServer::handleFiles);
     access(ROLE_OPERATOR, "GET", "/api/v1/files/:name", &AdminServer::handleFileDownload);
+    access(ROLE_OPERATOR, "GET", "/api/v1/uploads/:name", &AdminServer::handleUploadStatus);
     // manager：审计/证书列表
     access(ROLE_MANAGER, "GET", "/api/v1/audit", &AdminServer::handleAudit);
     access(ROLE_MANAGER, "GET", "/api/v1/certs", &AdminServer::handleCerts);

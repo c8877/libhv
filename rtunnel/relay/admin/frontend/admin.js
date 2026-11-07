@@ -908,15 +908,26 @@ const FilesPage = Object.assign(new Page(), {
             status.textContent = '上传中… ' + UI.bytes(loaded) + ' / ' + UI.bytes(fi.size);
           });
         } else {
-          let off = 0;
+          let off = 0, tries = 0;
           while (off < fi.size) {
             const chunk = fi.slice(off, off + CHUNK);
-            await send(url + '?append=1&upload=' + uid + '&offset=' + off, chunk, (loaded) => {
-              const cur = off + loaded;
-              bar.value = Math.floor(cur * 100 / fi.size);
-              status.textContent = '上传中… ' + UI.bytes(cur) + ' / ' + UI.bytes(fi.size);
-            });
-            off += chunk.size;
+            try {
+              await send(url + '?append=1&upload=' + uid + '&offset=' + off, chunk, (loaded) => {
+                const cur = off + loaded;
+                bar.value = Math.floor(cur * 100 / fi.size);
+                status.textContent = '上传中… ' + UI.bytes(cur) + ' / ' + UI.bytes(fi.size);
+              });
+              off += chunk.size;
+              tries = 0;
+            } catch (e) {
+              if (++tries > 2) throw e;
+              try {
+                const st = await Api.get('/api/v1/uploads/' + encodeURIComponent(fi.name) +
+                  '?upload=' + uid);
+                off = st.received || off;
+                status.textContent = '重试中… 已传 ' + UI.bytes(off) + ' / ' + UI.bytes(fi.size);
+              } catch (e2) { throw e; }
+            }
           }
           await send(url + '?finalize=1&upload=' + uid, new Blob([]));
         }

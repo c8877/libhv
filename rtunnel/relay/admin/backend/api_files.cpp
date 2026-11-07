@@ -131,16 +131,63 @@ void AdminServer::handleFileDownload(const HttpContextPtr& ctx) {
         ctx->send("{\"error\":\"no writer\"}");
         return;
     }
+
+    // 单段 Range，支持断点续传
+    long long start = 0, end = (long long)n - 1;
+    bool partial = false;
+    std::string rh = ctx->header("Range");
+    if (!rh.empty() && rh.rfind("bytes=", 0) == 0) {
+        std::string spec = rh.substr(6);
+        size_t dash = spec.find('-');
+        if (dash == std::string::npos) {
+            fclose(fp);
+            ctx->response->status_code = HTTP_STATUS_RANGE_NOT_SATISFIABLE;
+            ctx->send("{\"error\":\"bad range\"}");
+            return;
+        }
+        std::string a = spec.substr(0, dash), b = spec.substr(dash + 1);
+        if (a.empty()) {
+            long long suffix = atoll(b.c_str());
+            if (suffix <= 0) {
+                fclose(fp);
+                ctx->response->status_code = HTTP_STATUS_RANGE_NOT_SATISFIABLE;
+                ctx->send("{\"error\":\"bad range\"}");
+                return;
+            }
+            start = n > suffix ? (long long)n - suffix : 0;
+        } else {
+            start = atoll(a.c_str());
+            if (!b.empty()) end = atoll(b.c_str());
+        }
+        if (start < 0 || start >= n || end < start) {
+            fclose(fp);
+            ctx->response->status_code = HTTP_STATUS_RANGE_NOT_SATISFIABLE;
+            ctx->send("{\"error\":\"range not satisfiable\"}");
+            return;
+        }
+        if (end >= n) end = (long long)n - 1;
+        partial = true;
+    }
+
+    long long len = end - start + 1;
     w->Begin();
-    w->EndHeaders("Transfer-Encoding", "chunked");
+    w->WriteStatus(partial ? HTTP_STATUS_PARTIAL_CONTENT : HTTP_STATUS_OK);
+    w->WriteHeader("Accept-Ranges", "bytes");
+    if (partial) {
+        std::string cr = "bytes " + std::to_string(start) + "-" + std::to_string(end) +
+                         "/" + std::to_string(n);
+        w->WriteHeader("Content-Range", cr.c_str());
+    }
+    w->EndHeaders("Content-Length", len);
+    fseek(fp, (long)start, SEEK_SET);
     char buf[64 * 1024];
-    size_t left = (size_t)n;
+    long long left = len;
     while (left > 0) {
-        size_t want = left > sizeof(buf) ? sizeof(buf) : left;
+        size_t want = left > (long long)sizeof(buf) ? sizeof(buf) : (size_t)left;
         size_t got = fread(buf, 1, want, fp);
         if (got == 0) break;
-        if (w->WriteChunked(buf, (int)got) < 0) break;
-        left -= got;
+        if (w->WriteBody(buf, (int)got) < 0) break;
+        left -= (long long)got;
     }
     fclose(fp);
     w->End();
@@ -268,6 +315,23 @@ void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string&
     j["name"] = name;
     j["size"] = body.size();
     ctx->send(j.dump());
+}
+
+void AdminServer::handleUploadStatus(const HttpContextPtr& ctx) {
+    std::string name = urlDecode(ctx->param("name"));
+    std::string uid = ctx->param("upload");
+    if (cfg_.file_dir.empty() || !validFileName(name) || uid.empty() ||
+        uid.size() > 64 || uid.find_first_not_of(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != std::string::npos) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"bad request\"}");
+        return;
+    }
+    struct stat st{};
+    long long sz = 0;
+    std::string tmp = cfg_.file_dir + "/" + name + "." + uid + ".uploading";
+    if (stat(tmp.c_str(), &st) == 0) sz = (long long)st.st_size;
+    ctx->send("{\"received\":" + std::to_string(sz) + "}");
 }
 
 void AdminServer::handleFileDelete(const HttpContextPtr& ctx, const std::string& role) {
