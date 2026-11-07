@@ -381,8 +381,17 @@ const TermMgr = {
 };
 
 const TerminalPage = Object.assign(new Page(), {
-  enter(el, params) {
+  async enter(el, params) {
     this.el = el;
+    el.innerHTML = '<div class="panel"><div class="empty">终端组件加载中…</div></div>';
+    try {
+      await loadCssOnce('/vendor/xterm.css');
+      await loadScriptOnce('/vendor/xterm.js');
+      await loadScriptOnce('/vendor/xterm-addon-fit.js');
+    } catch (e) {
+      el.innerHTML = '<div class="panel"><div class="empty">终端组件加载失败</div></div>';
+      return;
+    }
     const devid = decodeURIComponent((params[0] || '').split('?')[0]);
     if (devid) {
       let target = TermMgr.aliveOf(devid);

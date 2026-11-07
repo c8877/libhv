@@ -2,7 +2,10 @@
 // ---------------------------------------------------------------- Pages.设备详情
 const AgentDetailPage = Object.assign(new Page(), {
   refreshInterval() { return 0; },   // 由「每 5s 刷新」勾选框控制
-  enter(el, params) {
+  async enter(el, params) {
+    this.el = el;
+    el.innerHTML = '<div class="panel"><div class="empty">图表组件加载中…</div></div>';
+    try { await loadScriptOnce('/vendor/chart.umd.min.js'); } catch (e) {}
     this.devid = decodeURIComponent(params[0] || '');
     this.cpuHist = [];
     this.memHist = [];

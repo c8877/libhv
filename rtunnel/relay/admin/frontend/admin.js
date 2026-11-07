@@ -79,6 +79,32 @@ function drawTagPill(ctx, x, y, text, bg, fg) {
   return w;
 }
 
+const _assetCache = {};
+function loadScriptOnce(src) {
+  if (_assetCache[src]) return _assetCache[src];
+  _assetCache[src] = new Promise((res, rej) => {
+    const el = document.createElement('script');
+    el.src = src;
+    el.onload = () => res();
+    el.onerror = () => { delete _assetCache[src]; rej(new Error('load failed: ' + src)); };
+    document.head.appendChild(el);
+  });
+  return _assetCache[src];
+}
+
+function loadCssOnce(href) {
+  if (_assetCache[href]) return _assetCache[href];
+  _assetCache[href] = new Promise((res, rej) => {
+    const el = document.createElement('link');
+    el.rel = 'stylesheet';
+    el.href = href;
+    el.onload = () => res();
+    el.onerror = () => { delete _assetCache[href]; rej(new Error('load failed: ' + href)); };
+    document.head.appendChild(el);
+  });
+  return _assetCache[href];
+}
+
 function fmtKbPair(usedKb, totalKb) {
   const k = Number(totalKb) || 0;
   let unit = 'K', div = 1;
