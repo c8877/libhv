@@ -4,6 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>rtunnel admin</title>
+<script>
+(function () {
+  try {
+    var m = localStorage.getItem('rt_theme') || 'system';
+    var dark = m === 'dark' || (m === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    var c = localStorage.getItem('rt_theme_color');
+    if (c) document.documentElement.style.setProperty('--accent', c);
+  } catch (e) {}
+})();
+</script>
 <link rel="stylesheet" href="/admin.css">
 <link rel="stylesheet" href="/vendor/xterm.css">
 </head>

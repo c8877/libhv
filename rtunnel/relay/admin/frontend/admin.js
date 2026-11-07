@@ -32,6 +32,88 @@ const Api = {
 };
 
 // ---------------------------------------------------------------- UI 组件
+function cssVar(name, def) {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || def;
+}
+
+function applyTheme(mode, color) {
+  mode = mode || 'system';
+  const dark = mode === 'dark' || (mode === 'system' &&
+    window.matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  if (color) document.documentElement.style.setProperty('--accent', color);
+  else document.documentElement.style.removeProperty('--accent');
+  try {
+    localStorage.setItem('rt_theme', mode);
+    localStorage.setItem('rt_theme_color', color || '');
+  } catch (e) {}
+}
+
+function themeMenu() {
+  const old = document.getElementById('themebox');
+  if (old) old.remove();
+  const top = document.getElementById('topbar');
+  const ub = document.getElementById('userbox');
+  const box = document.createElement('span');
+  box.id = 'themebox';
+  const colors = ['#3b82f6', '#57ab5a', '#f5a623', '#e5534b', '#b083f0', '#39c5cf', '#d4a72c'];
+  box.innerHTML = '<button id="themebtn" title="主题">🎨</button>' +
+    '<div id="thememenu">' +
+      '<div class="th-modes">' +
+        '<button data-mode="light">浅色</button>' +
+        '<button data-mode="dark">深色</button>' +
+        '<button data-mode="system">跟随系统</button>' +
+      '</div>' +
+      '<div class="th-swatches">' + colors.map(c =>
+        '<i data-color="' + c + '" style="background:' + c + '"></i>').join('') + '</div>' +
+      '<label class="th-custom">自定义 <input type="color" id="th-color"></label>' +
+    '</div>';
+  top.insertBefore(box, ub || null);
+
+  const menu = box.querySelector('#thememenu');
+  const profile = (Auth.profile) || {};
+  box.querySelectorAll('.th-modes button').forEach(b => {
+    if (b.dataset.mode === (profile.theme || 'system')) b.classList.add('active');
+    b.onclick = async () => {
+      const theme = b.dataset.mode;
+      await saveTheme({ theme }, theme, profile.theme_color);
+      box.querySelectorAll('.th-modes button').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+    };
+  });
+  box.querySelectorAll('.th-swatches i').forEach(el => {
+    el.onclick = async () => {
+      await saveTheme({ theme_color: el.dataset.color },
+                      profile.theme || 'system', el.dataset.color);
+    };
+  });
+  const cp = box.querySelector('#th-color');
+  if (cp) {
+    cp.value = profile.theme_color || '#3b82f6';
+    cp.onchange = async () => {
+      await saveTheme({ theme_color: cp.value },
+                      profile.theme || 'system', cp.value);
+    };
+  }
+  document.getElementById('themebtn').onclick = (e) => {
+    e.stopPropagation();
+    menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+  };
+  document.addEventListener('click', (e) => {
+    if (!box.contains(e.target)) menu.style.display = 'none';
+  });
+}
+
+async function saveTheme(patch, mode, color) {
+  try {
+    Auth.profile = Object.assign(Auth.profile || {}, patch);
+    await Api.put('/api/v1/me/profile', patch);
+  } catch (e) { UI.toast('主题保存失败：' + e.message, true); }
+  applyTheme(mode, color);
+  if (Router.current) Router.dispatch();
+}
+
 const ROLE_NAMES = { admin: '超级管理员', manager: '管理员', operator: '操作员', viewer: '浏览者' };
 
 function avatarColor(name) {
@@ -309,7 +391,7 @@ const AgentDetailPage = Object.assign(new Page(), {
         plugins: { legend: { display: false }, tooltip: { enabled: false } } }
     }));
   },
-  diskColor(p) { return p >= 85 ? '#e5534b' : p >= 70 ? '#f5a623' : '#4a9eff'; },
+  diskColor(p) { return p >= 85 ? cssVar('--bad', '#e5534b') : p >= 70 ? cssVar('--warn', '#f5a623') : cssVar('--accent', '#4a9eff'); },
   async refresh() {
     const d = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid));
     let si = null, siTs = 0;
@@ -421,8 +503,8 @@ const AgentDetailPage = Object.assign(new Page(), {
 
     if (si) {
       const self = this;
-      this.spark('si-mem', this.memHist, '#4a9eff');
-      this.spark('si-cpu', this.cpuHist, '#f5a623');
+      this.spark('si-mem', this.memHist, cssVar('--accent', '#4a9eff'));
+      this.spark('si-cpu', this.cpuHist, cssVar('--warn', '#f5a623'));
       const c = document.getElementById('si-disk');
       if (c && window.Chart) {
         const labels = (si.mounts || []).map(m => m.mount);
@@ -437,11 +519,11 @@ const AgentDetailPage = Object.assign(new Page(), {
           type: 'bar',
           data: { labels: labels, datasets: [
             { label: '已用', data: used, backgroundColor: colors, minBarLength: 2, stack: 's' },
-            { label: '空闲', data: free, backgroundColor: '#2b3038', stack: 's' },
+            { label: '空闲', data: free, backgroundColor: cssVar('--border', '#2b3038'), stack: 's' },
           ] },
           options: { indexAxis: 'y', animation: false, responsive: true,
             scales: { x: { stacked: true, max: maxT, display: false },
-                      y: { stacked: true, ticks: { color: '#8b929c' }, grid: { display: false } } },
+                      y: { stacked: true, ticks: { color: cssVar('--chart-axis', '#8b929c') }, grid: { display: false } } },
             plugins: { legend: { display: false } } }
         }));
       }
@@ -1004,7 +1086,10 @@ const ProfilePage = Object.assign(new Page(), {
         Auth.profile = await Api.put('/api/v1/me/profile', body);
         Auth.me.display_name = Auth.profile.display_name;
         Auth.me.avatar_color = Auth.profile.avatar_color;
-        UI.renderUser();
+        Auth.profile = Auth.profile || {};
+    applyTheme(Auth.profile.theme, Auth.profile.theme_color);
+    UI.renderUser();
+    themeMenu();
         UI.toast('已保存');
       } catch (e) { UI.toast('保存失败：' + e.message, true); }
     };
@@ -1173,7 +1258,10 @@ async function boot() {
     if (menu && !document.getElementById('menu-profile')) {
       menu.insertAdjacentHTML('afterbegin', '<a href="#/profile" id="menu-profile">个人设置</a>');
     }
+    Auth.profile = Auth.profile || {};
+    applyTheme(Auth.profile.theme, Auth.profile.theme_color);
     UI.renderUser();
+    themeMenu();
     btn.onclick = (e) => {
       e.stopPropagation();
       if (menu) menu.style.display = menu.style.display === 'none' ? '' : 'none';
