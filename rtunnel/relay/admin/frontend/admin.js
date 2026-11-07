@@ -689,14 +689,6 @@ async function boot() {
   Router.start();
 }
 
-Router.register(/^#\/clients$/, ClientsPage, '客户端 A');
-Router.register(/^#\/streams$/, StreamsPage, '会话');
-Router.register(/^#\/certs$/, CertsPage, '证书');
-Router.register(/^#\/acl$/, AclPage, 'ACL');
 Router.register(/^#\/accounts$/, AccountsPage, '账号');
-Router.register(/^#\/audit$/, AuditPage, '审计');
-Router.register(/^#\/files(?:\?.*)?$/, FilesPage, '文件');
-Router.register(/^#\/terminal\/([^/]+)$/, TerminalPage, '终端');
-Router.register(/^#\/settings$/, SettingsPage, '设置');
 Router.register(/^#\/profile$/, ProfilePage, '个人设置');
 window.addEventListener('load', boot);

@@ -816,3 +816,13 @@ const SettingsPage = Object.assign(new Page(), {
 
 
 Router.register(/^#\/agents\/([^/]+)$/, AgentDetailPage, '设备详情');
+
+// 路由注册（页面定义在本文件）
+Router.register(/^#\/clients$/, ClientsPage, '客户端 A');
+Router.register(/^#\/streams$/, StreamsPage, '会话');
+Router.register(/^#\/certs$/, CertsPage, '证书');
+Router.register(/^#\/acl$/, AclPage, 'ACL');
+Router.register(/^#\/audit$/, AuditPage, '审计');
+Router.register(/^#\/files(?:\?.*)?$/, FilesPage, '文件');
+Router.register(/^#\/terminal\/([^/]+)$/, TerminalPage, '终端');
+Router.register(/^#\/settings$/, SettingsPage, '设置');
