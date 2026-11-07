@@ -42,7 +42,6 @@ public:
     std::vector<double> cpu_cores;
     std::vector<unsigned long long> cpu_last_tot, cpu_last_idle;
     std::string  args_line;         // 启动参数（展示/排障）
-    long long    started_ms = 0;
     int          max_idle = 0;      // 无会话空闲多少秒后退出（0=常驻，按需 agent 用）
     uint64_t     last_active_ms = 0;
     int          had_stream = 0;       // 是否用过（用过后无会话快速退出）

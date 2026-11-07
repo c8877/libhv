@@ -355,8 +355,7 @@ const AgentDetailPage = Object.assign(new Page(), {
                   '序列号': UI.esc(String(si.cert_serial || '')), '状态': si.cert_valid ? '有效' : '已过期' })
         : '<div style="padding:12px;color:var(--muted)">未启用 mTLS</div>';
       const runtime = UI.kv({
-        'agent 版本': UI.esc(si.version || ''), 'pid': si.pid,
-        '启动时间': new Date(si.started_ms).toLocaleString(),
+        'agent 版本': UI.esc(si.version || ''),
         '启动参数': '<code style="font-size:12px">' + UI.esc(si.args || '') + '</code>',
         '架构 / 内核': UI.esc((si.machine || '') + ' / ' + (si.kernel || '')),
         'CPU 型号': UI.esc((si.cpu_model || '') + ' · ' + (cpu.cores || []).length + ' 核'),

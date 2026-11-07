@@ -351,8 +351,6 @@ void AgentApp::sendSysinfo() {
     agentSampleCpu(this);
     json j;
     j["version"] = hv_version();
-    j["pid"] = (int)getpid();
-    j["started_ms"] = started_ms;
     j["args"] = args_line;
 
     struct utsname u;
@@ -571,7 +569,6 @@ void AgentApp::onLinkDown() {
 // ---------------------------------------------------------------- 入口
 
 int AgentApp::run(int argc, char** argv) {
-    started_ms = (long long)time(NULL) * 1000;
     for (int i = 0; i < argc; ++i) {
         if (i) args_line += " ";
         args_line += argv[i];
