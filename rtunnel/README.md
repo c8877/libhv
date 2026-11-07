@@ -106,20 +106,9 @@ RTUNNEL_UDS=1 make rtunnel_test    # 本地入口走 UDS（需要 -DENABLE_UDS=O
 
 relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，独立 worker 线程）：
 
-- 只读 API：`/api/v1/overview`、`/api/v1/agents`、`/api/v1/agents/{devid}`、
-  `/api/v1/clients`、`/api/v1/streams`；
-- 操作 API：`DELETE /api/v1/streams/{a_sid}`（踢会话）、`POST /api/v1/agents/{devid}/kick`
-  （强制下线）、`GET/PUT /api/v1/acl/file`、`POST /api/v1/acl/reload`；
-- 证书 API：`GET /api/v1/certs`、`POST /api/v1/certs/issue`（OpenSSL 签发，EC P-256）、
-  `POST /api/v1/certs/sign`（上传 CSR 签名，私钥不出设备，身份取 SAN 缺省回退 CN）、
-  `POST /api/v1/certs/revoke`（吊销即刻生效：踢在线连接 + 后续 AUTH 拒绝）；
-- 其它：`GET /metrics`（Prometheus 文本指标）、`POST /api/v1/shutdown`（复用 drain 优雅退出）；
-- 文件管理：`GET /api/v1/files?sort=name|size|mtime&order=asc|desc`（列表+排序）、
-  `POST /api/v1/files/{name}`（raw body 上传，≤32MiB）、`GET /api/v1/files/{name}`（下载）、
-  `DELETE /api/v1/files/{name}`（删除）；目录由 `--admin-file-dir D` 指定，
-  文件名白名单防目录穿越，写入走 tmp+rename 原子替换；operator 上传/下载，manager/admin 删除；
-- 前端：`http://127.0.0.1:9443/`（侧边栏 + hash 路由；`admin.html/admin.js/admin.css`
-  编译期内嵌，`--admin-docroot DIR` 可改为磁盘读取便于调试）；
+- 能力：概览、设备/会话、踢会话/下线、ACL、证书签发/吊销、文件、审计、系统设置
+- API 与权限矩阵：见 `docs/design/rtunnel.md` §13.3
+- 前端：`http://127.0.0.1:9443/`（编译期内嵌，`--admin-docroot DIR` 可改磁盘读取）
 - 鉴权：`--admin-token T` 仅用于首次初始化管理员；之后使用账号密码登录
   （SQLite + HttpOnly 会话）；非回环监听必须配置 `--admin-token`；
 - 证书配置：`--admin-ca-cert C --admin-ca-key K --admin-cert-dir D`（台账 index.txt、
@@ -227,7 +216,7 @@ http://B:9443/device/<devid>/<port>/<path>
 | `--client-token T` | 全局客户端 token（`--client-users` 的简化版） |
 | `--shell-users u1,u2` / `*` | 允许 `OPEN_SHELL` 的用户；默认空 = 全部拒绝 |
 | `--tls-cert/--tls-key [--tls-ca]` | 服务端 TLS；给 `--tls-ca` 即要求客户端证书（mTLS） |
-| `--admin ADDR --admin-token T` | 管理台监听与 Bearer token |
+| `--admin ADDR --admin-token T` | 管理台监听；token 仅用于首次初始化 |
 | `--admin-db PATH` | SQLite 账号库，默认 `rtunnel-admin.db`（需 OpenSSL 构建） |
 | `--admin-shell-user U --admin-shell-token T` | Web 终端连本机 relay 的身份与凭证 |
 | `--admin-ca-cert/--admin-ca-key/--admin-cert-dir` | 证书签发 CA 与台账目录 |
@@ -278,7 +267,7 @@ printf 'dev:tok-dev\nops:tok-ops\n' > /tmp/rtunnel/clients.txt
 
 ```bash
 ssh -p 16022 root@127.0.0.1                         # 到板子
-# 管理台：http://B:9443/ ，Bearer token 打开后 → 客户端列表 Shell = 本机 shell
+# 管理台：http://B:9443/ ，初始化 admin 后登录；客户端列表 Shell = 本机 shell
 ```
 
 ## 故障排查

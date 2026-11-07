@@ -80,7 +80,6 @@ private:
     // api_settings.cpp
     void loadSettings();
     int  settingInt(const std::string& key, int def);
-    std::string settingStr(const std::string& key, const std::string& def);
     void handleSettingsGet(const HttpContextPtr& ctx);
     void handleSettingsSet(const HttpContextPtr& ctx);
     void handleProfileGet(const HttpContextPtr& ctx);

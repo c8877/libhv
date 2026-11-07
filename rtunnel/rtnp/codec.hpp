@@ -82,7 +82,7 @@ private:
 int send(hio_t* io, uint8_t type, uint32_t sid, const void* payload, uint16_t len, uint16_t flags = 0);
 
 // OPEN 的 flags 扩展位：请求设备侧直接起 shell（forkpty），而非转发到本地 TCP 端口。
-// relay 只透传不解释；旧 agent 无此能力时按协议错误拒绝。
+// relay 只透传不解释；agent 不支持时按协议错误拒绝。
 constexpr uint16_t OPEN_SHELL = 0x0001;
 
 } // namespace rtnp

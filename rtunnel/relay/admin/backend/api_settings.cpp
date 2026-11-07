@@ -70,12 +70,6 @@ int AdminServer::settingInt(const std::string& key, int def) {
     return atoi(it->second.c_str());
 }
 
-std::string AdminServer::settingStr(const std::string& key, const std::string& def) {
-    std::lock_guard<std::mutex> lk(settings_mu_);
-    auto it = settings_.find(key);
-    return it == settings_.end() ? def : it->second;
-}
-
 void AdminServer::handleSettingsGet(const HttpContextPtr& ctx) {
     std::lock_guard<std::mutex> lk(settings_mu_);
     nlohmann::json j = nlohmann::json::object();

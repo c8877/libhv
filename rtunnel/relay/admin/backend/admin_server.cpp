@@ -162,7 +162,7 @@ bool AdminServer::wsAuthorize(const HttpRequestPtr& req, AdminActor& actor, std:
             return true;
         }
     }
-    // 兼容：紧急 token / 初始化前的 token
+    // 初始化前仅放行 /api/v1/setup*
     std::string auth = req->GetHeader("Authorization");
     const std::string prefix = "Bearer ";
     if (auth.compare(0, prefix.size(), prefix) == 0) {

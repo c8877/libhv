@@ -371,37 +371,8 @@ sequenceDiagram
 
 ### 8.4 状态机
 
-**连接**
-
-```mermaid
-stateDiagram-v2
-    [*] --> TCP_CONNECTED: TCP connect 成功
-    TCP_CONNECTED --> HELLO_SENT: 发 HELLO
-    HELLO_SENT --> AUTH_SENT: 收到 HELLO_ACK
-    HELLO_SENT --> CLOSED: 版本不匹配/超时 5s
-    AUTH_SENT --> READY: AUTH_OK
-    AUTH_SENT --> CLOSED: AUTH_FAIL/超时 10s
-    READY --> DRAINING: 主动关闭（等待写队列排空）
-    DRAINING --> CLOSED: 帧写完且 stream 回收
-    DRAINING --> CLOSED: 关闭超时 10s
-    READY --> CLOSED: 心跳超时/TCP 断/协议错误
-```
-
-**会话流**
-
-```mermaid
-stateDiagram-v2
-    [*] --> OPENING: 发/收 OPEN
-    OPENING --> OPEN: OPEN_OK
-    OPENING --> CLOSED: OPEN_FAIL/RESET/超时 15s
-    OPENING --> CLOSED: A 取消（RESET/CANCELLED）
-    OPEN --> HALF_CLOSED: 任一端 CLOSE
-    HALF_CLOSED --> HALF_CLOSED: 反向仍有 DATA
-    HALF_CLOSED --> CLOSED: 双向 CLOSE
-    HALF_CLOSED --> CLOSED: 60s 未收到对端 CLOSE
-    OPEN --> CLOSED: RESET/对端连接断开
-    CLOSED --> [*]
-```
+连接与会话的状态迁移见 [`rtunnel-diagrams.md`](rtunnel-diagrams.md) 第 5 节
+（Mermaid 与 ASCII 各一份），此处不再重复。
 
 ### 8.5 devid 命名规则
 
@@ -566,7 +537,7 @@ operator（Shell、Web、文件上传下载）/ viewer（仅概览与设备列�
 | WS | `/ws/shell?devid=..&token=..` | 浏览器终端（xterm.js） |
 | POST | `/api/v1/shutdown` | 优雅退出 |
 
-### 13.3 Web 终端
+### 13.4 Web 终端
 
 - 身份固定为 `--admin-shell-user`，浏览器**不能**指定用户（防冒充）；
 - 设备列表 → `devid`；客户端列表 → `a:<user>`（触发 §12.1 按需 agent）；
@@ -574,7 +545,7 @@ operator（Shell、Web、文件上传下载）/ viewer（仅概览与设备列�
 - 输入/输出走 `DATA`，尺寸走 `RESIZE`；
 - 管理台是 **HTTP 明文**：非回环部署建议加 TLS 反代或只绑回环。
 
-### 13.4 设备 Web 代理
+### 13.5 设备 Web 代理
 
 `/device/<devid>/<port>/<path>`：admin 用会话身份做一次 `OPEN(devid, port)`，把 HTTP/WS 双向转发。
 
