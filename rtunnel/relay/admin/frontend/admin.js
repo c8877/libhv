@@ -1280,6 +1280,7 @@ async function boot() {
     applyTheme(Auth.profile.theme, Auth.profile.theme_color);
     UI.renderUser();
     themeMenu();
+    updateThemeBtn();
     themeMenu();
     btn.onclick = (e) => {
       e.stopPropagation();
