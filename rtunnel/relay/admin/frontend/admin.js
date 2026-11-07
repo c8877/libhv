@@ -128,7 +128,7 @@ const Router = {
     { hash: '#/accounts', title: '账号', icon: '☺' },
     { hash: '#/files', title: '文件', icon: '⬇' },
     { hash: '#/audit', title: '审计', icon: '≣' },
-    { hash: '#/settings', title: '系统配置', icon: '⚙' },
+    { hash: '#/settings', title: '设置', icon: '⚙' },
   ],
   register(re, page, title) { this.routes.push({ re, page, title }); },
   go(h) { location.hash = h; },
@@ -1202,6 +1202,6 @@ Router.register(/^#\/accounts$/, AccountsPage, '账号');
 Router.register(/^#\/audit$/, AuditPage, '审计');
 Router.register(/^#\/files(?:\?.*)?$/, FilesPage, '文件');
 Router.register(/^#\/terminal\/([^/]+)$/, TerminalPage, '终端');
-Router.register(/^#\/settings$/, SettingsPage, '系统配置');
+Router.register(/^#\/settings$/, SettingsPage, '设置');
 Router.register(/^#\/profile$/, ProfilePage, '个人设置');
 boot();

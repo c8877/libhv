@@ -177,3 +177,12 @@ button:hover { filter: brightness(.96); }
 .cfg-row em { color: var(--muted); font-style: normal; font-size: 12px; }
 .cfg-actions { padding: 0 16px 16px; }
 button.danger { border-color: #e5534b; color: #e5534b; }
+
+/* 表单控件可见性 */
+.cfg-row input, .cfg-row select {
+  background: #2b3038; border: 1px solid rgba(255,255,255,.22); color: #e6e9ee;
+}
+.cfg-row input:focus, .cfg-row select:focus {
+  border-color: #4a9eff; outline: none; box-shadow: 0 0 0 2px rgba(74,158,255,.18);
+}
+.cfg-row input[type=color] { border: 1px solid rgba(255,255,255,.22); border-radius: 6px; background: #2b3038; }
