@@ -27,8 +27,8 @@ const AgentDetailPage = Object.assign(new Page(), {
     if (!c || !window.Chart) return;
     this.charts.push(new Chart(c.getContext('2d'), {
       type: 'line',
-      data: { labels: data.map((_, i) => i),
-        datasets: [{ data: data, borderColor: color, backgroundColor: color + '26',
+      data: { labels: (data.length > 1 ? data : [data[0] || 0, data[0] || 0]).map((_, i) => i),
+        datasets: [{ data: data.length > 1 ? data : [data[0] || 0, data[0] || 0], borderColor: color, backgroundColor: color + '26',
           fill: true, pointRadius: 0, borderWidth: 2, tension: .3 }] },
       options: { animation: false, responsive: true,
         scales: { x: { display: false }, y: { display: false, min: 0, max: 100 } },
@@ -191,14 +191,14 @@ const AgentDetailPage = Object.assign(new Page(), {
               const maxRight = 192;
               let nm = row.mount;
               ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
-              while (nm.length > 1 && 6 + ctx2.measureText(nm).width + 6 + bw > maxRight) {
+              while (nm.length > 1 && 6 + ctx2.measureText(nm).width + 10 + bw > maxRight) {
                 nm = nm.slice(0, -1);
               }
               if (nm !== row.mount) nm = nm.replace(/.$/, '…');
               ctx2.fillStyle = cssVar('--chart-axis', '#8b929c');
               ctx2.fillText(nm, 6, y0);
               const nmW = ctx2.measureText(nm).width;
-              const bx = 6 + nmW + 6;
+              const bx = 6 + nmW + 10;
               drawTagPill(ctx2, bx, y0, fsShort,
                           fsColors[row.fstype] || 'rgba(139,146,156,.14)',
                           cssVar('--fg', '#e6e9ee'));
