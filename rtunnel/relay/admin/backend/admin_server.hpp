@@ -23,8 +23,7 @@ struct TerminalSession;
 
 struct AdminConfig {
     std::string addr;        // 形如 127.0.0.1:9443
-    std::string token;       // 单个全权 token（等价 admin）
-    std::string users;       // token:role 账户文件（viewer/operator/admin）
+    std::string token;       // 仅首次初始化使用的 token
     std::string docroot;     // 前端磁盘目录（调试用，空则内嵌）
     std::string ca_cert;     // 签发用 CA 证书
     std::string ca_key;      // 签发用 CA 私钥
@@ -86,6 +85,7 @@ private:
     void handleProfileSet(const HttpContextPtr& ctx);
     void handleLogoutAll(const HttpContextPtr& ctx);
     void cleanupAudit(int days);
+    void cleanupUploads();
     void handleClients(const HttpContextPtr& ctx);
     void handleStreams(const HttpContextPtr& ctx);
     // api_ops.cpp

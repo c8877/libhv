@@ -42,6 +42,7 @@ public:
     bool getSession(const std::string& sid_hash, DbUser& out, long long now_ms);
     bool dropSession(const std::string& sid_hash);
     bool dropUserSessions(long long user_id);
+    bool purgeExpiredSessions(long long now_ms);
 
     bool bindDevice(const std::string& devid, long long owner_id);
     bool unbindDevice(const std::string& devid);

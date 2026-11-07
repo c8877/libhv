@@ -434,6 +434,16 @@ bool AdminDb::dropUserSessions(long long user_id) {
     return true;
 }
 
+bool AdminDb::purgeExpiredSessions(long long now_ms) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, "DELETE FROM sessions WHERE expire_ms <= ?", -1, &st, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_int64(st, 1, now_ms);
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE;
+}
+
 bool AdminDb::bindDevice(const std::string& devid, long long owner_id) {
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;

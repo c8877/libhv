@@ -520,7 +520,7 @@ void AgentApp::sendSysinfo() {
             std::istringstream is(line);
             std::string dev, mnt, fstype;
             if (!(is >> dev >> mnt >> fstype)) continue;
-            if (fstype == "squashfs" || fstype == "overlay" ||
+            if (fstype == "squashfs" || (fstype == "overlay" && mnt != "/") ||
                 mnt.rfind("/run", 0) == 0 || mnt.rfind("/dev/shm", 0) == 0 ||
                 mnt.rfind("/sys", 0) == 0 ||
                 fstype == "proc" || fstype == "sysfs" || fstype == "devtmpfs" ||

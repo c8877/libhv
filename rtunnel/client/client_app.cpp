@@ -340,7 +340,7 @@ void ClientApp::spawnAgent(const char* devid) {
     snprintf(port_s, sizeof(port_s), "%d", port);
     snprintf(idle_s, sizeof(idle_s), "%d", agent_idle);
 
-    const char* argv[24];
+    const char* argv[32];
     int argc = 0;
     argv[argc++] = path;
     argv[argc++] = "--server"; argv[argc++] = host;
@@ -348,6 +348,7 @@ void ClientApp::spawnAgent(const char* devid) {
     argv[argc++] = "--devid";  argv[argc++] = devid;
     argv[argc++] = "--allow-shell";
     argv[argc++] = "--max-idle"; argv[argc++] = idle_s;
+    if (!agent_config.empty()) { argv[argc++] = "--config-file"; argv[argc++] = agent_config.c_str(); }
     if (tls_ca[0])   { argv[argc++] = "--tls-ca";   argv[argc++] = tls_ca; }
     if (tls_cert[0]) { argv[argc++] = "--tls-cert"; argv[argc++] = tls_cert; }
     if (tls_key[0])  { argv[argc++] = "--tls-key";  argv[argc++] = tls_key; }
@@ -540,6 +541,8 @@ int ClientApp::run(int argc, char** argv) {
             snprintf(agent_path, sizeof(agent_path), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--agent-idle") == 0 && i + 1 < argc) {
             agent_idle = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--agent-config") == 0 && i + 1 < argc) {
+            agent_config = argv[++i];
         } else if (strcmp(argv[i], "--token") == 0 && i + 1 < argc) {
             snprintf(auth_token, sizeof(auth_token), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--tls-ca") == 0 && i + 1 < argc) {
@@ -556,7 +559,7 @@ int ClientApp::run(int argc, char** argv) {
             fprintf(stderr,
                 "Usage: %s --user U [--token T] [--server H] [--port P] [--socks5 HOST:PORT]\n"
                 "          [--forward 127.0.0.1:16022=devid:22 ...]\n"
-                "          [--allow-shell [--agent-path P] [--agent-idle S]] [--verbose]\n"
+                "          [--allow-shell [--agent-path P] [--agent-idle S] [--agent-config F]] [--verbose]\n"
                 "          shell <devid>   # 直连设备免密 shell\n",
                 argv[0]);
             return 1;

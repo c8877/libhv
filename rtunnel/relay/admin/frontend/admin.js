@@ -480,7 +480,7 @@ const AgentDetailPage = Object.assign(new Page(), {
         '<div class="si-legend">已用 ' + kb(total - avail) + ' / ' + kb(total) +
         ' · Swap ' + kb(si.swap_total_kb) + '</div></div></div>' +
         '<div class="panel"><div class="panel-head"><h2>CPU</h2>' +
-        '<span class="spacer"></span><span class="si-num">' + (cpu.usage || 0).toFixed(0) + '%</span></div>' +
+        '<span class="spacer"></span><span class="si-num">' + ((cpu.cores || []).length ? (cpu.usage || 0).toFixed(0) + '%' : '—') + '</span></div>' +
         '<div class="si-body"><canvas id="si-cpu" height="56"></canvas>' +
         '<div class="si-legend">load ' + (si.load1 || 0).toFixed(2) + ' / ' +
         (si.load5 || 0).toFixed(2) + ' / ' + (si.load15 || 0).toFixed(2) +
@@ -585,9 +585,10 @@ const AgentDetailPage = Object.assign(new Page(), {
           if (shellAllowed) body.shell = document.getElementById('caps-shell').checked;
           msg.textContent = '下发中…';
           try {
-            await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/caps', body);
+            const r = await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/caps', body);
             close();
-            UI.toast('能力已更新');
+            if (r && r.persisted === false) UI.toast('已生效，但未能写入配置文件，重启后会丢失', true);
+            else UI.toast('能力已更新');
             this.refresh();
           } catch (e) { msg.textContent = '失败：' + e.message; }
         };

@@ -299,6 +299,9 @@ def main():
 
     procs = []
     admin_port = free_port()
+    agentcfg = os.path.join(logdir, "agent-config.json")
+    try: os.remove(agentcfg)
+    except OSError: pass
     aclfile = os.path.join(logdir, "acl.txt")
     with open(aclfile, "w") as f:
         f.write("# initial: no file-based acl\n")
@@ -322,14 +325,15 @@ def main():
         agent = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-agent"), "--server", "127.0.0.1", "--port", str(relay_port),
              "--devid", "dev1", "--allow", "%d,%d" % (echo_port, close_port),
-             "--allow-shell"] + tls_agent + ["--verbose"],
+             "--allow-shell", "--config-file", agentcfg] + tls_agent + ["--verbose"],
             stdout=logs["agent"], stderr=subprocess.STDOUT, env=env)
         procs.append(agent)
 
         client = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-client"), "--server", "127.0.0.1", "--port", str(relay_port),
              "--user", "tester", "--token", "tok-tester", "--allow-shell",
-             "--agent-idle", "5", "--socks5", socks1_arg] + tls_tester + ["--verbose"],
+             "--agent-idle", "5", "--agent-config", agentcfg,
+             "--socks5", socks1_arg] + tls_tester + ["--verbose"],
             stdout=logs["client"], stderr=subprocess.STDOUT, env=env)
         procs.append(client)
 

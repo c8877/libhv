@@ -151,7 +151,9 @@ void AdminServer::handleLogin(const HttpContextPtr& ctx) {
         return;
     }
     ctx->response->headers["Set-Cookie"] =
-        "rt_sid=" + sid + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" + std::to_string(hours * 3600);
+        "rt_sid=" + sid + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" +
+        std::to_string(hours * 3600) +
+        (ctx->header("X-Forwarded-Proto") == "https" ? "; Secure" : "");
     json j;
     j["username"] = u.username;
     j["role"] = u.role;
@@ -162,7 +164,8 @@ void AdminServer::handleLogin(const HttpContextPtr& ctx) {
 void AdminServer::handleLogout(const HttpContextPtr& ctx) {
     std::string sid = cookieVal(ctx, "rt_sid");
     if (!sid.empty() && db_.ok()) db_.dropSession(AdminDb::sha256Hex(sid));
-    ctx->response->headers["Set-Cookie"] = "rt_sid=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0";
+    ctx->response->headers["Set-Cookie"] = "rt_sid=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0" +
+        std::string(ctx->header("X-Forwarded-Proto") == "https" ? "; Secure" : "");
     ctx->send("{\"ok\":true}");
 }
 

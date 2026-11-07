@@ -153,6 +153,14 @@ int AdminServer::requireRole(const HttpContextPtr& ctx, int need, std::string& r
 bool AdminServer::wsAuthorize(const HttpRequestPtr& req, AdminActor& actor, std::string& role) {
     actor = AdminActor{};
     role.clear();
+    std::string origin = req->GetHeader("Origin");
+    if (!origin.empty()) {
+        std::string host = req->GetHeader("Host");
+        if (host.empty() || origin.find(host) == std::string::npos) {
+            logf_("[admin] ws origin mismatch: %s host=%s", origin.c_str(), host.c_str());
+            return false;
+        }
+    }
     const HttpCookie& ck = req->GetCookie("rt_sid");
     if (!ck.name.empty() && db_.ok()) {
         DbUser u;
@@ -465,10 +473,17 @@ int AdminServer::start(const AdminConfig& cfg) {
         mkdir(cfg_.cert_dir.c_str(), 0700);
         relay_->loadRevoked();
         audit_.init(cfg_.cert_dir + "/audit.log");
+        db_.purgeExpiredSessions(AdminDb::nowMs());
+        if (cfg_.addr.rfind("0.0.0.0", 0) == 0) {
+            logf_("[admin] WARNING: 明文监听 %s，请使用反向代理 TLS 或绑定 127.0.0.1",
+                  cfg_.addr.c_str());
+        }
         std::thread([this]() {
             for (;;) {
                 std::this_thread::sleep_for(std::chrono::hours(1));
                 cleanupAudit(settingInt("audit.retention_days", 30));
+                db_.purgeExpiredSessions(AdminDb::nowMs());
+                cleanupUploads();
             }
         }).detach();
     }

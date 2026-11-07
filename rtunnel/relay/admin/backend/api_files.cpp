@@ -122,13 +122,28 @@ void AdminServer::handleFileDownload(const HttpContextPtr& ctx) {
         ctx->send("{\"error\":\"file too large\"}");
         return;
     }
-    std::string body;
-    body.resize(n);
-    if (n > 0 && fread(&body[0], 1, n, fp) != (size_t)n) body.clear();
-    fclose(fp);
     ctx->response->content_type = APPLICATION_OCTET_STREAM;
     ctx->response->headers["Content-Disposition"] = "attachment; filename=\"" + name + "\"";
-    ctx->response->body = body;
+    hv::HttpResponseWriter* w = ctx->writer.get();
+    if (!w) {
+        fclose(fp);
+        ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+        ctx->send("{\"error\":\"no writer\"}");
+        return;
+    }
+    w->Begin();
+    w->EndHeaders("Transfer-Encoding", "chunked");
+    char buf[64 * 1024];
+    size_t left = (size_t)n;
+    while (left > 0) {
+        size_t want = left > sizeof(buf) ? sizeof(buf) : left;
+        size_t got = fread(buf, 1, want, fp);
+        if (got == 0) break;
+        if (w->WriteChunked(buf, (int)got) < 0) break;
+        left -= got;
+    }
+    fclose(fp);
+    w->End();
 }
 
 void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string& role) {
@@ -159,6 +174,7 @@ void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string&
         size_t off = (size_t)strtoull(ctx->param("offset", "0").c_str(), NULL, 10);
         const std::string& body = ctx->body();
         if (off + body.size() > max_ul) {
+            unlink(tmp.c_str());
             ctx->response->status_code = HTTP_STATUS_PAYLOAD_TOO_LARGE;
             ctx->send("{\"error\":\"file too large (max " +
                       std::to_string(settingInt("file.max_upload_mb", 32)) + "MiB)\"}");
@@ -174,6 +190,7 @@ void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string&
             fseek(fp, 0, SEEK_END);
             if ((size_t)ftell(fp) != off) {
                 fclose(fp);
+                unlink(tmp.c_str());
                 ctx->response->status_code = HTTP_STATUS_CONFLICT;
                 ctx->send("{\"error\":\"offset mismatch\"}");
                 return;

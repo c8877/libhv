@@ -5,6 +5,7 @@
 // 长连接（HELLO/AUTH/心跳/重连/收帧）由 common/TunnelLink 承担。
 
 #include "common/tunnel_link.hpp"
+#include <string>
 
 enum ClientStreamState {
     CS_HANDSHAKE = 0,
@@ -54,7 +55,8 @@ public:
     int         socks_enabled = 0;
     int         allow_shell = 0;            // 允许 B 通知本机按需拉起 agent（默认关）
     char        agent_path[512] = {0};      // rtunnel-agent 路径（默认同目录）
-    int         agent_idle = 15;            // 子 agent 未使用时多少秒自退
+    int         agent_idle = 15;
+    std::string agent_config;              // 传递给按需 agent 的配置文件            // 子 agent 未使用时多少秒自退
     struct AgentChild {
         char  devid[128] = {0};
         pid_t pid = -1;

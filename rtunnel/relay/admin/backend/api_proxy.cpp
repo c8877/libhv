@@ -294,6 +294,7 @@ void AdminServer::handleDeviceProxy(const HttpContextPtr& ctx) {
         if (t == 0x13 && !p.empty()) {
             raw += p;
             sendWindow(fd, 1, (uint32_t)p.size());
+            if (raw.size() > 64 * 1024) break;   // 响应头上限
             hdrEnd = raw.find("\r\n\r\n");
             if (hdrEnd != std::string::npos) break;
         } else if (t == 0x15 || t == 0x16) break;
