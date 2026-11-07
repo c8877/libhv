@@ -859,7 +859,7 @@ const FilesPage = Object.assign(new Page(), {
       const status = document.getElementById('upload-status');
       const bar = document.getElementById('upload-progress');
       if (!fi) { UI.toast('请选择文件', true); return; }
-      // 客户端先挡：不要等传完 32MiB 才报错
+      // 客户端先挡：不要等传完才报错
       if (fi.size > MAX_UPLOAD) {
         status.textContent = '文件 ' + UI.bytes(fi.size) + ' 超过 ' + uploadLimitMb() + ' MiB 上限';
         UI.toast('文件太大（' + UI.bytes(fi.size) + '），上限 ' + uploadLimitMb() + ' MiB', true);
