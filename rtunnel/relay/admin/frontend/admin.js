@@ -514,7 +514,7 @@ const AgentDetailPage = Object.assign(new Page(), {
         '<div class="panel si-disk-card"><div class="panel-head"><h2>存储</h2>' +
         '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">条长按最大分区归一</span></div>' +
         '<div class="si-body"><canvas id="si-disk" height="' +
-          Math.min(420, Math.max(140, (si.mounts || []).length * 48 + 40)) + '"></canvas></div></div>' +
+          Math.min(260, Math.max(120, (si.mounts || []).length * 26 + 24)) + '"></canvas></div></div>' +
         '</div>';
 
       const certText = si.mtls

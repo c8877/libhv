@@ -161,7 +161,7 @@ button:hover { filter: brightness(.96); }
   grid-template-rows: auto auto; gap: 16px; margin-bottom: 16px; align-items: stretch; }
 .si-grid .si-mem { grid-column: 1; grid-row: 1; }
 .si-grid .si-cpu { grid-column: 1; grid-row: 2; }
-.si-grid .si-disk-card { grid-column: 2; grid-row: 1 / span 2; }
+.si-grid .si-disk-card { grid-column: 2; grid-row: 1 / span 2; align-self: start; }
 .si-body { padding: 12px 16px 16px; }
 .si-legend { margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.7; }
 .si-cores { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--muted); }
