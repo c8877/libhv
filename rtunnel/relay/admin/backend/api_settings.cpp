@@ -11,21 +11,22 @@
 
 namespace {
 
-struct Def { const char* key; const char* val; int lo; int hi; };
+struct Def { const char* key; const char* val; int lo; int hi;
+             const char* label; const char* unit; const char* group; };
 const Def kDefs[] = {
-    {"file.max_upload_mb",   "32",  1, 512},
-    {"file.max_download_mb", "32",  1, 512},
-    {"proxy.max_concurrent", "32",  1, 256},
-    {"proxy.sysinfo_wait_ms","2000",500, 10000},
-    {"proxy.config_wait_ms", "2000",500, 10000},
-    {"auth.session_hours",   "12",  1, 168},
-    {"auth.password_min",    "8",   6, 32},
-    {"auth.lock_fails",      "5",   1, 20},
-    {"auth.lock_minutes",    "5",   1, 120},
-    {"term.max_sessions",    "4",   1, 32},
-    {"audit.retention_days", "30",  7, 365},
-    {"ui.site_title",        "rtunnel", 0, 0},
-    {"ui.refresh_seconds",   "0",   0, 300},
+    {"file.max_upload_mb",   "32",  1, 512,      "单文件上传上限", "MiB", "文件"},
+    {"file.max_download_mb", "32",  1, 512,      "单文件下载上限", "MiB", "文件"},
+    {"proxy.max_concurrent", "32",  1, 256,      "并发上限",       "条",  "代理"},
+    {"proxy.sysinfo_wait_ms","2000",500, 10000,  "SYSINFO 等待",   "ms",  "代理"},
+    {"proxy.config_wait_ms", "2000",500, 10000,  "CONFIG_ACK 等待","ms",  "代理"},
+    {"auth.session_hours",   "12",  1, 168,      "会话有效期",     "小时","账号安全"},
+    {"auth.password_min",    "8",   6, 32,       "密码最小长度",   "位",  "账号安全"},
+    {"auth.lock_fails",      "5",   1, 20,       "登录失败锁定",   "次",  "账号安全"},
+    {"auth.lock_minutes",    "5",   1, 120,      "锁定时长",       "分钟","账号安全"},
+    {"term.max_sessions",    "4",   1, 32,       "单账号最大终端数","个", "终端"},
+    {"audit.retention_days", "30",  7, 365,      "审计保留",       "天",  "审计"},
+    {"ui.site_title",        "rtunnel", 0, 0,    "站点标题",       "",    "展示"},
+    {"ui.refresh_seconds",   "0",   0, 300,      "详情默认刷新",   "秒（0=关闭）","展示"},
 };
 
 const Def* findDef(const std::string& k) {
@@ -74,6 +75,12 @@ void AdminServer::handleSettingsGet(const HttpContextPtr& ctx) {
     std::lock_guard<std::mutex> lk(settings_mu_);
     nlohmann::json j = nlohmann::json::object();
     for (auto& kv : settings_) j[kv.first] = kv.second;
+    nlohmann::json schema = nlohmann::json::array();
+    for (auto& d : kDefs) {
+        schema.push_back({{"key", d.key}, {"label", d.label}, {"unit", d.unit},
+                          {"group", d.group}, {"min", d.lo}, {"max", d.hi}});
+    }
+    j["_schema"] = schema;
     ctx->send(j.dump());
 }
 

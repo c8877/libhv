@@ -1033,31 +1033,28 @@ const SettingsPage = Object.assign(new Page(), {
   refreshInterval() { return 0; },
   async refresh() {
     const st = await Api.get('/api/v1/settings');
-    const num = (k, label, lo, hi, unit) =>
-      '<label class="cfg-row"><span>' + label + '</span><input type="number" data-k="' + k +
-      '" value="' + UI.esc(st[k] || '') + '" min="' + lo + '" max="' + hi + '"><em>' + unit + '</em></label>';
-    this.el.innerHTML =
-      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>文件</h2></div><div class="cfg-body">' +
-        num('file.max_upload_mb', '单文件上传上限', 1, 512, 'MiB') +
-        num('file.max_download_mb', '单文件下载上限', 1, 512, 'MiB') + '</div></div>' +
-      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>代理</h2></div><div class="cfg-body">' +
-        num('proxy.max_concurrent', '并发上限', 1, 256, '条') +
-        num('proxy.sysinfo_wait_ms', 'SYSINFO 等待', 500, 10000, 'ms') +
-        num('proxy.config_wait_ms', 'CONFIG_ACK 等待', 500, 10000, 'ms') + '</div></div>' +
-      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>账号安全</h2></div><div class="cfg-body">' +
-        num('auth.session_hours', '会话有效期', 1, 168, '小时') +
-        num('auth.password_min', '密码最小长度', 6, 32, '位') +
-        num('auth.lock_fails', '登录失败锁定', 1, 20, '次') +
-        num('auth.lock_minutes', '锁定时长', 1, 120, '分钟') + '</div></div>' +
-      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>终端</h2></div><div class="cfg-body">' +
-        num('term.max_sessions', '单账号最大终端数', 1, 32, '个') + '</div></div>' +
-      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>审计</h2></div><div class="cfg-body">' +
-        num('audit.retention_days', '审计保留', 7, 365, '天') + '</div></div>' +
-      '<div class="panel"><div class="panel-head"><h2>展示</h2></div><div class="cfg-body">' +
-        '<label class="cfg-row"><span>站点标题</span><input type="text" data-k="ui.site_title" value="' +
-        UI.esc(st['ui.site_title'] || 'rtunnel') + '"></label>' +
-        num('ui.refresh_seconds', '详情默认刷新', 0, 300, '秒（0=关闭）') +
-        '</div><div class="cfg-actions"><button class="primary" id="cfg-save">保存</button></div></div>';
+    const schema = st._schema || [];
+    const groups = [];
+    schema.forEach(d => { if (groups.indexOf(d.group) < 0) groups.push(d.group); });
+
+    let html = '';
+    groups.forEach(g => {
+      const rows = schema.filter(d => d.group === g).map(d => {
+        const isText = (d.min === 0 && d.max === 0);
+        const input = isText
+          ? '<input type="text" data-k="' + d.key + '" value="' + UI.esc(st[d.key] || '') + '">'
+          : '<input type="number" data-k="' + d.key + '" value="' + UI.esc(st[d.key] || '') +
+            '" min="' + d.min + '" max="' + d.max + '">';
+        return '<label class="cfg-row"><span>' + UI.esc(d.label) + '</span>' + input +
+          (d.unit ? '<em>' + UI.esc(d.unit) + '</em>' : '') + '</label>';
+      }).join('');
+      html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>' +
+        UI.esc(g) + '</h2></div><div class="cfg-body">' + rows + '</div></div>';
+    });
+    html += '<div class="panel"><div class="cfg-actions" style="padding-top:16px">' +
+      '<button class="primary" id="cfg-save">保存</button></div></div>';
+    this.el.innerHTML = html;
+
     document.getElementById('cfg-save').onclick = async () => {
       const body = {};
       document.querySelectorAll('#page .cfg-body [data-k]').forEach(inp => { body[inp.dataset.k] = inp.value; });
