@@ -2,6 +2,7 @@
 // 文件是 admin 自有资源（非 relay 状态），IO 直接在 admin worker 线程完成；
 // 审计照记。文件名白名单防目录穿越，写文件 tmp+rename 原子替换。
 #include "admin_server.hpp"
+#include "hash_util.hpp"
 #include "cpputil/json.hpp"
 
 #include <stdio.h>
@@ -9,9 +10,6 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <sys/stat.h>
-#if defined(WITH_OPENSSL)
-#include "openssl/evp.h"
-#endif
 #include <algorithm>
 #include <vector>
 
@@ -36,42 +34,6 @@ static std::string urlDecode(const std::string& in) {
     return out;
 }
 
-// 文件名白名单：禁止 / \ .. 开头点 和控制字符，允许 UTF-8（中文/空格等），最长 128 字节
-static bool validFileName(const std::string& s) {
-    if (s.empty() || s.size() > 128) return false;
-    if (s[0] == '.') return false;
-    if (s.find("..") != std::string::npos) return false;
-    for (unsigned char c : s) {
-        if (c < 0x20 || c == 0x7f) return false;
-        if (c == '/' || c == '\\') return false;
-    }
-    return true;
-}
-
-
-static std::string fileSha256(const std::string& path) {
-#if defined(WITH_OPENSSL)
-    FILE* fp = fopen(path.c_str(), "rb");
-    if (!fp) return std::string();
-    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
-    EVP_DigestInit_ex(ctx, EVP_sha256(), NULL);
-    char buf[64 * 1024];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) EVP_DigestUpdate(ctx, buf, n);
-    unsigned char md[32];
-    unsigned int mdlen = 0;
-    EVP_DigestFinal_ex(ctx, md, &mdlen);
-    EVP_MD_CTX_free(ctx);
-    fclose(fp);
-    static const char* hex = "0123456789abcdef";
-    std::string out;
-    for (unsigned int i = 0; i < mdlen; ++i) { out += hex[md[i] >> 4]; out += hex[md[i] & 0xF]; }
-    return out;
-#else
-    (void)path;
-    return std::string();
-#endif
-}
 
 struct FileEnt {
     std::string name;
@@ -85,7 +47,7 @@ static bool listDir(const std::string& dir, std::vector<FileEnt>& out) {
     struct dirent* de;
     while ((de = readdir(d)) != NULL) {
         std::string name = de->d_name;
-        if (!validFileName(name)) continue;
+        if (!adminValidFileName(name)) continue;
         struct stat st;
         std::string path = dir + "/" + name;
         if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) continue;
@@ -122,7 +84,7 @@ void AdminServer::handleFiles(const HttpContextPtr& ctx) {
         j["mtime_ms"] = f.mtime_ms;
         std::string sha;
         if (!db_.fileMetaGet(f.name, (long long)f.size, (long long)f.mtime_ms, sha)) {
-            sha = fileSha256(cfg_.file_dir + "/" + f.name);
+            sha = adminSha256File(cfg_.file_dir + "/" + f.name);
             if (!sha.empty()) db_.fileMetaPut(f.name, (long long)f.size, (long long)f.mtime_ms, sha);
         }
         j["sha256"] = sha;
@@ -133,7 +95,7 @@ void AdminServer::handleFiles(const HttpContextPtr& ctx) {
 
 void AdminServer::handleFileDownload(const HttpContextPtr& ctx) {
     std::string name = urlDecode(ctx->param("name"));
-    if (cfg_.file_dir.empty() || !validFileName(name)) {
+    if (cfg_.file_dir.empty() || !adminValidFileName(name)) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"bad file name\"}");
         return;
@@ -228,7 +190,7 @@ void AdminServer::handleFileDownload(const HttpContextPtr& ctx) {
 
 void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string& role) {
     std::string name = urlDecode(ctx->param("name"));
-    if (cfg_.file_dir.empty() || !validFileName(name)) {
+    if (cfg_.file_dir.empty() || !adminValidFileName(name)) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"bad file name\"}");
         return;
@@ -261,7 +223,7 @@ void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string&
         }
         struct stat st{};
         long long sz = (stat(path.c_str(), &st) == 0) ? (long long)st.st_size : 0;
-        std::string sha = fileSha256(path);
+        std::string sha = adminSha256File(path);
         if (!sha.empty()) db_.fileMetaPut(name, sz, (long long)st.st_mtime * 1000, sha);
         ctx->send("{\"name\":\"" + name + "\",\"size\":" + std::to_string(sz) +
                   ",\"sha256\":\"" + sha + "\"}");
@@ -356,7 +318,7 @@ void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string&
 void AdminServer::handleUploadStatus(const HttpContextPtr& ctx) {
     std::string name = urlDecode(ctx->param("name"));
     std::string uid = ctx->param("upload");
-    if (cfg_.file_dir.empty() || !validFileName(name) || uid.empty() ||
+    if (cfg_.file_dir.empty() || !adminValidFileName(name) || uid.empty() ||
         uid.size() > 64 || uid.find_first_not_of(
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != std::string::npos) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
@@ -372,7 +334,7 @@ void AdminServer::handleUploadStatus(const HttpContextPtr& ctx) {
 
 void AdminServer::handleFileDelete(const HttpContextPtr& ctx, const std::string& role) {
     std::string name = urlDecode(ctx->param("name"));
-    if (cfg_.file_dir.empty() || !validFileName(name)) {
+    if (cfg_.file_dir.empty() || !adminValidFileName(name)) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"bad file name\"}");
         return;

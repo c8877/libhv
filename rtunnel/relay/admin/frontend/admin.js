@@ -54,6 +54,31 @@ function updateThemeBtn() {
   b.title = mode === 'dark' ? '主题：深色' : '主题：浅色';
 }
 
+function tagTextWidth(ctx, text) {
+  ctx.save();
+  ctx.font = '10px -apple-system, "Segoe UI", sans-serif';
+  const w = ctx.measureText(text).width + 10;
+  ctx.restore();
+  return w;
+}
+
+function drawTagPill(ctx, x, y, text, bg, fg) {
+  const w = tagTextWidth(ctx, text);
+  ctx.save();
+  ctx.fillStyle = bg;
+  if (ctx.roundRect) {
+    ctx.beginPath(); ctx.roundRect(x, y - 8, w, 16, 3); ctx.fill();
+  } else {
+    ctx.fillRect(x, y - 8, w, 16);
+  }
+  ctx.font = '10px -apple-system, "Segoe UI", sans-serif';
+  ctx.fillStyle = fg;
+  ctx.textAlign = 'center';
+  ctx.fillText(text, x + w / 2, y);
+  ctx.restore();
+  return w;
+}
+
 function fmtKbPair(usedKb, totalKb) {
   const k = Number(totalKb) || 0;
   let unit = 'K', div = 1;
@@ -597,9 +622,7 @@ const AgentDetailPage = Object.assign(new Page(), {
               ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
               const fs = row.fstype || '—';
               const fsShort = fs.length > 8 ? fs.slice(0, 7) + '…' : fs;
-              ctx2.font = '10px -apple-system, "Segoe UI", sans-serif';
-              const tw = ctx2.measureText(fsShort).width;
-              const bw = tw + 10;
+              const bw = tagTextWidth(ctx2, fsShort);
               const maxRight = 192;
               let nm = row.mount;
               ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
@@ -610,43 +633,21 @@ const AgentDetailPage = Object.assign(new Page(), {
               ctx2.fillStyle = cssVar('--chart-axis', '#8b929c');
               ctx2.fillText(nm, 6, y0);
               const nmW = ctx2.measureText(nm).width;
-              const bx = 6 + nmW + 6, by = y0 - 9, bh = 18;
-              ctx2.font = '10px -apple-system, "Segoe UI", sans-serif';
-              ctx2.fillStyle = fsColors[row.fstype] || 'rgba(139,146,156,.14)';
-              if (ctx2.roundRect) {
-                ctx2.beginPath(); ctx2.roundRect(bx, by, bw, bh, 4); ctx2.fill();
-              } else {
-                ctx2.fillRect(bx, by, bw, bh);
-              }
-              ctx2.fillStyle = cssVar('--fg', '#e6e9ee');
-              ctx2.fillText(fsShort, bx + 5, y0);
+              const bx = 6 + nmW + 6;
+              drawTagPill(ctx2, bx, y0, fsShort,
+                          fsColors[row.fstype] || 'rgba(139,146,156,.14)',
+                          cssVar('--fg', '#e6e9ee'));
               ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
               ctx2.fillStyle = cssVar('--muted', '#8b929c');
               const x = xScale.getPixelForValue(row.total);
               const y = bar.y;
               ctx2.fillText(row.pct + '%', x + 6, y);
               const pair = fmtKbPair(row.used, row.total);
-              const drawTag = (tx, ty, text) => {
-                ctx2.font = '10px -apple-system, "Segoe UI", sans-serif';
-                const tw = ctx2.measureText(text).width + 8;
-                ctx2.fillStyle = 'rgba(139,146,156,.18)';
-                if (ctx2.roundRect) {
-                  ctx2.beginPath(); ctx2.roundRect(tx, ty - 8, tw, 16, 3); ctx2.fill();
-                } else {
-                  ctx2.fillRect(tx, ty - 8, tw, 16);
-                }
-                ctx2.fillStyle = cssVar('--fg', '#e6e9ee');
-                ctx2.textAlign = 'center';
-                ctx2.fillText(text, tx + tw / 2, ty);
-                ctx2.textAlign = 'left';
-                return tw;
-              };
               ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
               const usedW = ctx2.measureText(pair.used).width;
               const totalW = ctx2.measureText(pair.total).width;
-              ctx2.font = '10px -apple-system, "Segoe UI", sans-serif';
-              const slashW = ctx2.measureText('/').width + 8;
-              const unitW = ctx2.measureText(pair.unit).width + 8;
+              const slashW = tagTextWidth(ctx2, '/');
+              const unitW = tagTextWidth(ctx2, pair.unit);
               const gap = 4;
               const groupW = usedW + gap + slashW + gap + totalW + gap + unitW;
               let gx = chart.width - 8 - groupW;
@@ -654,12 +655,14 @@ const AgentDetailPage = Object.assign(new Page(), {
               ctx2.fillStyle = cssVar('--muted', '#8b929c');
               ctx2.fillText(pair.used, gx, y);
               gx += usedW + gap;
-              gx += drawTag(gx, y, '/') + gap;
+              gx += drawTagPill(ctx2, gx, y, '/', 'rgba(139,146,156,.18)',
+                                cssVar('--fg', '#e6e9ee')) + gap;
               ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
               ctx2.fillStyle = cssVar('--muted', '#8b929c');
               ctx2.fillText(pair.total, gx, y);
               gx += totalW + gap;
-              drawTag(gx, y, pair.unit);
+              drawTagPill(ctx2, gx, y, pair.unit, 'rgba(139,146,156,.18)',
+                          cssVar('--fg', '#e6e9ee'));
             });
             ctx2.restore();
           }

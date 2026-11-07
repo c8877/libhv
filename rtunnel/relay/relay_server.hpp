@@ -164,7 +164,6 @@ private:
     std::string  takeCheckResult(uint32_t cid);
     bool         agentOnline(const char* devid) { return findAgent(devid) != nullptr; }
     std::string  fileDirOf(const char* devid);
-    std::string  pushResult(uint32_t tid);
     void         onFileAck(RelayConn* c, const rtnp::Frame* f);
     void         onHsTimeout(RelayConn* c);
     void         handleFrame(RelayConn* c, rtnp::Frame* f);

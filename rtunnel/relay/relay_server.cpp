@@ -528,13 +528,6 @@ std::string RelayServer::pushProgress(uint32_t tid) {
     return j.dump();
 }
 
-std::string RelayServer::pushResult(uint32_t tid) {
-    auto it = push_results.find(tid);
-    if (it == push_results.end()) return std::string();
-    std::string s = it->second;
-    return s;
-}
-
 void RelayServer::onFileAck(RelayConn* c, const rtnp::Frame* f) {
     auto it = pushes.find(f->sid);
     if (it == pushes.end()) return;

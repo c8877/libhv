@@ -340,6 +340,8 @@ sequenceDiagram
 | `0x1E` | `FILE_DATA` | B→C | 原始字节（≤32KiB） |
 | `0x1F` | `FILE_END` | B→C | `str sha256` |
 | `0x20` | `FILE_ACK` | C→B | `str json {ok,received,error}` |
+| `0x21` | `FILE_CHECK_REQ` | B→C | `str dir + str name` |
+| `0x22` | `FILE_CHECK_ACK` | C→B | `str json {exists,size,sha256,error}` |
 
 **会话级（stream_id > 0）**
 
@@ -558,6 +560,52 @@ operator（Shell、Web、文件上传下载）/ viewer（仅概览与设备列�
 - WS：向设备做二次握手（不协商压缩扩展），浏览器帧 ↔ RTNP DATA 双向封装
 - Cookie：`d_<devid>_<port>_` 前缀隔离，避免与管理台及其他设备串味
 - 上限：32 并发；HEAD/204/304 无响应体；不支持设备 HTTPS
+
+### 13.6 文件分发任务
+
+**数据表**
+
+```sql
+distribution_tasks(
+  id, batch_id, devid, file_name, file_size, file_sha, sub_dir, target_path,
+  status, start_at_ms, deadline_at_ms, retry_count, max_retries, next_retry_ms,
+  extend_count, sent, error, relay_tid, actor, created_ms, started_ms, finished_ms
+);
+file_meta(name, size, mtime_ms, sha256);
+```
+
+**状态**
+
+```
+scheduled → queued → running → success
+                       ├─ 失败且 retry < max → queued（30/60/120s）
+                       ├─ 重试耗尽 → failed
+                       └─ 超过截止 → timeout（可延长一次，≤+24h）
+queued/scheduled → canceled
+创建时同 devid + 同 sha 已有 success/conflict → conflict
+```
+
+**接口**
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/v1/distributions` | `{file,dir,devids,start_at_ms,deadline_at_ms,max_retries}` |
+| GET | `/api/v1/distributions` | `status/q/batch/page/per_page` |
+| GET | `/api/v1/distributions/summary` | 全部/进行中/已完成/失败/冲突计数 |
+| GET | `/api/v1/distributions/{id}` | 详情 |
+| POST | `/{id}/retry` | 失败任务重试（截止前） |
+| POST | `/{id}/cancel` | scheduled/queued 取消 |
+| POST | `/{id}/extend` | timeout 延长一次 |
+| POST | `/{id}/verify` | 校验设备文件哈希，相同→success，不同→queued |
+| POST | `/{id}/force` | 同 verify |
+
+**调度**
+
+- 1s 轮询 DB，全局并发 3，同设备串行
+- `start_at` 前只排队；`deadline_at` 未完成标 timeout 并取消 relay 传输
+- 文件大小/哈希在创建时写入任务；执行前文件被替换会校验失败
+- 上传完成计算并缓存 sha256，文件列表显示前 8 位
+
 
 ## 14. 备选方案与取舍
 

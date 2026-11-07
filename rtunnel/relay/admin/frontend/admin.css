@@ -169,7 +169,6 @@ button:hover { filter: brightness(.96); }
 .si-cores span { display: inline-flex; align-items: center; gap: 6px; }
 .si-cores i { display: inline-block; height: 6px; background: #4a9eff; border-radius: 3px; min-width: 2px; }
 .si-disks { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; padding: 16px; }
-.si-disk { text-align: center; }
 @media (max-width: 1100px) {
   .si-grid { grid-template-columns: 1fr; }
   .si-grid .si-mem, .si-grid .si-cpu, .si-grid .si-disk, .si-grid .si-nic {
@@ -179,9 +178,6 @@ button:hover { filter: brightness(.96); }
 
 /* 设备详情：sparkline 与分区条 */
 .si-num { font-size: 18px; font-weight: 600; }
-.si-disk-row { display: flex; gap: 12px; font-size: 12px; color: var(--muted); padding: 2px 0; }
-.si-disk-row .nm { width: 80px; color: inherit; }
-.si-disk-row .val { flex: 1; }
 
 /* 设备详情：系统两列表格 */
 .si-table { width: 100%; border-collapse: collapse; font-size: 13px; }
