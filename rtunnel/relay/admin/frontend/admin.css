@@ -244,3 +244,4 @@ button.danger { border-color: #e5534b; color: #e5534b; }
 .th-swatches i:hover { border-color: var(--fg); }
 .th-custom { display: flex; align-items: center; justify-content: space-between;
   font-size: 12px; color: var(--muted); }
+#themebtn .th-dot { display: block; width: 14px; height: 14px; border-radius: 50%; }

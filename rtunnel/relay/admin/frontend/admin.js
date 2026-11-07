@@ -37,6 +37,23 @@ function cssVar(name, def) {
   return v || def;
 }
 
+function updateThemeBtn() {
+  const b = document.getElementById('themebtn');
+  if (!b) return;
+  const p = (typeof Auth !== 'undefined' && Auth.profile) || {};
+  const mode = p.theme || 'system';
+  const color = p.theme_color;
+  if (color) {
+    b.innerHTML = '<i class="th-dot" style="background:' + color + '"></i>';
+    b.title = '主题：自定义色';
+    return;
+  }
+  const dark = mode === 'dark' || (mode === 'system' &&
+    window.matchMedia('(prefers-color-scheme: dark)').matches);
+  b.textContent = dark ? '🌙' : '☀️';
+  b.title = dark ? '主题：深色' : '主题：浅色';
+}
+
 function applyTheme(mode, color) {
   mode = mode || 'system';
   const dark = mode === 'dark' || (mode === 'system' &&
@@ -48,6 +65,7 @@ function applyTheme(mode, color) {
     localStorage.setItem('rt_theme', mode);
     localStorage.setItem('rt_theme_color', color || '');
   } catch (e) {}
+  updateThemeBtn();
 }
 
 function themeMenu() {
@@ -1087,9 +1105,7 @@ const ProfilePage = Object.assign(new Page(), {
         Auth.me.display_name = Auth.profile.display_name;
         Auth.me.avatar_color = Auth.profile.avatar_color;
         Auth.profile = Auth.profile || {};
-    applyTheme(Auth.profile.theme, Auth.profile.theme_color);
-    UI.renderUser();
-    themeMenu();
+        UI.renderUser();
         UI.toast('已保存');
       } catch (e) { UI.toast('保存失败：' + e.message, true); }
     };
@@ -1260,7 +1276,10 @@ async function boot() {
     }
     Auth.profile = Auth.profile || {};
     applyTheme(Auth.profile.theme, Auth.profile.theme_color);
+    Auth.profile = Auth.profile || {};
+    applyTheme(Auth.profile.theme, Auth.profile.theme_color);
     UI.renderUser();
+    themeMenu();
     themeMenu();
     btn.onclick = (e) => {
       e.stopPropagation();
