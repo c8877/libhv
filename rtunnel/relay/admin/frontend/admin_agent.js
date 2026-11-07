@@ -8,7 +8,7 @@ function drawDiskChart(canvas, rows) {
   if (!canvas || !rows) return;
   const dpr = window.devicePixelRatio || 1;
   const W = canvas.parentElement.clientWidth || 600;
-  const H = Math.max(40, rows.length * 24 + 16);
+  const H = Math.max(44, rows.length * 28 + 16);
   canvas.style.width = '100%';
   canvas.style.height = H + 'px';
   canvas.width = W * dpr;
@@ -27,20 +27,20 @@ function drawDiskChart(canvas, rows) {
   };
 
   rows.forEach((r, i) => {
-    const y = 14 + i * 24;
+    const y = 16 + i * 28;
     // 名称 + 类型标签
     const fs = r.fstype || '—';
     const fsShort = fs.length > 8 ? fs.slice(0, 7) + '…' : fs;
     ctx.font = '11px -apple-system, "Segoe UI", sans-serif';
     const tagW = tagTextWidth(ctx, fsShort);
     let nm = r.mount;
-    while (nm.length > 1 && 6 + ctx.measureText(nm).width + 6 + tagW > 192) nm = nm.slice(0, -1);
+    while (nm.length > 1 && 6 + ctx.measureText(nm).width + 8 + tagW > 192) nm = nm.slice(0, -1);
     if (nm !== r.mount) nm = nm.replace(/.$/, '…');
     ctx.textAlign = 'left';
     ctx.fillStyle = cssVar('--chart-axis', '#8b929c');
     ctx.fillText(nm, 6, y);
     const nmW = ctx.measureText(nm).width;
-    drawTagPill(ctx, 6 + nmW + 6, y, fsShort,
+    drawTagPill(ctx, 6 + nmW + 8, y, fsShort,
                 fsColors[r.fstype] || 'rgba(139,146,156,.14)', cssVar('--fg', '#e6e9ee'));
 
     // 条形
@@ -78,7 +78,7 @@ function drawDiskChart(canvas, rows) {
 
   canvas.onmousemove = (e) => {
     const rect = canvas.getBoundingClientRect();
-    const i = Math.floor((e.clientY - rect.top - 2) / 24);
+    const i = Math.floor((e.clientY - rect.top - 2) / 28);
     const r = rows[i];
     canvas.title = r ? (r.mount + ' [' + (r.fstype || '—') + ']\n已用 ' +
       fmtKbPair(r.used, r.total).used + fmtKbPair(r.used, r.total).unit + ' / ' +
@@ -123,7 +123,8 @@ const AgentDetailPage = Object.assign(new Page(), {
       axes: [{ show: false }, { show: false }],
       scales: { x: { time: false }, y: { range: [0, 100] } },
       series: [{}, { stroke: color, width: 1.5, fill: color + '26' }],
-    }, [data.map((_, i) => i), data], el);
+    }, [data.length > 1 ? data.map((_, i) => i) : [0, 1],
+        data.length > 1 ? data : [data[0] || 0, data[0] || 0]], el);
   },
   diskColor(p) { return p >= 85 ? cssVar('--bad', '#e5534b') : p >= 70 ? cssVar('--warn', '#f5a623') : cssVar('--accent', '#4a9eff'); },
   async refresh() {
