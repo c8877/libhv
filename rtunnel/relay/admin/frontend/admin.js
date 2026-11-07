@@ -54,6 +54,20 @@ function updateThemeBtn() {
   b.title = mode === 'dark' ? '主题：深色' : '主题：浅色';
 }
 
+function fmtKbPair(usedKb, totalKb) {
+  const k = Number(totalKb) || 0;
+  let unit = 'K', div = 1;
+  if (k >= 1024 * 1024) { unit = 'G'; div = 1024 * 1024; }
+  else if (k >= 1024) { unit = 'M'; div = 1024; }
+  else if (k < 1) { unit = 'B'; div = 1 / 1024; }
+  const fmt = v => {
+    const n = (Number(v) || 0) / div;
+    const s = n.toFixed(unit === 'B' ? 0 : 1);
+    return s.endsWith('.0') ? s.slice(0, -2) : s;
+  };
+  return fmt(usedKb) + ' / ' + fmt(totalKb) + unit;
+}
+
 function applyTheme(mode, color) {
   mode = (mode === 'dark' || mode === 'color') ? mode : 'light';
   document.documentElement.setAttribute('data-theme', mode);
@@ -574,6 +588,9 @@ const AgentDetailPage = Object.assign(new Page(), {
               const x = xScale.getPixelForValue(row.total);
               const y = bar.y;
               ctx2.fillText(row.pct + '%', x + 6, y);
+              ctx2.textAlign = 'right';
+              ctx2.fillText(fmtKbPair(row.used, row.total), chart.width - 8, y);
+              ctx2.textAlign = 'left';
             });
             ctx2.restore();
           }
@@ -585,7 +602,7 @@ const AgentDetailPage = Object.assign(new Page(), {
             { label: '空闲', data: free, backgroundColor: cssVar('--border', '#2b3038'), stack: 's' },
           ] },
           options: { indexAxis: 'y', animation: false, responsive: true,
-            layout: { padding: { right: 42 } },
+            layout: { padding: { right: 190 } },
             interaction: { mode: 'index', intersect: false },
             scales: { x: { stacked: true, max: maxT, display: false },
                       y: { stacked: true, ticks: { color: cssVar('--chart-axis', '#8b929c') }, grid: { display: false } } },
