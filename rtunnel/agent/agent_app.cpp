@@ -703,6 +703,7 @@ void AgentApp::cleanupParts(const std::string& dir, time_t cutoff) {
 }
 
 void AgentApp::sampleMetric() {
+    agentSampleCpu(this);
     double mem = 0;
     std::ifstream mf("/proc/meminfo");
     std::string k;
@@ -1070,16 +1071,6 @@ int AgentApp::run(int argc, char** argv) {
             agentSampleCpu((AgentApp*)hevent_userdata(t));
         }, 1000, INFINITE);
         hevent_set_userdata(cpu_timer, this);
-        htimer_t* part_timer = htimer_add(lp, [](htimer_t* t) {
-            auto* app = (AgentApp*)hevent_userdata(t);
-            app->cleanupParts(app->file_dir, time(NULL) - 24 * 3600);
-        }, 3600 * 1000, INFINITE);
-        hevent_set_userdata(part_timer, this);
-        htimer_t* metric_timer = htimer_add(lp, [](htimer_t* t) {
-            auto* app = (AgentApp*)hevent_userdata(t);
-            app->sampleMetric();
-        }, 5000, INFINITE);
-        hevent_set_userdata(metric_timer, this);
         htimer_t* idle_timer = htimer_add(lp, [](htimer_t* t) {
             auto* app = (AgentApp*)hevent_userdata(t);
             uint64_t now = hloop_now_ms(app->loop);
@@ -1105,8 +1096,19 @@ int AgentApp::run(int argc, char** argv) {
         }, 1000, INFINITE);
         hevent_set_userdata(idle_timer, this);
     }
+    htimer_t* part_timer = htimer_add(lp, [](htimer_t* t) {
+        auto* app = (AgentApp*)hevent_userdata(t);
+        app->cleanupParts(app->file_dir, time(NULL) - 24 * 3600);
+    }, 3600 * 1000, INFINITE);
+    hevent_set_userdata(part_timer, this);
+    htimer_t* metric_timer = htimer_add(lp, [](htimer_t* t) {
+        auto* app = (AgentApp*)hevent_userdata(t);
+        app->sampleMetric();
+    }, 5000, INFINITE);
+    hevent_set_userdata(metric_timer, this);
     loadConfig();
     init(lp);
+    sampleMetric();
     hloop_run(lp);
     hloop_free(&lp);
     return 0;
