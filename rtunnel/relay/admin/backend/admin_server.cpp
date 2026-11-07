@@ -265,6 +265,36 @@ void AdminServer::registerRoutes() {
         handleLogoutAll(ctx);
         return (int)ctx->response->status_code;
     });
+    service_.Handle("POST", "/api/v1/distributions", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
+        if (rc) return rc;
+        handleDistCreate(ctx, currentActor());
+        return (int)ctx->response->status_code;
+    });
+    access(ROLE_MANAGER, "GET", "/api/v1/distributions", &AdminServer::handleDistList);
+    access(ROLE_MANAGER, "GET", "/api/v1/distributions/:id", &AdminServer::handleDistGet);
+    service_.Handle("POST", "/api/v1/distributions/:id/retry", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
+        if (rc) return rc;
+        handleDistRetry(ctx, currentActor());
+        return (int)ctx->response->status_code;
+    });
+    service_.Handle("POST", "/api/v1/distributions/:id/cancel", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
+        if (rc) return rc;
+        handleDistCancel(ctx, currentActor());
+        return (int)ctx->response->status_code;
+    });
+    service_.Handle("POST", "/api/v1/distributions/:id/extend", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
+        if (rc) return rc;
+        handleDistExtend(ctx, currentActor());
+        return (int)ctx->response->status_code;
+    });
     service_.Handle("POST", "/api/v1/agents/:devid/files", [this](const HttpContextPtr& ctx) {
         std::string role;
         int rc = requireRole(ctx, ROLE_MANAGER, role);
@@ -488,21 +518,23 @@ int AdminServer::start(const AdminConfig& cfg) {
         mkdir(cfg_.cert_dir.c_str(), 0700);
         relay_->loadRevoked();
         audit_.init(cfg_.cert_dir + "/audit.log");
-        db_.purgeExpiredSessions(AdminDb::nowMs());
-        if (cfg_.addr.rfind("0.0.0.0", 0) == 0) {
-            logf_("[admin] WARNING: 明文监听 %s，请使用反向代理 TLS 或绑定 127.0.0.1",
-                  cfg_.addr.c_str());
-        }
-        std::thread([this]() {
-            for (;;) {
-                std::this_thread::sleep_for(std::chrono::hours(1));
-                cleanupAudit(settingInt("audit.retention_days", 30));
-                db_.purgeExpiredSessions(AdminDb::nowMs());
-                cleanupUploads();
-                audit_.rotate(100 * 1024 * 1024);
-            }
-        }).detach();
     }
+
+    db_.purgeExpiredSessions(AdminDb::nowMs());
+    if (cfg_.addr.rfind("0.0.0.0", 0) == 0) {
+        logf_("[admin] WARNING: 明文监听 %s，请使用反向代理 TLS 或绑定 127.0.0.1",
+              cfg_.addr.c_str());
+    }
+    std::thread([this]() { distLoop(); }).detach();
+    std::thread([this]() {
+        for (;;) {
+            std::this_thread::sleep_for(std::chrono::hours(1));
+            cleanupAudit(settingInt("audit.retention_days", 30));
+            db_.purgeExpiredSessions(AdminDb::nowMs());
+            cleanupUploads();
+            audit_.rotate(100 * 1024 * 1024);
+        }
+    }).detach();
 
     char host[64] = "127.0.0.1";
     int port = 9443;

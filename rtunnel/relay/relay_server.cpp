@@ -466,6 +466,23 @@ bool RelayServer::startFilePush(const char* devid, const char* path, const char*
     return true;
 }
 
+std::string RelayServer::fileDirOf(const char* devid) {
+    auto it = caps_file_dir.find(devid);
+    return it == caps_file_dir.end() ? std::string() : it->second;
+}
+
+bool RelayServer::cancelFilePush(uint32_t tid) {
+    auto it = pushes.find(tid);
+    if (it == pushes.end()) return false;
+    if (it->second.fp) fclose(it->second.fp);
+    nlohmann::json r;
+    r["ok"] = false;
+    r["error"] = "canceled";
+    push_results[tid] = r.dump();
+    pushes.erase(it);
+    return true;
+}
+
 std::string RelayServer::pushProgress(uint32_t tid) {
     nlohmann::json j;
     auto pit = pushes.find(tid);
@@ -649,6 +666,9 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             if (!aj.is_discarded() && aj.contains("shell")) {
                 caps_shell[c->devid] = aj["shell"].get<bool>() ? 1 : 0;
             }
+            if (!aj.is_discarded() && aj.contains("file_dir")) {
+                caps_file_dir[c->devid] = aj["file_dir"].get<std::string>();
+            }
         }
         return;
     }
@@ -665,6 +685,9 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             auto sj = nlohmann::json::parse(e.json, nullptr, false);
             if (!sj.is_discarded() && sj.contains("caps") && sj["caps"].contains("shell")) {
                 caps_shell[c->devid] = sj["caps"]["shell"].get<bool>() ? 1 : 0;
+            }
+            if (!sj.is_discarded() && sj.contains("caps") && sj["caps"].contains("file_dir")) {
+                caps_file_dir[c->devid] = sj["caps"]["file_dir"].get<std::string>();
             }
         }
         return;

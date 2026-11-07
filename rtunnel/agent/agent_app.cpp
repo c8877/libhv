@@ -371,6 +371,10 @@ void AgentApp::loadConfig() {
         nallow = idx;
     }
     if (j.contains("shell") && j["shell"].is_boolean()) allow_shell = j["shell"].get<bool>() ? 1 : 0;
+    if (j.contains("file_dir") && j["file_dir"].is_string()) {
+        std::string v = j["file_dir"].get<std::string>();
+        if (!v.empty() && v[0] == '/' && v.find("..") == std::string::npos) file_dir = v;
+    }
     logf_("[agent] config loaded from %s (allow=%d shell=%d)", config_file.c_str(),
           allow_ports[0], allow_shell);
 }
@@ -386,6 +390,7 @@ bool AgentApp::saveConfig() {
     j["allow"] = nlohmann::json::array();
     for (int i = 0; i < 32 && allow_ports[i] > 0; ++i) j["allow"].push_back(allow_ports[i]);
     j["shell"] = allow_shell != 0;
+    j["file_dir"] = file_dir;
     std::string tmp = config_file + ".tmp";
     FILE* fp = fopen(tmp.c_str(), "w");
     if (!fp) return false;
@@ -449,12 +454,30 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
         new_shell = r["shell"].get<bool>() ? 1 : 0;
         shell_set = true;
     }
+    std::string new_file_dir = file_dir;
+    if (r.contains("file_dir")) {
+        if (!r["file_dir"].is_string()) {
+            std::string e = "{\"ok\":false,\"error\":\"file_dir must be string\"}";
+            rtnp::Writer w; w.str(e.c_str());
+            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
+        std::string v = r["file_dir"].get<std::string>();
+        if (v.empty() || v[0] != '/' || v.find("..") != std::string::npos || v.size() > 200) {
+            std::string e = "{\"ok\":false,\"error\":\"bad file_dir\"}";
+            rtnp::Writer w; w.str(e.c_str());
+            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
+        new_file_dir = v;
+    }
     if (ports_set) {
         memcpy(allow_ports, new_ports, sizeof(allow_ports));
         nallow = 0;
         while (nallow < 32 && allow_ports[nallow] > 0) nallow++;
     }
     if (shell_set) allow_shell = new_shell;
+    file_dir = new_file_dir;
     bool persisted = saveConfig();
     nlohmann::json ack;
     ack["ok"] = true;
@@ -462,6 +485,7 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     ack["ports"] = nlohmann::json::array();
     for (int i = 0; i < 32 && allow_ports[i] > 0; ++i) ack["ports"].push_back(allow_ports[i]);
     ack["shell"] = allow_shell != 0;
+    ack["file_dir"] = file_dir;
     std::string body = ack.dump();
     logf_("[agent] config set: ports=%d shell=%d persisted=%d", allow_ports[0], allow_shell, (int)persisted);
     rtnp::Writer w; w.str(body.c_str());
@@ -799,6 +823,7 @@ void AgentApp::sendSysinfo() {
         caps["shell"] = allow_shell != 0;
         caps["sysinfo"] = true;
         caps["mtls"] = (tls_cert[0] != '\0');
+        caps["file_dir"] = file_dir;
         j["caps"] = caps;
     }
 

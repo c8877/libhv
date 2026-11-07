@@ -9,6 +9,7 @@
 #include <string>
 #include <map>
 #include <set>
+#include <thread>
 #include <mutex>
 #include <unordered_map>
 
@@ -79,6 +80,15 @@ private:
     void handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleAgentFilePush(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleAgentFileStatus(const HttpContextPtr& ctx, const AdminActor& actor);
+    // api_dist.cpp
+    void handleDistCreate(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleDistList(const HttpContextPtr& ctx);
+    void handleDistGet(const HttpContextPtr& ctx);
+    void handleDistRetry(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleDistCancel(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleDistExtend(const HttpContextPtr& ctx, const AdminActor& actor);
+    void distLoop();
+    void distTick();
     // api_settings.cpp
     void loadSettings();
     int  settingInt(const std::string& key, int def);
@@ -141,6 +151,8 @@ private:
     std::mutex settings_mu_;
     std::set<uint32_t> pushed_done;
     std::mutex push_mu_;
+    std::map<long long, uint32_t> dist_active;   // task id -> relay tid
+    std::set<std::string> dist_busy_dev;
 
     // Web 终端
     hv::WebSocketService ws_service_;

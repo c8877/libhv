@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <string>
 #include <mutex>
 
 struct sqlite3;
@@ -43,6 +44,20 @@ public:
     bool dropSession(const std::string& sid_hash);
     bool dropUserSessions(long long user_id);
     bool purgeExpiredSessions(long long now_ms);
+    bool distInsert(const std::string& batch, const std::string& devid, const std::string& file,
+                    long long size, const std::string& sha, const std::string& sub,
+                    const std::string& target, const std::string& status,
+                    long long start_ms, long long deadline_ms, int max_retries,
+                    const std::string& actor, long long* id);
+    bool distUpdate(long long id, const std::string& status, const std::string& error,
+                    long long sent, long long relay_tid, long long finished_ms,
+                    long long next_retry_ms, int retry_count);
+    bool distProgress(long long id, long long sent);
+    bool distExtend(long long id, long long deadline_ms);
+    bool distList(const std::string& status, const std::string& q, const std::string& batch,
+                  int page, int per_page, std::string& json_out, int& total);
+    bool distGet(long long id, std::string& json_out);
+    bool distDue(std::string& json_out);   // status/start/deadline/retry 字段列表
 
     bool bindDevice(const std::string& devid, long long owner_id);
     bool unbindDevice(const std::string& devid);

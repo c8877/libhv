@@ -101,6 +101,7 @@ public:
     std::unordered_map<std::string, SysinfoEntry> sysinfo_cache;
     std::unordered_map<std::string, ConfigAck> config_acks;
     std::unordered_map<std::string, int> caps_shell;   // devid -> 0/1，用于设备列表隐藏 Shell
+    std::unordered_map<std::string, std::string> caps_file_dir;
     std::unordered_map<uint32_t, FilePush> pushes;
     std::unordered_map<uint32_t, std::string> push_results;
     uint32_t push_seq = 0;
@@ -155,6 +156,9 @@ private:
                                const char* name, uint64_t size, const std::string& sha,
                                std::string& err, uint32_t& tid);
     std::string  pushProgress(uint32_t tid);
+    bool         cancelFilePush(uint32_t tid);
+    bool         agentOnline(const char* devid) { return findAgent(devid) != nullptr; }
+    std::string  fileDirOf(const char* devid);
     std::string  pushResult(uint32_t tid);
     void         onFileAck(RelayConn* c, const rtnp::Frame* f);
     void         onHsTimeout(RelayConn* c);

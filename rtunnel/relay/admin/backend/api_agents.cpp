@@ -106,7 +106,8 @@ void AdminServer::handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& a
     nlohmann::json out = nlohmann::json::object();
     bool has_ports = req.contains("ports");
     bool has_shell = req.contains("shell");
-    if (!has_ports && !has_shell) {
+    bool has_dir = req.contains("file_dir");
+    if (!has_ports && !has_shell && !has_dir) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"nothing to update\"}");
         return;
@@ -126,6 +127,20 @@ void AdminServer::handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& a
             if (seen.insert(p).second) arr.push_back(p);
         }
         out["ports"] = arr;
+    }
+    if (has_dir) {
+        if (!req["file_dir"].is_string()) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"file_dir must be string\"}");
+            return;
+        }
+        std::string v = req["file_dir"].get<std::string>();
+        if (v.empty() || v[0] != '/' || v.find("..") != std::string::npos || v.size() > 200) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"bad file_dir\"}");
+            return;
+        }
+        out["file_dir"] = v;
     }
     if (has_shell) {
         if (actor.role != "admin") {
