@@ -246,9 +246,9 @@ const Router = {
     { hash: '#/acl', title: 'ACL', icon: '☰' },
     { hash: '#/accounts', title: '账号', icon: '☺' },
     { hash: '#/files', title: '文件', icon: '⬇' },
+    { hash: '#/tasks', title: '任务', icon: '⧉' },
     { hash: '#/audit', title: '审计', icon: '≣' },
     { hash: '#/settings', title: '设置', icon: '⚙' },
-    { hash: '#/tasks', title: '任务', icon: '⧉' },
   ],
   register(re, page, title) { this.routes.push({ re, page, title }); },
   go(h) { location.hash = h; },
@@ -1420,7 +1420,7 @@ const TasksPage = Object.assign(new Page(), {
   refreshInterval() { return 2000; },
   enter(el, params, hash) {
     this.el = el;
-    this.tab = 'active';
+    this.tab = 'all';
     this.q = '';
     this.page = 1;
     this.per = 20;
