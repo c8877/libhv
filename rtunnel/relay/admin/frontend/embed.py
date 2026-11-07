@@ -8,6 +8,7 @@ import sys
 
 FILES = [("admin.html", "text/html"),
          ("admin.js", "application/javascript"),
+         ("admin_agent.js", "application/javascript"),
          ("admin_dist.js", "application/javascript"),
          ("admin.css", "text/css"),
          ("vendor/xterm.js", "application/javascript"),

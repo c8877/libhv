@@ -487,6 +487,9 @@ void AdminServer::registerRoutes() {
     service_.GET("/", [this](const HttpContextPtr& ctx) {
         return serveFrontend(ctx, "admin.html", "text/html");
     });
+    service_.GET("/admin_agent.js", [this](const HttpContextPtr& ctx) {
+        return serveFrontend(ctx, "admin_agent.js", "application/javascript");
+    });
     service_.GET("/admin_dist.js", [this](const HttpContextPtr& ctx) {
         return serveFrontend(ctx, "admin_dist.js", "application/javascript");
     });
