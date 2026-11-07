@@ -57,15 +57,10 @@ function updateThemeBtn() {
 function fmtKbPair(usedKb, totalKb) {
   const k = Number(totalKb) || 0;
   let unit = 'K', div = 1;
-  if (k >= 1024 * 1024) { unit = 'G'; div = 1024 * 1024; }
+  if (k >= 100 * 1024) { unit = 'G'; div = 1024 * 1024; }
   else if (k >= 1024) { unit = 'M'; div = 1024; }
-  else if (k < 1) { unit = 'B'; div = 1 / 1024; }
-  const fmt = v => {
-    const n = (Number(v) || 0) / div;
-    const s = n.toFixed(unit === 'B' ? 0 : 1);
-    return s.endsWith('.0') ? s.slice(0, -2) : s;
-  };
-  return fmt(usedKb) + unit + ' / ' + fmt(totalKb) + unit;
+  const f = v => ((Number(v) || 0) / div).toFixed(2);
+  return f(usedKb) + '/' + f(totalKb) + unit;
 }
 
 function applyTheme(mode, color) {
