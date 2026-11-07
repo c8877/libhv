@@ -1,4 +1,5 @@
 #include "relay_server.hpp"
+#include "cpputil/json.hpp"
 #include "common/logging.hpp"
 #include "relay/admin/backend/admin_server.hpp"
 
@@ -511,6 +512,10 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             a.json = std::string(buf);
             a.ts = (uint64_t)time(NULL) * 1000;
             config_acks[c->devid] = a;
+            auto aj = nlohmann::json::parse(a.json, nullptr, false);
+            if (!aj.is_discarded() && aj.contains("shell")) {
+                caps_shell[c->devid] = aj["shell"].get<bool>() ? 1 : 0;
+            }
         }
         return;
     }
@@ -524,6 +529,10 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             e.json = std::string(buf);
             e.ts = (uint64_t)time(NULL) * 1000;
             sysinfo_cache[c->devid] = e;
+            auto sj = nlohmann::json::parse(e.json, nullptr, false);
+            if (!sj.is_discarded() && sj.contains("caps") && sj["caps"].contains("shell")) {
+                caps_shell[c->devid] = sj["caps"]["shell"].get<bool>() ? 1 : 0;
+            }
         }
         return;
     }

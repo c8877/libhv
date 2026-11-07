@@ -74,6 +74,7 @@ private:
     int          openShellStream(LocalStream* s);
     void         killShellChild(LocalStream* s);
     void         sendSysinfo();
+    void         onReady() override { sendSysinfo(); }
     void         loadConfig();
     bool         saveConfig();
     void         handleConfigSet(const rtnp::Frame* f);

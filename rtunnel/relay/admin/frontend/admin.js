@@ -209,7 +209,8 @@ const AgentsPage = Object.assign(new Page(), {
       UI.bytes(a.bytes_in) + ' / ' + UI.bytes(a.bytes_out),
       (canOperate()
         ? '<button class="web" data-devid="' + UI.esc(a.devid) + '">Web</button> ' +
-          '<button class="shell" data-devid="' + UI.esc(a.devid) + '">Shell</button> ' : '') +
+          (a.caps_shell !== 0
+            ? '<button class="shell" data-devid="' + UI.esc(a.devid) + '">Shell</button> ' : '') : '') +
       (canManage()
         ? '<button class="bind" data-devid="' + UI.esc(a.devid) + '">绑定</button> ' +
           '<button class="kick" data-devid="' + UI.esc(a.devid) + '">下线</button>' : ''),

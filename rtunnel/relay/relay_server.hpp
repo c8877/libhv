@@ -89,6 +89,7 @@ public:
     RelayConn*  agents = nullptr;     // devid 注册表
     std::unordered_map<std::string, SysinfoEntry> sysinfo_cache;
     std::unordered_map<std::string, ConfigAck> config_acks;
+    std::unordered_map<std::string, int> caps_shell;   // devid -> 0/1，用于设备列表隐藏 Shell
     struct ClientCred { std::string user, token; };
     std::vector<ClientCred> client_creds;   // --client-users（user:token）
     std::string client_token;               // --client-token（全局 token）

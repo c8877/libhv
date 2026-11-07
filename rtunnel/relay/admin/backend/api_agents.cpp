@@ -31,6 +31,12 @@ void AdminServer::handleAgents(const HttpContextPtr& ctx) {
             json j;
             j["devid"] = c->devid;
             j["online"] = true;   // 注册表在册即在线
+            {
+                int sh = 1;
+                auto it = relay_->caps_shell.find(c->devid);
+                if (it != relay_->caps_shell.end()) sh = it->second;
+                j["caps_shell"] = sh;
+            }
             fillConnCommon(c, j);
             arr.push_back(j);
         }
