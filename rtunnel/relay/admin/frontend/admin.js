@@ -478,13 +478,11 @@ const AgentDetailPage = Object.assign(new Page(), {
         const t = Number(m.total_kb) || 0;
         return this.diskColor(t > 0 ? Math.round((t - (Number(m.free_kb) || 0)) * 100 / t) : 0);
       });
-      const diskLegend = mounts.map(m => {
+      const diskRows = (si.mounts || []).map(m => {
         const t = Number(m.total_kb) || 0, f = Number(m.free_kb) || 0;
-        const p = t > 0 ? Math.round((t - f) * 100 / t) : 0;
-        return '<div class="si-disk-row"><span class="nm">' + UI.esc(m.mount) + '</span>' +
-          '<span class="val">' + kb(t - f) + ' / ' + kb(t) + '</span>' +
-          '<span class="pct" style="color:' + this.diskColor(p) + '">' + p + '%</span></div>';
-      }).join('');
+        return { mount: m.mount, total: t, used: t - f, free: f,
+                 pct: t > 0 ? Math.round((t - f) * 100 / t) : 0 };
+      });
 
       html += '<div class="si-grid">' +
         '<div class="panel"><div class="panel-head"><h2>内存</h2>' +
@@ -500,7 +498,7 @@ const AgentDetailPage = Object.assign(new Page(), {
         ' · ' + (cpu.cores || []).length + ' 核</div></div></div>' +
         '<div class="panel"><div class="panel-head"><h2>存储</h2>' +
         '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">条长按最大分区归一</span></div>' +
-        '<div class="si-body"><canvas id="si-disk" height="100"></canvas>' + diskLegend + '</div></div>' +
+        '<div class="si-body"><canvas id="si-disk" height="100"></canvas></div></div>' +
         '</div>';
 
       const certText = si.mtls
@@ -558,6 +556,26 @@ const AgentDetailPage = Object.assign(new Page(), {
           const t = Number(m.total_kb) || 0, f = Number(m.free_kb) || 0;
           return self.diskColor(t > 0 ? Math.round((t - f) * 100 / t) : 0);
         });
+        const pctPlugin = {
+          id: 'diskPct',
+          afterDatasetsDraw(chart) {
+            const ctx2 = chart.ctx;
+            const xScale = chart.scales.x;
+            const meta = chart.getDatasetMeta(0);
+            ctx2.save();
+            ctx2.fillStyle = cssVar('--muted', '#8b929c');
+            ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
+            ctx2.textBaseline = 'middle';
+            meta.data.forEach((bar, i) => {
+              const row = diskRows[i];
+              if (!row) return;
+              const x = xScale.getPixelForValue(row.total);
+              const y = bar.y;
+              ctx2.fillText(row.pct + '%', x + 6, y);
+            });
+            ctx2.restore();
+          }
+        };
         this.charts.push(new Chart(c.getContext('2d'), {
           type: 'bar',
           data: { labels: labels, datasets: [
@@ -565,9 +583,25 @@ const AgentDetailPage = Object.assign(new Page(), {
             { label: '空闲', data: free, backgroundColor: cssVar('--border', '#2b3038'), stack: 's' },
           ] },
           options: { indexAxis: 'y', animation: false, responsive: true,
+            layout: { padding: { right: 42 } },
+            interaction: { mode: 'index', intersect: false },
             scales: { x: { stacked: true, max: maxT, display: false },
                       y: { stacked: true, ticks: { color: cssVar('--chart-axis', '#8b929c') }, grid: { display: false } } },
-            plugins: { legend: { display: false } } }
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  title: items => items[0] ? items[0].label : '',
+                  label: ctx => {
+                    const row = diskRows[ctx.dataIndex];
+                    if (!row) return '';
+                    return ['已用 ' + kb(row.used) + ' / ' + kb(row.total),
+                            '空闲 ' + kb(row.free) + ' · ' + row.pct + '%'].join('\n');
+                  }
+                }
+              }
+            } },
+          plugins: [pctPlugin]
         }));
       }
       const ce = document.getElementById('caps-edit');
