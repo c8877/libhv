@@ -45,8 +45,8 @@ const AgentDetailPage = Object.assign(new Page(), {
     if (now - (this._lastSample || 0) < 1500) return;
     this._lastSample = now;
     const mem = si.mem || {};
-    const total = Number(mem.total_kb) || 0;
-    const avail = Number(mem.available_kb) || 0;
+    const total = Number(si.mem_total_kb != null ? si.mem_total_kb : mem.total_kb) || 0;
+    const avail = Number(si.mem_available_kb != null ? si.mem_available_kb : mem.available_kb) || 0;
     const memPct = total > 0 ? Math.round((total - avail) * 100 / total) : 0;
     this.memHist.push(memPct);
     this.cpuHist.push((si.cpu || {}).usage || 0);
