@@ -336,6 +336,10 @@ sequenceDiagram
 | `0x1A` | `SYSINFO` | C→B | `str json`：运行时/系统快照 |
 | `0x1B` | `CONFIG_SET` | B→C | `str json {ports?,shell?}`，sid 为请求号 |
 | `0x1C` | `CONFIG_ACK` | C→B | `str json {ok,ports,shell,persisted}`，sid 回显 |
+| `0x1D` | `FILE_BEGIN` | B→C | `str name + u64 size + str sha256`，sid=传输号 |
+| `0x1E` | `FILE_DATA` | B→C | 原始字节（≤32KiB） |
+| `0x1F` | `FILE_END` | B→C | `str sha256` |
+| `0x20` | `FILE_ACK` | C→B | `str json {ok,received,error}` |
 
 **会话级（stream_id > 0）**
 

@@ -43,6 +43,10 @@ enum Type : uint8_t {
     SYSINFO        = 0x1A,   // 连接级：str json（设备运行时/系统快照）
     CONFIG_SET     = 0x1B,   // 连接级：str json {ports?,shell?}，sid 作请求号
     CONFIG_ACK     = 0x1C,   // 连接级：str json {ok,...}，sid 回显请求号
+    FILE_BEGIN     = 0x1D,   // B→C：str name + u64 size + str sha256；sid=传输号
+    FILE_DATA      = 0x1E,   // B→C：原始字节；sid=传输号
+    FILE_END       = 0x1F,   // B→C：str sha256；sid=传输号
+    FILE_ACK       = 0x20,   // C→B：str json {ok,received,error}；sid 回显
 };
 
 // 错误码

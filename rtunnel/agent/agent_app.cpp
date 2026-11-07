@@ -19,6 +19,7 @@
 #include <sstream>
 #include <vector>
 #if defined(WITH_OPENSSL)
+#include "openssl/evp.h"
 #include "openssl/x509.h"
 #include "openssl/pem.h"
 #include "openssl/bio.h"
@@ -465,6 +466,117 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
 }
 
+struct FileRx {
+    FILE* fp = nullptr;
+    uint64_t expect = 0;
+    uint64_t written = 0;
+    std::string name;
+    std::string dest;
+};
+
+static std::map<uint32_t, FileRx> g_file_rx;
+
+std::string AgentApp::sha256File(const std::string& path) {
+#if defined(WITH_OPENSSL)
+    FILE* fp = fopen(path.c_str(), "rb");
+    if (!fp) return std::string();
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    EVP_DigestInit_ex(ctx, EVP_sha256(), NULL);
+    char buf[64 * 1024];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) EVP_DigestUpdate(ctx, buf, n);
+    unsigned char md[32];
+    unsigned int mdlen = 0;
+    EVP_DigestFinal_ex(ctx, md, &mdlen);
+    EVP_MD_CTX_free(ctx);
+    fclose(fp);
+    static const char* hex = "0123456789abcdef";
+    std::string out;
+    for (unsigned int i = 0; i < mdlen; ++i) {
+        out += hex[md[i] >> 4];
+        out += hex[md[i] & 0xF];
+    }
+    return out;
+#else
+    (void)path;
+    return std::string();
+#endif
+}
+
+void AgentApp::handleFileFrame(const rtnp::Frame* f) {
+    auto sendAck = [&](bool ok, uint64_t received, const std::string& err) {
+        nlohmann::json j;
+        j["ok"] = ok;
+        j["received"] = received;
+        if (!err.empty()) j["error"] = err;
+        std::string s = j.dump();
+        rtnp::Writer w; w.str(s.c_str());
+        rtnp::send(io, rtnp::FILE_ACK, f->sid, w.data, (uint16_t)w.len);
+    };
+    if (f->type == rtnp::FILE_BEGIN) {
+        rtnp::Reader r(f->payload, f->len);
+        char name[256] = {0};
+        r.str(name, sizeof(name));
+        uint64_t size = r.u64();
+        char sha[80] = {0};
+        r.str(sha, sizeof(sha));
+        if (r.err || name[0] == '\0' || strstr(name, "..") || strchr(name, '/') || size == 0) {
+            sendAck(false, 0, "bad begin");
+            return;
+        }
+        if (!file_dir.empty()) {
+            std::string cmd = "mkdir -p '" + file_dir + "'";
+            system(cmd.c_str());
+        }
+        std::string dest = file_dir + "/" + name;
+        std::string part = dest + ".part";
+        FILE* fp = fopen(part.c_str(), "wb");
+        if (!fp) { sendAck(false, 0, "open failed"); return; }
+        FileRx rx;
+        rx.fp = fp; rx.expect = size; rx.written = 0; rx.name = name; rx.dest = dest;
+        g_file_rx[f->sid] = rx;
+        sendAck(true, 0, "");
+        return;
+    }
+    auto it = g_file_rx.find(f->sid);
+    if (it == g_file_rx.end()) { sendAck(false, 0, "no transfer"); return; }
+    FileRx& rx = it->second;
+    if (f->type == rtnp::FILE_DATA) {
+        if (f->len > 0 && fwrite(f->payload, 1, f->len, rx.fp) != f->len) {
+            sendAck(false, rx.written, "write failed");
+            return;
+        }
+        rx.written += f->len;
+        sendAck(true, rx.written, "");
+        return;
+    }
+    // FILE_END
+    fflush(rx.fp);
+    fsync(fileno(rx.fp));
+    fclose(rx.fp);
+    rx.fp = nullptr;
+    std::string part = rx.dest + ".part";
+    std::string want = sha256File(part);
+    rtnp::Reader r(f->payload, f->len);
+    char expect[80] = {0};
+    r.str(expect, sizeof(expect));
+    if (want.empty() || strcmp(want.c_str(), expect) != 0) {
+        unlink(part.c_str());
+        g_file_rx.erase(it);
+        sendAck(false, rx.written, "sha256 mismatch");
+        return;
+    }
+    if (rename(part.c_str(), rx.dest.c_str()) != 0) {
+        unlink(part.c_str());
+        g_file_rx.erase(it);
+        sendAck(false, rx.written, "rename failed");
+        return;
+    }
+    logf_("[agent] file received: %s (%llu bytes)", rx.dest.c_str(), (unsigned long long)rx.written);
+    g_file_rx.erase(it);
+    sendAck(true, rx.written, "");
+}
+
 void AgentApp::sendSysinfo() {
     using nlohmann::json;
     agentSampleCpu(this);
@@ -623,6 +735,11 @@ void AgentApp::onFrame(rtnp::Frame* f) {
     case rtnp::CONFIG_SET:
         handleConfigSet(f);
         return;
+    case rtnp::FILE_BEGIN:
+    case rtnp::FILE_DATA:
+    case rtnp::FILE_END:
+        handleFileFrame(f);
+        return;
     case rtnp::OPEN:
         handleOpen(f);
         return;
@@ -724,6 +841,8 @@ int AgentApp::run(int argc, char** argv) {
             allow_all = 1;
         } else if (strcmp(argv[i], "--config-file") == 0 && i + 1 < argc) {
             config_file = argv[++i];
+        } else if (strcmp(argv[i], "--file-dir") == 0 && i + 1 < argc) {
+            file_dir = argv[++i];
         } else if (strcmp(argv[i], "--allow-shell") == 0) {
             allow_shell = 1;
         } else if (strcmp(argv[i], "--max-idle") == 0 && i + 1 < argc) {

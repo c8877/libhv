@@ -3,6 +3,10 @@
 #include "cpputil/json.hpp"
 
 #include <atomic>
+#include <sys/stat.h>
+#if defined(WITH_OPENSSL)
+#include "openssl/evp.h"
+#endif
 #include <set>
 
 #include <algorithm>
@@ -166,6 +170,91 @@ void AdminServer::handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& a
     }
     audit(actor.username, "agent.caps", devid + " " + body);
     ctx->send(ack);
+}
+
+static std::string fileSha256(const std::string& path) {
+#if defined(WITH_OPENSSL)
+    FILE* fp = fopen(path.c_str(), "rb");
+    if (!fp) return std::string();
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    EVP_DigestInit_ex(ctx, EVP_sha256(), NULL);
+    char buf[64 * 1024];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) EVP_DigestUpdate(ctx, buf, n);
+    unsigned char md[32];
+    unsigned int mdlen = 0;
+    EVP_DigestFinal_ex(ctx, md, &mdlen);
+    EVP_MD_CTX_free(ctx);
+    fclose(fp);
+    static const char* hex = "0123456789abcdef";
+    std::string out;
+    for (unsigned int i = 0; i < mdlen; ++i) { out += hex[md[i] >> 4]; out += hex[md[i] & 0xF]; }
+    return out;
+#else
+    (void)path;
+    return std::string();
+#endif
+}
+
+void AdminServer::handleAgentFilePush(const HttpContextPtr& ctx, const AdminActor& actor) {
+    std::string devid = ctx->param("devid");
+    if (!ownsDevid(devid)) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return;
+    }
+    auto req = nlohmann::json::parse(ctx->body(), nullptr, false);
+    std::string name = req.is_discarded() ? "" : req.value("name", "");
+    if (cfg_.file_dir.empty() || name.empty() || name.find("..") != std::string::npos ||
+        name.find('/') != std::string::npos) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"bad file name\"}");
+        return;
+    }
+    std::string path = cfg_.file_dir + "/" + name;
+    struct stat st{};
+    if (stat(path.c_str(), &st) != 0 || st.st_size <= 0) {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"file not found\"}");
+        return;
+    }
+    std::string sha = fileSha256(path);
+    if (sha.empty()) {
+        ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+        ctx->send("{\"error\":\"sha256 unavailable\"}");
+        return;
+    }
+    uint32_t tid = 0;
+    std::string err;
+    std::string started = callRelay([this, &devid, &path, &name, &st, &sha, &err, &tid]() {
+        return relay_->startFilePush(devid.c_str(), path.c_str(), name.c_str(),
+                                     (uint64_t)st.st_size, sha, err, tid)
+            ? std::string("1") : std::string("0");
+    });
+    if (started != "1") {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"" + err + "\"}");
+        return;
+    }
+    std::string result;
+    long long wait_ms = (long long)(st.st_size / (1 << 20)) * 3000 + 10000;
+    if (wait_ms > 300000) wait_ms = 300000;
+    for (long long i = 0; i < wait_ms / 100 && result.empty(); ++i) {
+        usleep(100000);
+        result = callRelay([this, tid]() { return relay_->pushResult(tid); });
+    }
+    if (result.empty()) {
+        ctx->response->status_code = HTTP_STATUS_GATEWAY_TIMEOUT;
+        ctx->send("{\"error\":\"device did not confirm\"}");
+        return;
+    }
+    if (!nlohmann::json::parse(result, nullptr, false).value("ok", false)) {
+        ctx->response->status_code = HTTP_STATUS_BAD_GATEWAY;
+        ctx->send(result);
+        return;
+    }
+    audit(actor.username, "agent.file_push", devid + " " + name + " " + result);
+    ctx->send(result);
 }
 
 void AdminServer::handleAgentSysinfo(const HttpContextPtr& ctx) {

@@ -420,6 +420,99 @@ bool RelayServer::revokeSan(const std::string& san) {
     return true;
 }
 
+static bool sendFileChunk(RelayConn* a, uint32_t tid, FilePush& p) {
+    if (!p.fp || p.sent >= p.size) return false;
+    size_t want = (size_t)((p.size - p.sent) > (32u << 10) ? (32u << 10) : (p.size - p.sent));
+    std::vector<char> buf(want);
+    size_t got = fread(buf.data(), 1, want, p.fp);
+    if (got == 0) return false;
+    rtnp::send(a->io, rtnp::FILE_DATA, tid, buf.data(), (uint16_t)got);
+    p.sent += got;
+    return true;
+}
+
+bool RelayServer::startFilePush(const char* devid, const char* path, const char* name,
+                                uint64_t size, const std::string& sha,
+                                std::string& err, uint32_t& tid) {
+    RelayConn* a = findAgent(devid);
+    if (!a || !a->io) { err = "device offline"; return false; }
+    FILE* fp = fopen(path, "rb");
+    if (!fp) { err = "open failed"; return false; }
+    tid = ++push_seq;
+    FilePush p;
+    p.fp = fp;
+    p.size = size;
+    p.devid = devid;
+    p.name = name;
+    p.sha = sha;
+    p.phase = 0;
+    pushes[tid] = p;
+    rtnp::Writer w;
+    w.str(name);
+    w.u64(size);
+    w.str(sha.c_str());
+    rtnp::send(a->io, rtnp::FILE_BEGIN, tid, w.data, (uint16_t)w.len);
+    return true;
+}
+
+std::string RelayServer::pushResult(uint32_t tid) {
+    auto it = push_results.find(tid);
+    if (it == push_results.end()) return std::string();
+    std::string s = it->second;
+    return s;
+}
+
+void RelayServer::onFileAck(RelayConn* c, const rtnp::Frame* f) {
+    auto it = pushes.find(f->sid);
+    if (it == pushes.end()) return;
+    FilePush& p = it->second;
+    rtnp::Reader rr(f->payload, f->len);
+    static char ackbuf[1024];
+    rr.str(ackbuf, sizeof ackbuf);
+    auto j = nlohmann::json::parse(rr.err ? std::string() : std::string(ackbuf), nullptr, false);
+    auto fail = [&](const std::string& e) {
+        if (p.fp) fclose(p.fp);
+        nlohmann::json r;
+        r["ok"] = false;
+        r["error"] = e;
+        push_results[f->sid] = r.dump();
+        pushes.erase(it);
+    };
+    if (j.is_discarded() || !j.value("ok", false)) {
+        fail(j.is_discarded() ? "bad ack" : j.value("error", std::string("agent error")));
+        return;
+    }
+    uint64_t received = j.value("received", (uint64_t)0);
+    if (p.phase == 0) {
+        p.phase = 1;
+        if (!sendFileChunk(c, f->sid, p)) fail("read failed");
+        return;
+    }
+    if (p.phase == 1) {
+        if (received != p.sent) {
+            fail("received mismatch recv=" + std::to_string(received) +
+                 " sent=" + std::to_string(p.sent));
+            return;
+        }
+        if (p.sent >= p.size) {
+            p.phase = 2;
+            rtnp::Writer w;
+            w.str(p.sha.c_str());
+            rtnp::send(c->io, rtnp::FILE_END, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
+        if (!sendFileChunk(c, f->sid, p)) fail("read failed");
+        return;
+    }
+    // phase 2：完成
+    if (p.fp) fclose(p.fp);
+    nlohmann::json r;
+    r["ok"] = true;
+    r["received"] = received;
+    push_results[f->sid] = r.dump();
+    pushes.erase(it);
+}
+
 bool RelayServer::sendConfig(const char* devid, uint32_t sid, const std::string& json) {
     RelayConn* a = findAgent(devid);
     if (!a || !a->io) return false;
@@ -501,6 +594,9 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         if (verbose) logf_("[relay] HELLO role=%d fd=%d", role, hio_fd(c->io));
         return;
     }
+    case rtnp::FILE_ACK:
+        onFileAck(c, f);
+        return;
     case rtnp::CONFIG_ACK: {
         if (c->role != rtnp::ROLE_AGENT) return;
         rtnp::Reader r(f->payload, f->len);

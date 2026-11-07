@@ -17,6 +17,16 @@ struct SysinfoEntry {
     uint64_t    ts = 0;
 };
 
+struct FilePush {
+    FILE*       fp = nullptr;
+    uint64_t    size = 0;
+    uint64_t    sent = 0;
+    int         phase = 0;         // 0=等 BEGIN ACK，1=传数据，2=等 END ACK
+    std::string devid;
+    std::string name;
+    std::string sha;
+};
+
 struct ConfigAck {
     uint32_t    sid = 0;
     std::string json;
@@ -90,6 +100,9 @@ public:
     std::unordered_map<std::string, SysinfoEntry> sysinfo_cache;
     std::unordered_map<std::string, ConfigAck> config_acks;
     std::unordered_map<std::string, int> caps_shell;   // devid -> 0/1，用于设备列表隐藏 Shell
+    std::unordered_map<uint32_t, FilePush> pushes;
+    std::unordered_map<uint32_t, std::string> push_results;
+    uint32_t push_seq = 0;
     struct ClientCred { std::string user, token; };
     std::vector<ClientCred> client_creds;   // --client-users（user:token）
     std::string client_token;               // --client-token（全局 token）
@@ -137,6 +150,11 @@ private:
     std::string  sysinfoOf(const char* devid, uint64_t* ts);
     bool         sendConfig(const char* devid, uint32_t sid, const std::string& json);
     std::string  configAck(const char* devid, uint32_t sid, uint64_t* ts);
+    bool         startFilePush(const char* devid, const char* path, const char* name,
+                               uint64_t size, const std::string& sha,
+                               std::string& err, uint32_t& tid);
+    std::string  pushResult(uint32_t tid);
+    void         onFileAck(RelayConn* c, const rtnp::Frame* f);
     void         onHsTimeout(RelayConn* c);
     void         handleFrame(RelayConn* c, rtnp::Frame* f);
     void         onRead(RelayConn* c, void* buf, int readbytes);

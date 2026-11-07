@@ -7,6 +7,7 @@
 #include "common/tunnel_link.hpp"
 #include <string>
 #include <vector>
+#include <map>
 
 class AgentApp;
 
@@ -39,6 +40,7 @@ public:
     int          allow_all = 0;
     int          allow_shell = 0;   // 允许 OPEN_SHELL（forkpty 起 shell，默认禁用）
     std::string  config_file = "/opt/data/etc/agent.json";
+    std::string  file_dir = "/opt/data/files";
     double       cpu_usage = 0;
     std::vector<double> cpu_cores;
     std::vector<unsigned long long> cpu_last_tot, cpu_last_idle;
@@ -78,6 +80,8 @@ private:
     void         loadConfig();
     bool         saveConfig();
     void         handleConfigSet(const rtnp::Frame* f);
+    void         handleFileFrame(const rtnp::Frame* f);
+    std::string  sha256File(const std::string& path);
 
     // libhv C 回调的薄封装（对象经 hio_context / hevent_userdata 取回）
     static void localReadCb(hio_t* io, void* buf, int n);

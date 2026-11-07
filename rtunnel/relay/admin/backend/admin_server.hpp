@@ -76,6 +76,7 @@ private:
     void handleAgentDetail(const HttpContextPtr& ctx);
     void handleAgentSysinfo(const HttpContextPtr& ctx);
     void handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleAgentFilePush(const HttpContextPtr& ctx, const AdminActor& actor);
     // api_settings.cpp
     void loadSettings();
     int  settingInt(const std::string& key, int def);
