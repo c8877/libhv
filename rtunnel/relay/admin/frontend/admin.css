@@ -13,9 +13,9 @@
   --warn: #d97706;
   --bad: #dc2626;
   /* 组件 token */
-  --input-bg: #ffffff;
+  --input-bg: #eef2f7;
   --input-fg: #1f2937;
-  --input-border: #d1d5db;
+  --input-border: #c3ccd8;
   --hover: #f0f6ff;
   --th-bg: #fafbfc;
   --modal-bg: #ffffff;
@@ -39,9 +39,9 @@ html[data-theme="dark"] {
   --ok: #3fb950;
   --warn: #d29922;
   --bad: #f85149;
-  --input-bg: #1b1f26;
+  --input-bg: #0d1117;
   --input-fg: #e6e9ee;
-  --input-border: #39414c;
+  --input-border: #3d4754;
   --hover: #1d232b;
   --th-bg: #1a1f26;
   --modal-bg: #1b1f26;
@@ -253,9 +253,9 @@ html[data-theme="color"] {
   --fg: #1f2937;
   --muted: #5a6472;
   --border: color-mix(in srgb, var(--accent) 24%, #ffffff);
-  --input-bg: #ffffff;
+  --input-bg: color-mix(in srgb, var(--accent) 9%, #ffffff);
   --input-fg: #1f2937;
-  --input-border: color-mix(in srgb, var(--accent) 35%, #ffffff);
+  --input-border: color-mix(in srgb, var(--accent) 38%, #ffffff);
   --hover: color-mix(in srgb, var(--accent) 8%, #ffffff);
   --th-bg: color-mix(in srgb, var(--accent) 5%, #ffffff);
   --modal-bg: #ffffff;
