@@ -563,7 +563,8 @@ const AgentDetailPage = Object.assign(new Page(), {
       this.spark('si-cpu', this.cpuHist, cssVar('--warn', '#f5a623'));
       const c = document.getElementById('si-disk');
       if (c && window.Chart) {
-        const labels = (si.mounts || []).map(m => m.mount);
+        const labels = (si.mounts || []).map(m =>
+          m.mount.length > 16 ? m.mount.slice(0, 15) + '…' : m.mount);
         const used = (si.mounts || []).map(m => (Number(m.total_kb) || 0) - (Number(m.free_kb) || 0));
         const free = (si.mounts || []).map(m => Number(m.free_kb) || 0);
         const maxT = (si.mounts || []).reduce((a, m) => Math.max(a, Number(m.total_kb) || 0), 1);
@@ -587,17 +588,10 @@ const AgentDetailPage = Object.assign(new Page(), {
               if (!row) return;
               const x = xScale.getPixelForValue(row.total);
               const y = bar.y;
-              const pctText = row.pct + '%';
-              ctx2.fillText(pctText, x + 6, y);
-              const pair = fmtKbPair(row.used, row.total);
-              const after = x + 6 + ctx2.measureText(pctText).width + 8;
-              if (after + ctx2.measureText(pair).width <= chart.width - 6) {
-                ctx2.fillText(pair, after, y);
-              } else {
-                ctx2.textAlign = 'right';
-                ctx2.fillText(pair, chart.width - 6, y);
-                ctx2.textAlign = 'left';
-              }
+              ctx2.fillText(row.pct + '%', x + 6, y);
+              ctx2.textAlign = 'right';
+              ctx2.fillText(fmtKbPair(row.used, row.total), chart.width - 8, y);
+              ctx2.textAlign = 'left';
             });
             ctx2.restore();
           }
@@ -609,10 +603,14 @@ const AgentDetailPage = Object.assign(new Page(), {
             { label: '空闲', data: free, backgroundColor: cssVar('--border', '#2b3038'), stack: 's' },
           ] },
           options: { indexAxis: 'y', animation: false, responsive: true,
-            layout: { padding: { right: 190 } },
+            layout: { padding: { right: 150 } },
             interaction: { mode: 'index', intersect: false },
             scales: { x: { stacked: true, max: maxT, display: false },
-                      y: { stacked: true, ticks: { color: cssVar('--chart-axis', '#8b929c') }, grid: { display: false } } },
+                      y: { stacked: true,
+                           afterFit: scale => { scale.width = 130; },
+                           ticks: { color: cssVar('--chart-axis', '#8b929c'),
+                                    crossAlign: 'far' },
+                           grid: { display: false } } },
             plugins: {
               legend: { display: false },
               tooltip: {
