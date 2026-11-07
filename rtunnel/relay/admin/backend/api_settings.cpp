@@ -135,7 +135,7 @@ void AdminServer::handleProfileGet(const HttpContextPtr& ctx) {
     j["default_page"] = p.count("default_page") ? p["default_page"] : "overview";
     j["time_format"] = p.count("time_format") ? p["time_format"] : "local";
     j["term_font"] = p.count("term_font") ? p["term_font"] : "14";
-    j["theme"] = p.count("theme") ? p["theme"] : "system";
+    j["theme"] = p.count("theme") ? p["theme"] : "light";
     j["theme_color"] = p.count("theme_color") ? p["theme_color"] : "";
     ctx->send(j.dump());
 }
@@ -177,7 +177,7 @@ void AdminServer::handleProfileSet(const HttpContextPtr& ctx) {
             ctx->send("{\"error\":\"bad time_format\"}");
             return;
         }
-        if (k == "theme" && v != "light" && v != "dark" && v != "system") {
+        if (k == "theme" && v != "light" && v != "dark" && v != "color") {
             ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
             ctx->send("{\"error\":\"bad theme\"}");
             return;

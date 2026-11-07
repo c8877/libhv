@@ -245,3 +245,22 @@ button.danger { border-color: #e5534b; color: #e5534b; }
 .th-custom { display: flex; align-items: center; justify-content: space-between;
   font-size: 12px; color: var(--muted); }
 #themebtn .th-dot { display: block; width: 14px; height: 14px; border-radius: 50%; }
+
+/* 纯色主题：以所选颜色派生 */
+html[data-theme="color"] {
+  --bg: color-mix(in srgb, var(--accent) 10%, #ffffff);
+  --card: color-mix(in srgb, var(--accent) 4%, #ffffff);
+  --fg: #1f2937;
+  --muted: #5a6472;
+  --border: color-mix(in srgb, var(--accent) 24%, #ffffff);
+  --input-bg: #ffffff;
+  --input-fg: #1f2937;
+  --input-border: color-mix(in srgb, var(--accent) 35%, #ffffff);
+  --hover: color-mix(in srgb, var(--accent) 8%, #ffffff);
+  --th-bg: color-mix(in srgb, var(--accent) 5%, #ffffff);
+  --modal-bg: #ffffff;
+  --side-bg: color-mix(in srgb, var(--accent) 30%, #0f141a);
+  --side-fg: #c9d4e2;
+  --chart-grid: color-mix(in srgb, var(--accent) 15%, transparent);
+  --chart-axis: #5a6472;
+}

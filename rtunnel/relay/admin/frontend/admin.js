@@ -43,24 +43,23 @@ function updateThemeBtn() {
   const p = (typeof Auth !== 'undefined' && Auth.profile) || {};
   const mode = p.theme || 'system';
   const color = p.theme_color;
-  if (color) {
+  if (mode === 'color' && color) {
     b.innerHTML = '<i class="th-dot" style="background:' + color + '"></i>';
     b.title = '主题：自定义色';
     return;
   }
-  const dark = mode === 'dark' || (mode === 'system' &&
-    window.matchMedia('(prefers-color-scheme: dark)').matches);
-  b.textContent = dark ? '🌙' : '☀️';
-  b.title = dark ? '主题：深色' : '主题：浅色';
+  b.textContent = mode === 'dark' ? '🌙' : '☀️';
+  b.title = mode === 'dark' ? '主题：深色' : '主题：浅色';
 }
 
 function applyTheme(mode, color) {
-  mode = mode || 'system';
-  const dark = mode === 'dark' || (mode === 'system' &&
-    window.matchMedia('(prefers-color-scheme: dark)').matches);
-  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
-  if (color) document.documentElement.style.setProperty('--accent', color);
-  else document.documentElement.style.removeProperty('--accent');
+  mode = (mode === 'dark' || mode === 'color') ? mode : 'light';
+  document.documentElement.setAttribute('data-theme', mode);
+  if (mode === 'color' && color) {
+    document.documentElement.style.setProperty('--accent', color);
+  } else {
+    document.documentElement.style.removeProperty('--accent');
+  }
   try {
     localStorage.setItem('rt_theme', mode);
     localStorage.setItem('rt_theme_color', color || '');
@@ -81,7 +80,7 @@ function themeMenu() {
       '<div class="th-modes">' +
         '<button data-mode="light">浅色</button>' +
         '<button data-mode="dark">深色</button>' +
-        '<button data-mode="system">跟随系统</button>' +
+        '<button data-mode="color">纯色</button>' +
       '</div>' +
       '<div class="th-swatches">' + colors.map(c =>
         '<i data-color="' + c + '" style="background:' + c + '"></i>').join('') + '</div>' +
@@ -92,26 +91,28 @@ function themeMenu() {
   const menu = box.querySelector('#thememenu');
   const profile = (Auth.profile) || {};
   box.querySelectorAll('.th-modes button').forEach(b => {
-    if (b.dataset.mode === (profile.theme || 'system')) b.classList.add('active');
+    if (b.dataset.mode === (profile.theme || 'light')) b.classList.add('active');
     b.onclick = async () => {
       const theme = b.dataset.mode;
-      await saveTheme({ theme }, theme, profile.theme_color);
+      await saveTheme({ theme: theme === 'color' ? 'color' : theme },
+                      theme, theme === 'color' ? (profile.theme_color || cssVar('--accent', '#3b82f6')) : '');
       box.querySelectorAll('.th-modes button').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
     };
   });
   box.querySelectorAll('.th-swatches i').forEach(el => {
     el.onclick = async () => {
-      await saveTheme({ theme_color: el.dataset.color },
-                      profile.theme || 'system', el.dataset.color);
+      await saveTheme({ theme: 'color', theme_color: el.dataset.color },
+                      'color', el.dataset.color);
+      box.querySelectorAll('.th-modes button').forEach(x => x.classList.toggle('active', x.dataset.mode === 'color'));
     };
   });
   const cp = box.querySelector('#th-color');
   if (cp) {
     cp.value = profile.theme_color || '#3b82f6';
     cp.onchange = async () => {
-      await saveTheme({ theme_color: cp.value },
-                      profile.theme || 'system', cp.value);
+      await saveTheme({ theme: 'color', theme_color: cp.value }, 'color', cp.value);
+      box.querySelectorAll('.th-modes button').forEach(x => x.classList.toggle('active', x.dataset.mode === 'color'));
     };
   }
   document.getElementById('themebtn').onclick = (e) => {
