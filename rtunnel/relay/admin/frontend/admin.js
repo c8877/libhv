@@ -333,14 +333,14 @@ const AgentDetailPage = Object.assign(new Page(), {
 
       const certText = si.mtls
         ? UI.kv({ '证书主体': UI.esc(si.cert_subject || ''), '签发者': UI.esc(si.cert_issuer || ''),
-                  '序列号': UI.esc(String(si.cert_serial || '')), '状态': si.cert_not_after ? '有效' : '已过期' })
+                  '序列号': UI.esc(String(si.cert_serial || '')), '状态': si.cert_valid ? '有效' : '已过期' })
         : '<div style="padding:12px;color:var(--muted)">未启用 mTLS</div>';
       const runtime = UI.kv({
         'agent 版本': UI.esc(si.version || ''), 'pid': si.pid,
         '启动时间': new Date(si.started_ms).toLocaleString(),
         '启动参数': '<code style="font-size:12px">' + UI.esc(si.args || '') + '</code>',
         '架构/内核': UI.esc((si.machine || '') + ' / ' + (si.kernel || '')),
-        'CPU 型号': UI.esc((si.cpu_model || '') + ' · ' + si.cpu_cores + ' 核'),
+        'CPU 型号': UI.esc((si.cpu_model || '') + ' · ' + ((si.cpu && si.cpu.cores) ? si.cpu.cores.length : 0) + ' 核'),
       });
       const nics = (si.nics || []).map(n => [UI.esc(n.name), UI.esc(n.ip), UI.esc(n.netmask),
         n.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>']);

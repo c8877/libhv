@@ -13,6 +13,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <net/if.h>
+#include <string.h>
 #include <unistd.h>
 #include <fstream>
 #include <sstream>
@@ -349,7 +350,6 @@ void AgentApp::sendSysinfo() {
     using nlohmann::json;
     agentSampleCpu(this);
     json j;
-    j["devid"] = devid;
     j["version"] = hv_version();
     j["pid"] = (int)getpid();
     j["started_ms"] = started_ms;
@@ -357,9 +357,7 @@ void AgentApp::sendSysinfo() {
 
     struct utsname u;
     if (uname(&u) == 0) {
-        j["sysname"] = u.sysname;
         j["kernel"] = u.release;
-        j["kernel_version"] = u.version;
         j["machine"] = u.machine;
     }
     {
@@ -379,7 +377,6 @@ void AgentApp::sendSysinfo() {
         }
         while (!model.empty() && (model[0] == ' ' || model[0] == '\t')) model.erase(0, 1);
         j["cpu_model"] = model;
-        j["cpu_cores"] = cores ? cores : (int)sysconf(_SC_NPROCESSORS_ONLN);
     }
     {
         std::ifstream f("/proc/meminfo");
@@ -445,6 +442,7 @@ void AgentApp::sendSysinfo() {
         if (getifaddrs(&ifs) == 0) {
             for (struct ifaddrs* p = ifs; p; p = p->ifa_next) {
                 if (!p->ifa_addr || p->ifa_addr->sa_family != AF_INET) continue;
+                if (strcmp(p->ifa_name, "lo") == 0) continue;
                 char ip[64] = {0}, mask[64] = {0};
                 struct sockaddr_in* sin = (struct sockaddr_in*)p->ifa_addr;
                 inet_ntop(AF_INET, &sin->sin_addr, ip, sizeof(ip));
@@ -478,13 +476,7 @@ void AgentApp::sendSysinfo() {
                 j["cert_subject"] = subj;
                 j["cert_issuer"] = iss;
                 j["cert_serial"] = std::to_string((long long)ASN1_INTEGER_get(X509_get_serialNumber(x)));
-                j["cert_not_after"] = (long long)X509_cmp_current_time(X509_get0_notAfter(x)) < 0
-                    ? 0 : 1;
-                BIO* bo = BIO_new(BIO_s_mem());
-                X509_print_ex(bo, x, XN_FLAG_ONELINE, 0);
-                char* p = NULL; long n = BIO_get_mem_data(bo, &p);
-                if (n > 0 && p) j["cert_text"] = std::string(p, (size_t)n);
-                BIO_free(bo);
+                j["cert_valid"] = (X509_cmp_current_time(X509_get0_notAfter(x)) < 0) ? 0 : 1;
                 X509_free(x);
             }
         }
