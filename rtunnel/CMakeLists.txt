@@ -30,6 +30,7 @@ set_target_properties(rtunnel_sqlite PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_log.cpp
                relay/admin/backend/admin_server.cpp
+               relay/admin/backend/admin_routes.cpp
                relay/admin/backend/api_agents.cpp
                relay/admin/backend/api_streams.cpp
                relay/admin/backend/api_ops.cpp
