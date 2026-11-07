@@ -494,7 +494,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       });
       const diskRows = (si.mounts || []).map(m => {
         const t = Number(m.total_kb) || 0, f = Number(m.free_kb) || 0;
-        return { mount: m.mount, total: t, used: t - f, free: f,
+        return { mount: m.mount, fstype: m.fstype || '', total: t, used: t - f, free: f,
                  pct: t > 0 ? Math.round((t - f) * 100 / t) : 0 };
       });
       this.diskRows = diskRows;
@@ -583,9 +583,35 @@ const AgentDetailPage = Object.assign(new Page(), {
             ctx2.fillStyle = cssVar('--muted', '#8b929c');
             ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
             ctx2.textBaseline = 'middle';
+            const fsColors = {
+              ext4: 'rgba(74,158,255,.16)', vfat: 'rgba(245,166,35,.18)',
+              tmpfs: 'rgba(139,146,156,.18)', overlay: 'rgba(176,131,240,.18)',
+              squashfs: 'rgba(87,171,90,.18)'
+            };
             meta.data.forEach((bar, i) => {
               const row = rows[i];
               if (!row) return;
+              const y0 = bar.y;
+              ctx2.textAlign = 'left';
+              ctx2.fillStyle = cssVar('--chart-axis', '#8b929c');
+              ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
+              const nm = row.mount.length > 14 ? row.mount.slice(0, 13) + '…' : row.mount;
+              ctx2.fillText(nm, 6, y0);
+              const fs = row.fstype || '—';
+              const fsShort = fs.length > 8 ? fs.slice(0, 7) + '…' : fs;
+              ctx2.font = '10px -apple-system, "Segoe UI", sans-serif';
+              const tw = ctx2.measureText(fsShort).width;
+              const bx = 128, by = y0 - 9, bh = 18, bw = 64;
+              ctx2.fillStyle = fsColors[row.fstype] || 'rgba(139,146,156,.14)';
+              if (ctx2.roundRect) {
+                ctx2.beginPath(); ctx2.roundRect(bx, by, bw, bh, 4); ctx2.fill();
+              } else {
+                ctx2.fillRect(bx, by, bw, bh);
+              }
+              ctx2.fillStyle = cssVar('--fg', '#e6e9ee');
+              ctx2.fillText(fsShort, bx + (bw - tw) / 2, y0);
+              ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
+              ctx2.fillStyle = cssVar('--muted', '#8b929c');
               const x = xScale.getPixelForValue(row.total);
               const y = bar.y;
               ctx2.fillText(row.pct + '%', x + 6, y);
@@ -603,19 +629,18 @@ const AgentDetailPage = Object.assign(new Page(), {
             { label: '空闲', data: free, backgroundColor: cssVar('--border', '#2b3038'), stack: 's' },
           ] },
           options: { indexAxis: 'y', animation: false, responsive: true,
-            layout: { padding: { right: 150 } },
+            layout: { padding: { left: 200, right: 150 } },
             interaction: { mode: 'index', intersect: false },
             scales: { x: { stacked: true, max: maxT, display: false },
-                      y: { stacked: true,
-                           afterFit: scale => { scale.width = 130; },
-                           ticks: { color: cssVar('--chart-axis', '#8b929c'),
-                                    crossAlign: 'far' },
-                           grid: { display: false } } },
+                      y: { stacked: true, display: false } },
             plugins: {
               legend: { display: false },
               tooltip: {
                 callbacks: {
-                  title: items => items[0] ? items[0].label : '',
+                  title: items => {
+                    const r = items[0] ? (self.diskRows || [])[items[0].dataIndex] : null;
+                    return r ? (r.mount + (r.fstype ? '  [' + r.fstype + ']' : '')) : '';
+                  },
                   label: ctx => {
                     const row = (self.diskRows || [])[ctx.dataIndex];
                     if (!row) return '';
