@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import http.cookiejar
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -576,11 +577,28 @@ def main():
         import urllib.request
         admin_base = "http://127.0.0.1:%d" % admin_port
 
-        def admin_get(path, token="admintok"):
-            req = urllib.request.Request(admin_base + path)
-            req.add_header("Authorization", "Bearer " + token)
-            with urllib.request.urlopen(req, timeout=5) as r:
-                return json_mod.loads(r.read().decode())
+        def make_admin(base, token="admintok"):
+            jar = http.cookiejar.CookieJar()
+            op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+            def call(method, path, body=None):
+                data = json_mod.dumps(body).encode() if body is not None else None
+                req = urllib.request.Request(base + path, data=data, method=method)
+                if data:
+                    req.add_header("Content-Type", "application/json")
+                with op.open(req, timeout=5) as r:
+                    return json_mod.loads(r.read().decode())
+            for path, body in (
+                    ("/api/v1/setup", {"token": token, "username": "root", "password": "rootpass1"}),
+                    ("/api/v1/login", {"username": "root", "password": "rootpass1"})):
+                req = urllib.request.Request(base + path, data=json_mod.dumps(body).encode(), method="POST")
+                req.add_header("Content-Type", "application/json")
+                op.open(req, timeout=5).read()
+            return op, call
+
+        admin_opener, admin_call = make_admin(admin_base)
+
+        def admin_get(path, token=None):
+            return admin_call("GET", path)
 
         try:
             ov = admin_get("/api/v1/overview")
@@ -610,14 +628,8 @@ def main():
             check("admin 管理台", False, str(e))
 
         # 11. admin 操作面：踢会话 / 设备下线重连 / ACL 读写
-        def admin_req(method, path, body=None, token="admintok"):
-            data = json_mod.dumps(body).encode() if body is not None else None
-            req = urllib.request.Request(admin_base + path, data=data, method=method)
-            req.add_header("Authorization", "Bearer " + token)
-            if data:
-                req.add_header("Content-Type", "application/json")
-            with urllib.request.urlopen(req, timeout=5) as r:
-                return json_mod.loads(r.read().decode())
+        def admin_req(method, path, body=None, token=None):
+            return admin_call(method, path, body)
 
         s, rep = socks5_open(socks1, "dev1", echo_port)
         st = admin_get("/api/v1/streams")
@@ -719,17 +731,13 @@ def main():
                 ok = wait_log(os.path.join(logdir, "agent900002.log"), "authenticated as PILE-900002", 8)
                 check("CSR 签出证书可注册上线", ok)
 
-            req = urllib.request.Request(admin_base + "/metrics")
-            req.add_header("Authorization", "Bearer admintok")
-            with urllib.request.urlopen(req, timeout=5) as r:
-                metrics = r.read().decode()
+            metrics = admin_opener.open(admin_base + "/metrics", timeout=5).read().decode()
             check("/metrics", "rtunnel_agents" in metrics and "rtunnel_bytes_in_total" in metrics)
 
             # 文件管理：上传/列表/排序/下载/删除 + 角色权限
-            def upload(name, data, token="admintok"):
+            def upload(name, data, token=None):
                 req = urllib.request.Request(admin_base + "/api/v1/files/" + name, data=data, method="POST")
-                req.add_header("Authorization", "Bearer " + token)
-                with urllib.request.urlopen(req, timeout=5) as r:
+                with admin_opener.open(req, timeout=5) as r:
                     return json_mod.loads(r.read().decode())
 
             upload("a-small.txt", b"hello")
@@ -738,9 +746,7 @@ def main():
             check("文件列表+按大小降序", len(fl) == 2 and fl[0]["name"] == "b-large.bin", str(fl))
             fl = admin_get("/api/v1/files?sort=name&order=asc")
             check("按名称升序", fl[0]["name"] == "a-small.txt", str(fl))
-            req = urllib.request.Request(admin_base + "/api/v1/files/b-large.bin")
-            req.add_header("Authorization", "Bearer admintok")
-            with urllib.request.urlopen(req, timeout=5) as r:
+            with admin_opener.open(admin_base + "/api/v1/files/b-large.bin", timeout=5) as r:
                 data = r.read()
             check("下载内容一致", data == bytes(range(256)) * 8)
             admin_req("DELETE", "/api/v1/files/a-small.txt")
@@ -790,15 +796,13 @@ def main():
         relay2 = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-relay"), "--host", "127.0.0.1", "--port", str(r2_port),
              "--acl", "tester=*", "--drain-timeout", "200",
-             "--admin", "127.0.0.1:%d" % a2_port, "--admin-token", "admintok"],
+             "--admin", "127.0.0.1:%d" % a2_port, "--admin-token", "admintok",
+             "--admin-db", os.path.join(logdir, "admin2.db")],
             stdout=r2log, stderr=subprocess.STDOUT, env=env)
         procs.append(relay2)
         time.sleep(0.5)
-        req = urllib.request.Request("http://127.0.0.1:%d/api/v1/shutdown" % a2_port, data=b"{}", method="POST")
-        req.add_header("Content-Type", "application/json")
-        req.add_header("Authorization", "Bearer admintok")
-        with urllib.request.urlopen(req, timeout=5) as r:
-            resp = json_mod.loads(r.read().decode())
+        _, call2 = make_admin("http://127.0.0.1:%d" % a2_port)
+        resp = call2("POST", "/api/v1/shutdown", {})
         try:
             rc2 = relay2.wait(timeout=5)
         except subprocess.TimeoutExpired:

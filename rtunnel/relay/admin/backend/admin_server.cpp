@@ -106,6 +106,10 @@ std::string AdminServer::roleOf(const HttpContextPtr& ctx) {
             if (!cfg_.token.empty() && tok == cfg_.token) {
                 bool allow = !initialized;
                 if (allow) {
+                    // 初始化前 token 只放行 setup 接口
+                    if (ctx->request->path.find("/api/v1/setup") != 0) allow = false;
+                }
+                if (allow) {
                     tl_actor.username = "bootstrap";
                     tl_actor.role = "admin";
                     return "admin";

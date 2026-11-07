@@ -111,11 +111,11 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 - 文件管理：`GET /api/v1/files?sort=name|size|mtime&order=asc|desc`（列表+排序）、
   `POST /api/v1/files/{name}`（raw body 上传，≤32MiB）、`GET /api/v1/files/{name}`（下载）、
   `DELETE /api/v1/files/{name}`（删除）；目录由 `--admin-file-dir D` 指定，
-  文件名白名单防目录穿越，写入走 tmp+rename 原子替换；viewer 可读、operator 可写；
+  文件名白名单防目录穿越，写入走 tmp+rename 原子替换；operator 上传/下载，manager/admin 删除；
 - 前端：`http://127.0.0.1:9443/`（侧边栏 + hash 路由；`admin.html/admin.js/admin.css`
   编译期内嵌，`--admin-docroot DIR` 可改为磁盘读取便于调试）；
-- 鉴权与角色：`--admin-token T`（全权）或 `--admin-users F`（每行 `token:role`，
-  role = viewer/operator/admin）；**非回环监听必须配置凭据**；
+- 鉴权：`--admin-token T` 仅用于首次初始化管理员；之后使用账号密码登录
+  （SQLite + HttpOnly 会话）；非回环监听必须配置 `--admin-token`；
 - 证书配置：`--admin-ca-cert C --admin-ca-key K --admin-cert-dir D`（台账 index.txt、
   黑名单 revoked.txt、审计 audit.log 均落在 D 下，启动自动加载黑名单）；
 - 线程模型：HTTP 在 admin worker 线程，relay 状态访问经 `hloop_post_event` 投递回
@@ -125,7 +125,7 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 
 管理台账号存 SQLite（`--admin-db`，默认 `rtunnel-admin.db`），**需要 OpenSSL 构建**（PBKDF2 口令哈希）。
 
-- **首次部署**：浏览器打开管理台 → 初始化页输入 `--admin-token` + 超管用户名/密码 → 创建 superadmin；
+- **首次部署**：浏览器打开管理台 → 初始化页输入 `--admin-token` + 管理员用户名/密码 → 创建 admin；
   初始化前 token 只能访问 `/api/v1/setup*`
 - **之后登录**：用户名 + 密码，服务端会话（HttpOnly Cookie，12h），不再用 token
 - **角色**（admin 唯一，其余可多个）：
@@ -136,16 +136,34 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
   | operator | 设备 Shell / Web 代理；文件上传、下载；查看会话 |
   | viewer | 仅「概览」「设备列表」两个浏览页面 |
 - **设备归属**：`PUT /api/v1/devices/{devid}/owner {"username":"alice"}`（空串=解绑）；
-  普通账号的设备/会话列表按归属过滤，未绑定设备仅 admin 可见
+  operator/viewer 的设备与会话按归属过滤，未绑定设备仅 manager/admin 可见
 - **账号 API**：`GET/POST /api/v1/users`、`PUT /api/v1/users/{id}/password|status`、
   `DELETE /api/v1/users/{id}`；`POST /api/v1/login|logout`、`GET /api/v1/me`
 - 口令策略：最短 8 位；连续 5 次失败锁定 5 分钟；改密/禁用会吊销该账号全部会话
+
+## 设备系统信息与能力
+
+设备详情页（operator 及以上，viewer 可看自己名下设备）：
+
+- 内存/CPU sparkline（可选「每 5s 刷新」，浏览器本地累积 60 点）
+- 存储：按分区横向条，条长 = 分区总量 / 最大分区总量，条内按已用/空闲分色
+- 网卡、系统（架构/内核/CPU/板卡/采集时间）、运行时（版本/能力/启动参数）
+- 「能力」行展示 TCP 端口、Shell、SYSINFO、mTLS；manager/admin 可在线编辑
+
+采集与配置：
+
+- `SYSINFO_REQ(0x19)` / `SYSINFO(0x1A)`：按需采集，relay 仅内存缓存，不落库
+- `CONFIG_SET(0x1B)` / `CONFIG_ACK(0x1C)`：在线修改端口与 Shell 能力，
+  agent 原子生效并写入 `--config-file`（默认 `/opt/data/etc/agent.json`），重启后保持
+- API：`GET /api/v1/agents/{devid}/sysinfo?refresh=1`、`PUT /api/v1/agents/{devid}/caps`
+  （端口 manager/admin；Shell 仅 admin；设备离线直接报错）
 
 ## Web 终端（免密）
 
 「设备 C」「客户端 A」列表的 Shell 入口：admin 作为 RTNP client 直连本机 relay，
 向目标 agent 发 `OPEN_SHELL`（flags=0x0001），agent `forkpty` 起交互 shell，
 经 WebSocket 接到浏览器 xterm.js。不 fork ssh、不经手密码。
+前端支持多 tab；切换页面只摘 DOM，不关闭 WebSocket 会话。
 
 - 身份固定为 `--admin-shell-user`（凭证 `--admin-shell-token`），**不接受浏览器指定用户**；
 - 设备列表：目标 devid = 设备 ID；客户端列表：目标 devid = `a:<user>`（按需拉起，见下节）；

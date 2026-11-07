@@ -528,13 +528,21 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 | `--admin-shell-user/--admin-shell-token` | Web 终端连本机 relay 的身份与凭证 |
 | `--admin-db PATH` | SQLite 账号库（users/sessions/devices），需 OpenSSL 构建（PBKDF2） |
 
-账号体系：首次用 `--admin-token` 初始化 superadmin，之后用户名+密码登录（HttpOnly Cookie 会话）。
+账号体系：首次用 `--admin-token` 初始化 admin，之后用户名+密码登录（HttpOnly Cookie 会话）。
 角色：admin（唯一，全部）/ manager（绑定设备、建 operator/viewer、设备与文件全部操作）/
 operator（Shell、Web、文件上传下载）/ viewer（仅概览与设备列表）。
 口令 PBKDF2-HMAC-SHA256；失败 5 次锁 5 分钟；改密/禁用吊销会话。
-旧的 `--admin-users token:role` 仍作为兼容服务账号。
 
-### 13.2 接口
+### 13.2 系统信息与能力配置
+
+- `SYSINFO_REQ(0x19)` / `SYSINFO(0x1A, str json)`：B 按需请求，C 返回运行时/系统快照；
+  relay 仅内存缓存，详情页打开时刷新一次，不周期上报
+- 快照字段：version/args/caps、uname/CPU/内存/分区/负载/网卡、证书（mTLS 未配置则 `mtls=false`）
+- `CONFIG_SET(0x1B)` / `CONFIG_ACK(0x1C, sid 回显)`：在线修改 `ports` 与 `shell`；
+  agent 校验→原子替换→写 `--config-file`（默认 `/opt/data/etc/agent.json`）→ ACK
+- `PUT /api/v1/agents/{devid}/caps`：manager/admin 改端口，Shell 仅 admin；离线返回 404
+
+### 13.3 接口
 
 | 方法 | 路径 | 说明 |
 |---|---|---|

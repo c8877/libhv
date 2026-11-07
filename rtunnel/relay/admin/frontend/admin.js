@@ -6,15 +6,12 @@
 
 // ---------------------------------------------------------------- Api
 const Api = {
-  token: localStorage.getItem('rt_admin_token') || '',
   async req(path, opt = {}) {
     const headers = Object.assign({ 'X-Requested-With': 'fetch' }, opt.headers || {});
     if (this.token) headers['Authorization'] = 'Bearer ' + this.token;
     const r = await fetch(path, Object.assign({ cache: 'no-store' }, opt, { headers }));
     if (r.status === 401) {
       // 账号体系下不再弹 token；回到登录页
-      this.token = '';
-      localStorage.removeItem('rt_admin_token');
       if (Auth.me) location.reload();
       throw new Error('unauthorized');
     }
@@ -229,7 +226,7 @@ const AgentsPage = Object.assign(new Page(), {
     document.querySelectorAll('#page button.shell').forEach(btn => {
       btn.onclick = (e) => {
         e.stopPropagation();
-        Router.go('#/terminal/' + encodeURIComponent(btn.dataset.devid) + '?direct=1');
+        Router.go('#/terminal/' + encodeURIComponent(btn.dataset.devid));
       };
     });
     document.querySelectorAll('#page tbody tr').forEach((tr, i) => {
@@ -738,7 +735,6 @@ const FilesPage = Object.assign(new Page(), {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', '/api/v1/files/' + encodeURIComponent(fi.name));
       xhr.setRequestHeader('X-Requested-With', 'fetch');
-      if (Api.token) xhr.setRequestHeader('Authorization', 'Bearer ' + Api.token);
       bar.style.display = '';
       bar.value = 0;
       status.textContent = '上传中…';
@@ -771,7 +767,6 @@ const FilesPage = Object.assign(new Page(), {
       btn.onclick = async () => {
         try {
           const headers = {};
-          if (Api.token) headers['Authorization'] = 'Bearer ' + Api.token;
           const r = await fetch('/api/v1/files/' + encodeURIComponent(btn.dataset.name), { headers, cache: 'no-store' });
           if (!r.ok) throw new Error('HTTP ' + r.status);
           const blob = await r.blob();
