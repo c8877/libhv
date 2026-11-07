@@ -171,8 +171,12 @@ button:hover { filter: brightness(.96); }
 .cfg-row { display: flex; align-items: center; gap: 12px; padding: 7px 0; font-size: 13px; }
 .cfg-row > span { width: 160px; color: var(--muted); }
 .cfg-row input[type=number], .cfg-row input[type=text], .cfg-row select {
-  width: 160px; background: #1b1e24; border: 1px solid rgba(255,255,255,.16);
-  color: inherit; border-radius: 6px; padding: 6px 8px; font-size: 13px; }
+  width: 160px; background: #e9edf2; border: 1px solid #9aa3ad;
+  color: #15181d; border-radius: 6px; padding: 6px 8px; font-size: 13px; }
+.cfg-row select option { background: #e9edf2; color: #15181d; }
+.cfg-row input[type=password] {
+  width: 220px; background: #e9edf2; border: 1px solid #9aa3ad; color: #15181d;
+  border-radius: 6px; padding: 6px 8px; font-size: 13px; }
 .cfg-row input[type=color] { width: 40px; height: 28px; border: 0; background: none; padding: 0; }
 .cfg-row em { color: var(--muted); font-style: normal; font-size: 12px; }
 .cfg-actions { padding: 0 16px 16px; }
