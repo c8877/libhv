@@ -855,6 +855,11 @@ void AgentApp::cleanupParts(const std::string& dir, time_t cutoff) {
 }
 
 static bool readTtyCounters(const std::string& want, unsigned long long& rx, unsigned long long& tx) {
+    // /dev/ttyS0 对应 /proc/tty/driver 中的 "0:" 端口行
+    int port = -1;
+    if (want.size() > 4 && want.compare(0, 4, "ttyS") == 0) {
+        port = atoi(want.c_str() + 4);
+    }
     DIR* d = opendir("/proc/tty/driver");
     if (!d) return false;
     bool found = false;
@@ -864,7 +869,14 @@ static bool readTtyCounters(const std::string& want, unsigned long long& rx, uns
         std::ifstream in(std::string("/proc/tty/driver/") + e->d_name);
         std::string line;
         while (std::getline(in, line)) {
-            if (line.find(want) == std::string::npos) continue;
+            bool match = false;
+            if (port >= 0) {
+                int n = -1;
+                if (sscanf(line.c_str(), "%d:", &n) == 1 && n == port) match = true;
+            } else if (line.find(want) != std::string::npos) {
+                match = true;
+            }
+            if (!match) continue;
             size_t p1 = line.find("tx:"), p2 = line.find("rx:");
             if (p1 != std::string::npos) sscanf(line.c_str() + p1, "tx:%llu", &tx);
             if (p2 != std::string::npos) sscanf(line.c_str() + p2, "rx:%llu", &rx);
@@ -1034,12 +1046,25 @@ void AgentApp::sendSysinfo(int mode) {
         j["nics"] = nics;
     }
     {
+        std::set<std::string> paths;
+        for (auto& kv : tty_cfgs_) paths.insert(kv.first);
+        DIR* d = opendir("/dev");
+        if (d) {
+            struct dirent* e;
+            while ((e = readdir(d)) != NULL) {
+                std::string n = e->d_name;
+                if (n.rfind("ttyS", 0) != 0 && n.rfind("ttyUSB", 0) != 0 &&
+                    n.rfind("ttyACM", 0) != 0) continue;
+                paths.insert("/dev/" + n);
+            }
+            closedir(d);
+        }
         nlohmann::json serial = nlohmann::json::array();
-        for (auto& kv : tty_cfgs_) {
+        for (auto& path : paths) {
             unsigned long long rx = 0, tx = 0;
             char rp[PATH_MAX];
-            std::string base = kv.first;
-            if (realpath(kv.first.c_str(), rp)) {
+            std::string base = path;
+            if (realpath(path.c_str(), rp)) {
                 std::string r = rp;
                 size_t p = r.find_last_of('/');
                 if (p != std::string::npos) base = r.substr(p + 1);
@@ -1047,12 +1072,14 @@ void AgentApp::sendSysinfo(int mode) {
                 size_t p = base.find_last_of('/');
                 if (p != std::string::npos) base = base.substr(p + 1);
             }
-            readTtyCounters(base, rx, tx);
-            nlohmann::json s;
-            s["path"] = kv.first;
-            s["rx"] = rx;
-            s["tx"] = tx;
-            serial.push_back(s);
+            bool found = readTtyCounters(base, rx, tx);
+            bool configured = tty_cfgs_.count(path) > 0;
+            if (!found && !configured) continue;
+            nlohmann::json sj;
+            sj["path"] = path;
+            sj["rx"] = rx;
+            sj["tx"] = tx;
+            serial.push_back(sj);
         }
         j["serial"] = serial;
     }
