@@ -493,6 +493,142 @@ const SettingsPage = Object.assign(new Page(), {
 });
 
 
+// ---------------------------------------------------------------- 串口调试
+const TtyPage = Object.assign(new Page(), {
+  refreshInterval() { return 0; },
+  enter(el, params) {
+    this.el = el;
+    this.devid = decodeURIComponent(params[0] || '');
+    this.alias = decodeURIComponent((params[1] || '').split('?')[0]);
+    this.entries = [];
+    this.paused = false;
+    this.showTs = true;
+    this.showHex = true;
+    this.showText = true;
+    this.maxLines = 2000;
+    el.innerHTML = '<div class="panel"><div class="panel-head">' +
+      '<h2>串口调试 · ' + UI.esc(this.alias) + '</h2><span class="spacer"></span>' +
+      '<span id="tty-state" class="pill">连接中…</span> ' +
+      '<button id="tty-close">断开</button></div>' +
+      '<div class="tty-console" id="tty-log"></div>' +
+      '<div class="tty-send">' +
+      '<select id="tty-mode"><option value="text">文本</option><option value="hex">HEX</option></select>' +
+      '<select id="tty-eol"><option value="">无行尾</option><option value="\r\n">CRLF</option>' +
+      '<option value="\n">LF</option><option value="\r">CR</option></select>' +
+      '<input id="tty-input" placeholder="输入后 Ctrl+Enter 发送">' +
+      '<button id="tty-send">发送</button></div>' +
+      '<div class="tty-tools">' +
+      '<label><input type="checkbox" id="tty-ts" checked> 时间戳</label>' +
+      '<label><input type="checkbox" id="tty-hex" checked> HEX</label>' +
+      '<label><input type="checkbox" id="tty-text" checked> 文本</label>' +
+      '<label><input type="checkbox" id="tty-pause"> 暂停</label>' +
+      '<button id="tty-clear">清空</button><button id="tty-save">保存日志</button>' +
+      ' <a href="#/agents/' + encodeURIComponent(this.devid) + '">返回设备</a></div></div>';
+    this.logEl = document.getElementById('tty-log');
+    this.inputEl = document.getElementById('tty-input');
+    const $ = id => document.getElementById(id);
+    $('tty-close').onclick = () => { if (this.ws) this.ws.close(); };
+    $('tty-send').onclick = () => this.send();
+    this.inputEl.onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) this.send(); };
+    $('tty-clear').onclick = () => { this.entries = []; this.renderLog(); };
+    $('tty-save').onclick = () => this.saveLog();
+    ['ts','hex','text','pause'].forEach(k => {
+      $(('tty-' + k)).onchange = e => {
+        this['show' + k[0].toUpperCase() + k.slice(1)] = e.target.checked;
+        if (k === 'pause') this.paused = e.target.checked;
+        this.renderLog();
+      };
+    });
+    this.connect();
+  },
+  leave() {
+    if (this.ws) { this.ws.onclose = null; this.ws.close(); this.ws = null; }
+  },
+  connect() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const url = proto + '//' + location.host + '/ws/tty/' +
+      encodeURIComponent(this.devid) + '/' + encodeURIComponent(this.alias);
+    const ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
+    this.ws = ws;
+    ws.onopen = () => { document.getElementById('tty-state').textContent = '已连接'; };
+    ws.onclose = () => { const st = document.getElementById('tty-state'); if (st) st.textContent = '已断开'; };
+    ws.onerror = () => { const st = document.getElementById('tty-state'); if (st) st.textContent = '连接失败'; };
+    ws.onmessage = ev => {
+      if (typeof ev.data === 'string') {
+        try {
+          const j = JSON.parse(ev.data);
+          if (j.op === 'error') { this.addEntry('sys', j.msg || 'error', null); }
+        } catch (e) {}
+        return;
+      }
+      const bytes = new Uint8Array(ev.data);
+      this.addEntry('rx', null, bytes);
+    };
+  },
+  send() {
+    if (!this.ws || this.ws.readyState !== 1) return;
+    const mode = document.getElementById('tty-mode').value;
+    const eol = document.getElementById('tty-eol').value;
+    let raw = this.inputEl.value;
+    let bytes;
+    if (mode === 'hex') {
+      const clean = raw.replace(/[^0-9a-fA-F]/g, '');
+      const out = new Uint8Array(Math.floor(clean.length / 2));
+      for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.substr(i * 2, 2), 16);
+      bytes = out;
+    } else {
+      bytes = new TextEncoder().encode(raw + eol);
+    }
+    if (!bytes.length) return;
+    let bin = '';
+    bytes.forEach(b => { bin += String.fromCharCode(b); });
+    this.ws.send(JSON.stringify({ op: 'write', data: btoa(bin) }));
+    this.addEntry('tx', null, bytes);
+    this.inputEl.value = '';
+  },
+  addEntry(dir, text, bytes) {
+    this.entries.push({ ts: Date.now(), dir, text, bytes });
+    if (this.entries.length > this.maxLines) this.entries.shift();
+    if (!this.paused) this.renderLog();
+  },
+  fmtHex(bytes) {
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+  },
+  fmtText(bytes) {
+    if (!bytes) return '';
+    return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  },
+  renderLog() {
+    if (!this.logEl) return;
+    const parts = this.entries.map(e => {
+      const t = this.showTs ? '<span class="tty-ts">' + new Date(e.ts).toLocaleTimeString('zh-CN', { hour12: false }) +
+        '.' + String(e.ts % 1000).padStart(3, '0') + '</span> ' : '';
+      const d = '<span class="tty-' + e.dir + '">' + (e.dir === 'rx' ? '←' : e.dir === 'tx' ? '→' : '!') + '</span> ';
+      if (e.dir === 'sys') return '<div class="tty-line">' + t + d + UI.esc(e.text || '') + '</div>';
+      let body = '';
+      if (this.showHex) body += '<span class="tty-hex">' + this.fmtHex(e.bytes) + '</span> ';
+      if (this.showText) body += '<span class="tty-text">' + UI.esc(this.fmtText(e.bytes).replace(/\r/g, '\\r').replace(/\n/g, '\\n')) + '</span>';
+      return '<div class="tty-line">' + t + d + body + '</div>';
+    });
+    this.logEl.innerHTML = parts.join('');
+    this.logEl.scrollTop = this.logEl.scrollHeight;
+  },
+  saveLog() {
+    const lines = this.entries.map(e => {
+      if (e.dir === 'sys') return '[' + new Date(e.ts).toISOString() + '] SYS ' + (e.text || '');
+      return '[' + new Date(e.ts).toISOString() + '] ' + e.dir.toUpperCase() + ' ' + this.fmtHex(e.bytes);
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = this.devid + '-' + this.alias.replace(/[^A-Za-z0-9_.-]/g, '_') + '-tty.log';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  },
+});
+
+Router.register(/^#\/tty\/([^/]+)\/(.+)$/, TtyPage, '串口调试');
 Router.register(/^#\/agents\/([^/]+)$/, AgentDetailPage, '设备详情');
 
 // 路由注册（页面定义在本文件）

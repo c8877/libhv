@@ -137,6 +137,9 @@ private:
     // api_proxy.cpp
     void handleDeviceProxy(const HttpContextPtr& ctx);
     void handleDeviceWsOpen(const WebSocketChannelPtr& channel, const HttpRequestPtr& req);
+    bool handleTtyWsOpen(const WebSocketChannelPtr& channel, const HttpRequestPtr& req);
+    bool handleTtyWsMessage(const WebSocketChannelPtr& channel, const std::string& msg);
+    bool handleTtyWsClose(const WebSocketChannelPtr& channel);
     bool handleDeviceWsMessage(const WebSocketChannelPtr& channel, const std::string& msg);
     bool handleDeviceWsClose(const WebSocketChannelPtr& channel);
     // api_files.cpp

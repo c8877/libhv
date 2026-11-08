@@ -292,3 +292,12 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .tty-modal input[type=text],.tty-modal input:not([type]),.tty-modal select{padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg)}
 .tty-btns{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}
 .tty-ops button{padding:2px 8px}
+.tty-console{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.6;height:360px;overflow:auto;background:var(--bg);border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:8px 12px}
+.tty-line{white-space:pre-wrap;word-break:break-all}
+.tty-ts{color:var(--muted)}
+.tty-rx{color:var(--accent)} .tty-tx{color:var(--warn)} .tty-sys{color:var(--bad)}
+.tty-hex{color:var(--fg)} .tty-text{color:var(--muted)}
+.tty-send{display:flex;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border)}
+.tty-send input{flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg)}
+.tty-tools{display:flex;align-items:center;gap:14px;padding:8px 12px;font-size:12px;color:var(--muted)}
+.tty-tools label{display:flex;align-items:center;gap:4px}

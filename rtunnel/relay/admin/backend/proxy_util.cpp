@@ -179,3 +179,36 @@ int openStream(const AdminConfig& cfg, const std::string& devid, int port, std::
     return fd;
 }
 
+
+int openTtyStream(const AdminConfig& cfg, const std::string& devid, const std::string& path,
+                  int baud, int data_bits, char parity, int stop_bits, std::string& err) {
+    int fd = tcpConnect("127.0.0.1", cfg.shell_relay_port, 5000);
+    if (fd < 0) { err = "relay connect failed"; return -1; }
+    std::string hello;
+    hello.push_back(2);
+    hello.push_back(1);
+    hello += rtnpStr("admin-tty");
+    put32(hello, 0);
+    sendFrame(fd, 0x01, 0, hello);
+    uint8_t t; uint32_t sid; std::string p;
+    if (!recvFrame(fd, t, sid, p) || t != 0x02) { err = "no HELLO_ACK"; close(fd); return -1; }
+    std::string auth = rtnpStr(cfg.shell_user);
+    auth.push_back(cfg.shell_token.empty() ? 0 : 1);
+    auth += rtnpStr(cfg.shell_token);
+    sendFrame(fd, 0x03, 0, auth);
+    if (!recvFrame(fd, t, sid, p) || t != 0x04) { err = "auth failed"; close(fd); return -1; }
+
+    std::string op = rtnpStr(devid);
+    op += rtnpStr(path);
+    put32(op, (uint32_t)baud);
+    op.push_back((char)data_bits);
+    op.push_back(parity);
+    op.push_back((char)stop_bits);
+    sendFrame(fd, 0x10, 1, op, 0x0002);
+    if (!recvFrame(fd, t, sid, p) || t != 0x11) {
+        err = (t == 0x12 && p.size() > 2) ? ("open failed: " + p.substr(4)) : "open failed";
+        close(fd);
+        return -1;
+    }
+    return fd;
+}

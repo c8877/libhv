@@ -429,6 +429,8 @@ const AgentDetailPage = Object.assign(new Page(), {
         '<td>' + st + '</td>' +
         '<td>' + t.baud + ' ' + t.data_bits + t.parity + t.stop_bits + '</td>' +
         '<td class="tty-ops">' +
+        '<a class="btn" href="#/tty/' + encodeURIComponent(this.devid) + '/' +
+          encodeURIComponent(t.alias || t.path) + '">调试</a> ' +
         (can ? '<button data-edit="' + UI.esc(t.path) + '">编辑</button>' : '') +
         (can ? ' <button data-tog="' + UI.esc(t.path) + '">' + (t.enabled ? '禁用' : '启用') + '</button>' : '') +
         '</td></tr>';
