@@ -527,7 +527,8 @@ const ProfilePage = Object.assign(new Page(), {
       '<tr class="setting-row' + (open(k) ? ' open' : '') + '" data-pf-row="' + k + '">' +
       '<td>' + label + '</td><td>' + value + '</td><td class="chev">⌄</td></tr>' +
       (open(k) ? '<tr class="setting-expand"><td colspan="3">' + form(k) + '</td></tr>' : '');
-    const profileTable = '<div class="detail-table-shell"><table class="detail-table setting-table"><tbody>' +
+    const profileTable = '<div class="detail-table-shell"><table class="detail-table setting-table profile-table">' +
+      '<thead><tr><th>设置项</th><th>当前值</th><th>操作</th></tr></thead><tbody>' +
       row('avatar_color', '头像颜色', '<span class="color-dot" style="background:' + UI.esc(p.avatar_color || colors[0]) + '"></span>' +
         '<code>' + UI.esc(p.avatar_color || colors[0]) + '</code>') +
       row('display_name', '显示名', UI.esc(p.display_name || '—')) +
@@ -537,7 +538,8 @@ const ProfilePage = Object.assign(new Page(), {
       '</tbody></table></div>';
 
     const pwOpen = this.editKey === 'password';
-    const securityTable = '<div class="detail-table-shell"><table class="detail-table setting-table"><tbody>' +
+    const securityTable = '<div class="detail-table-shell"><table class="detail-table setting-table profile-table">' +
+      '<thead><tr><th>设置项</th><th>说明</th><th>操作</th></tr></thead><tbody>' +
       '<tr class="setting-row' + (pwOpen ? ' open' : '') + '" data-pf-row="password"><td>登录密码</td>' +
         '<td class="muted">修改当前账号密码</td><td class="chev">⌄</td></tr>' +
       (pwOpen ? '<tr class="setting-expand"><td colspan="3"><div class="ui-form">' +

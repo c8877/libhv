@@ -575,3 +575,13 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-form-grid.cols-1{grid-template-columns:1fr}
 .ui-form-grid.cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}
 .ui-form-right{display:flex;gap:8px}
+.setting-table td:first-child{width:auto}
+.settings-table{table-layout:fixed}
+.settings-table th:nth-child(1){width:40%}
+.settings-table th:nth-child(2){width:26%}
+.settings-table th:nth-child(3){width:16%}
+.settings-table th:nth-child(4){width:18%}
+.profile-table{table-layout:fixed}
+.profile-table th:nth-child(1){width:34%}
+.profile-table th:nth-child(2){width:46%}
+.profile-table th:nth-child(3){width:20%}

@@ -513,8 +513,7 @@ const SettingsPage = Object.assign(new Page(), {
     const groups = [];
     schema.forEach(d => { if (groups.indexOf(d.group) < 0) groups.push(d.group); });
     const open = k => this.editKey === k;
-    const value = d => '<span class="setting-value">' + UI.esc(st[d.key] || '—') +
-      (d.unit ? ' <span class="muted">' + UI.esc(d.unit) + '</span>' : '') + '</span>';
+    const value = d => '<span class="setting-value">' + UI.esc(st[d.key] || '—') + '</span>';
     const field = d => {
       const isText = (d.min === 0 && d.max === 0);
       return '<label>' + UI.esc(d.label) + (isText
@@ -526,9 +525,10 @@ const SettingsPage = Object.assign(new Page(), {
     groups.forEach(g => {
       const rows = schema.filter(d => d.group === g).map(d => {
         let r = '<tr class="setting-row' + (open(d.key) ? ' open' : '') + '" data-set-key="' + d.key + '">' +
-          '<td>' + UI.esc(d.label) + '</td><td>' + value(d) + '</td><td class="chev">⌄</td></tr>';
+          '<td>' + UI.esc(d.label) + '</td><td>' + value(d) + '</td>' +
+          '<td class="muted">' + UI.esc(d.unit || '—') + '</td><td class="chev">⌄</td></tr>';
         if (open(d.key)) {
-          r += '<tr class="setting-expand"><td colspan="3"><div class="ui-form">' +
+          r += '<tr class="setting-expand"><td colspan="4"><div class="ui-form">' +
             '<div class="ui-form-grid cols-1">' + field(d) + '</div>' +
             '<div class="ui-form-foot"><span class="muted">保存后立即生效</span><span class="spacer"></span>' +
             '<div class="ui-form-right"><button data-set-cancel="1">取消</button>' +
@@ -536,7 +536,8 @@ const SettingsPage = Object.assign(new Page(), {
         }
         return r;
       }).join('');
-      html += UI.panel(UI.esc(g), '<div class="detail-table-shell"><table class="detail-table setting-table"><tbody>' +
+      html += UI.panel(UI.esc(g), '<div class="detail-table-shell"><table class="detail-table setting-table settings-table">' +
+        '<thead><tr><th>设置项</th><th>当前值</th><th>单位</th><th>操作</th></tr></thead><tbody>' +
         rows + '</tbody></table></div>', { cls: 'mb16' });
     });
     this.el.innerHTML = html;
