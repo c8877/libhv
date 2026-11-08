@@ -628,3 +628,9 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .settings-table th:nth-child(3){width:16%}
 .settings-table th:nth-child(4){width:20%}
 .ui-form-foot .spacer{flex:1}
+.settings-kv{table-layout:fixed;min-width:0}
+.settings-kv th{width:260px;padding-left:20px;font-weight:400;color:var(--fg);position:relative}
+.settings-kv td{text-align:left;padding-left:8px}
+.settings-kv thead th{font-weight:600;color:var(--fg);background:color-mix(in srgb,var(--fg) 7%,var(--card))}
+.settings-kv th:first-child{width:220px}
+.settings-kv th:last-child{width:auto}
