@@ -81,13 +81,10 @@ private:
     void handleTtyPut(const HttpContextPtr& ctx);
     void handleTtyDelete(const HttpContextPtr& ctx);
     void handleTtyDiscovered(const HttpContextPtr& ctx);
-    void handleMetricCfgGet(const HttpContextPtr& ctx);
-    void handleMetricCfgPut(const HttpContextPtr& ctx);
     void handleMetricSeriesCfgGet(const HttpContextPtr& ctx);
     void handleMetricSeriesCfgPut(const HttpContextPtr& ctx);
     void handleMetricSeriesData(const HttpContextPtr& ctx);
     bool pushMetricSeriesConfig(const std::string& devid);
-    void handleAgentMetrics(const HttpContextPtr& ctx);
     void handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& actor);
     // api_dist.cpp
     void handleDistCreate(const HttpContextPtr& ctx, const AdminActor& actor);

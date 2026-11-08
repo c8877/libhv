@@ -107,13 +107,11 @@ public:
     uint32_t push_seq = 0;
     std::unordered_map<uint32_t, std::string> check_results;
     uint32_t check_seq = 0;
-    std::unordered_map<uint32_t, std::string> metrics_results;
     std::unordered_map<uint32_t, std::string> tty_list_results;
     std::unordered_map<uint32_t, std::string> metric_data_results;
     std::unordered_map<std::string, std::string> metric_status;
     uint32_t metric_query_seq = 0;
     uint32_t tty_list_seq = 0;
-    uint32_t metrics_seq = 0;
     struct ClientCred { std::string user, token; };
     std::vector<ClientCred> client_creds;   // --client-users（user:token）
     std::string client_token;               // --client-token（全局 token）
@@ -169,8 +167,6 @@ private:
     bool         startFileCheck(const char* devid, const char* dir, const char* name,
                                 uint32_t& cid, std::string& err);
     std::string  takeCheckResult(uint32_t cid);
-    bool         startMetricsReq(const char* devid, uint64_t limit, uint32_t& rid, std::string& err);
-    std::string  takeMetricsResult(uint32_t rid);
     bool         startTtyList(const char* devid, uint32_t& rid, std::string& err);
     std::string  takeTtyListResult(uint32_t rid);
     bool         pushTtyCfg(const char* devid, const std::string& json);

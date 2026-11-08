@@ -25,14 +25,11 @@ void AdminServer::registerRoutes() {
     access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid/metrics/series/config", &AdminServer::handleMetricSeriesCfgGet);
     access(ROLE_MANAGER, "PUT", "/api/v1/agents/:devid/metrics/series/config", &AdminServer::handleMetricSeriesCfgPut);
     access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid/metrics/series", &AdminServer::handleMetricSeriesData);
-    access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid/metrics/config", &AdminServer::handleMetricCfgGet);
-    access(ROLE_MANAGER, "PUT", "/api/v1/agents/:devid/metrics/config", &AdminServer::handleMetricCfgPut);
     access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid/ttys", &AdminServer::handleTtyList);
     access(ROLE_MANAGER, "PUT", "/api/v1/agents/:devid/ttys", &AdminServer::handleTtyPut);
     access(ROLE_MANAGER, "DELETE", "/api/v1/agents/:devid/ttys", &AdminServer::handleTtyDelete);
     access(ROLE_MANAGER, "GET", "/api/v1/agents/:devid/ttys/discovered", &AdminServer::handleTtyDiscovered);
     access(ROLE_MANAGER, "GET", "/api/v1/ttylogs/:name", &AdminServer::handleTtyLogDownload);
-    access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid/metrics", &AdminServer::handleAgentMetrics);
     access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid/sysinfo", &AdminServer::handleAgentSysinfo);
     service_.Handle("PUT", "/api/v1/settings", [this](const HttpContextPtr& ctx) {
         std::string role;

@@ -471,16 +471,6 @@ std::string RelayServer::fileDirOf(const char* devid) {
     return it == caps_file_dir.end() ? std::string() : it->second;
 }
 
-bool RelayServer::startMetricsReq(const char* devid, uint64_t limit, uint32_t& rid, std::string& err) {
-    RelayConn* a = findAgent(devid);
-    if (!a || !a->io) { err = "device offline"; return false; }
-    rid = ++metrics_seq;
-    rtnp::Writer w;
-    w.u64(limit);
-    rtnp::send(a->io, rtnp::METRICS_REQ, rid, w.data, (uint16_t)w.len);
-    return true;
-}
-
 bool RelayServer::startTtyList(const char* devid, uint32_t& rid, std::string& err) {
     RelayConn* a = findAgent(devid);
     if (!a || !a->io) { err = "device offline"; return false; }
@@ -541,14 +531,6 @@ bool RelayServer::pushTtyCfg(const char* devid, const std::string& json) {
     w.str(json.c_str());
     rtnp::send(a->io, rtnp::TTY_CFG_SET, 0, w.data, (uint16_t)w.len);
     return true;
-}
-
-std::string RelayServer::takeMetricsResult(uint32_t rid) {
-    auto it = metrics_results.find(rid);
-    if (it == metrics_results.end()) return std::string();
-    std::string s = it->second;
-    metrics_results.erase(it);
-    return s;
 }
 
 bool RelayServer::startFileCheck(const char* devid, const char* dir, const char* name,
@@ -763,13 +745,6 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         static char tb[64 * 1024];
         rr.str(tb, sizeof tb);
         if (!rr.err) tty_list_results[f->sid] = std::string(tb);
-        return;
-    }
-    case rtnp::METRICS_ACK: {
-        rtnp::Reader rr(f->payload, f->len);
-        static char mbuf[256 * 1024];
-        rr.str(mbuf, sizeof mbuf);
-        if (!rr.err) metrics_results[f->sid] = std::string(mbuf);
         return;
     }
     case rtnp::FILE_CHECK_ACK: {
