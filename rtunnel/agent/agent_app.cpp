@@ -873,6 +873,10 @@ void AgentApp::applyMetricsConfig(const nlohmann::json& j) {
     if (j.contains("interfaces")) metric_ifaces = join(j["interfaces"]);
     if (j.contains("ttys")) metric_ttys = join(j["ttys"]);
     if (j.contains("persist")) metric_persist = j["persist"].get<bool>() ? 1 : 0;
+    if (j.contains("persist_path") && j["persist_path"].is_string()) {
+        std::string v = j["persist_path"].get<std::string>();
+        if (!v.empty() && v[0] == '/') metric_path = v;
+    }
     while ((int)metrics_.size() > metric_points) metrics_.pop_front();
 }
 
