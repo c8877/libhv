@@ -282,10 +282,29 @@ const UI = {
     rows.forEach(r => { h += '<tr>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>'; });
     return h + '</tbody></table></div>';
   },
-  kvTable(rows) {
-    return '<div class="detail-table-shell"><table class="detail-table detail-kv"><tbody>' +
+  kvTable(rows, opts) {
+    opts = opts || {};
+    const head = opts.header ? '<thead><tr>' + opts.header.map(h => '<th>' + h + '</th>').join('') + '</tr></thead>' : '';
+    return '<div class="detail-table-shell ' + (opts.shellCls || '') + '">' +
+      '<table class="detail-table detail-kv ' + (opts.cls || '') + '">' + head + '<tbody>' +
       rows.map(r => '<tr><th>' + r[0] + '</th><td>' + r[1] + '</td></tr>').join('') +
       '</tbody></table></div>';
+  },
+  form(opts) {
+    opts = opts || {};
+    const rows = opts.rows || [];
+    let body;
+    if (opts.layout === 'grid') {
+      body = '<div class="ui-form-grid ' + (opts.cols ? 'cols-' + opts.cols : '') + '">' +
+        rows.map(r => '<label>' + r.label + r.control + '</label>').join('') + '</div>';
+    } else {
+      body = '<div class="form-rows">' + rows.map(r =>
+        '<label class="form-row"><span class="k">' + r.label + '</span>' +
+        '<span class="c">' + r.control + '</span><span class="u">' + (r.unit || '') + '</span></label>').join('') + '</div>';
+    }
+    return '<div class="ui-form ' + (opts.cls || '') + '">' + body +
+      '<div class="ui-form-foot">' + (opts.left || '') +
+      '<span class="spacer"></span>' + (opts.right || '') + '</div></div>';
   },
   table(cols, rows, onrow) {
     // 表头允许传 HTML（如排序链接）；以 '<' 开头的原样输出，其余转义
@@ -513,21 +532,18 @@ const ProfilePage = Object.assign(new Page(), {
       '<td>' + label + '</td><td>' + value + '</td><td class="chev">⌄</td></tr>';
     const pfKeys = ['avatar_color','display_name','default_page','time_format','term_font'];
     const pfOpen = pfKeys.some(k => this.editKey === k);
-    const profileForm = pfOpen ? '<div class="ui-form setting-form"><div class="form-rows">' +
-      '<label class="form-row"><span class="k">头像颜色</span><span class="c"><input type="color" id="pf-color" value="' +
-        UI.esc(p.avatar_color || colors[0]) + '"></span><span class="u"></span></label>' +
-      '<label class="form-row"><span class="k">显示名</span><span class="c"><input type="text" id="pf-name" value="' +
-        UI.esc(p.display_name || '') + '"></span><span class="u"></span></label>' +
-      '<label class="form-row"><span class="k">默认页面</span><span class="c"><select id="pf-page">' +
-        '<option value="overview"' + (p.default_page === 'overview' ? ' selected' : '') + '>概览</option>' +
-        '<option value="agents"' + (p.default_page === 'agents' ? ' selected' : '') + '>设备列表</option></select></span><span class="u"></span></label>' +
-      '<label class="form-row"><span class="k">时间格式</span><span class="c"><select id="pf-time">' +
-        '<option value="local"' + (p.time_format === 'local' ? ' selected' : '') + '>本地时间</option>' +
-        '<option value="relative"' + (p.time_format === 'relative' ? ' selected' : '') + '>相对时间</option></select></span><span class="u"></span></label>' +
-      '<label class="form-row"><span class="k">终端字号</span><span class="c"><input type="number" id="pf-font" min="10" max="24" value="' +
-        UI.esc(p.term_font || '14') + '"></span><span class="u">px</span></label>' +
-      '</div><div class="ui-form-foot"><span class="muted">保存后立即生效</span><span class="spacer"></span>' +
-      '<button data-pf-cancel="1">取消</button><button class="primary" id="pf-save">保存</button></div></div>' : '';
+    const profileForm = pfOpen ? UI.form({
+      cls: 'setting-form',
+      rows: [
+        { label: '头像颜色', control: '<input type="color" id="pf-color" value="' + UI.esc(p.avatar_color || colors[0]) + '">' },
+        { label: '显示名', control: '<input type="text" id="pf-name" value="' + UI.esc(p.display_name || '') + '">' },
+        { label: '默认页面', control: '<select id="pf-page"><option value="overview"' + (p.default_page === 'overview' ? ' selected' : '') + '>概览</option><option value="agents"' + (p.default_page === 'agents' ? ' selected' : '') + '>设备列表</option></select>' },
+        { label: '时间格式', control: '<select id="pf-time"><option value="local"' + (p.time_format === 'local' ? ' selected' : '') + '>本地时间</option><option value="relative"' + (p.time_format === 'relative' ? ' selected' : '') + '>相对时间</option></select>' },
+        { label: '终端字号', control: '<input type="number" id="pf-font" min="10" max="24" value="' + UI.esc(p.term_font || '14') + '">', unit: 'px' },
+      ],
+      left: '<span class="muted">保存后立即生效</span>',
+      right: '<button data-pf-cancel="1">取消</button><button class="primary" id="pf-save">保存</button>',
+    }) : '';
     const profileTable = '<div class="detail-table-shell"><table class="detail-table setting-table profile-table">' +
       '<thead><tr><th>设置项</th><th>当前值</th><th>操作</th></tr></thead><tbody>' +
       row('avatar_color', '头像颜色', '<span class="color-dot" style="background:' + UI.esc(p.avatar_color || colors[0]) + '"></span>' +
@@ -545,11 +561,14 @@ const ProfilePage = Object.assign(new Page(), {
         '<td class="muted">修改当前账号密码</td><td class="chev">⌄</td></tr>' +
       '<tr><td>登录会话</td><td class="muted">吊销本账号全部登录会话（含当前）</td>' +
         '<td><button class="danger" id="sess-drop">登出所有</button></td></tr>' +
-      '</tbody></table></div>' + (pwOpen ? '<div class="ui-form setting-form"><div class="form-rows">' +
-        '<label class="form-row"><span class="k">当前密码</span><span class="c"><input type="password" id="pw-old"></span><span class="u"></span></label>' +
-        '<label class="form-row"><span class="k">新密码</span><span class="c"><input type="password" id="pw-new"></span><span class="u"></span></label>' +
-        '</div><div class="ui-form-foot"><span class="spacer"></span><button data-pw-cancel="1">取消</button>' +
-        '<button class="primary" id="pw-save">修改密码</button></div></div>' : '');
+      '</tbody></table></div>' + (pwOpen ? UI.form({
+        cls: 'setting-form',
+        rows: [
+          { label: '当前密码', control: '<input type="password" id="pw-old">' },
+          { label: '新密码', control: '<input type="password" id="pw-new">' },
+        ],
+        right: '<button data-pw-cancel="1">取消</button><button class="primary" id="pw-save">修改密码</button>',
+      }) : '');
 
     this.el.innerHTML = UI.panel('个人设置', profileTable + profileForm, { cls: 'mb16' }) +
       UI.panel('安全', securityTable, { cls: 'mb16' });

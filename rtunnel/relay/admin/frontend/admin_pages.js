@@ -520,26 +520,26 @@ const SettingsPage = Object.assign(new Page(), {
           '范围 ' + d.min + '–' + d.max + (d.unit ? ' ' + d.unit : '');
         return UI.esc((d.desc || '') + (range ? ' · ' + range : ''));
       };
-      const rows = defs.map(d =>
-        '<tr><th><span class="setting-name">' + UI.esc(d.label) + '</span>' +
-        '<span class="tip" tabindex="0" data-tip="' + tip(d) + '">ⓘ</span></th>' +
-        '<td><b>' + UI.esc(st[d.key] || '—') + '</b>' +
-        (d.unit ? ' <span class="muted">' + UI.esc(d.unit) + '</span>' : '') + '</td></tr>').join('');
-      const table = '<div class="detail-table-shell settings-kv-shell">' +
-        '<table class="detail-table detail-kv settings-kv"><thead><tr><th>设置项</th><th>当前值</th></tr></thead>' +
-        '<tbody>' + rows + '</tbody></table></div>';
-      const form = this.editGroup === g ? '<div class="ui-form setting-form"><div class="form-rows">' +
-        defs.map(d => {
+      const rows = defs.map(d => [
+        '<span class="setting-name">' + UI.esc(d.label) + '</span>' +
+        '<span class="tip" tabindex="0" data-tip="' + tip(d) + '">ⓘ</span>',
+        '<b>' + UI.esc(st[d.key] || '—') + '</b>' +
+        (d.unit ? ' <span class="muted">' + UI.esc(d.unit) + '</span>' : '')]);
+      const table = UI.kvTable(rows, { header: ['设置项', '当前值'], cls: 'settings-kv', shellCls: 'settings-kv-shell' });
+      const form = this.editGroup === g ? UI.form({
+        cls: 'setting-form',
+        rows: defs.map(d => {
           const isText = (d.min === 0 && d.max === 0);
           const input = isText
             ? '<input type="text" data-set-input="' + d.key + '" value="' + UI.esc(st[d.key] || '') + '">'
             : '<input type="number" data-set-input="' + d.key + '" value="' + UI.esc(st[d.key] || '') +
               '" min="' + d.min + '" max="' + d.max + '">';
-          return '<label class="form-row"><span class="k">' + UI.esc(d.label) + '</span>' +
-            '<span class="c">' + input + '</span><span class="u">' + UI.esc(d.unit || '') + '</span></label>';
-        }).join('') +
-        '</div><div class="ui-form-foot"><span class="muted">保存后立即生效</span><span class="spacer"></span>' +
-        '<button data-set-cancel="1">取消</button><button class="primary" data-set-save="' + UI.esc(g) + '">保存本组</button></div></div>' : '';
+          return { label: UI.esc(d.label), control: input, unit: UI.esc(d.unit || '') };
+        }),
+        left: '<span class="muted">保存后立即生效</span>',
+        right: '<button data-set-cancel="1">取消</button>' +
+          '<button class="primary" data-set-save="' + UI.esc(g) + '">保存本组</button>',
+      }) : '';
       html += UI.panel(UI.esc(g), table + form, { cls: 'mb16',
         right: '<button data-set-edit="' + UI.esc(g) + '">' + (this.editGroup === g ? '收起' : '编辑') + '</button>' });
     });
