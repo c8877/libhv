@@ -63,6 +63,15 @@ public:
     bool fileMetaPut(const std::string& name, long long size, long long mtime_ms, const std::string& sha);
     bool distAlreadyPushed(const std::string& devid, const std::string& sha);
 
+    bool ttyList(const std::string& devid, std::string& json_out);
+    bool ttyUpsert(const std::string& devid, const std::string& path, const std::string& alias,
+                   int enabled, int baud, int data_bits, const std::string& parity, int stop_bits,
+                   const std::string& roles, const std::string& actor, std::string& err);
+    bool ttyDelete(const std::string& devid, const std::string& path, std::string& err);
+    bool ttyResolve(const std::string& devid, const std::string& alias_or_path,
+                    std::string& path, int& baud, int& data_bits,
+                    std::string& parity, int& stop_bits, bool& enabled);
+
     bool bindDevice(const std::string& devid, long long owner_id);
     bool unbindDevice(const std::string& devid);
     bool deviceOwner(const std::string& devid, long long& owner_id);  // 0=未绑定

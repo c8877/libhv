@@ -22,6 +22,9 @@ void AdminServer::registerRoutes() {
     access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid", &AdminServer::handleAgentDetail);
     access(ROLE_VIEWER, "GET", "/api/v1/settings", &AdminServer::handleSettingsGet);
     access(ROLE_VIEWER, "GET", "/api/v1/me/profile", &AdminServer::handleProfileGet);
+    access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid/ttys", &AdminServer::handleTtyList);
+    access(ROLE_MANAGER, "PUT", "/api/v1/agents/:devid/ttys", &AdminServer::handleTtyPut);
+    access(ROLE_MANAGER, "DELETE", "/api/v1/agents/:devid/ttys", &AdminServer::handleTtyDelete);
     access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid/metrics", &AdminServer::handleAgentMetrics);
     access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid/sysinfo", &AdminServer::handleAgentSysinfo);
     service_.Handle("PUT", "/api/v1/settings", [this](const HttpContextPtr& ctx) {
