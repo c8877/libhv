@@ -342,6 +342,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       if (document.getElementById('series-charts')) this.pullSeriesPanel(false);
       else this.renderSeriesPanel();
       if (!this.ttysLoaded) this.loadTtys();
+      else this.renderTtyCard(document.getElementById('si-tty'));
       const ce = document.getElementById('caps-edit');
       if (ce) ce.onclick = () => { this.capsOpen = !this.capsOpen; this._rendered = false; this.refresh(); };
       const cs = document.getElementById('caps-save');
@@ -1009,6 +1010,7 @@ const AgentDetailPage = Object.assign(new Page(), {
         await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/ttys', body);
         close();
         if (!this.ttysLoaded) this.loadTtys();
+      else this.renderTtyCard(document.getElementById('si-tty'));
       } catch (e) { this.ttyError(e.message); }
     };
   },
