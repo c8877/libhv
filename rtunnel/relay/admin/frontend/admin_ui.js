@@ -50,6 +50,33 @@ const UI = {
       '<div class="sys-item"><span class="k">' + r[0] + '</span>' +
       '<span class="v" title="' + r[1] + '">' + r[1] + '</span></div>').join('') + '</div>';
   },
+  listPage(opts) {
+    opts = opts || {};
+    const search = opts.search
+      ? '<input id="' + UI.esc(opts.search.id || '') + '" class="ui-search" placeholder="' +
+        UI.esc(opts.search.placeholder || '搜索') + '">'
+      : '';
+    return UI.panel(opts.title, UI.detailTable(opts.columns || [], opts.rows || [], opts.tableOpts),
+      { cls: opts.cls || '', left: opts.summary ? '<span class="muted" style="margin-left:10px">' +
+          opts.summary + '</span>' : '', right: search + (opts.actions || '') });
+  },
+  bindSearch(input, scope) {
+    if (!input) return;
+    input.oninput = () => {
+      const q = input.value.trim().toLowerCase();
+      const rows = (scope || document).querySelectorAll('tbody tr');
+      rows.forEach(tr => {
+        tr.style.display = !q || tr.innerText.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
+      });
+    };
+  },
+  formValues(root) {
+    const out = {};
+    (root || document).querySelectorAll('[data-field]').forEach(el => {
+      out[el.dataset.field] = el.type === 'checkbox' ? el.checked : el.value;
+    });
+    return out;
+  },
   detailTable(cols, rows, opts) {
     opts = opts || {};
     const th = c => '<th>' + (String(c).charAt(0) === '<' ? c : UI.esc(c)) + '</th>';
@@ -86,17 +113,7 @@ const UI = {
       '<span class="spacer"></span>' + (opts.right || '') + '</div></div>';
   },
   table(cols, rows, onrow) {
-    // 表头允许传 HTML（如排序链接）；以 '<' 开头的原样输出，其余转义
-    const th = c => '<th>' + (String(c).charAt(0) === '<' ? c : UI.esc(c)) + '</th>';
-    let h = '<div class="detail-table-shell"><table class="detail-table"><thead><tr>' +
-      cols.map(th).join('') + '</tr></thead><tbody>';
-    if (!rows.length) {
-      h += '<tr><td colspan="' + cols.length + '" class="empty">暂无数据</td></tr>';
-    }
-    rows.forEach((r, i) => {
-      h += '<tr data-i="' + i + '">' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>';
-    });
-    h += '</tbody></table></div>';
+    const html = UI.detailTable(cols, rows, { rowAttrs: i => ' data-i="' + i + '"' });
     if (onrow) {
       setTimeout(() => {
         document.querySelectorAll('#page tbody tr').forEach(tr => {
@@ -104,7 +121,7 @@ const UI = {
         });
       });
     }
-    return h;
+    return html;
   },
   kv(obj) {
     let h = '<dl class="kv">';

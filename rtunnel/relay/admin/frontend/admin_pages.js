@@ -8,9 +8,10 @@ const ClientsPage = Object.assign(new Page(), {
       UI.bytes(c.bytes_in) + ' / ' + UI.bytes(c.bytes_out),
       '<button class="shell" data-user="' + UI.esc(c.user) + '">Shell</button>',
     ]);
-    this.el.innerHTML = UI.panel('客户端（A 侧）',
-      UI.table(['用户', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'], rows),
-      { right: '<span>共 ' + arr.length + ' 个</span>' });
+    this.el.innerHTML = UI.listPage({
+      title: '客户端（A 侧）', summary: '共 ' + arr.length + ' 个',
+      columns: ['用户', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'], rows,
+    });
     document.querySelectorAll('#page button.web').forEach(btn => {
       btn.onclick = (e) => {
         e.stopPropagation();
@@ -44,17 +45,12 @@ const StreamsPage = Object.assign(new Page(), {
       pill(s.state), UI.ago(s.opened_at_ms),
       '<button class="kick" data-sid="' + s.a_sid + '">踢掉</button>',
     ]);
-    this.el.innerHTML = UI.panel('会话',
-      UI.table(['A 用户:a_sid', 'C 设备:c_sid', '状态', '开启于', '操作'], rows),
-      { right: '<input id="st-q" class="tty-search" placeholder="搜索用户 / 设备">' +
-        '<span>共 ' + arr.length + ' 条</span>' });
-    const sq = document.getElementById('st-q');
-    if (sq) sq.oninput = () => {
-      const q = sq.value.trim().toLowerCase();
-      document.querySelectorAll('#page tbody tr').forEach(tr => {
-        tr.style.display = !q || tr.innerText.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
-      });
-    };
+    this.el.innerHTML = UI.listPage({
+      title: '会话', summary: '共 ' + arr.length + ' 条',
+      search: { id: 'st-q', placeholder: '搜索用户 / 设备' },
+      columns: ['A 用户:a_sid', 'C 设备:c_sid', '状态', '开启于', '操作'], rows,
+    });
+    UI.bindSearch(document.getElementById('st-q'));
     document.querySelectorAll('#page button.bind').forEach(btn => {
       btn.onclick = async (e) => {
         e.stopPropagation();
@@ -117,20 +113,15 @@ const CertsPage = Object.assign(new Page(), {
         '<textarea id="csr-input" rows="6" style="width:100%;font-family:monospace" placeholder="粘贴 CSR PEM（设备侧生成，SAN 或 CN 为身份）"></textarea>' +
         '<div style="margin-top:8px;display:flex;gap:10px;align-items:center">有效期(天) <input id="csr-days" type="number" value="30" style="width:80px">' +
         '<button id="csr-btn">签名</button><span id="csr-result" style="color:var(--muted)"></span></div></div>', { cls: 'mb16' }) +
-      UI.panel('证书台账',
-        UI.table(['SAN(身份)', '类型', '序列号', '到期日', '状态', '操作'], rows),
-        { right: '<input id="cert-q" class="tty-search" placeholder="搜索 SAN">' +
-          '<span>共 ' + arr.length + ' 张</span>' });
+      UI.listPage({
+        title: '证书台账', summary: '共 ' + arr.length + ' 张',
+        search: { id: 'cert-q', placeholder: '搜索 SAN' },
+        columns: ['SAN(身份)', '类型', '序列号', '到期日', '状态', '操作'], rows,
+      });
 
     const cr = document.getElementById('certs-refresh');
     if (cr) cr.onclick = () => this.refresh();
-    const cq = document.getElementById('cert-q');
-    if (cq) cq.oninput = () => {
-      const q = cq.value.trim().toLowerCase();
-      document.querySelectorAll('#page tbody tr').forEach(tr => {
-        tr.style.display = !q || tr.innerText.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
-      });
-    };
+    UI.bindSearch(document.getElementById('cert-q'));
     document.getElementById('issue-btn').onclick = async () => {
       const san = document.getElementById('issue-san').value.trim();
       const role = document.getElementById('issue-role').value;
@@ -220,17 +211,12 @@ const AuditPage = Object.assign(new Page(), {
         UI.esc(m[2]), '<code>' + UI.esc(m[3]) + '</code>',
         '<span title="' + UI.esc(m[4]) + '">' + UI.esc(m[4].length > 80 ? m[4].slice(0, 79) + '…' : m[4]) + '</span>'];
     });
-    this.el.innerHTML = UI.panel('审计日志',
-      UI.table(['时间', '角色', '操作', '详情'], rows),
-      { right: '<input id="au-q" class="tty-search" placeholder="搜索操作 / 详情">' +
-        '<span>最近 ' + arr.length + ' 条（新到旧）</span>' });
-    const q = document.getElementById('au-q');
-    if (q) q.oninput = () => {
-      const v = q.value.trim().toLowerCase();
-      document.querySelectorAll('#page tbody tr').forEach(tr => {
-        tr.style.display = !v || tr.innerText.toLowerCase().indexOf(v) >= 0 ? '' : 'none';
-      });
-    };
+    this.el.innerHTML = UI.listPage({
+      title: '审计日志', summary: '最近 ' + arr.length + ' 条（新到旧）',
+      search: { id: 'au-q', placeholder: '搜索操作 / 详情' },
+      columns: ['时间', '角色', '操作', '详情'], rows,
+    });
+    UI.bindSearch(document.getElementById('au-q'));
   },
 });
 
@@ -271,20 +257,16 @@ const FilesPage = Object.assign(new Page(), {
       '<span style="color:var(--muted)">单文件上限 ' + uploadLimitMb() + ' MiB</span></div>';
     this.el.innerHTML = UI.panel('上传文件', uploadBody, {
       cls: 'mb16', right: '<button id="files-refresh">刷新列表</button>',
-    }) + UI.panel('文件列表',
-      UI.table([this.sortLink('name', '名称'), this.sortLink('size', '大小'), '哈希',
-                this.sortLink('mtime', '修改时间'), '操作'], rows),
-      { right: '<input id="fl-q" class="tty-search" placeholder="搜索文件名">' +
-        '<span>共 ' + arr.length + ' 个</span>' });
+    }) + UI.listPage({
+      title: '文件列表', summary: '共 ' + arr.length + ' 个',
+      search: { id: 'fl-q', placeholder: '搜索文件名' },
+      columns: [this.sortLink('name', '名称'), this.sortLink('size', '大小'), '哈希',
+                this.sortLink('mtime', '修改时间'), '操作'],
+      rows,
+    });
 
     document.getElementById('files-refresh').onclick = () => this.refresh();
-    const fq = document.getElementById('fl-q');
-    if (fq) fq.oninput = () => {
-      const q = fq.value.trim().toLowerCase();
-      document.querySelectorAll('#page tbody tr').forEach(tr => {
-        tr.style.display = !q || tr.innerText.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
-      });
-    };
+    UI.bindSearch(document.getElementById('fl-q'));
     document.querySelectorAll('#page button.cp').forEach(btn => {
       btn.onclick = async () => {
         try { await navigator.clipboard.writeText(btn.dataset.hash); UI.toast('哈希已复制'); }

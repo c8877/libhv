@@ -347,17 +347,14 @@ const AgentsPage = Object.assign(new Page(), {
         ? '<button class="bind" data-devid="' + UI.esc(a.devid) + '">绑定</button> ' +
           '<button class="kick" data-devid="' + UI.esc(a.devid) + '">下线</button>' : ''),
     ]);
-    this.el.innerHTML = UI.panel('设备（C 侧）',
-      UI.table(['devid', '状态', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'], rows),
-      { right: '<input id="ag-q" class="tty-search" placeholder="搜索 devid / 地址">' +
-        '<span>共 ' + arr.length + ' 台 · 5s 自动刷新</span>' });
-    const aq = document.getElementById('ag-q');
-    if (aq) aq.oninput = () => {
-      const q = aq.value.trim().toLowerCase();
-      document.querySelectorAll('#page tbody tr').forEach(tr => {
-        tr.style.display = !q || tr.innerText.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
-      });
-    };
+    this.el.innerHTML = UI.listPage({
+      title: '设备（C 侧）',
+      summary: '共 ' + arr.length + ' 台 · 5s 自动刷新',
+      search: { id: 'ag-q', placeholder: '搜索 devid / 地址' },
+      columns: ['devid', '状态', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'],
+      rows,
+    });
+    UI.bindSearch(document.getElementById('ag-q'));
     document.querySelectorAll('#page button.web').forEach(btn => {
       btn.onclick = (e) => {
         e.stopPropagation();
@@ -555,19 +552,15 @@ const AccountsPage = Object.assign(new Page(), {
         return ops;
       })(),
     ]);
-    this.el.innerHTML = UI.panel('账号列表',
-      UI.table(['用户名', '角色', '状态', '创建时间', '操作'], rows2),
-      { right: '<input id="au-q" class="tty-search" placeholder="搜索用户名">' +
-        '<span>共 ' + arr.length + ' 个</span> ' +
-        '<button class="primary" id="nu-open">+ 新建账号</button>' });
-
-    const aq = document.getElementById('au-q');
-    if (aq) aq.oninput = () => {
-      const q = aq.value.trim().toLowerCase();
-      document.querySelectorAll('#page tbody tr').forEach(tr => {
-        tr.style.display = !q || tr.innerText.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
-      });
-    };
+    this.el.innerHTML = UI.listPage({
+      title: '账号列表',
+      summary: '共 ' + arr.length + ' 个',
+      search: { id: 'au-q', placeholder: '搜索用户名' },
+      actions: '<button class="primary" id="nu-open">+ 新建账号</button>',
+      columns: ['用户名', '角色', '状态', '创建时间', '操作'],
+      rows: rows2,
+    });
+    UI.bindSearch(document.getElementById('au-q'));
     document.getElementById('nu-open').onclick = () => {
       const mask = document.createElement('div');
       mask.className = 'tty-mask';
