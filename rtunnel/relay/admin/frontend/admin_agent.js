@@ -879,6 +879,7 @@ const AgentDetailPage = Object.assign(new Page(), {
           data_bits: 8, parity: 'N', stop_bits: 1, enabled: true }, true) + '</td></tr>';
       }
     }
+    const openAny = (tab === 'config') ? !!this.expandTty : (this.addTtyPath !== null && this.addTtyPath !== undefined);
     const search = '<input id="tty-q" class="tty-search" placeholder="搜索别名 / 路径" value="' + UI.esc(this.ttyQuery || '') + '">';
     wrap.innerHTML = '<div class="panel" style="margin-bottom:16px"><div class="panel-head">' +
       '<h2>串口 TTY</h2>' +
@@ -887,7 +888,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       '<span class="spacer"></span>' + search +
       '<button id="tty-refresh">刷新</button> ' +
       (can ? '<button id="tty-add">手动添加</button>' : '') + '</div>' +
-      '<div class="tty-table-wrap detail-table-shell"><table class="detail-table si-table tty-table"><tr>' +
+      '<div class="tty-table-wrap detail-table-shell' + (openAny ? ' open' : '') + '"><table class="detail-table si-table tty-table"><tr>' +
       '<th>设备</th><th>状态</th><th>参数</th><th>RX</th><th>TX</th><th>操作</th></tr>' +
       (rows || '<tr><td colspan="6" style="color:var(--muted)">' +
         (tab === 'config' ? '暂无已配置串口' : (q ? '没有匹配的串口' : '没有未配置的串口')) + '</td></tr>') +
