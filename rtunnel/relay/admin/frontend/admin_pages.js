@@ -45,8 +45,16 @@ const StreamsPage = Object.assign(new Page(), {
       '<button class="kick" data-sid="' + s.a_sid + '">踢掉</button>',
     ]);
     this.el.innerHTML = '<div class="panel"><div class="panel-head"><h2>会话</h2>' +
-      '<span class="spacer"></span><span>共 ' + arr.length + ' 条</span></div>' +
+      '<span class="spacer"></span><input id="st-q" class="tty-search" placeholder="搜索用户 / 设备">' +
+      '<span>共 ' + arr.length + ' 条</span></div>' +
       UI.table(['A 用户:a_sid', 'C 设备:c_sid', '状态', '开启于', '操作'], rows) + '</div>';
+    const sq = document.getElementById('st-q');
+    if (sq) sq.oninput = () => {
+      const q = sq.value.trim().toLowerCase();
+      document.querySelectorAll('#page tbody tr').forEach(tr => {
+        tr.style.display = !q || tr.innerText.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
+      });
+    };
     document.querySelectorAll('#page button.bind').forEach(btn => {
       btn.onclick = async (e) => {
         e.stopPropagation();

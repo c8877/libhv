@@ -420,8 +420,16 @@ const AgentsPage = Object.assign(new Page(), {
           '<button class="kick" data-devid="' + UI.esc(a.devid) + '">下线</button>' : ''),
     ]);
     this.el.innerHTML = '<div class="panel"><div class="panel-head"><h2>设备（C 侧）</h2>' +
-      '<span class="spacer"></span><span>共 ' + arr.length + ' 台 · 5s 自动刷新</span></div>' +
+      '<span class="spacer"></span><input id="ag-q" class="tty-search" placeholder="搜索 devid / 地址">' +
+      '<span>共 ' + arr.length + ' 台 · 5s 自动刷新</span></div>' +
       UI.table(['devid', '状态', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'], rows) + '</div>';
+    const aq = document.getElementById('ag-q');
+    if (aq) aq.oninput = () => {
+      const q = aq.value.trim().toLowerCase();
+      document.querySelectorAll('#page tbody tr').forEach(tr => {
+        tr.style.display = !q || tr.innerText.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
+      });
+    };
     document.querySelectorAll('#page button.web').forEach(btn => {
       btn.onclick = (e) => {
         e.stopPropagation();
