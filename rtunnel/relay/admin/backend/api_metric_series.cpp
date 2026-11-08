@@ -110,7 +110,17 @@ void AdminServer::handleMetricSeriesData(const HttpContextPtr& ctx) {
         ctx->send("{\"error\":\"timeout\"}");
         return;
     }
-    if (data[0] == '\1') {
+    std::string ae = ctx->header("Accept-Encoding");
+    bool accepts_gzip = ae.find("gzip") != std::string::npos;
+    if (data[0] == '\1' && data.size() > 1) {
+        if (accepts_gzip) {
+            // agent 已是完整 gzip 流，直接作为 HTTP gzip 响应，避免 relay 解压再压缩
+            ctx->response->headers["Content-Encoding"] = "gzip";
+            ctx->response->headers["Vary"] = "Accept-Encoding";
+            ctx->response->content_type = APPLICATION_JSON;
+            ctx->send(data.substr(1));
+            return;
+        }
         std::string plain;
         if (!gzipDecompress(data.data() + 1, data.size() - 1, plain)) {
             ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
@@ -124,17 +134,6 @@ void AdminServer::handleMetricSeriesData(const HttpContextPtr& ctx) {
         ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
         ctx->send("{\"error\":\"bad metric payload\"}");
         return;
-    }
-    bool full = since.empty() || since == "0";
-    std::string ae = ctx->header("Accept-Encoding");
-    if (full && ae.find("gzip") != std::string::npos) {
-        std::string gz;
-        if (gzipCompress(data, gz)) {
-            ctx->response->headers["Content-Encoding"] = "gzip";
-            ctx->response->content_type = APPLICATION_JSON;
-            ctx->send(gz);
-            return;
-        }
     }
     ctx->response->content_type = APPLICATION_JSON;
     ctx->send(data);
