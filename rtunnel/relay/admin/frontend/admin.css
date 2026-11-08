@@ -622,3 +622,9 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .settings-kv th{width:22%;min-width:150px;padding-left:20px;padding-right:8px}
 .settings-kv td{width:28%;text-align:left;padding-left:6px;padding-right:16px}
 .settings-kv tr:first-child th:first-child{padding-left:20px}
+.settings-table{table-layout:fixed}
+.settings-table th:nth-child(1){width:38%}
+.settings-table th:nth-child(2){width:26%}
+.settings-table th:nth-child(3){width:16%}
+.settings-table th:nth-child(4){width:20%}
+.ui-form-foot .spacer{flex:1}

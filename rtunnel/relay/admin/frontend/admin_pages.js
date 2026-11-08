@@ -515,49 +515,38 @@ const SettingsPage = Object.assign(new Page(), {
     let html = '';
     groups.forEach(g => {
       const defs = schema.filter(d => d.group === g);
-      const tip = d => {
-        const range = (d.min === 0 && d.max === 0) ? '' :
-          '范围 ' + d.min + '–' + d.max + (d.unit ? ' ' + d.unit : '');
-        return UI.esc((d.desc || '') + (range ? ' · ' + range : ''));
-      };
-      const cell = d => '<th><span class="setting-name">' + UI.esc(d.label) + '</span>' +
-        '<span class="tip" tabindex="0" data-tip="' + tip(d) + '">ⓘ</span></th>' +
-        '<td><b>' + UI.esc(st[d.key] || '—') + '</b>' +
-        (d.unit ? ' <span class="muted">' + UI.esc(d.unit) + '</span>' : '') + '</td>';
-      let rows = '';
-      for (let i = 0; i < defs.length; i += 2) {
-        rows += '<tr>' + cell(defs[i]) + (defs[i + 1] ? cell(defs[i + 1]) : '<th></th><td></td>') + '</tr>';
-      }
-      const table = '<div class="detail-table-shell settings-kv-shell">' +
-        '<table class="detail-table detail-kv settings-kv"><tbody>' + rows + '</tbody></table></div>';
-      let form = '';
-      if (this.editGroup === g) {
-        form = '<div class="ui-form setting-form"><div class="form-rows">' +
-          defs.map(d => {
-            const isText = (d.min === 0 && d.max === 0);
-            const input = isText
-              ? '<input type="text" data-set-input="' + d.key + '" value="' + UI.esc(st[d.key] || '') + '">'
-              : '<input type="number" data-set-input="' + d.key + '" value="' + UI.esc(st[d.key] || '') +
-                '" min="' + d.min + '" max="' + d.max + '">';
-            return '<label class="form-row"><span class="k">' + UI.esc(d.label) + '</span>' +
-              '<span class="c">' + input + '</span><span class="u">' + UI.esc(d.unit || '') + '</span></label>';
-          }).join('') +
-          '</div><div class="ui-form-foot"><span class="muted">保存后立即生效</span><span class="spacer"></span>' +
-          '<button data-set-cancel="1">取消</button><button class="primary" data-set-save="' + UI.esc(g) + '">保存本组</button></div></div>';
-      }
-      html += UI.panel(UI.esc(g), table + form, { cls: 'mb16',
-        right: '<button data-set-edit="' + UI.esc(g) + '">' + (this.editGroup === g ? '收起' : '编辑') + '</button>' });
+      const form = defs.map(d => {
+        const isText = (d.min === 0 && d.max === 0);
+        const input = isText
+          ? '<input type="text" data-set-input="' + d.key + '" value="' + UI.esc(st[d.key] || '') + '">'
+          : '<input type="number" data-set-input="' + d.key + '" value="' + UI.esc(st[d.key] || '') +
+            '" min="' + d.min + '" max="' + d.max + '">';
+        return '<label class="form-row"><span class="k">' + UI.esc(d.label) + '</span>' +
+          '<span class="c">' + input + '</span><span class="u">' + UI.esc(d.unit || '') + '</span></label>';
+      }).join('');
+      const openGroup = defs.some(d => this.editRow === d.key);
+      const rows = defs.map(d =>
+        '<tr class="setting-row' + (this.editRow === d.key ? ' open' : '') + '" data-set-key="' + d.key + '">' +
+        '<td>' + UI.esc(d.label) + '</td><td>' + UI.esc(st[d.key] || '—') + '</td>' +
+        '<td class="muted">' + UI.esc(d.unit || '—') + '</td><td class="chev">⌄</td></tr>').join('');
+      const groupForm = openGroup ? '<div class="ui-form setting-form"><div class="form-rows">' + form + '</div>' +
+        '<div class="ui-form-foot"><span class="muted">保存后立即生效</span><span class="spacer"></span>' +
+        '<button data-set-cancel="1">取消</button><button class="primary" data-set-save="' + UI.esc(g) + '">保存本组</button></div></div>' : '';
+      html += UI.panel(UI.esc(g), '<div class="detail-table-shell"><table class="detail-table setting-table settings-table">' +
+        '<thead><tr><th>设置项</th><th>当前值</th><th>单位</th><th>操作</th></tr></thead><tbody>' +
+        rows + '</tbody></table></div>' + groupForm, { cls: 'mb16' });
     });
     this.el.innerHTML = html;
 
-    this.el.querySelectorAll('[data-set-edit]').forEach(b => {
-      b.onclick = () => {
-        this.editGroup = this.editGroup === b.dataset.setEdit ? null : b.dataset.setEdit;
+    this.el.querySelectorAll('[data-set-key]').forEach(tr => {
+      tr.onclick = (e) => {
+        if (e.target.closest('button,input,select,label')) return;
+        this.editRow = this.editRow === tr.dataset.setKey ? null : tr.dataset.setKey;
         this.refresh();
       };
     });
     this.el.querySelectorAll('[data-set-cancel]').forEach(b => {
-      b.onclick = () => { this.editGroup = null; this.refresh(); };
+      b.onclick = () => { this.editRow = null; this.refresh(); };
     });
     this.el.querySelectorAll('[data-set-save]').forEach(b => {
       b.onclick = async () => {
@@ -574,7 +563,7 @@ const SettingsPage = Object.assign(new Page(), {
             window.SETTINGS = await Api.get('/api/v1/settings');
             applySiteTitle();
           } catch (e) {}
-          this.editGroup = null;
+          this.editRow = null;
           UI.toast('已保存，立即生效');
           this.refresh();
         } catch (e) { UI.toast('保存失败：' + e.message, true); }
