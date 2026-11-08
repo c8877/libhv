@@ -512,38 +512,60 @@ const SettingsPage = Object.assign(new Page(), {
     const schema = st._schema || [];
     const groups = [];
     schema.forEach(d => { if (groups.indexOf(d.group) < 0) groups.push(d.group); });
-
+    const open = k => this.editKey === k;
+    const value = d => '<span class="setting-value">' + UI.esc(st[d.key] || '—') +
+      (d.unit ? ' <span class="muted">' + UI.esc(d.unit) + '</span>' : '') + '</span>';
+    const field = d => {
+      const isText = (d.min === 0 && d.max === 0);
+      return '<label>' + UI.esc(d.label) + (isText
+        ? '<input type="text" id="set-input" value="' + UI.esc(st[d.key] || '') + '">'
+        : '<input type="number" id="set-input" value="' + UI.esc(st[d.key] || '') +
+          '" min="' + d.min + '" max="' + d.max + '">') + '</label>';
+    };
     let html = '';
     groups.forEach(g => {
       const rows = schema.filter(d => d.group === g).map(d => {
-        const isText = (d.min === 0 && d.max === 0);
-        const input = isText
-          ? '<input type="text" data-k="' + d.key + '" value="' + UI.esc(st[d.key] || '') + '">'
-          : '<input type="number" data-k="' + d.key + '" value="' + UI.esc(st[d.key] || '') +
-            '" min="' + d.min + '" max="' + d.max + '">';
-        return '<label class="cfg-row"><span>' + UI.esc(d.label) + '</span>' + input +
-          (d.unit ? '<em>' + UI.esc(d.unit) + '</em>' : '') + '</label>';
+        let r = '<tr class="setting-row' + (open(d.key) ? ' open' : '') + '" data-set-key="' + d.key + '">' +
+          '<td>' + UI.esc(d.label) + '</td><td>' + value(d) + '</td><td class="chev">⌄</td></tr>';
+        if (open(d.key)) {
+          r += '<tr class="setting-expand"><td colspan="3"><div class="ui-form">' +
+            '<div class="ui-form-grid cols-1">' + field(d) + '</div>' +
+            '<div class="ui-form-foot"><span class="muted">保存后立即生效</span><span class="spacer"></span>' +
+            '<div class="ui-form-right"><button data-set-cancel="1">取消</button>' +
+            '<button class="primary" data-set-save="' + d.key + '">保存</button></div></div></div></td></tr>';
+        }
+        return r;
       }).join('');
-      html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>' +
-        UI.esc(g) + '</h2></div><div class="cfg-body">' + rows + '</div></div>';
+      html += UI.panel(UI.esc(g), '<div class="detail-table-shell"><table class="detail-table setting-table"><tbody>' +
+        rows + '</tbody></table></div>', { cls: 'mb16' });
     });
-    html += '<div class="panel"><div class="cfg-actions" style="padding-top:16px">' +
-      '<button class="primary" id="cfg-save">保存</button></div></div>';
     this.el.innerHTML = html;
 
-    document.getElementById('cfg-save').onclick = async () => {
-      const body = {};
-      document.querySelectorAll('#page .cfg-body [data-k]').forEach(inp => { body[inp.dataset.k] = inp.value; });
-      try {
-        await Api.put('/api/v1/settings', body);
-        try {
-          window.SETTINGS = await Api.get('/api/v1/settings');
-          applySiteTitle();
-        } catch (e) {}
-        UI.toast('已保存，立即生效');
+    this.el.querySelectorAll('[data-set-key]').forEach(tr => {
+      tr.onclick = (e) => {
+        if (e.target.closest('button,input,select,label')) return;
+        this.editKey = this.editKey === tr.dataset.setKey ? null : tr.dataset.setKey;
         this.refresh();
-      } catch (e) { UI.toast('保存失败：' + e.message, true); }
-    };
+      };
+    });
+    this.el.querySelectorAll('[data-set-cancel]').forEach(b => {
+      b.onclick = () => { this.editKey = null; this.refresh(); };
+    });
+    this.el.querySelectorAll('[data-set-save]').forEach(b => {
+      b.onclick = async () => {
+        const k = b.dataset.setSave;
+        try {
+          await Api.put('/api/v1/settings', { [k]: document.getElementById('set-input').value });
+          try {
+            window.SETTINGS = await Api.get('/api/v1/settings');
+            applySiteTitle();
+          } catch (e) {}
+          this.editKey = null;
+          UI.toast('已保存，立即生效');
+          this.refresh();
+        } catch (e) { UI.toast('保存失败：' + e.message, true); }
+      };
+    });
   },
   enter(el) { this.el = el; return Page.prototype.enter.call(this, el, []); },
 });
