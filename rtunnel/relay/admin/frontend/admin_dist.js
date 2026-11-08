@@ -307,33 +307,47 @@ const TaskDetailPage = Object.assign(new Page(), {
     const size = Number(t.file_size) || 0;
     const sent = Number(t.sent) || 0;
     const pct = size ? Math.min(100, Math.floor(sent * 100 / size)) : 0;
+    const cls = t.status === 'success' ? 'ok' : (t.status === 'failed' || t.status === 'timeout') ? 'bad'
+      : (t.status === 'canceled' ? 'info' : 'warn');
+    const meta = [
+      ['设备', UI.esc(t.devid)],
+      ['目标路径', UI.esc(t.target_path || '—')],
+      ['重试', t.retry_count + ' / ' + t.max_retries],
+      ['开始时间', new Date(t.start_at_ms).toLocaleString()],
+      ['截止时间', new Date(t.deadline_at_ms).toLocaleString()],
+      ['创建时间', new Date(t.created_ms).toLocaleString()],
+      ['操作人', UI.esc(t.actor || '—')],
+      ['批次', UI.esc(t.batch_id || '—')],
+    ];
     this.el.innerHTML =
-      '<div class="panel" style="max-width:760px"><div class="panel-head"><h2>任务 #' + t.id +
-        '</h2><span class="spacer"></span><a href="#/tasks"><button>返回列表</button></a></div>' +
-      '<div class="cfg-body">' +
-        '<table class="si-table">' +
-        '<tr><th>文件</th><td>' + UI.esc(t.file_name) + '</td></tr>' +
-        '<tr><th>设备</th><td>' + UI.esc(t.devid) + '</td></tr>' +
-        '<tr><th>目标路径</th><td>' + UI.esc(t.target_path || '—') + '</td></tr>' +
-        '<tr><th>文件哈希</th><td><code>' + UI.esc(t.file_sha || '') + '</code></td></tr>' +
-        '<tr><th>状态</th><td>' + st + '</td></tr>' +
-        '<tr><th>进度</th><td><progress max="100" value="' + pct + '"></progress> ' +
-          UI.bytes(sent) + ' / ' + UI.bytes(size) + '</td></tr>' +
-        '<tr><th>重试</th><td>' + t.retry_count + ' / ' + t.max_retries + '</td></tr>' +
-        '<tr><th>开始时间</th><td>' + new Date(t.start_at_ms).toLocaleString() + '</td></tr>' +
-        '<tr><th>截止时间</th><td>' + new Date(t.deadline_at_ms).toLocaleString() + '</td></tr>' +
-        '<tr><th>创建时间</th><td>' + new Date(t.created_ms).toLocaleString() + '</td></tr>' +
-        '<tr><th>操作人</th><td>' + UI.esc(t.actor) + '</td></tr>' +
-        '<tr><th>批次</th><td>' + UI.esc(t.batch_id) + '</td></tr>' +
-        '<tr><th>错误</th><td>' + UI.esc(t.error || '—') + '</td></tr>' +
-        '</table>' +
-      '</div><div class="cfg-actions">' +
+      '<div class="panel" style="max-width:900px"><div class="panel-head"><h2>任务 #' + t.id + '</h2>' +
+        '<span class="pill ' + cls + '" style="margin-left:8px">' + UI.esc(st) + '</span>' +
+        '<span class="spacer"></span><a href="#/tasks"><button>返回列表</button></a></div>' +
+      '<div class="task-hero">' +
+        '<div class="task-file"><b>' + UI.esc(t.file_name) + '</b>' +
+          '<div class="task-sub">' + UI.bytes(size) + ' · ' +
+          (t.file_sha ? '<code title="' + UI.esc(t.file_sha) + '">' + UI.esc(t.file_sha.slice(0, 16)) + '…</code> ' +
+            '<button id="td-copy" data-hash="' + UI.esc(t.file_sha) + '">复制哈希</button>' : '—') +
+          '</div></div>' +
+        '<div class="task-progress"><progress max="100" value="' + pct + '"></progress>' +
+          '<div class="task-pct">' + pct + '% · ' + UI.bytes(sent) + ' / ' + UI.bytes(size) + '</div></div>' +
+      '</div>' +
+      '<div class="kv-grid">' + meta.map(m =>
+        '<div class="kv-item"><span class="k">' + m[0] + '</span><span class="v" title="' + m[1] + '">' + m[1] + '</span></div>').join('') +
+      '</div>' +
+      (t.error ? '<div class="task-error"><b>错误</b> ' + UI.esc(t.error) + '</div>' : '') +
+      '<div class="cfg-actions" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px">' +
         (t.status === 'failed' ? '<button class="primary" id="td-retry">重试</button> ' : '') +
         (t.status === 'scheduled' || t.status === 'queued' ? '<button id="td-cancel">取消</button> ' : '') +
         (t.status === 'timeout' && t.extend_count === 0 ? '<button id="td-extend">延长截止时间</button>' : '') +
         (t.status === 'conflict' ? '<button id="td-verify">校验设备</button> ' +
           '<button id="td-force">强制重发</button>' : '') +
       '</div></div>';
+    const cp = document.getElementById('td-copy');
+    if (cp) cp.onclick = async () => {
+      try { await navigator.clipboard.writeText(cp.dataset.hash); UI.toast('哈希已复制'); }
+      catch (e) { UI.toast('复制失败', true); }
+    };
     const rt = document.getElementById('td-retry');
     if (rt) rt.onclick = async () => {
       try { await Api.post('/api/v1/distributions/' + this.id + '/retry', {}); this.refresh(); }

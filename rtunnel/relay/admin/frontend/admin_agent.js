@@ -30,6 +30,19 @@ const AgentDetailPage = Object.assign(new Page(), {
     Object.values(this.charts || {}).forEach(c => { try { c.destroy(); } catch (e) {} });
     this.charts = {};
   },
+  sysGrid(si, ts) {
+    const rows = [
+      ['架构', si.machine || '—'],
+      ['内核', si.kernel || '—'],
+      ['CPU 型号', si.cpu_model || '—'],
+      ['核心数', (si.cpu_count || 0) + ' 核'],
+      ['板卡型号', si.board || '—'],
+      ['采集时间', ts ? new Date(ts).toLocaleString() : '—'],
+    ];
+    return '<div class="sys-grid">' + rows.map(r =>
+      '<div class="sys-item"><span class="k">' + UI.esc(r[0]) + '</span>' +
+      '<span class="v" title="' + UI.esc(r[1]) + '">' + UI.esc(r[1]) + '</span></div>').join('') + '</div>';
+  },
   diskColor(p) { return p >= 85 ? cssVar('--bad', '#e5534b') : p >= 70 ? cssVar('--warn', '#f5a623') : cssVar('--accent', '#4a9eff'); },
   updateSnapshot(d, si, rows) {
     const head = document.getElementById('si-head-kv');
@@ -43,15 +56,8 @@ const AgentDetailPage = Object.assign(new Page(), {
       n.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>']);
     const nw = document.getElementById('si-nic-wrap');
     if (nw) nw.innerHTML = UI.table(['接口', 'IP', '掩码', '状态'], nics);
-    const cpu = si.cpu || { usage: 0, cores: [] };
-    const sysRows = [
-      ['架构', si.machine || '—'], ['内核', si.kernel || '—'], ['CPU 型号', si.cpu_model || '—'],
-      ['核心数', (si.cpu_count || 0) + ' 核'], ['板卡型号', si.board || '—'],
-      ['采集时间', new Date(Date.now()).toLocaleString()],
-    ];
     const sw = document.getElementById('si-sys-wrap');
-    if (sw) sw.innerHTML = '<table class="si-table">' + sysRows.map(r =>
-      '<tr><th>' + UI.esc(r[0]) + '</th><td>' + UI.esc(r[1]) + '</td></tr>').join('') + '</table>';
+    if (sw) sw.innerHTML = this.sysGrid(si, Date.now());
     const fw = document.getElementById('si-flows-wrap');
     if (fw) fw.innerHTML = UI.table(['A 用户:sid', 'c_sid', '状态', '开启于'], rows);
     this.diskRows = (si.mounts || []).map(m => {
@@ -177,16 +183,7 @@ const AgentDetailPage = Object.assign(new Page(), {
         (canManage() ? ' <button class="caps-edit" id="caps-edit">编辑</button>' : '') + '</td></tr>' +
         '<tr><th>启动参数</th><td><code style="font-size:12px">' + UI.esc(si.args || '') + '</code></td></tr>' +
         '</table>';
-      const sysRows = [
-        ['架构', si.machine || '—'],
-        ['内核', si.kernel || '—'],
-        ['CPU 型号', si.cpu_model || '—'],
-        ['核心数', (si.cpu_count || 0) + ' 核'],
-        ['板卡型号', si.board || '—'],
-        ['采集时间', new Date(siTs).toLocaleString()],
-      ];
-      const sysTable = '<table class="si-table">' + sysRows.map(r =>
-        '<tr><th>' + UI.esc(r[0]) + '</th><td>' + UI.esc(r[1]) + '</td></tr>').join('') + '</table>';
+      const sysTable = this.sysGrid(si, siTs);
       html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>系统</h2></div>' +
         '<div id="si-sys-wrap">' + sysTable + '</div></div>' +
         '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>运行时</h2></div>' +
