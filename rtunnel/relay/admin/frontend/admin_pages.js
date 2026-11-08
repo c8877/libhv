@@ -512,56 +512,57 @@ const SettingsPage = Object.assign(new Page(), {
     const schema = st._schema || [];
     const groups = [];
     schema.forEach(d => { if (groups.indexOf(d.group) < 0) groups.push(d.group); });
-    const open = k => this.editKey === k;
-    const value = d => '<span class="setting-value">' + UI.esc(st[d.key] || '—') + '</span>';
-    const field = d => {
-      const isText = (d.min === 0 && d.max === 0);
-      return '<label>' + UI.esc(d.label) + (isText
-        ? '<input type="text" id="set-input" value="' + UI.esc(st[d.key] || '') + '">'
-        : '<input type="number" id="set-input" value="' + UI.esc(st[d.key] || '') +
-          '" min="' + d.min + '" max="' + d.max + '">') + '</label>';
-    };
     let html = '';
     groups.forEach(g => {
-      const rows = schema.filter(d => d.group === g).map(d => {
-        let r = '<tr class="setting-row' + (open(d.key) ? ' open' : '') + '" data-set-key="' + d.key + '">' +
-          '<td>' + UI.esc(d.label) + '</td><td>' + value(d) + '</td>' +
-          '<td class="muted">' + UI.esc(d.unit || '—') + '</td><td class="chev">⌄</td></tr>';
-        if (open(d.key)) {
-          r += '<tr class="setting-expand"><td colspan="4"><div class="ui-form">' +
-            '<div class="ui-form-grid cols-1">' + field(d) + '</div>' +
-            '<div class="ui-form-foot"><span class="muted">保存后立即生效</span><span class="spacer"></span>' +
-            '<div class="ui-form-right"><button data-set-cancel="1">取消</button>' +
-            '<button class="primary" data-set-save="' + d.key + '">保存</button></div></div></div></td></tr>';
-        }
-        return r;
-      }).join('');
-      html += UI.panel(UI.esc(g), '<div class="detail-table-shell"><table class="detail-table setting-table settings-table">' +
-        '<thead><tr><th>设置项</th><th>当前值</th><th>单位</th><th>操作</th></tr></thead><tbody>' +
-        rows + '</tbody></table></div>', { cls: 'mb16' });
+      const defs = schema.filter(d => d.group === g);
+      const rows = defs.map(d =>
+        '<tr><td>' + UI.esc(d.label) + '</td><td>' + UI.esc(st[d.key] || '—') + '</td>' +
+        '<td class="muted">' + UI.esc(d.unit || '—') + '</td></tr>').join('');
+      const table = '<div class="detail-table-shell"><table class="detail-table setting-table settings-table">' +
+        '<thead><tr><th>设置项</th><th>当前值</th><th>单位</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+      let form = '';
+      if (this.editGroup === g) {
+        form = '<div class="ui-form setting-form"><div class="ui-form-grid cols-3">' +
+          defs.map(d => {
+            const isText = (d.min === 0 && d.max === 0);
+            return '<label>' + UI.esc(d.label) + (isText
+              ? '<input type="text" data-set-input="' + d.key + '" value="' + UI.esc(st[d.key] || '') + '">'
+              : '<input type="number" data-set-input="' + d.key + '" value="' + UI.esc(st[d.key] || '') +
+                '" min="' + d.min + '" max="' + d.max + '">') + '</label>';
+          }).join('') +
+          '</div><div class="ui-form-foot"><span class="muted">保存后立即生效</span><span class="spacer"></span>' +
+          '<button data-set-cancel="1">取消</button><button class="primary" data-set-save="' + UI.esc(g) + '">保存</button></div></div>';
+      }
+      html += UI.panel(UI.esc(g), table + form, { cls: 'mb16',
+        right: '<button data-set-edit="' + UI.esc(g) + '">' + (this.editGroup === g ? '收起' : '编辑') + '</button>' });
     });
     this.el.innerHTML = html;
 
-    this.el.querySelectorAll('[data-set-key]').forEach(tr => {
-      tr.onclick = (e) => {
-        if (e.target.closest('button,input,select,label')) return;
-        this.editKey = this.editKey === tr.dataset.setKey ? null : tr.dataset.setKey;
+    this.el.querySelectorAll('[data-set-edit]').forEach(b => {
+      b.onclick = () => {
+        this.editGroup = this.editGroup === b.dataset.setEdit ? null : b.dataset.setEdit;
         this.refresh();
       };
     });
     this.el.querySelectorAll('[data-set-cancel]').forEach(b => {
-      b.onclick = () => { this.editKey = null; this.refresh(); };
+      b.onclick = () => { this.editGroup = null; this.refresh(); };
     });
     this.el.querySelectorAll('[data-set-save]').forEach(b => {
       b.onclick = async () => {
-        const k = b.dataset.setSave;
+        const g = b.dataset.setSave;
+        const defs = schema.filter(d => d.group === g);
+        const body = {};
+        defs.forEach(d => {
+          const el = document.querySelector('[data-set-input="' + d.key + '"]');
+          if (el) body[d.key] = el.value;
+        });
         try {
-          await Api.put('/api/v1/settings', { [k]: document.getElementById('set-input').value });
+          await Api.put('/api/v1/settings', body);
           try {
             window.SETTINGS = await Api.get('/api/v1/settings');
             applySiteTitle();
           } catch (e) {}
-          this.editKey = null;
+          this.editGroup = null;
           UI.toast('已保存，立即生效');
           this.refresh();
         } catch (e) { UI.toast('保存失败：' + e.message, true); }

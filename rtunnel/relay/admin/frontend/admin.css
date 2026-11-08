@@ -585,3 +585,10 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .profile-table th:nth-child(1){width:34%}
 .profile-table th:nth-child(2){width:46%}
 .profile-table th:nth-child(3){width:20%}
+.setting-form{margin-top:12px}
+.settings-table th:nth-child(1){width:52%}
+.settings-table th:nth-child(2){width:28%}
+.settings-table th:nth-child(3){width:20%}
+.profile-table th:nth-child(1){width:34%}
+.profile-table th:nth-child(2){width:46%}
+.profile-table th:nth-child(3){width:20%}
