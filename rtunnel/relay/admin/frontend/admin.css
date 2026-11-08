@@ -465,3 +465,13 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .tty-form-grid .tty-check{flex-direction:row;align-items:center;gap:8px;height:33px}
 .tty-form-foot{display:flex;align-items:center;gap:8px;margin-top:14px}
 .tty-form-left,.tty-form-right{display:flex;gap:8px}
+.metric-form{max-width:760px;padding:14px 0 4px}
+.metric-form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px 22px;align-items:end}
+.metric-form-grid label{display:flex;flex-direction:column;gap:6px;font-size:11px;color:var(--muted)}
+.metric-form-grid input{padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:13px;width:100%}
+.metric-readonly{display:flex;flex-direction:column;gap:6px;font-size:11px;color:var(--muted)}
+.metric-readonly b{font-size:13px;color:var(--fg);font-weight:500;padding:7px 0}
+.metric-form-foot{display:flex;align-items:center;gap:8px;margin-top:14px}
+.metric-form-foot .metric-sync{margin:0}
+.metric-form-foot .spacer{flex:1}
+.metric-form-foot{justify-content:flex-start}

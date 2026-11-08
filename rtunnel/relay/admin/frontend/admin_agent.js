@@ -653,25 +653,25 @@ const AgentDetailPage = Object.assign(new Page(), {
           '<td class="chev">⌄</td></tr>';
         if (open) {
           rows += '<tr class="metric-expand"><td colspan="6"><div class="metric-form">' +
-            '<div class="metric-fields">' +
-            '<div class="field"><label>间隔</label><div class="control">' +
-              '<input id="me-int" type="number" min="1" max="300" value="' + c.interval_sec + '"><span>秒</span></div></div>' +
-            '<div class="field"><label>保留点数</label><div class="control">' +
-              '<input id="me-pts" type="number" min="60" max="86400" value="' + c.points + '"><span>点</span></div></div>' +
-            '<div class="field"><label>预计保留</label><div class="static">' + dur(c) + '</div></div>' +
+            '<div class="metric-form-grid">' +
+            '<label>间隔（秒）<input id="me-int" type="number" min="1" max="300" value="' + c.interval_sec + '"></label>' +
+            '<label>保留点数<input id="me-pts" type="number" min="60" max="86400" value="' + c.points + '"></label>' +
+            '<div class="metric-readonly"><span>预计保留</span><b>' + dur(c) + '</b></div>' +
             '</div>' +
-            '<div class="metric-sync">' + (c.enabled
-              ? (c.synced ? '已下发并确认' : '已下发，等待 agent 确认')
-              : '已禁用，不参与采样') + '</div>' +
-            '<div class="metric-actions">' +
-            '<button class="primary" data-msave="' + UI.esc(c.series) + '">保存并下发</button>' +
-            '<button data-mdel="' + UI.esc(c.series) + '">删除</button>' +
+            '<div class="metric-form-foot">' +
+              '<span class="metric-sync">' + (c.enabled
+                ? (c.synced ? '已下发并确认' : '已下发，等待 agent 确认')
+                : '已禁用，不参与采样') + '</span>' +
+              '<span class="spacer"></span>' +
+              '<button data-mdel="' + UI.esc(c.series) + '">删除</button>' +
+              '<button data-mcancel="1">取消</button>' +
+              '<button class="primary" data-msave="' + UI.esc(c.series) + '">保存并下发</button>' +
             '</div></div></td></tr>';
         }
       });
     });
     wrap.innerHTML = '<div class="panel" style="margin-bottom:16px"><div class="panel-head">' +
-      '<h2>监控采样</h2><span class="muted" style="margin-left:10px">' + list.length + ' 项 · ' +
+      '<h2>采样配置</h2><span class="muted" style="margin-left:10px">' + list.length + ' 项 · ' +
       syncCount + ' 项未同步</span><span class="spacer"></span>' +
       (can ? '<button id="metric-add">+ 添加指标</button>' : '') + '</div>' +
       '<table class="si-table metric-table"><tr><th>指标</th><th>间隔</th><th>保留</th>' +
@@ -710,6 +710,9 @@ const AgentDetailPage = Object.assign(new Page(), {
         }) : c);
         save(next);
       };
+    });
+    wrap.querySelectorAll('[data-mcancel]').forEach(b => {
+      b.onclick = () => { this.expandMetric = null; this.renderMetricCard(wrap); };
     });
     wrap.querySelectorAll('[data-mdel]').forEach(b => {
       b.onclick = () => {
