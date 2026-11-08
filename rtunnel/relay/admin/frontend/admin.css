@@ -618,3 +618,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
   border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;line-height:1.5;
   box-shadow:0 8px 24px rgba(0,0,0,.25);opacity:0;visibility:hidden;transition:.12s}
 .tip:hover::after,.tip:focus::after{opacity:1;visibility:visible}
+.settings-kv{table-layout:fixed;min-width:720px}
+.settings-kv th{width:22%;min-width:150px;padding-left:20px;padding-right:8px}
+.settings-kv td{width:28%;text-align:left;padding-left:6px;padding-right:16px}
+.settings-kv tr:first-child th:first-child{padding-left:20px}

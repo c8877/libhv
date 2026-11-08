@@ -520,11 +520,14 @@ const SettingsPage = Object.assign(new Page(), {
           '范围 ' + d.min + '–' + d.max + (d.unit ? ' ' + d.unit : '');
         return UI.esc((d.desc || '') + (range ? ' · ' + range : ''));
       };
-      const rows = defs.map(d =>
-        '<tr><th><span class="setting-name">' + UI.esc(d.label) + '</span>' +
+      const cell = d => '<th><span class="setting-name">' + UI.esc(d.label) + '</span>' +
         '<span class="tip" tabindex="0" data-tip="' + tip(d) + '">ⓘ</span></th>' +
         '<td><b>' + UI.esc(st[d.key] || '—') + '</b>' +
-        (d.unit ? ' <span class="muted">' + UI.esc(d.unit) + '</span>' : '') + '</td></tr>').join('');
+        (d.unit ? ' <span class="muted">' + UI.esc(d.unit) + '</span>' : '') + '</td>';
+      let rows = '';
+      for (let i = 0; i < defs.length; i += 2) {
+        rows += '<tr>' + cell(defs[i]) + (defs[i + 1] ? cell(defs[i + 1]) : '<th></th><td></td>') + '</tr>';
+      }
       const table = '<div class="detail-table-shell settings-kv-shell">' +
         '<table class="detail-table detail-kv settings-kv"><tbody>' + rows + '</tbody></table></div>';
       let form = '';
