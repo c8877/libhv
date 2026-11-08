@@ -527,3 +527,5 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .tty-table th:nth-child(4){width:12%}
 .tty-table th:nth-child(5){width:12%}
 .tty-table th:nth-child(6){width:16%}
+.caps-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.caps-expand td{padding:0 16px 14px 24px!important;border-bottom:0!important}

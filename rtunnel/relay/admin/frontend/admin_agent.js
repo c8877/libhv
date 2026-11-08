@@ -30,6 +30,20 @@ const AgentDetailPage = Object.assign(new Page(), {
     Object.values(this.charts || {}).forEach(c => { try { c.destroy(); } catch (e) {} });
     this.charts = {};
   },
+  capsFormHtml(si) {
+    const caps = si.caps || {};
+    const shellAllowed = roleOf() === 'admin';
+    return '<div class="tty-form"><div class="tty-form-grid caps-grid">' +
+      '<label>转发端口<input id="caps-ports" value="' + UI.esc((caps.ports || []).join(', ')) +
+        '" placeholder="22, 8080, 8099"></label>' +
+      '<label>文件目录<input id="caps-dir" value="' + UI.esc(caps.file_dir || '/opt/data/files') + '"></label>' +
+      '<label class="tty-check"><input type="checkbox" id="caps-shell"' + (caps.shell ? ' checked' : '') +
+        (shellAllowed ? '' : ' disabled') + '> 允许 Shell</label>' +
+      '</div><div class="tty-form-foot"><span class="muted" id="caps-msg">' +
+        (shellAllowed ? '' : '仅 admin 可修改 Shell') + '</span><span class="spacer"></span>' +
+      '<div class="tty-form-right"><button data-caps-cancel="1" id="caps-cancel">取消</button>' +
+      '<button class="primary" id="caps-save">保存并下发</button></div></div></div>';
+  },
   sysGrid(si, ts) {
     const rows = [
       ['架构', si.machine || '—'],
@@ -187,11 +201,15 @@ const AgentDetailPage = Object.assign(new Page(), {
       if (caps.file_dir) chips.push('文件 ' + caps.file_dir);
       chips.push(caps.mtls ? 'mTLS' : 'mTLS 未启用');
       const capHtml = chips.map(c => '<span class="chip">' + UI.esc(c) + '</span>').join(' ');
-      const runtimeTable = UI.kvTable([
-        ['agent 版本', UI.esc(si.version || '')],
-        ['能力', capHtml + (canManage() ? ' <button class="caps-edit" id="caps-edit">编辑</button>' : '')],
-        ['启动参数', '<code style="font-size:12px">' + UI.esc(si.args || '') + '</code>'],
-      ]);
+      const capsForm = this.capsOpen ? this.capsFormHtml(si) : '';
+      const runtimeTable = '<div class="detail-table-shell"><table class="detail-table detail-kv"><tbody>' +
+        '<tr><th>agent 版本</th><td>' + UI.esc(si.version || '') + '</td></tr>' +
+        '<tr><th>能力</th><td>' + capHtml +
+          (canManage() ? ' <button class="caps-edit" id="caps-edit">' +
+            (this.capsOpen ? '收起' : '编辑') + '</button>' : '') + '</td></tr>' +
+        (capsForm ? '<tr class="caps-expand"><td colspan="2">' + capsForm + '</td></tr>' : '') +
+        '<tr><th>启动参数</th><td><code style="font-size:12px">' + UI.esc(si.args || '') + '</code></td></tr>' +
+        '</tbody></table></div>';
       const sysTable = this.sysGrid(si, siTs);
       html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>系统</h2></div>' +
         '<div id="si-sys-wrap">' + sysTable + '</div></div>' +
@@ -325,46 +343,31 @@ const AgentDetailPage = Object.assign(new Page(), {
       else this.renderSeriesPanel();
       if (!this.ttysLoaded) this.loadTtys();
       const ce = document.getElementById('caps-edit');
-      if (ce) ce.onclick = () => {
-        const caps = si.caps || {};
-        const shellAllowed = roleOf() === 'admin';
-        const ov = document.createElement('div');
-        ov.className = 'modal-mask';
-        ov.innerHTML = '<div class="modal"><h3>编辑能力</h3>' +
-          '<label class="fld">转发端口（逗号分隔，1–65535，最多 32 个）' +
-          '<input id="caps-ports" value="' + UI.esc((caps.ports || []).join(', ')) + '"></label>' +
-          '<label class="fld">文件目录（绝对路径）' +
-          '<input id="caps-dir" value="' + UI.esc(caps.file_dir || '/opt/data/files') + '"></label>' +
-          '<label class="fld"><input type="checkbox" id="caps-shell"' + (caps.shell ? ' checked' : '') +
-          (shellAllowed ? '' : ' disabled') + '> 允许 Shell' +
-          (shellAllowed ? '' : '（仅 admin 可改）') + '</label>' +
-          '<div class="modal-actions"><button id="caps-cancel">取消</button>' +
-          '<button class="primary" id="caps-save">保存并下发</button></div>' +
-          '<div id="caps-msg" class="modal-msg"></div></div>';
-        document.body.appendChild(ov);
-        const close = () => ov.remove();
-        document.getElementById('caps-cancel').onclick = close;
-        document.getElementById('caps-save').onclick = async () => {
-          const msg = document.getElementById('caps-msg');
-          const raw = document.getElementById('caps-ports').value;
-          const ports = raw.split(',').map(x => x.trim()).filter(Boolean).map(x => Number(x));
-          if (ports.some(x => !Number.isInteger(x) || x <= 0 || x > 65535)) {
-            msg.textContent = '端口必须是 1–65535 的整数'; return;
-          }
-          const body = { ports: ports };
-          const fdir = document.getElementById('caps-dir').value.trim();
-          if (fdir) body.file_dir = fdir;
-          if (shellAllowed) body.shell = document.getElementById('caps-shell').checked;
-          msg.textContent = '下发中…';
-          try {
-            const r = await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/caps', body);
-            close();
-            if (r && r.persisted === false) UI.toast('已生效，但未能写入配置文件，重启后会丢失', true);
-            else UI.toast('能力已更新');
-            this.refresh();
-          } catch (e) { msg.textContent = '失败：' + e.message; }
-        };
+      if (ce) ce.onclick = () => { this.capsOpen = !this.capsOpen; this._rendered = false; this.refresh(); };
+      const cs = document.getElementById('caps-save');
+      if (cs) cs.onclick = async () => {
+        const msg = document.getElementById('caps-msg');
+        const raw = document.getElementById('caps-ports').value;
+        const ports = raw.split(',').map(x => x.trim()).filter(Boolean).map(x => Number(x));
+        if (ports.some(x => !Number.isInteger(x) || x <= 0 || x > 65535)) {
+          msg.textContent = '端口必须是 1–65535 的整数'; return;
+        }
+        const body = { ports: ports };
+        const fdir = document.getElementById('caps-dir').value.trim();
+        if (fdir) body.file_dir = fdir;
+        if (roleOf() === 'admin') body.shell = document.getElementById('caps-shell').checked;
+        msg.textContent = '下发中…';
+        try {
+          const r = await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/caps', body);
+          this.capsOpen = false;
+          this._rendered = false;
+          if (r && r.persisted === false) UI.toast('已生效，但未能写入配置文件，重启后会丢失', true);
+          else UI.toast('能力已更新');
+          this.refresh();
+        } catch (e) { msg.textContent = '失败：' + e.message; }
       };
+      const cc = document.getElementById('caps-cancel');
+      if (cc) cc.onclick = () => { this.capsOpen = false; this._rendered = false; this.refresh(); };
       const cb = document.getElementById('si-auto');
       const ps = document.getElementById('si-period');
       if (ps) this.period = Number(ps.value) || 10;
