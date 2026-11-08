@@ -497,3 +497,18 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
   color:var(--fg);
 }
 .table-shell .si-table td{border-bottom:1px solid color-mix(in srgb,var(--border) 45%,transparent)}
+/* 表单输入控件加重 */
+.metric-form-grid input,.tty-form-grid input,.tty-form-grid select{
+  background:var(--card);
+  border-color:color-mix(in srgb, var(--border) 80%, var(--fg) 20%);
+}
+.metric-form-grid input:focus,.tty-form-grid input:focus,.tty-form-grid select:focus{
+  outline:none;border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent)
+}
+/* 表头更重、行线更轻 */
+.table-shell .si-table th{
+  background:color-mix(in srgb, var(--fg) 7%, var(--card));
+  font-weight:600;color:var(--fg)
+}
+.si-table td{border-bottom:1px solid color-mix(in srgb, var(--border) 55%, transparent)}
+.table-shell .si-table tr:last-child td{border-bottom:0}
