@@ -261,6 +261,18 @@ const UI = {
     const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
     return (d ? d + 'd ' : '') + String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
   },
+  panel(title, body, opts) {
+    opts = opts || {};
+    return '<div class="panel ' + (opts.cls || '') + '">' +
+      '<div class="panel-head"><h2>' + title + '</h2>' +
+      (opts.left || '') + '<span class="spacer"></span>' + (opts.right || '') +
+      '</div>' + body + '</div>';
+  },
+  grid(rows) {
+    return '<div class="sys-grid">' + rows.map(r =>
+      '<div class="sys-item"><span class="k">' + r[0] + '</span>' +
+      '<span class="v" title="' + r[1] + '">' + r[1] + '</span></div>').join('') + '</div>';
+  },
   detailTable(cols, rows, opts) {
     opts = opts || {};
     const th = c => '<th>' + (String(c).charAt(0) === '<' ? c : UI.esc(c)) + '</th>';

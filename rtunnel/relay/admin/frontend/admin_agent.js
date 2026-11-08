@@ -33,13 +33,13 @@ const AgentDetailPage = Object.assign(new Page(), {
   capsFormHtml(si) {
     const caps = si.caps || {};
     const shellAllowed = roleOf() === 'admin';
-    return '<div class="tty-form"><div class="tty-form-grid caps-grid">' +
+    return '<div class="tty-form ui-form"><div class="tty-form-grid ui-form-grid caps-grid">' +
       '<label>转发端口<input id="caps-ports" value="' + UI.esc((caps.ports || []).join(', ')) +
         '" placeholder="22, 8080, 8099"></label>' +
       '<label>文件目录<input id="caps-dir" value="' + UI.esc(caps.file_dir || '/opt/data/files') + '"></label>' +
       '<label class="tty-check"><input type="checkbox" id="caps-shell"' + (caps.shell ? ' checked' : '') +
         (shellAllowed ? '' : ' disabled') + '> 允许 Shell</label>' +
-      '</div><div class="tty-form-foot"><span class="muted" id="caps-msg">' +
+      '</div><div class="tty-form-foot ui-form-foot"><span class="muted" id="caps-msg">' +
         (shellAllowed ? '' : '仅 admin 可修改 Shell') + '</span><span class="spacer"></span>' +
       '<div class="tty-form-right"><button data-caps-cancel="1" id="caps-cancel">取消</button>' +
       '<button class="primary" id="caps-save">保存并下发</button></div></div></div>';
@@ -53,9 +53,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       ['板卡型号', si.board || '—'],
       ['采集时间', ts ? new Date(ts).toLocaleString() : '—'],
     ];
-    return '<div class="sys-grid">' + rows.map(r =>
-      '<div class="sys-item"><span class="k">' + UI.esc(r[0]) + '</span>' +
-      '<span class="v" title="' + UI.esc(r[1]) + '">' + UI.esc(r[1]) + '</span></div>').join('') + '</div>';
+    return UI.grid(rows.map(r => [UI.esc(r[0]), UI.esc(r[1])]));
   },
   diskColor(p) { return p >= 85 ? cssVar('--bad', '#e5534b') : p >= 70 ? cssVar('--warn', '#f5a623') : cssVar('--accent', '#4a9eff'); },
   updateSnapshot(d, si, rows) {
@@ -177,13 +175,12 @@ const AgentDetailPage = Object.assign(new Page(), {
       this.diskRows = diskRows;
       const nics = (si.nics || []).map(n => [UI.esc(n.name), UI.esc(n.ip), UI.esc(n.netmask),
         n.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>']);
-      const nicPanel = '<div class="panel si-nic"><div class="panel-head"><h2>网卡</h2></div>' +
-        '<div id="si-nic-wrap">' + UI.detailTable(['接口', 'IP', '掩码', '状态'], nics) + '</div></div>';
+      const nicPanel = UI.panel('网卡', '<div id="si-nic-wrap">' +
+        UI.detailTable(['接口', 'IP', '掩码', '状态'], nics) + '</div>', { cls: 'si-nic' });
 
-      const diskPanel = '<div class="panel si-disk"><div class="panel-head"><h2>存储</h2>' +
-        '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">条长按最大分区归一</span></div>' +
-        '<div class="si-body"><canvas id="si-disk" height="' +
-          Math.max(60, (si.mounts || []).length * 24 + 16) + '"></canvas></div></div>';
+      const diskPanel = UI.panel('存储', '<div class="si-body"><canvas id="si-disk" height="' +
+          Math.max(60, (si.mounts || []).length * 24 + 16) + '"></canvas></div>',
+          { cls: 'si-disk', right: '<span style="color:var(--muted);font-size:12px">条长按最大分区归一</span>' });
       html += '<div class="si-two">' + diskPanel + nicPanel + '</div>' +
         '<div id="si-series"></div>' +
         '<div id="si-metric"></div>' +
@@ -210,16 +207,13 @@ const AgentDetailPage = Object.assign(new Page(), {
         '<tr><th>启动参数</th><td><code style="font-size:12px">' + UI.esc(si.args || '') + '</code></td></tr>' +
         '</tbody></table></div>';
       const sysTable = this.sysGrid(si, siTs);
-      html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>系统</h2></div>' +
-        '<div id="si-sys-wrap">' + sysTable + '</div></div>' +
-        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>能力配置</h2></div>' +
-        '<div id="si-runtime-wrap">' + runtimeTable + '</div></div>' +
-        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>证书</h2></div>' +
-        '<div id="si-cert-wrap">' + certText + '</div></div>';
+      html += UI.panel('系统', '<div id="si-sys-wrap">' + sysTable + '</div>', { cls: 'mb16' }) +
+        UI.panel('能力配置', '<div id="si-runtime-wrap">' + runtimeTable + '</div>', { cls: 'mb16' }) +
+        UI.panel('证书', '<div id="si-cert-wrap">' + certText + '</div>', { cls: 'mb16' });
     }
 
-    html += '<div class="panel"><div class="panel-head"><h2>当前会话</h2></div>' +
-      '<div id="si-flows-wrap">' + UI.detailTable(['A 用户:sid', 'c_sid', '状态', '开启于'], rows) + '</div></div>';
+    html += UI.panel('当前会话', '<div id="si-flows-wrap">' +
+      UI.detailTable(['A 用户:sid', 'c_sid', '状态', '开启于'], rows) + '</div>');
     this.el.innerHTML = html;
     this._rendered = true;
 
@@ -430,12 +424,10 @@ const AgentDetailPage = Object.assign(new Page(), {
       if (!this.seriesSel.length) this.seriesSel = [enabled[0].series];
     }
     this.seriesSel = this.seriesSel.filter(s => enabled.some(c => c.series === s));
-    wrap.innerHTML = '<div class="panel" style="margin-bottom:16px"><div class="panel-head">' +
-      '<h2>采样曲线</h2><label class="si-auto" style="margin-left:10px"><input type="checkbox" id="sample-auto"' +
-      (this.sampleAuto ? ' checked' : '') + '> 自动采集</label>' +
-      '<span class="spacer"></span><span class="muted" id="series-last"></span> ' +
-      '<button id="series-full">全量</button></div>' +
-      '<div class="series-chips" id="series-chips">' +
+    const sampleAuto = '<label class="si-auto"><input type="checkbox" id="sample-auto"' +
+      (this.sampleAuto ? ' checked' : '') + '> 自动采集</label>';
+    const seriesRight = '<span class="muted" id="series-last"></span> <button id="series-full">全量</button>';
+    const seriesBody = '<div class="series-chips" id="series-chips">' +
       '<label class="chip-all"><input type="checkbox" id="sel-all"> 全选</label>' +
       ['percent', 'load', 'rate'].map(u => {
         const list = enabled.filter(c => this.seriesUnit(c.series) === u);
@@ -451,7 +443,8 @@ const AgentDetailPage = Object.assign(new Page(), {
       '<div class="series-group" id="series-wrap-percent" style="display:none"><canvas id="series-chart-percent" height="140"></canvas></div>' +
       '<div class="series-group" id="series-wrap-load" style="display:none"><canvas id="series-chart-load" height="120"></canvas></div>' +
       '<div class="series-group" id="series-wrap-rate" style="display:none"><canvas id="series-chart-rate" height="140"></canvas></div>' +
-      '</div></div>';
+      '</div>';
+    wrap.innerHTML = UI.panel('采样曲线', seriesBody, { cls: 'mb16', left: sampleAuto, right: seriesRight });
     const all = enabled.map(c => c.series);
     const syncBoxes = () => {
       wrap.querySelectorAll('[data-sel]').forEach(cb => { cb.checked = this.seriesSel.indexOf(cb.dataset.sel) >= 0; });
@@ -669,13 +662,13 @@ const AgentDetailPage = Object.assign(new Page(), {
             (c.enabled ? ' checked' : '') + '><span></span></label>' : (c.enabled ? '开' : '关')) + '</td>' +
           '<td class="chev">⌄</td></tr>';
         if (open) {
-          rows += '<tr class="metric-expand"><td colspan="6"><div class="metric-form">' +
-            '<div class="metric-form-grid">' +
+          rows += '<tr class="metric-expand"><td colspan="6"><div class="metric-form ui-form">' +
+            '<div class="metric-form-grid ui-form-grid cols-3">' +
             '<label>间隔（秒）<input id="me-int" type="number" min="1" max="300" value="' + c.interval_sec + '"></label>' +
             '<label>保留点数<input id="me-pts" type="number" min="60" max="86400" value="' + c.points + '"></label>' +
             '<div class="metric-readonly"><span>预计保留</span><b>' + dur(c) + '</b></div>' +
             '</div>' +
-            '<div class="metric-form-foot">' +
+            '<div class="metric-form-foot ui-form-foot">' +
               '<span class="metric-sync">' + (c.enabled
                 ? (c.synced ? '已下发并确认' : '已下发，等待 agent 确认')
                 : '已禁用，不参与采样') + '</span>' +
@@ -687,13 +680,12 @@ const AgentDetailPage = Object.assign(new Page(), {
         }
       });
     });
-    wrap.innerHTML = '<div class="panel" style="margin-bottom:16px"><div class="panel-head">' +
-      '<h2>采样配置</h2><span class="muted" style="margin-left:10px">' + list.length + ' 项 · ' +
-      syncCount + ' 项未同步</span><span class="spacer"></span>' +
-      (can ? '<button id="metric-add">+ 添加指标</button>' : '') + '</div>' +
-      '<div class="detail-table-shell"><table class="detail-table si-table metric-table"><tr><th>指标</th><th>间隔</th><th>保留</th>' +
+    const metricBody = '<div class="detail-table-shell"><table class="detail-table si-table metric-table"><tr><th>指标</th><th>间隔</th><th>保留</th>' +
       '<th>同步</th><th>启用</th><th></th></tr>' +
-      (rows || '<tr><td colspan="6" style="color:var(--muted)">暂无配置</td></tr>') + '</table></div></div>';
+      (rows || '<tr><td colspan="6" style="color:var(--muted)">暂无配置</td></tr>') + '</table></div>';
+    wrap.innerHTML = UI.panel('采样配置', metricBody, { cls: 'mb16',
+      left: '<span class="muted" style="margin-left:10px">' + list.length + ' 项 · ' + syncCount + ' 项未同步</span>',
+      right: (can ? '<button id="metric-add">+ 添加指标</button>' : '') });
     if (!can) return;
     const save = async (next) => {
       try {
@@ -790,8 +782,8 @@ const AgentDetailPage = Object.assign(new Page(), {
   ttyFormHtml(it, isNew) {
     const bauds = [1200,2400,4800,9600,19200,38400,57600,115200,230400,460800,921600];
     const opts = (a, cur) => a.map(v => '<option value="' + v + '"' + (v === cur ? ' selected' : '') + '>' + v + '</option>').join('');
-    return '<div class="tty-form" data-new="' + (isNew ? '1' : '0') + '">' +
-      '<div class="tty-form-grid">' +
+    return '<div class="tty-form ui-form" data-new="' + (isNew ? '1' : '0') + '">' +
+      '<div class="tty-form-grid ui-form-grid">' +
       '<label>别名<input id="tf-alias" value="' + UI.esc(it.alias || '') + '" placeholder="设备内唯一"></label>' +
       '<label>路径<input id="tf-path" value="' + UI.esc(it.path || '') + '"' +
         (it.path && !isNew ? ' readonly' : '') + '></label>' +
@@ -801,7 +793,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       '<label>停止位<select id="tf-stop">' + opts([1,2], it.stop_bits) + '</select></label>' +
       '<label class="tty-check"><input type="checkbox" id="tf-en"' + (it.enabled ? ' checked' : '') + '> 启用</label>' +
       '</div>' +
-      '<div class="tty-form-foot">' +
+      '<div class="tty-form-foot ui-form-foot">' +
         '<div class="tty-form-left">' +
           (!isNew && roleOf() === 'admin' ? '<button data-tf-take="' + UI.esc(it.alias || it.path) + '">强制接管</button>' : '') +
           '<button data-tf-copy="' + UI.esc(it.path || '') + '">复制路径</button>' +
@@ -885,18 +877,16 @@ const AgentDetailPage = Object.assign(new Page(), {
     }
     const openAny = (tab === 'config') ? !!this.expandTty : (this.addTtyPath !== null && this.addTtyPath !== undefined);
     const search = '<input id="tty-q" class="tty-search" placeholder="搜索别名 / 路径" value="' + UI.esc(this.ttyQuery || '') + '">';
-    wrap.innerHTML = '<div class="panel" style="margin-bottom:16px"><div class="panel-head">' +
-      '<h2>串口 TTY</h2>' +
-      '<span class="tty-tabs"><button data-tab="config"' + (tab === 'config' ? ' class="active"' : '') + '>已配置 ' + (this.ttys || []).length + '</button>' +
-      '<button data-tab="unconfig"' + (tab === 'unconfig' ? ' class="active"' : '') + '>未配置 ' + unAll.length + '</button></span>' +
-      '<span class="spacer"></span>' + search +
-      '<button id="tty-refresh">刷新</button> ' +
-      (can ? '<button id="tty-add">手动添加</button>' : '') + '</div>' +
-      '<div class="tty-table-wrap detail-table-shell' + (openAny ? ' open' : '') + '"><table class="detail-table si-table tty-table"><tr>' +
+    const tabsHtml = '<span class="tty-tabs"><button data-tab="config"' + (tab === 'config' ? ' class="active"' : '') + '>已配置 ' + (this.ttys || []).length + '</button>' +
+      '<button data-tab="unconfig"' + (tab === 'unconfig' ? ' class="active"' : '') + '>未配置 ' + unAll.length + '</button></span>';
+    const ttyBody = '<div class="tty-table-wrap detail-table-shell' + (openAny ? ' open' : '') + '"><table class="detail-table si-table tty-table"><tr>' +
       '<th>设备</th><th>状态</th><th>参数</th><th>RX</th><th>TX</th><th>操作</th></tr>' +
       (rows || '<tr><td colspan="6" style="color:var(--muted)">' +
         (tab === 'config' ? '暂无已配置串口' : (q ? '没有匹配的串口' : '没有未配置的串口')) + '</td></tr>') +
-      '</table></div></div>';
+      '</table></div>';
+    wrap.innerHTML = UI.panel('串口 TTY', ttyBody, { cls: 'mb16', left: tabsHtml,
+      right: search + '<button id="tty-refresh">刷新</button> ' +
+        (can ? '<button id="tty-add">手动添加</button>' : '') });
     wrap.querySelectorAll('[data-tab]').forEach(b => {
       b.onclick = () => { this.ttyTab = b.dataset.tab; this.expandTty = null; this.addTtyPath = null; this.renderTtyCard(wrap); };
     });

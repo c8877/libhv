@@ -534,3 +534,11 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .caps-row:hover{background:rgba(255,255,255,.03)}
 .caps-row .chev{float:right;color:var(--muted);transition:.15s}
 .caps-row.open .chev{transform:rotate(180deg)}
+.panel.mb16{margin-bottom:16px}
+.ui-form{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:4px 0}
+.ui-form-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 18px;align-items:end}
+.ui-form-grid.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.ui-form-grid label{display:flex;flex-direction:column;gap:6px;font-size:11px;color:var(--muted)}
+.ui-form-grid input,.ui-form-grid select{padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--fg);font-size:13px;width:100%}
+.ui-form-foot{display:flex;align-items:center;gap:8px;margin-top:14px}
+.ui-form-grid.caps-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
