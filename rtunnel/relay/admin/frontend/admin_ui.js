@@ -70,6 +70,31 @@ const UI = {
       });
     };
   },
+  pager(page, pages, total, right) {
+    return '<div class="ui-pager">' +
+      '<button data-pager="prev"' + (page <= 1 ? ' disabled' : '') + '>上一页</button>' +
+      '<span>' + page + ' / ' + pages + (total != null ? '（共 ' + total + '）' : '') + '</span>' +
+      '<button data-pager="next"' + (page >= pages ? ' disabled' : '') + '>下一页</button>' +
+      '<span class="spacer"></span>' + (right || '') + '</div>';
+  },
+  bindPager(root, onPrev, onNext) {
+    const p = root.querySelector('[data-pager="prev"]');
+    const n = root.querySelector('[data-pager="next"]');
+    if (p) p.onclick = onPrev;
+    if (n) n.onclick = onNext;
+  },
+  modal(opts) {
+    opts = opts || {};
+    const mask = document.createElement('div');
+    mask.className = 'tty-mask';
+    mask.innerHTML = '<div class="tty-modal"><h2>' + (opts.title || '') + '</h2>' + (opts.body || '') +
+      '<div class="tty-btns">' + (opts.buttons || '') + '</div></div>';
+    document.body.appendChild(mask);
+    const close = () => mask.remove();
+    mask.querySelectorAll('[data-modal-close]').forEach(b => { b.onclick = close; });
+    mask.onclick = e => { if (e.target === mask) close(); };
+    return { el: mask, close };
+  },
   formValues(root) {
     const out = {};
     (root || document).querySelectorAll('[data-field]').forEach(el => {

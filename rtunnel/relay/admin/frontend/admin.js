@@ -562,28 +562,23 @@ const AccountsPage = Object.assign(new Page(), {
     });
     UI.bindSearch(document.getElementById('au-q'));
     document.getElementById('nu-open').onclick = () => {
-      const mask = document.createElement('div');
-      mask.className = 'tty-mask';
-      mask.innerHTML = '<div class="tty-modal"><h2>新建账号</h2>' +
-        '<label>用户名<input id="nu-name" placeholder="用户名"></label>' +
-        '<label>密码<input id="nu-pass" type="password" placeholder="至少 8 位"></label>' +
-        '<label>角色<select id="nu-role">' + roleOpts + '</select></label>' +
-        '<div class="tty-btns"><button id="nu-cancel">取消</button>' +
-        '<button class="primary" id="nu-btn">创建</button></div></div>';
-      document.body.appendChild(mask);
-      const close = () => mask.remove();
-      mask.querySelector('#nu-cancel').onclick = close;
-      mask.onclick = e => { if (e.target === mask) close(); };
-      mask.querySelector('#nu-btn').onclick = async () => {
-        const username = mask.querySelector('#nu-name').value.trim();
-        const password = mask.querySelector('#nu-pass').value;
-        const role = mask.querySelector('#nu-role').value;
+      const m = UI.modal({
+        title: '新建账号',
+        body: '<label>用户名<input id="nu-name" placeholder="用户名"></label>' +
+          '<label>密码<input id="nu-pass" type="password" placeholder="至少 8 位"></label>' +
+          '<label>角色<select id="nu-role">' + roleOpts + '</select></label>',
+        buttons: '<button data-modal-close>取消</button><button class="primary" id="nu-btn">创建</button>',
+      });
+      m.el.querySelector('#nu-btn').onclick = async () => {
+        const username = m.el.querySelector('#nu-name').value.trim();
+        const password = m.el.querySelector('#nu-pass').value;
+        const role = m.el.querySelector('#nu-role').value;
         if (!username) { UI.toast('用户名不能为空', true); return; }
         if (password.length < 8) { UI.toast('密码至少 8 位', true); return; }
         try {
           await Api.post('/api/v1/users', { username, password, role });
           UI.toast('已创建 ' + username);
-          close();
+          m.close();
           this.refresh();
         } catch (e) { UI.toast('创建失败：' + e.message, true); }
       };

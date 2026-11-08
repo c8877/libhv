@@ -96,14 +96,10 @@ const DistributePage = Object.assign(new Page(), {
           '</td><td>' + UI.esc(a.owner || '—') + '</td><td>' + UI.esc(a.remote_addr || '—') + '</td></tr>').join('') +
         (view.length ? '' : '<tr><td colspan="5" class="empty">没有匹配的设备</td></tr>') +
       '</tbody></table></div>' +
-      '<div style="display:flex;align-items:center;gap:8px;margin-top:12px">' +
-        '<button id="dist-prev"' + (this.page <= 1 ? ' disabled' : '') + '>上一页</button>' +
-        '<span style="color:var(--muted);font-size:12px">' + this.page + ' / ' + pages + '</span>' +
-        '<button id="dist-next"' + (this.page >= pages ? ' disabled' : '') + '>下一页</button>' +
-        '<span class="spacer" style="flex:1"></span>' +
+      UI.pager(this.page, pages, null,
         '<a href="#/files"><button>取消</button></a> ' +
-        '<button class="primary" id="dist-submit">创建分发任务（' + this.sel.size + '）</button>' +
-      '</div></div></div>';
+        '<button class="primary" id="dist-submit">创建分发任务（' + this.sel.size + '）</button>') +
+      '</div></div>';
 
     const q = document.getElementById('dist-q');
     q.oninput = () => {
@@ -137,8 +133,7 @@ const DistributePage = Object.assign(new Page(), {
         this.refresh();
       };
     });
-    document.getElementById('dist-prev').onclick = () => { this.page--; this.refresh(); };
-    document.getElementById('dist-next').onclick = () => { this.page++; this.refresh(); };
+    UI.bindPager(this.el, () => { this.page--; this.refresh(); }, () => { this.page++; this.refresh(); });
     document.getElementById('dist-submit').onclick = async () => {
       if (!this.sel.size) { UI.toast('请选择设备', true); return; }
       const start = new Date(document.getElementById('dist-start').value).getTime();
@@ -234,12 +229,7 @@ const TasksPage = Object.assign(new Page(), {
         '<th>状态</th><th>重试</th><th>开始</th><th>截止</th><th>操作</th></tr></thead><tbody>' +
         (rows || '<tr><td colspan="10" class="empty">暂无任务</td></tr>') +
       '</tbody></table></div>' +
-      '<div style="display:flex;align-items:center;gap:8px;margin-top:12px">' +
-        '<button id="task-prev"' + (this.page <= 1 ? ' disabled' : '') + '>上一页</button>' +
-        '<span style="color:var(--muted);font-size:12px">' + this.page + ' / ' + pages +
-        '（共 ' + r.total + '）</span>' +
-        '<button id="task-next"' + (this.page >= pages ? ' disabled' : '') + '>下一页</button>' +
-      '</div></div></div>';
+      UI.pager(this.page, pages, r.total) + '</div></div>';
 
     document.querySelectorAll('#page .tab').forEach(b => {
       b.onclick = () => { this.tab = b.dataset.tab; this.page = 1; this.refresh(); };
@@ -250,8 +240,7 @@ const TasksPage = Object.assign(new Page(), {
       this._qt = setTimeout(() => { this.q = q.value.trim(); this.page = 1; this.refresh(); }, 200);
     };
     document.getElementById('task-refresh').onclick = () => this.refresh();
-    document.getElementById('task-prev').onclick = () => { this.page--; this.refresh(); };
-    document.getElementById('task-next').onclick = () => { this.page++; this.refresh(); };
+    UI.bindPager(this.el, () => { this.page--; this.refresh(); }, () => { this.page++; this.refresh(); });
     if (this.batch) {
       const chip = this.el.querySelector('.pill.info');
       if (chip) chip.onclick = () => { this.batch = ''; this.page = 1; this.refresh(); };
