@@ -319,30 +319,48 @@ const TaskDetailPage = Object.assign(new Page(), {
       ['操作人', UI.esc(t.actor || '—')],
       ['批次', UI.esc(t.batch_id || '—')],
     ];
+    const trans = [
+      ['设备', UI.esc(t.devid)],
+      ['目标路径', UI.esc(t.target_path || '—')],
+      ['重试', t.retry_count + ' / ' + t.max_retries],
+      ['批次', UI.esc(t.batch_id || '—')],
+    ];
+    const times = [
+      ['创建时间', new Date(t.created_ms).toLocaleString()],
+      ['开始时间', new Date(t.start_at_ms).toLocaleString()],
+      ['截止时间', new Date(t.deadline_at_ms).toLocaleString()],
+      ['操作人', UI.esc(t.actor || '—')],
+    ];
+    const kv = list => '<div class="kv-list">' + list.map(m =>
+      '<div class="kv-row"><span class="k">' + m[0] + '</span>' +
+      '<span class="v" title="' + m[1] + '">' + m[1] + '</span></div>').join('') + '</div>';
     this.el.innerHTML =
-      '<div class="panel" style="max-width:900px"><div class="panel-head"><h2>任务 #' + t.id + '</h2>' +
-        '<span class="pill ' + cls + '" style="margin-left:8px">' + UI.esc(st) + '</span>' +
-        '<span class="spacer"></span><a href="#/tasks"><button>返回列表</button></a></div>' +
-      '<div class="task-hero">' +
-        '<div class="task-file"><b>' + UI.esc(t.file_name) + '</b>' +
-          '<div class="task-sub">' + UI.bytes(size) + ' · ' +
-          (t.file_sha ? '<code title="' + UI.esc(t.file_sha) + '">' + UI.esc(t.file_sha.slice(0, 16)) + '…</code> ' +
-            '<button id="td-copy" data-hash="' + UI.esc(t.file_sha) + '">复制哈希</button>' : '—') +
-          '</div></div>' +
-        '<div class="task-progress"><progress max="100" value="' + pct + '"></progress>' +
-          '<div class="task-pct">' + pct + '% · ' + UI.bytes(sent) + ' / ' + UI.bytes(size) + '</div></div>' +
-      '</div>' +
-      '<div class="kv-grid">' + meta.map(m =>
-        '<div class="kv-item"><span class="k">' + m[0] + '</span><span class="v" title="' + m[1] + '">' + m[1] + '</span></div>').join('') +
-      '</div>' +
-      (t.error ? '<div class="task-error"><b>错误</b> ' + UI.esc(t.error) + '</div>' : '') +
-      '<div class="cfg-actions" style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px">' +
-        (t.status === 'failed' ? '<button class="primary" id="td-retry">重试</button> ' : '') +
-        (t.status === 'scheduled' || t.status === 'queued' ? '<button id="td-cancel">取消</button> ' : '') +
-        (t.status === 'timeout' && t.extend_count === 0 ? '<button id="td-extend">延长截止时间</button>' : '') +
-        (t.status === 'conflict' ? '<button id="td-verify">校验设备</button> ' +
-          '<button id="td-force">强制重发</button>' : '') +
-      '</div></div>';
+      '<div class="task-page">' +
+        '<div class="panel task-head"><div class="task-title-wrap">' +
+          '<h2>任务 #' + t.id + '</h2><span class="pill ' + cls + '">' + UI.esc(st) + '</span></div>' +
+          '<span class="spacer"></span><div class="task-actions">' +
+          (t.status === 'failed' ? '<button class="primary" id="td-retry">重试</button>' : '') +
+          (t.status === 'scheduled' || t.status === 'queued' ? '<button id="td-cancel">取消</button>' : '') +
+          (t.status === 'timeout' && t.extend_count === 0 ? '<button id="td-extend">延长截止</button>' : '') +
+          (t.status === 'conflict' ? '<button id="td-verify">校验设备</button>' +
+            '<button id="td-force">强制重发</button>' : '') +
+          '<a href="#/tasks"><button>返回列表</button></a></div></div>' +
+        '<div class="panel task-overview">' +
+          '<div class="task-file-name">' + UI.esc(t.file_name) + '</div>' +
+          '<div class="task-sub">' + UI.bytes(size) +
+            (t.file_sha ? ' · <code title="' + UI.esc(t.file_sha) + '">' + UI.esc(t.file_sha) + '</code> ' +
+              '<button id="td-copy" data-hash="' + UI.esc(t.file_sha) + '">复制哈希</button>' : '') +
+          '</div>' +
+          '<div class="task-bar"><span style="width:' + pct + '%"></span></div>' +
+          '<div class="task-stats"><span>' + pct + '%</span><span>' +
+            UI.bytes(sent) + ' / ' + UI.bytes(size) + '</span></div>' +
+        '</div>' +
+        '<div class="task-cols">' +
+          '<div class="panel"><div class="panel-head"><h2>传输</h2></div>' + kv(trans) + '</div>' +
+          '<div class="panel"><div class="panel-head"><h2>时间与操作</h2></div>' + kv(times) + '</div>' +
+        '</div>' +
+        (t.error ? '<div class="panel task-error"><b>错误</b><div>' + UI.esc(t.error) + '</div></div>' : '') +
+      '</div>';
     const cp = document.getElementById('td-copy');
     if (cp) cp.onclick = async () => {
       try { await navigator.clipboard.writeText(cp.dataset.hash); UI.toast('哈希已复制'); }

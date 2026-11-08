@@ -366,3 +366,25 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .kv-item .v{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .task-error{margin:0 16px 12px;padding:10px 12px;border:1px solid var(--bad);border-radius:8px;color:var(--bad);font-size:12px;word-break:break-all}
 @media (max-width:800px){.task-hero{flex-direction:column;align-items:stretch}.task-progress{width:auto}.kv-grid{grid-template-columns:1fr}}
+.task-page{display:flex;flex-direction:column;gap:16px;width:100%}
+.task-head{display:flex;align-items:center;gap:12px;padding:18px 22px}
+.task-head h2{font-size:20px;margin:0}
+.task-title-wrap{display:flex;align-items:center;gap:10px}
+.task-actions{display:flex;gap:8px;margin-left:auto}
+.task-overview{padding:24px}
+.task-file-name{font-size:22px;font-weight:600;margin-bottom:8px;word-break:break-all}
+.task-overview .task-sub{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:13px}
+.task-overview .task-sub code{font-size:12px;word-break:break-all}
+.task-bar{height:10px;border-radius:5px;background:rgba(255,255,255,.08);margin:22px 0 10px;overflow:hidden}
+.task-bar>span{display:block;height:100%;background:var(--accent);border-radius:5px}
+.task-stats{display:flex;justify-content:space-between;color:var(--muted);font-size:13px}
+.task-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.kv-list{padding:6px 22px 18px}
+.kv-row{display:flex;gap:16px;padding:11px 0;border-bottom:1px solid var(--border);font-size:13px}
+.kv-row:last-child{border-bottom:0}
+.kv-row .k{width:96px;flex:none;color:var(--muted);font-size:12px}
+.kv-row .v{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.panel.task-error{padding:16px 22px;border-color:var(--bad)}
+.task-error b{color:var(--bad);display:block;margin-bottom:6px}
+.task-error div{color:var(--bad);font-size:13px;word-break:break-all}
+@media (max-width:900px){.task-cols{grid-template-columns:1fr}.task-head{flex-wrap:wrap}.task-actions{width:100%;justify-content:flex-end}}
