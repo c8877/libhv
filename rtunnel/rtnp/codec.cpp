@@ -1,3 +1,4 @@
+#include <string>
 #include "codec.hpp"
 
 #include <stdlib.h>
@@ -106,6 +107,12 @@ void Writer::str(const char* s) {
     bytes(s, n);
 }
 
+void Writer::strn(const void* p, size_t n) {
+    if (n > 0xFFFF) n = 0xFFFF;
+    u16((uint16_t)n);
+    bytes(p, n);
+}
+
 // ---------------------------------------------------------------- Reader
 
 const uint8_t* Reader::take(size_t n) {
@@ -146,6 +153,13 @@ void Reader::str(char* out, size_t cap) {
     size_t copy = n < cap - 1 ? n : cap - 1;
     memcpy(out, p, copy);
     out[copy] = '\0';
+}
+
+std::string Reader::strBytes() {
+    uint16_t n = u16();
+    const uint8_t* p = take(n);
+    if (p == NULL) return std::string();
+    return std::string((const char*)p, n);
 }
 
 // ---------------------------------------------------------------- send

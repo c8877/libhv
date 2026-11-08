@@ -4,12 +4,16 @@ include_directories(${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/base ${PROJECT_S
                     ${PROJECT_SOURCE_DIR}/http ${PROJECT_SOURCE_DIR}/http/server ${PROJECT_SOURCE_DIR}/evpp ${PROJECT_SOURCE_DIR}/cpputil
                     ${CMAKE_CURRENT_SOURCE_DIR})
 
+find_package(ZLIB REQUIRED)
+add_library(rtunnel_gzip STATIC common/gzip_util.cpp)
+target_link_libraries(rtunnel_gzip PUBLIC ZLIB::ZLIB)
+
 add_library(rtnp STATIC rtnp/codec.cpp)
 target_include_directories(rtnp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(rtnp PUBLIC ${HV_LIBRARIES})
 
 add_library(rtunnel_common STATIC common/tunnel_link.cpp common/shell_spawn.cpp)
-target_link_libraries(rtunnel_common PUBLIC rtnp)
+target_link_libraries(rtunnel_common PUBLIC rtnp rtunnel_gzip)
 
 # 嵌入式目标静态链接 C++ 运行时（目标机无 libstdc++ 时使用，如 MP135）
 option(RTUNNEL_STATIC_LIBGCC "静态链接 libstdc++/libgcc" OFF)
@@ -59,7 +63,7 @@ add_executable(rtunnel-client client/main.cpp client/client_app.cpp client/shell
 add_executable(rtnp-codec-test tests/codec_test.cpp)
 
 target_include_directories(rtunnel-relay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/3rd/sqlite3)
-target_link_libraries(rtunnel-relay  rtnp rtunnel_sqlite)
+target_link_libraries(rtunnel-relay  rtnp rtunnel_sqlite rtunnel_gzip)
 target_link_libraries(rtunnel-agent  rtunnel_common)
 target_link_libraries(rtunnel-client rtunnel_common)
 target_link_libraries(rtnp-codec-test rtnp)

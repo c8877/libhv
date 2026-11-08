@@ -1,3 +1,4 @@
+#include <string>
 #pragma once
 
 #include "frame.hpp"
@@ -49,6 +50,7 @@ public:
     void u32(uint32_t v);
     void u64(uint64_t v);
     void str(const char* s);   // u16 len + bytes
+    void strn(const void* p, size_t n);
 
     uint8_t* data = nullptr;
     size_t   len  = 0;
@@ -69,6 +71,7 @@ public:
     uint32_t u32();
     uint64_t u64();
     void     str(char* out, size_t cap);   // 读到 out（NUL 结尾），超长截断
+    std::string strBytes();
 
     int err = 0;
 

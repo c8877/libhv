@@ -1,4 +1,5 @@
 #include "agent_app.hpp"
+#include "common/gzip_util.hpp"
 #include "hversion.h"
 #include "cpputil/json.hpp"
 #include "common/logging.hpp"
@@ -1220,7 +1221,14 @@ void AgentApp::onFrame(rtnp::Frame* f) {
         out["truncated"] = truncated;
         out["points"] = pts;
         std::string os = out.dump();
-        rtnp::Writer ow; ow.str(os.c_str());
+        if (since == 0) {
+            std::string gz;
+            if (gzipCompress(os, gz)) os = std::string(1, '\1') + gz;
+            else os = std::string(1, '\0') + os;
+        } else {
+            os = std::string(1, '\0') + os;
+        }
+        rtnp::Writer ow; ow.strn(os.data(), os.size());
         rtnp::send(io, rtnp::METRICS_DATA, f->sid, ow.data, (uint16_t)ow.len);
         return;
     }

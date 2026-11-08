@@ -728,9 +728,8 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         return;
     case rtnp::METRICS_DATA: {
         rtnp::Reader rr(f->payload, f->len);
-        static char md[256 * 1024];
-        rr.str(md, sizeof md);
-        if (!rr.err) metric_data_results[f->sid] = std::string(md);
+        std::string md = rr.strBytes();
+        if (!rr.err) metric_data_results[f->sid] = md;
         return;
     }
     case rtnp::METRICS_STATUS: {

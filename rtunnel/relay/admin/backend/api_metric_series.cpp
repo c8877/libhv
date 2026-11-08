@@ -1,6 +1,7 @@
 // 分指标采样配置与实时查询
 #include "admin_server.hpp"
 #include "cpputil/json.hpp"
+#include "common/gzip_util.hpp"
 
 using nlohmann::json;
 
@@ -109,5 +110,28 @@ void AdminServer::handleMetricSeriesData(const HttpContextPtr& ctx) {
         ctx->send("{\"error\":\"timeout\"}");
         return;
     }
+    if (data[0] == '\1') {
+        std::string plain;
+        if (!gzipDecompress(data.data() + 1, data.size() - 1, plain)) {
+            ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+            ctx->send("{\"error\":\"gunzip failed\"}");
+            return;
+        }
+        data.swap(plain);
+    } else if (data[0] == '\0') {
+        data.erase(0, 1);
+    }
+    bool full = since.empty() || since == "0";
+    std::string ae = ctx->header("Accept-Encoding");
+    if (full && ae.find("gzip") != std::string::npos) {
+        std::string gz;
+        if (gzipCompress(data, gz)) {
+            ctx->response->headers["Content-Encoding"] = "gzip";
+            ctx->response->content_type = APPLICATION_JSON;
+            ctx->send(gz);
+            return;
+        }
+    }
+    ctx->response->content_type = APPLICATION_JSON;
     ctx->send(data);
 }
