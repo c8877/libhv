@@ -181,6 +181,7 @@ const AgentDetailPage = Object.assign(new Page(), {
         ' · ' + (cpu.cores || []).length + ' 核</div></div></div>' +
         nicPanel +
         '</div>' +
+        '<div id="si-metric"></div>' +
         '<div id="si-tty"></div>';
 
       const certText = si.mtls
@@ -336,6 +337,7 @@ const AgentDetailPage = Object.assign(new Page(), {
           plugins: [pctPlugin]
         });
       }
+      this.loadMetricCfg();
       this.loadTtys();
       const ce = document.getElementById('caps-edit');
       if (ce) ce.onclick = () => {
@@ -405,6 +407,82 @@ const AgentDetailPage = Object.assign(new Page(), {
     }
   },
 
+
+  async loadMetricCfg() {
+    const wrap = document.getElementById('si-metric');
+    if (!wrap) return;
+    try {
+      this.metricCfg = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/metrics/config');
+    } catch (e) {
+      wrap.innerHTML = '';
+      return;
+    }
+    this.renderMetricCard(wrap);
+  },
+  renderMetricCard(wrap) {
+    const c = this.metricCfg || {};
+    const can = canManage();
+    const labels = { cpu: 'CPU', mem: '内存', load: '负载', net: '网卡', serial: '串口' };
+    const ms = (c.metrics || []).map(m => labels[m] || m).join(' / ') || '—';
+    wrap.innerHTML = '<div class="panel" style="margin-bottom:16px"><div class="panel-head">' +
+      '<h2>监控采样</h2><span class="spacer"></span>' +
+      (can ? '<button id="metric-edit">编辑</button>' : '') + '</div>' +
+      '<table class="si-table">' +
+      '<tr><th>状态</th><td>' + (c.enabled ? '<span class="pill ok">启用</span>' : '<span class="pill">禁用</span>') +
+      ' <span class="muted">来源 ' + UI.esc(c.source || 'default') + '</span></td></tr>' +
+      '<tr><th>间隔 / 保留</th><td>' + (c.interval_sec || 5) + 's / ' + (c.points || 720) + ' 点</td></tr>' +
+      '<tr><th>指标</th><td>' + UI.esc(ms) + '</td></tr>' +
+      '<tr><th>持久化</th><td>' + (c.persist ? '开启' : '关闭') + '</td></tr>' +
+      '</table></div>';
+    const b = document.getElementById('metric-edit');
+    if (b) b.onclick = () => this.openMetricEditor();
+  },
+  openMetricEditor() {
+    const c = this.metricCfg || {};
+    const has = m => (c.metrics || []).indexOf(m) >= 0;
+    const mask = document.createElement('div');
+    mask.className = 'tty-mask';
+    mask.innerHTML = '<div class="tty-modal"><h2>采样配置</h2>' +
+      '<label class="row"><input type="checkbox" id="mc-en"' + (c.enabled !== false ? ' checked' : '') + '> 启用</label>' +
+      '<label>间隔（秒）<input id="mc-int" type="number" min="1" max="300" value="' + (c.interval_sec || 5) + '"></label>' +
+      '<label>保留点数<input id="mc-pts" type="number" min="60" max="8640" value="' + (c.points || 720) + '"></label>' +
+      '<label class="row"><input type="checkbox" id="mc-cpu"' + (has('cpu') ? ' checked' : '') + '> CPU</label>' +
+      '<label class="row"><input type="checkbox" id="mc-mem"' + (has('mem') ? ' checked' : '') + '> 内存</label>' +
+      '<label class="row"><input type="checkbox" id="mc-load"' + (has('load') ? ' checked' : '') + '> 负载</label>' +
+      '<label class="row"><input type="checkbox" id="mc-net"' + (has('net') ? ' checked' : '') + '> 网卡</label>' +
+      '<label>网卡列表<input id="mc-if" value="' + UI.esc((c.interfaces || []).join(',')) + '" placeholder="eth0,wlan0"></label>' +
+      '<label class="row"><input type="checkbox" id="mc-ser"' + (has('serial') ? ' checked' : '') + '> 串口统计</label>' +
+      '<label>串口列表<input id="mc-tty" value="' + UI.esc((c.ttys || []).join(',')) + '" placeholder="ttyUSB0,ttymxc0"></label>' +
+      '<label class="row"><input type="checkbox" id="mc-per"' + (c.persist ? ' checked' : '') + '> 本地持久化</label>' +
+      '<div class="tty-btns"><button id="mc-cancel">取消</button><button id="mc-save" class="primary">保存并下发</button></div></div>';
+    document.body.appendChild(mask);
+    const $ = id => mask.querySelector('#' + id);
+    const close = () => mask.remove();
+    $('mc-cancel').onclick = close;
+    mask.onclick = e => { if (e.target === mask) close(); };
+    $('mc-save').onclick = async () => {
+      const metrics = [];
+      if ($('mc-cpu').checked) metrics.push('cpu');
+      if ($('mc-mem').checked) metrics.push('mem');
+      if ($('mc-load').checked) metrics.push('load');
+      if ($('mc-net').checked) metrics.push('net');
+      if ($('mc-ser').checked) metrics.push('serial');
+      const split = v => v.split(',').map(x => x.trim()).filter(Boolean);
+      try {
+        await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/metrics/config', {
+          enabled: $('mc-en').checked,
+          interval_sec: Number($('mc-int').value),
+          points: Number($('mc-pts').value),
+          metrics: metrics,
+          interfaces: split($('mc-if').value),
+          ttys: split($('mc-tty').value),
+          persist: $('mc-per').checked,
+        });
+        close();
+        this.loadMetricCfg();
+      } catch (e) { this.ttyError(e.message); }
+    };
+  },
   async loadTtys() {
     const wrap = document.getElementById('si-tty');
     if (!wrap) return;

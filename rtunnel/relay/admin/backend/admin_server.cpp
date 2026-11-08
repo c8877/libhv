@@ -261,6 +261,13 @@ int AdminServer::start(const AdminConfig& cfg) {
                 std::string out;
                 if (db_.ttyList(d, out)) relay_->pushTtyCfg(d.c_str(), out);
             }
+            std::vector<std::string> mdevs;
+            db_.metricDevids(mdevs);
+            for (auto& d : mdevs) {
+                if (!relay_->hasAgent(d.c_str())) continue;
+                std::string out;
+                if (db_.metricGet(d, out)) relay_->pushMetricCfg(d.c_str(), out);
+            }
         }
     }).detach();
     std::thread([this]() {

@@ -507,6 +507,9 @@ void AgentApp::loadConfig() {
         nallow = idx;
     }
     if (j.contains("shell") && j["shell"].is_boolean()) allow_shell = j["shell"].get<bool>() ? 1 : 0;
+    if (j.contains("metrics") && j["metrics"].is_object()) {
+        applyMetricsConfig(j["metrics"]);
+    }
     if (j.contains("file_dir") && j["file_dir"].is_string()) {
         std::string v = j["file_dir"].get<std::string>();
         if (!v.empty() && v[0] == '/' && v.find("..") == std::string::npos) file_dir = v;
@@ -838,6 +841,74 @@ void AgentApp::cleanupParts(const std::string& dir, time_t cutoff) {
     closedir(d);
 }
 
+void AgentApp::restartMetricTimer() {
+    if (metric_timer) { htimer_del(metric_timer); metric_timer = nullptr; }
+    if (!metric_enabled) return;
+    int sec = metric_interval > 0 ? metric_interval : 5;
+    metric_timer = htimer_add(loop, [](htimer_t* t) {
+        auto* app = (AgentApp*)hevent_userdata(t);
+        app->sampleMetric();
+    }, sec * 1000, INFINITE);
+    hevent_set_userdata(metric_timer, this);
+}
+
+void AgentApp::applyMetricsConfig(const nlohmann::json& j) {
+    if (j.contains("enabled")) metric_enabled = j["enabled"].get<bool>() ? 1 : 0;
+    if (j.contains("interval_sec")) metric_interval = j["interval_sec"].get<int>();
+    if (j.contains("points")) metric_points = j["points"].get<int>();
+    if (metric_interval < 1) metric_interval = 1;
+    if (metric_interval > 300) metric_interval = 300;
+    if (metric_points < 60) metric_points = 60;
+    if (metric_points > 8640) metric_points = 8640;
+    if (j.contains("metrics") && j["metrics"].is_array()) {
+        metric_set.clear();
+        for (auto& v : j["metrics"]) if (v.is_string()) metric_set.insert(v.get<std::string>());
+    }
+    auto join = [](const nlohmann::json& a) {
+        std::string o;
+        if (!a.is_array()) return o;
+        for (auto& v : a) { if (!v.is_string()) continue; if (!o.empty()) o += ","; o += v.get<std::string>(); }
+        return o;
+    };
+    if (j.contains("interfaces")) metric_ifaces = join(j["interfaces"]);
+    if (j.contains("ttys")) metric_ttys = join(j["ttys"]);
+    if (j.contains("persist")) metric_persist = j["persist"].get<bool>() ? 1 : 0;
+    while ((int)metrics_.size() > metric_points) metrics_.pop_front();
+}
+
+void AgentApp::loadMetricHistory() {
+    if (!metric_persist) return;
+    if (metric_path.empty()) metric_path = "/tmp/rtunnel-metrics-" + std::string(devid) + ".jsonl";
+    std::ifstream f(metric_path);
+    if (!f) return;
+    std::string line;
+    std::deque<std::string> lines;
+    while (std::getline(f, line)) if (!line.empty()) lines.push_back(line);
+    while ((int)lines.size() > metric_points) lines.pop_front();
+    metrics_ = lines;
+}
+
+void AgentApp::saveMetricLine(const std::string& line) {
+    if (!metric_persist) return;
+    if (metric_path.empty()) metric_path = "/tmp/rtunnel-metrics-" + std::string(devid) + ".jsonl";
+    bool needCompact = false;
+    {
+        FILE* fp = fopen(metric_path.c_str(), "a");
+        if (!fp) return;
+        fprintf(fp, "%s\n", line.c_str());
+        fclose(fp);
+        if ((int)metrics_.size() % 200 == 0) needCompact = true;
+    }
+    if (needCompact) {
+        std::string tmp = metric_path + ".tmp";
+        FILE* out = fopen(tmp.c_str(), "w");
+        if (!out) return;
+        for (auto& l : metrics_) fprintf(out, "%s\n", l.c_str());
+        fclose(out);
+        rename(tmp.c_str(), metric_path.c_str());
+    }
+}
+
 void AgentApp::sampleMetric() {
     agentSampleCpu(this);
     double mem = 0;
@@ -859,11 +930,70 @@ void AgentApp::sampleMetric() {
     if (getloadavg(la, 3) > 0) load1 = la[0];
     nlohmann::json j;
     j["ts"] = (long long)time(NULL) * 1000;
-    j["cpu"] = cpu_usage;
-    j["mem"] = (int)(mem + 0.5);
-    j["load1"] = load1;
-    metrics_.push_back(j.dump());
-    while (metrics_.size() > 720) metrics_.pop_front();
+    if (metric_set.count("cpu")) j["cpu"] = cpu_usage;
+    if (metric_set.count("mem")) j["mem"] = (int)(mem + 0.5);
+    if (metric_set.count("load")) {
+        j["load1"] = load1;
+        double la3[3] = {0, 0, 0};
+        getloadavg(la3, 3);
+        j["load5"] = la3[1];
+        j["load15"] = la3[2];
+    }
+    if (metric_set.count("net") && !metric_ifaces.empty()) {
+        nlohmann::json net = nlohmann::json::object();
+        size_t pos = 0;
+        while (pos <= metric_ifaces.size()) {
+            size_t c = metric_ifaces.find(',', pos);
+            std::string n = metric_ifaces.substr(pos, c == std::string::npos ? std::string::npos : c - pos);
+            if (!n.empty()) {
+                auto rd = [&](const char* f) -> unsigned long long {
+                    std::ifstream in(std::string("/sys/class/net/") + n + "/statistics/" + f);
+                    unsigned long long v = 0; in >> v; return v;
+                };
+                net[n] = {{"rx", rd("rx_bytes")}, {"tx", rd("tx_bytes")}};
+            }
+            if (c == std::string::npos) break;
+            pos = c + 1;
+        }
+        j["net"] = net;
+    }
+    if (metric_set.count("serial") && !metric_ttys.empty()) {
+        nlohmann::json ser = nlohmann::json::object();
+        std::vector<std::string> want;
+        size_t pos = 0;
+        while (pos <= metric_ttys.size()) {
+            size_t c = metric_ttys.find(',', pos);
+            std::string n = metric_ttys.substr(pos, c == std::string::npos ? std::string::npos : c - pos);
+            if (!n.empty()) want.push_back(n);
+            if (c == std::string::npos) break;
+            pos = c + 1;
+        }
+        DIR* d = opendir("/proc/tty/driver");
+        if (d) {
+            struct dirent* e;
+            while ((e = readdir(d)) != NULL) {
+                if (e->d_name[0] == '.') continue;
+                std::ifstream in(std::string("/proc/tty/driver/") + e->d_name);
+                std::string line;
+                while (std::getline(in, line)) {
+                    for (auto& n : want) {
+                        if (line.find(n) == std::string::npos) continue;
+                        unsigned long long rx = 0, tx = 0;
+                        size_t p1 = line.find("tx:"), p2 = line.find("rx:");
+                        if (p1 != std::string::npos) sscanf(line.c_str() + p1, "tx:%llu", &tx);
+                        if (p2 != std::string::npos) sscanf(line.c_str() + p2, "rx:%llu", &rx);
+                        ser[n] = {{"rx", rx}, {"tx", tx}};
+                    }
+                }
+            }
+            closedir(d);
+        }
+        j["serial"] = ser;
+    }
+    std::string mline = j.dump();
+    metrics_.push_back(mline);
+    while ((int)metrics_.size() > metric_points) metrics_.pop_front();
+    saveMetricLine(mline);
 }
 
 void AgentApp::sendSysinfo() {
@@ -1087,6 +1217,25 @@ void AgentApp::onFrame(rtnp::Frame* f) {
         }
         return;
     }
+    case rtnp::METRICS_CFG: {
+        rtnp::Reader mc(f->payload, f->len);
+        static char mb[8192];
+        mc.str(mb, sizeof mb);
+        if (mc.err) return;
+        auto cj = nlohmann::json::parse(mb, nullptr, false);
+        if (cj.is_discarded() || !cj.is_object()) return;
+        applyMetricsConfig(cj);
+        restartMetricTimer();
+        sampleMetric();
+        nlohmann::json st;
+        st["applied"] = true;
+        st["interval_sec"] = metric_interval;
+        st["points"] = metric_points;
+        std::string s2 = st.dump();
+        rtnp::Writer sw; sw.str(s2.c_str());
+        rtnp::send(io, rtnp::METRICS_STATUS, 0, sw.data, (uint16_t)sw.len);
+        return;
+    }
     case rtnp::METRICS_REQ: {
         rtnp::Reader r(f->payload, f->len);
         uint64_t limit = r.u64();
@@ -1299,13 +1448,10 @@ int AgentApp::run(int argc, char** argv) {
         app->cleanupParts(app->file_dir, time(NULL) - 24 * 3600);
     }, 3600 * 1000, INFINITE);
     hevent_set_userdata(part_timer, this);
-    htimer_t* metric_timer = htimer_add(lp, [](htimer_t* t) {
-        auto* app = (AgentApp*)hevent_userdata(t);
-        app->sampleMetric();
-    }, 5000, INFINITE);
-    hevent_set_userdata(metric_timer, this);
     loadConfig();
     init(lp);
+    restartMetricTimer();
+    loadMetricHistory();
     sampleMetric();
     hloop_run(lp);
     hloop_free(&lp);

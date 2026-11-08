@@ -171,6 +171,7 @@ private:
     bool         startTtyList(const char* devid, uint32_t& rid, std::string& err);
     std::string  takeTtyListResult(uint32_t rid);
     bool         pushTtyCfg(const char* devid, const std::string& json);
+    bool         pushMetricCfg(const char* devid, const std::string& json);
     bool         hasAgent(const char* devid);
     bool         agentOnline(const char* devid) { return findAgent(devid) != nullptr; }
     std::string  fileDirOf(const char* devid);

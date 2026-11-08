@@ -63,6 +63,11 @@ public:
     bool fileMetaPut(const std::string& name, long long size, long long mtime_ms, const std::string& sha);
     bool distAlreadyPushed(const std::string& devid, const std::string& sha);
 
+    bool metricGet(const std::string& devid, std::string& json_out);   // 无记录返回默认
+    bool metricPut(const std::string& devid, int enabled, int interval_sec, int points,
+                   const std::string& metrics, const std::string& ifaces, const std::string& ttys,
+                   int persist, const std::string& actor, std::string& err);
+    bool metricDevids(std::vector<std::string>& out);
     bool ttyList(const std::string& devid, std::string& json_out);
     bool ttyDevids(std::vector<std::string>& out);
     bool ttyUpsert(const std::string& devid, const std::string& path, const std::string& alias,

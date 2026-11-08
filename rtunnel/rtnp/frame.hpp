@@ -54,6 +54,8 @@ enum Type : uint8_t {
     TTY_LIST_REQ   = 0x29,   // B→C：无载荷
     TTY_LIST_ACK   = 0x2A,   // C→B：str json [{path,by_id}]
     TTY_CFG_SET    = 0x2B,   // B→C：str json [{path,enabled,baud,data_bits,parity,stop_bits}]
+    METRICS_CFG    = 0x2C,   // B→C：str json 采样配置
+    METRICS_STATUS = 0x2D,   // C→B：str json {applied,error}
 };
 
 // 错误码

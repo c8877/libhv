@@ -81,6 +81,8 @@ private:
     void handleTtyPut(const HttpContextPtr& ctx);
     void handleTtyDelete(const HttpContextPtr& ctx);
     void handleTtyDiscovered(const HttpContextPtr& ctx);
+    void handleMetricCfgGet(const HttpContextPtr& ctx);
+    void handleMetricCfgPut(const HttpContextPtr& ctx);
     void handleAgentMetrics(const HttpContextPtr& ctx);
     void handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& actor);
     // api_dist.cpp

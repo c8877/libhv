@@ -8,9 +8,15 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
+
+#include "cpputil/json.hpp"
 #include <ctime>
 #include <deque>
 #include <map>
+#include <set>
+
+#include "cpputil/json.hpp"
 
 class AgentApp;
 
@@ -92,6 +98,18 @@ private:
     std::deque<std::string> metrics_;
     struct TtyCfg { int enabled = 1; int baud = 115200; int data_bits = 8; char parity = 'N'; int stop_bits = 1; };
     std::map<std::string, TtyCfg> tty_cfgs_;
+    int metric_enabled = 1;
+    int metric_interval = 5;
+    int metric_points = 720;
+    std::set<std::string> metric_set{"cpu", "mem", "load"};
+    std::string metric_ifaces, metric_ttys;
+    int metric_persist = 0;
+    std::string metric_path;
+    htimer_t* metric_timer = nullptr;
+    void restartMetricTimer();
+    void applyMetricsConfig(const nlohmann::json& j);
+    void loadMetricHistory();
+    void saveMetricLine(const std::string& line);
     std::string  sha256File(const std::string& path);
     void         cleanupParts(const std::string& dir, time_t cutoff);
 

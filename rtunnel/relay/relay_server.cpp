@@ -499,6 +499,15 @@ std::string RelayServer::takeTtyListResult(uint32_t rid) {
 
 bool RelayServer::hasAgent(const char* devid) { return findAgent(devid) != NULL; }
 
+bool RelayServer::pushMetricCfg(const char* devid, const std::string& json) {
+    RelayConn* a = findAgent(devid);
+    if (!a || !a->io) return false;
+    rtnp::Writer w;
+    w.str(json.c_str());
+    rtnp::send(a->io, rtnp::METRICS_CFG, 0, w.data, (uint16_t)w.len);
+    return true;
+}
+
 bool RelayServer::pushTtyCfg(const char* devid, const std::string& json) {
     RelayConn* a = findAgent(devid);
     if (!a || !a->io) return false;
