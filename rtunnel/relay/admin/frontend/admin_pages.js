@@ -89,13 +89,22 @@ const CertsPage = Object.assign(new Page(), {
       : s === 'expiring' ? '<span class="pill warn">即将到期</span>'
       : s === 'expired' ? '<span class="pill bad">已过期</span>'
       : '<span class="pill bad">已吊销</span>';
-    const rows = arr.map(c => [
-      '<b>' + UI.esc(c.san) + '</b>', UI.esc(c.role),
-      '0x' + Number(c.serial).toString(16).toUpperCase(),
-      c.expire_ms ? new Date(c.expire_ms).toLocaleDateString() : '—',
-      pill(c.status),
-      c.status === 'revoked' ? '' : '<button class="revoke" data-san="' + UI.esc(c.san) + '">吊销</button>',
-    ]);
+    const roleName = r => r === 'device' ? '设备' : r === 'user' ? '用户' : UI.esc(r || '');
+    const rows = arr.map(c => {
+      const days = c.expire_ms ? Math.ceil((c.expire_ms - Date.now()) / 86400000) : null;
+      const exp = c.expire_ms
+        ? new Date(c.expire_ms).toLocaleDateString() +
+          (days !== null ? ' <span class="muted">' + (days >= 0 ? '剩 ' + days + ' 天' : '已过期') + '</span>' : '')
+        : '—';
+      const serial = '0x' + Number(c.serial).toString(16).toUpperCase();
+      return [
+        '<b title="' + UI.esc(c.san) + '">' + UI.esc(c.san.length > 28 ? c.san.slice(0, 27) + '…' : c.san) + '</b>',
+        roleName(c.role),
+        '<code title="' + UI.esc(serial) + '">' + UI.esc(serial.length > 14 ? serial.slice(0, 13) + '…' : serial) + '</code>',
+        exp, pill(c.status),
+        c.status === 'revoked' ? '' : '<button class="revoke" data-san="' + UI.esc(c.san) + '">吊销</button>',
+      ];
+    });
     this.el.innerHTML =
       '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>签发新证书</h2>' +
       '<span class="spacer"></span><button id="certs-refresh">刷新列表</button></div>' +
@@ -109,12 +118,20 @@ const CertsPage = Object.assign(new Page(), {
       '<div style="padding:16px"><textarea id="csr-input" rows="6" style="width:100%;font-family:monospace" placeholder="粘贴 CSR PEM（设备侧生成，SAN 或 CN 为身份）"></textarea>' +
       '<div style="margin-top:8px;display:flex;gap:10px;align-items:center">有效期(天) <input id="csr-days" type="number" value="30" style="width:80px">' +
       '<button id="csr-btn">签名</button><span id="csr-result" style="color:var(--muted)"></span></div></div></div>' +
-      '<div class="panel"><div class="panel-head"><h2>证书台账</h2>' +
-      '<span class="spacer"></span><span>共 ' + arr.length + ' 张</span></div>' +
+      '<div class="panel"><div class="panel-head"><h2>证书台账</h2><span class="spacer"></span>' +
+      '<input id="cert-q" class="tty-search" placeholder="搜索 SAN">' +
+      '<span>共 ' + arr.length + ' 张</span></div>' +
       UI.table(['SAN(身份)', '类型', '序列号', '到期日', '状态', '操作'], rows) + '</div>';
 
     const cr = document.getElementById('certs-refresh');
     if (cr) cr.onclick = () => this.refresh();
+    const cq = document.getElementById('cert-q');
+    if (cq) cq.oninput = () => {
+      const q = cq.value.trim().toLowerCase();
+      document.querySelectorAll('#page tbody tr').forEach(tr => {
+        tr.style.display = !q || tr.innerText.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
+      });
+    };
     document.getElementById('issue-btn').onclick = async () => {
       const san = document.getElementById('issue-san').value.trim();
       const role = document.getElementById('issue-role').value;
@@ -199,9 +216,24 @@ const AclPage = Object.assign(new Page(), {
 const AuditPage = Object.assign(new Page(), {
   async refresh() {
     const arr = await Api.get('/api/v1/audit');
+    const rows = arr.map(x => {
+      const m = /^\[([^\]]+)\] role=(\S+) action=(\S+) detail=(.*)$/.exec(x);
+      if (!m) return ['<code>' + UI.esc(x) + '</code>', '', '', ''];
+      return ['<span class="muted">' + UI.esc(m[1].replace('T', ' ').replace('Z', '')) + '</span>',
+        UI.esc(m[2]), '<code>' + UI.esc(m[3]) + '</code>',
+        '<span title="' + UI.esc(m[4]) + '">' + UI.esc(m[4].length > 80 ? m[4].slice(0, 79) + '…' : m[4]) + '</span>'];
+    });
     this.el.innerHTML = '<div class="panel"><div class="panel-head"><h2>审计日志</h2>' +
-      '<span class="spacer"></span><span>最近 ' + arr.length + ' 条（新到旧）</span></div>' +
-      UI.table(['时间 / 角色 / 操作 / 详情'], arr.map(x => ['<code>' + UI.esc(x) + '</code>'])) + '</div>';
+      '<span class="spacer"></span><input id="au-q" class="tty-search" placeholder="搜索操作 / 详情">' +
+      '<span>最近 ' + arr.length + ' 条（新到旧）</span></div>' +
+      UI.table(['时间', '角色', '操作', '详情'], rows) + '</div>';
+    const q = document.getElementById('au-q');
+    if (q) q.oninput = () => {
+      const v = q.value.trim().toLowerCase();
+      document.querySelectorAll('#page tbody tr').forEach(tr => {
+        tr.style.display = !v || tr.innerText.toLowerCase().indexOf(v) >= 0 ? '' : 'none';
+      });
+    };
   },
 });
 
