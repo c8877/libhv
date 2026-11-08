@@ -316,12 +316,12 @@ const OverviewPage = Object.assign(new Page(), {
        ['累计下行', UI.bytes(o.bytes_in)], ['累计上行', UI.bytes(o.bytes_out)]]
         .map(c => '<div class="card"><div class="num">' + c[1] + '</div><div class="label">' + c[0] + '</div></div>').join('') +
       '</div>' +
-      '<div class="panel">' + UI.kv({
+      UI.panel('运行信息', UI.kv({
         '版本': UI.esc(o.version),
         '运行时长': UI.duration(o.uptime_ms),
         'mTLS': o.mtls ? '<span class="pill ok">开启</span>' : '<span class="pill warn">关闭</span>',
         'ACL': o.allow_all ? '<span class="pill warn">allow-all</span>' : '<span class="pill info">按表授权</span>',
-      }) + '</div>';
+      }));
     document.getElementById('relay-info').textContent = 'v' + o.version + ' · uptime ' + UI.duration(o.uptime_ms);
     document.getElementById('side-foot').innerHTML =
       '<span class="dot ok"></span>relay 在线 · ' + o.agents + ' 设备 · ' + o.streams + ' 会话';
@@ -347,10 +347,10 @@ const AgentsPage = Object.assign(new Page(), {
         ? '<button class="bind" data-devid="' + UI.esc(a.devid) + '">绑定</button> ' +
           '<button class="kick" data-devid="' + UI.esc(a.devid) + '">下线</button>' : ''),
     ]);
-    this.el.innerHTML = '<div class="panel"><div class="panel-head"><h2>设备（C 侧）</h2>' +
-      '<span class="spacer"></span><input id="ag-q" class="tty-search" placeholder="搜索 devid / 地址">' +
-      '<span>共 ' + arr.length + ' 台 · 5s 自动刷新</span></div>' +
-      UI.table(['devid', '状态', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'], rows) + '</div>';
+    this.el.innerHTML = UI.panel('设备（C 侧）',
+      UI.table(['devid', '状态', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'], rows),
+      { right: '<input id="ag-q" class="tty-search" placeholder="搜索 devid / 地址">' +
+        '<span>共 ' + arr.length + ' 台 · 5s 自动刷新</span>' });
     const aq = document.getElementById('ag-q');
     if (aq) aq.oninput = () => {
       const q = aq.value.trim().toLowerCase();
@@ -555,12 +555,11 @@ const AccountsPage = Object.assign(new Page(), {
         return ops;
       })(),
     ]);
-    this.el.innerHTML =
-      '<div class="panel"><div class="panel-head"><h2>账号列表</h2><span class="spacer"></span>' +
-      '<input id="au-q" class="tty-search" placeholder="搜索用户名">' +
-      '<span>共 ' + arr.length + ' 个</span> ' +
-      '<button class="primary" id="nu-open">+ 新建账号</button></div>' +
-      UI.table(['用户名', '角色', '状态', '创建时间', '操作'], rows2) + '</div>';
+    this.el.innerHTML = UI.panel('账号列表',
+      UI.table(['用户名', '角色', '状态', '创建时间', '操作'], rows2),
+      { right: '<input id="au-q" class="tty-search" placeholder="搜索用户名">' +
+        '<span>共 ' + arr.length + ' 个</span> ' +
+        '<button class="primary" id="nu-open">+ 新建账号</button>' });
 
     const aq = document.getElementById('au-q');
     if (aq) aq.oninput = () => {

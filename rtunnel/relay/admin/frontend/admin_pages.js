@@ -8,9 +8,9 @@ const ClientsPage = Object.assign(new Page(), {
       UI.bytes(c.bytes_in) + ' / ' + UI.bytes(c.bytes_out),
       '<button class="shell" data-user="' + UI.esc(c.user) + '">Shell</button>',
     ]);
-    this.el.innerHTML = '<div class="panel"><div class="panel-head"><h2>客户端（A 侧）</h2>' +
-      '<span class="spacer"></span><span>共 ' + arr.length + ' 个</span></div>' +
-      UI.table(['用户', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'], rows) + '</div>';
+    this.el.innerHTML = UI.panel('客户端（A 侧）',
+      UI.table(['用户', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'], rows),
+      { right: '<span>共 ' + arr.length + ' 个</span>' });
     document.querySelectorAll('#page button.web').forEach(btn => {
       btn.onclick = (e) => {
         e.stopPropagation();
@@ -44,10 +44,10 @@ const StreamsPage = Object.assign(new Page(), {
       pill(s.state), UI.ago(s.opened_at_ms),
       '<button class="kick" data-sid="' + s.a_sid + '">踢掉</button>',
     ]);
-    this.el.innerHTML = '<div class="panel"><div class="panel-head"><h2>会话</h2>' +
-      '<span class="spacer"></span><input id="st-q" class="tty-search" placeholder="搜索用户 / 设备">' +
-      '<span>共 ' + arr.length + ' 条</span></div>' +
-      UI.table(['A 用户:a_sid', 'C 设备:c_sid', '状态', '开启于', '操作'], rows) + '</div>';
+    this.el.innerHTML = UI.panel('会话',
+      UI.table(['A 用户:a_sid', 'C 设备:c_sid', '状态', '开启于', '操作'], rows),
+      { right: '<input id="st-q" class="tty-search" placeholder="搜索用户 / 设备">' +
+        '<span>共 ' + arr.length + ' 条</span>' });
     const sq = document.getElementById('st-q');
     if (sq) sq.oninput = () => {
       const q = sq.value.trim().toLowerCase();
@@ -106,22 +106,21 @@ const CertsPage = Object.assign(new Page(), {
       ];
     });
     this.el.innerHTML =
-      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>签发新证书</h2>' +
-      '<span class="spacer"></span><button id="certs-refresh">刷新列表</button></div>' +
-      '<div style="padding:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
-      'SAN <input id="issue-san" placeholder="PILE-000200" size="18">' +
-      '类型 <select id="issue-role"><option value="device">设备</option><option value="user">用户</option></select>' +
-      '有效期(天) <input id="issue-days" type="number" value="30" min="1" max="3650" style="width:80px">' +
-      '<button class="primary" id="issue-btn">签发</button>' +
-      '<span id="issue-result" style="color:var(--muted)"></span></div></div>' +
-      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>CSR 签名（私钥不出设备）</h2></div>' +
-      '<div style="padding:16px"><textarea id="csr-input" rows="6" style="width:100%;font-family:monospace" placeholder="粘贴 CSR PEM（设备侧生成，SAN 或 CN 为身份）"></textarea>' +
-      '<div style="margin-top:8px;display:flex;gap:10px;align-items:center">有效期(天) <input id="csr-days" type="number" value="30" style="width:80px">' +
-      '<button id="csr-btn">签名</button><span id="csr-result" style="color:var(--muted)"></span></div></div></div>' +
-      '<div class="panel"><div class="panel-head"><h2>证书台账</h2><span class="spacer"></span>' +
-      '<input id="cert-q" class="tty-search" placeholder="搜索 SAN">' +
-      '<span>共 ' + arr.length + ' 张</span></div>' +
-      UI.table(['SAN(身份)', '类型', '序列号', '到期日', '状态', '操作'], rows) + '</div>';
+      UI.panel('签发新证书', '<div style="padding:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+        'SAN <input id="issue-san" placeholder="PILE-000200" size="18">' +
+        '类型 <select id="issue-role"><option value="device">设备</option><option value="user">用户</option></select>' +
+        '有效期(天) <input id="issue-days" type="number" value="30" min="1" max="3650" style="width:80px">' +
+        '<button class="primary" id="issue-btn">签发</button>' +
+        '<span id="issue-result" style="color:var(--muted)"></span></div>',
+        { cls: 'mb16', right: '<button id="certs-refresh">刷新列表</button>' }) +
+      UI.panel('CSR 签名（私钥不出设备）', '<div style="padding:16px">' +
+        '<textarea id="csr-input" rows="6" style="width:100%;font-family:monospace" placeholder="粘贴 CSR PEM（设备侧生成，SAN 或 CN 为身份）"></textarea>' +
+        '<div style="margin-top:8px;display:flex;gap:10px;align-items:center">有效期(天) <input id="csr-days" type="number" value="30" style="width:80px">' +
+        '<button id="csr-btn">签名</button><span id="csr-result" style="color:var(--muted)"></span></div></div>', { cls: 'mb16' }) +
+      UI.panel('证书台账',
+        UI.table(['SAN(身份)', '类型', '序列号', '到期日', '状态', '操作'], rows),
+        { right: '<input id="cert-q" class="tty-search" placeholder="搜索 SAN">' +
+          '<span>共 ' + arr.length + ' 张</span>' });
 
     const cr = document.getElementById('certs-refresh');
     if (cr) cr.onclick = () => this.refresh();
@@ -188,15 +187,13 @@ const AclPage = Object.assign(new Page(), {
   refreshInterval() { return 0; },
   async refresh() {
     const d = await Api.get('/api/v1/acl/file');
-    this.el.innerHTML =
-      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>ACL 文件（' + UI.esc(d.path || '未配置') + '）</h2>' +
-      '<span class="spacer"></span>' +
-      '<button id="acl-reload">重新加载</button> <button class="primary" id="acl-save">保存并热加载</button></div>' +
-      '<div style="padding:16px"><textarea id="acl-content" rows="12" style="width:100%;font-family:monospace" ' +
+    const aclBody = '<div style="padding:16px"><textarea id="acl-content" rows="12" style="width:100%;font-family:monospace" ' +
       'placeholder="user=devid[,devid|*]，每行一条，# 注释">' + UI.esc(d.content) + '</textarea>' +
-      '<div style="color:var(--muted);margin-top:8px">保存 = 写文件 + 热加载，只影响新 OPEN，不动已建立会话；解析失败保留旧表。</div></div></div>' +
-      '<div class="panel"><div class="panel-head"><h2>命令行条目（只读）</h2></div>' +
-      UI.table(['条目'], (d.cli || []).map(x => [UI.esc(x)])) + '</div>';
+      '<div style="color:var(--muted);margin-top:8px">保存 = 写文件 + 热加载，只影响新 OPEN，不动已建立会话；解析失败保留旧表。</div></div>';
+    this.el.innerHTML = UI.panel('ACL 文件（' + UI.esc(d.path || '未配置') + '）', aclBody, {
+      cls: 'mb16', right: '<button id="acl-reload">重新加载</button> ' +
+        '<button class="primary" id="acl-save">保存并热加载</button>',
+    }) + UI.panel('命令行条目（只读）', UI.table(['条目'], (d.cli || []).map(x => [UI.esc(x)])));
     document.getElementById('acl-save').onclick = async () => {
       try {
         const r = await Api.put('/api/v1/acl/file', { content: document.getElementById('acl-content').value });
@@ -223,10 +220,10 @@ const AuditPage = Object.assign(new Page(), {
         UI.esc(m[2]), '<code>' + UI.esc(m[3]) + '</code>',
         '<span title="' + UI.esc(m[4]) + '">' + UI.esc(m[4].length > 80 ? m[4].slice(0, 79) + '…' : m[4]) + '</span>'];
     });
-    this.el.innerHTML = '<div class="panel"><div class="panel-head"><h2>审计日志</h2>' +
-      '<span class="spacer"></span><input id="au-q" class="tty-search" placeholder="搜索操作 / 详情">' +
-      '<span>最近 ' + arr.length + ' 条（新到旧）</span></div>' +
-      UI.table(['时间', '角色', '操作', '详情'], rows) + '</div>';
+    this.el.innerHTML = UI.panel('审计日志',
+      UI.table(['时间', '角色', '操作', '详情'], rows),
+      { right: '<input id="au-q" class="tty-search" placeholder="搜索操作 / 详情">' +
+        '<span>最近 ' + arr.length + ' 条（新到旧）</span>' });
     const q = document.getElementById('au-q');
     if (q) q.oninput = () => {
       const v = q.value.trim().toLowerCase();
@@ -267,19 +264,18 @@ const FilesPage = Object.assign(new Page(), {
       (canManage() ? '<button class="push" data-name="' + UI.esc(f.name) + '">分发</button> ' : '') +
       (canManage() ? '<button class="del" data-name="' + UI.esc(f.name) + '">删除</button>' : ''),
     ]);
-    this.el.innerHTML =
-      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>上传文件</h2>' +
-      '<span class="spacer"></span><button id="files-refresh">刷新列表</button></div>' +
-      '<div style="padding:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+    const uploadBody = '<div style="padding:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
       '<input type="file" id="upload-input"> <button class="primary" id="upload-btn">上传</button>' +
       '<progress id="upload-progress" max="100" value="0" style="width:220px;display:none"></progress>' +
       '<span id="upload-status" style="color:var(--muted)"></span>' +
-      '<span style="color:var(--muted)">单文件上限 ' + uploadLimitMb() + ' MiB</span></div></div>' +
-      '<div class="panel"><div class="panel-head"><h2>文件列表</h2><span class="spacer"></span>' +
-      '<input id="fl-q" class="tty-search" placeholder="搜索文件名">' +
-      '<span>共 ' + arr.length + ' 个</span></div>' +
+      '<span style="color:var(--muted)">单文件上限 ' + uploadLimitMb() + ' MiB</span></div>';
+    this.el.innerHTML = UI.panel('上传文件', uploadBody, {
+      cls: 'mb16', right: '<button id="files-refresh">刷新列表</button>',
+    }) + UI.panel('文件列表',
       UI.table([this.sortLink('name', '名称'), this.sortLink('size', '大小'), '哈希',
-                this.sortLink('mtime', '修改时间'), '操作'], rows) + '</div>';
+                this.sortLink('mtime', '修改时间'), '操作'], rows),
+      { right: '<input id="fl-q" class="tty-search" placeholder="搜索文件名">' +
+        '<span>共 ' + arr.length + ' 个</span>' });
 
     document.getElementById('files-refresh').onclick = () => this.refresh();
     const fq = document.getElementById('fl-q');
