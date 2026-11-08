@@ -55,11 +55,11 @@ const AgentDetailPage = Object.assign(new Page(), {
     const nics = (si.nics || []).map(n => [UI.esc(n.name), UI.esc(n.ip), UI.esc(n.netmask),
       n.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>']);
     const nw = document.getElementById('si-nic-wrap');
-    if (nw) nw.innerHTML = UI.table(['接口', 'IP', '掩码', '状态'], nics);
+    if (nw) nw.innerHTML = UI.detailTable(['接口', 'IP', '掩码', '状态'], nics);
     const sw = document.getElementById('si-sys-wrap');
     if (sw) sw.innerHTML = this.sysGrid(si, Date.now());
     const fw = document.getElementById('si-flows-wrap');
-    if (fw) fw.innerHTML = UI.table(['A 用户:sid', 'c_sid', '状态', '开启于'], rows);
+    if (fw) fw.innerHTML = UI.detailTable(['A 用户:sid', 'c_sid', '状态', '开启于'], rows);
     this.diskRows = (si.mounts || []).map(m => {
       const t = Number(m.total_kb) || 0, f = Number(m.free_kb) || 0;
       return { mount: m.mount, fstype: m.fstype || '', total: t, used: t - f, free: f,
@@ -154,7 +154,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       const nics = (si.nics || []).map(n => [UI.esc(n.name), UI.esc(n.ip), UI.esc(n.netmask),
         n.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>']);
       const nicPanel = '<div class="panel si-nic"><div class="panel-head"><h2>网卡</h2></div>' +
-        '<div id="si-nic-wrap">' + UI.table(['接口', 'IP', '掩码', '状态'], nics) + '</div></div>';
+        '<div id="si-nic-wrap">' + UI.detailTable(['接口', 'IP', '掩码', '状态'], nics) + '</div></div>';
 
       const diskPanel = '<div class="panel si-disk"><div class="panel-head"><h2>存储</h2>' +
         '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">条长按最大分区归一</span></div>' +
@@ -177,12 +177,11 @@ const AgentDetailPage = Object.assign(new Page(), {
       if (caps.file_dir) chips.push('文件 ' + caps.file_dir);
       chips.push(caps.mtls ? 'mTLS' : 'mTLS 未启用');
       const capHtml = chips.map(c => '<span class="chip">' + UI.esc(c) + '</span>').join(' ');
-      const runtimeTable = '<table class="si-table">' +
-        '<tr><th>agent 版本</th><td>' + UI.esc(si.version || '') + '</td></tr>' +
-        '<tr><th>能力</th><td>' + capHtml +
-        (canManage() ? ' <button class="caps-edit" id="caps-edit">编辑</button>' : '') + '</td></tr>' +
-        '<tr><th>启动参数</th><td><code style="font-size:12px">' + UI.esc(si.args || '') + '</code></td></tr>' +
-        '</table>';
+      const runtimeTable = UI.kvTable([
+        ['agent 版本', UI.esc(si.version || '')],
+        ['能力', capHtml + (canManage() ? ' <button class="caps-edit" id="caps-edit">编辑</button>' : '')],
+        ['启动参数', '<code style="font-size:12px">' + UI.esc(si.args || '') + '</code>'],
+      ]);
       const sysTable = this.sysGrid(si, siTs);
       html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>系统</h2></div>' +
         '<div id="si-sys-wrap">' + sysTable + '</div></div>' +
@@ -193,7 +192,7 @@ const AgentDetailPage = Object.assign(new Page(), {
     }
 
     html += '<div class="panel"><div class="panel-head"><h2>当前会话</h2></div>' +
-      '<div id="si-flows-wrap">' + UI.table(['A 用户:sid', 'c_sid', '状态', '开启于'], rows) + '</div></div>';
+      '<div id="si-flows-wrap">' + UI.detailTable(['A 用户:sid', 'c_sid', '状态', '开启于'], rows) + '</div></div>';
     this.el.innerHTML = html;
     this._rendered = true;
 
@@ -674,7 +673,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       '<h2>采样配置</h2><span class="muted" style="margin-left:10px">' + list.length + ' 项 · ' +
       syncCount + ' 项未同步</span><span class="spacer"></span>' +
       (can ? '<button id="metric-add">+ 添加指标</button>' : '') + '</div>' +
-      '<div class="table-shell"><table class="si-table metric-table"><tr><th>指标</th><th>间隔</th><th>保留</th>' +
+      '<div class="detail-table-shell"><table class="detail-table si-table metric-table"><tr><th>指标</th><th>间隔</th><th>保留</th>' +
       '<th>同步</th><th>启用</th><th></th></tr>' +
       (rows || '<tr><td colspan="6" style="color:var(--muted)">暂无配置</td></tr>') + '</table></div></div>';
     if (!can) return;
@@ -866,7 +865,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       '<span class="spacer"></span>' + search +
       '<button id="tty-refresh">刷新</button> ' +
       (can ? '<button id="tty-add">手动添加</button>' : '') + '</div>' +
-      '<div class="tty-table-wrap"><table class="si-table tty-table"><tr>' +
+      '<div class="tty-table-wrap detail-table-shell"><table class="detail-table si-table tty-table"><tr>' +
       '<th>设备</th><th>状态</th><th>参数</th><th>操作</th></tr>' +
       (rows || '<tr><td colspan="4" style="color:var(--muted)">' +
         (tab === 'config' ? '暂无已配置串口' : (q ? '没有匹配的串口' : '没有未配置的串口')) + '</td></tr>') +

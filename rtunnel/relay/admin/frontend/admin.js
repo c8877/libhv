@@ -261,6 +261,20 @@ const UI = {
     const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
     return (d ? d + 'd ' : '') + String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
   },
+  detailTable(cols, rows, opts) {
+    opts = opts || {};
+    const th = c => '<th>' + (String(c).charAt(0) === '<' ? c : UI.esc(c)) + '</th>';
+    let h = '<div class="detail-table-shell"><table class="detail-table"><thead><tr>' +
+      cols.map(th).join('') + '</tr></thead><tbody>';
+    if (!rows.length) h += '<tr><td class="empty" colspan="' + cols.length + '">' + UI.esc(opts.empty || '暂无数据') + '</td></tr>';
+    rows.forEach(r => { h += '<tr>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>'; });
+    return h + '</tbody></table></div>';
+  },
+  kvTable(rows) {
+    return '<div class="detail-table-shell"><table class="detail-table detail-kv"><tbody>' +
+      rows.map(r => '<tr><th>' + r[0] + '</th><td>' + r[1] + '</td></tr>').join('') +
+      '</tbody></table></div>';
+  },
   table(cols, rows, onrow) {
     // 表头允许传 HTML（如排序链接）；以 '<' 开头的原样输出，其余转义
     const th = c => '<th>' + (String(c).charAt(0) === '<' ? c : UI.esc(c)) + '</th>';
