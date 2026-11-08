@@ -936,7 +936,6 @@ void AgentApp::seriesTick() {
 
 void AgentApp::sendSysinfo() {
     using nlohmann::json;
-    agentSampleCpu(this);
     json j;
     j["version"] = hv_version();
     j["args"] = args_line;
@@ -963,20 +962,19 @@ void AgentApp::sendSysinfo() {
         }
         while (!model.empty() && (model[0] == ' ' || model[0] == '\t')) model.erase(0, 1);
         j["cpu_model"] = model;
+        j["cpu_count"] = cores;
     }
     {
         std::ifstream f("/proc/meminfo");
         std::string line;
-        unsigned long long total = 0, avail = 0, swap_total = 0, swap_free = 0;
+        unsigned long long total = 0, swap_total = 0, swap_free = 0;
         while (std::getline(f, line)) {
             unsigned long long v = 0;
             if (sscanf(line.c_str(), "MemTotal: %llu kB", &v) == 1) total = v;
-            else if (sscanf(line.c_str(), "MemAvailable: %llu kB", &v) == 1) avail = v;
             else if (sscanf(line.c_str(), "SwapTotal: %llu kB", &v) == 1) swap_total = v;
             else if (sscanf(line.c_str(), "SwapFree: %llu kB", &v) == 1) swap_free = v;
         }
         j["mem_total_kb"] = total;
-        j["mem_available_kb"] = avail;
         j["swap_total_kb"] = swap_total;
         j["swap_free_kb"] = swap_free;
     }
@@ -1009,18 +1007,6 @@ void AgentApp::sendSysinfo() {
             mounts.push_back(m);
         }
         j["mounts"] = mounts;
-    }
-    {
-        nlohmann::json cpu;
-        cpu["usage"] = cpu_usage;
-        cpu["cores"] = cpu_cores;
-        j["cpu"] = cpu;
-    }
-    {
-        double la[3] = {0, 0, 0};
-        if (getloadavg(la, 3) == 3) {
-            j["load1"] = la[0]; j["load5"] = la[1]; j["load15"] = la[2];
-        }
     }
     {
         json nics = json::array();

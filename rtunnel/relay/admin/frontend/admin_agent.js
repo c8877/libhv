@@ -45,7 +45,7 @@ const AgentDetailPage = Object.assign(new Page(), {
     const cpu = si.cpu || { usage: 0, cores: [] };
     const sysRows = [
       ['架构', si.machine || '—'], ['内核', si.kernel || '—'], ['CPU 型号', si.cpu_model || '—'],
-      ['核心数', ((cpu.cores || []).length) + ' 核'], ['板卡型号', si.board || '—'],
+      ['核心数', (si.cpu_count || 0) + ' 核'], ['板卡型号', si.board || '—'],
       ['采集时间', new Date(Date.now()).toLocaleString()],
     ];
     const sw = document.getElementById('si-sys-wrap');
@@ -110,10 +110,6 @@ const AgentDetailPage = Object.assign(new Page(), {
       Object.values(this.charts || {}).forEach(c => { try { c.destroy(); } catch (e) {} });
       this.charts = {};
       const kb = n => UI.bytes((Number(n) || 0) * 1024);
-      const total = Number(si.mem_total_kb) || 0;
-      const avail = Number(si.mem_available_kb) || 0;
-      const memPct = total > 0 ? Math.round((total - avail) * 100 / total) : 0;
-      const cpu = si.cpu || { usage: 0, cores: [] };
 
       const mounts = si.mounts || [];
       const maxTotal = mounts.reduce((m, x) => Math.max(m, Number(x.total_kb) || 0), 1);
@@ -166,7 +162,7 @@ const AgentDetailPage = Object.assign(new Page(), {
         ['架构', si.machine || '—'],
         ['内核', si.kernel || '—'],
         ['CPU 型号', si.cpu_model || '—'],
-        ['核心数', ((cpu.cores || []).length) + ' 核'],
+        ['核心数', (si.cpu_count || 0) + ' 核'],
         ['板卡型号', si.board || '—'],
         ['采集时间', new Date(siTs).toLocaleString()],
       ];
@@ -355,7 +351,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       };
       if (cb) cb.onchange = () => { this.auto = cb.checked; startStateTimer(); };
       if (ps) ps.onchange = () => { this.period = Number(ps.value) || 10; startStateTimer(); };
-      if (si && (!si.cpu || !(si.cpu.cores || []).length) && !this._retry) {
+      if (si && !si.cpu_count && !this._retry) {
         this._retry = setTimeout(() => { this._retry = null; this.refresh().catch(() => {}); }, 1200);
       }
       const btn = document.getElementById('si-export');
