@@ -767,47 +767,93 @@ const AgentDetailPage = Object.assign(new Page(), {
     this.ttysLoaded = true;
     this.renderTtyCard(wrap);
   },
+  ttyFormHtml(it, isNew) {
+    const bauds = [1200,2400,4800,9600,19200,38400,57600,115200,230400,460800,921600];
+    const opts = (a, cur) => a.map(v => '<option value="' + v + '"' + (v === cur ? ' selected' : '') + '>' + v + '</option>').join('');
+    return '<div class="tty-form" data-new="' + (isNew ? '1' : '0') + '">' +
+      '<div class="tty-form-grid">' +
+      '<label>别名<input id="tf-alias" value="' + UI.esc(it.alias || '') + '" placeholder="设备内唯一"></label>' +
+      '<label>路径<input id="tf-path" value="' + UI.esc(it.path || '') + '"' +
+        (it.path && !isNew ? ' readonly' : '') + '></label>' +
+      '<label>波特率<select id="tf-baud">' + opts(bauds, it.baud) + '</select></label>' +
+      '<label>数据位<select id="tf-db">' + opts([5,6,7,8], it.data_bits) + '</select></label>' +
+      '<label>校验<select id="tf-par">' + opts(['N','E','O'], it.parity) + '</select></label>' +
+      '<label>停止位<select id="tf-stop">' + opts([1,2], it.stop_bits) + '</select></label>' +
+      '<label class="tty-check"><input type="checkbox" id="tf-en"' + (it.enabled ? ' checked' : '') + '> 启用</label>' +
+      '</div>' +
+      '<div class="tty-form-foot">' +
+        '<div class="tty-form-left">' +
+          (!isNew && roleOf() === 'admin' ? '<button data-tf-take="' + UI.esc(it.alias || it.path) + '">强制接管</button>' : '') +
+          '<button data-tf-copy="' + UI.esc(it.path || '') + '">复制路径</button>' +
+        '</div><span class="spacer"></span><div class="tty-form-right">' +
+          (!isNew && canManage() ? '<button data-tf-del="' + UI.esc(it.path) + '">删除</button>' : '') +
+          '<button data-tf-cancel="1">取消</button>' +
+          '<button class="primary" data-tf-save="1">' + (isNew ? '添加并下发' : '保存并下发') + '</button>' +
+        '</div>' +
+      '</div></div>';
+  },
+  async saveTtyForm(wrap, isNew) {
+    const alias = document.getElementById('tf-alias').value.trim();
+    const path = document.getElementById('tf-path').value.trim();
+    if (!path) { this.ttyError('路径不能为空'); return; }
+    const it = (this.ttys || []).find(x => x.path === path);
+    const body = {
+      path: path,
+      alias: alias,
+      enabled: document.getElementById('tf-en').checked,
+      baud: Number(document.getElementById('tf-baud').value),
+      data_bits: Number(document.getElementById('tf-db').value),
+      parity: document.getElementById('tf-par').value,
+      stop_bits: Number(document.getElementById('tf-stop').value),
+      roles: (it && it.roles) || 'operator,manager,admin',
+    };
+    try {
+      await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/ttys', body);
+      this.expandTty = null;
+      this.addTtyPath = null;
+      await this.loadTtys(true);
+    } catch (e) { this.ttyError(e.message); }
+  },
   renderTtyCard(wrap) {
     const can = canManage();
     const configured = new Set((this.ttys || []).map(t => t.path));
     const unAll = (this.ttyDisc || []).filter(d => !configured.has(d.path));
     const tab = this.ttyTab || (this.ttys && this.ttys.length ? 'config' : 'unconfig');
+    this.ttyTab = tab;
     const q = (this.ttyQuery || '').trim().toLowerCase();
     let rows = '';
     if (tab === 'config') {
       rows = (this.ttys || []).map(t => {
         const st = t.enabled ? '<span class="dot ok"></span>启用' : '<span class="dot off"></span>禁用';
-        const label = t.alias || '—';
         const open = this.expandTty === t.path;
         let r = '<tr class="tty-row' + (open ? ' open' : '') + '" data-trow="' + UI.esc(t.path) + '">' +
-          '<td class="tty-main"><b>' + UI.esc(label) + '</b>' +
+          '<td class="tty-main"><b>' + UI.esc(t.alias || '—') + '</b>' +
           '<div class="tty-path" title="' + UI.esc(t.path) + '">' + UI.esc(t.path) + '</div></td>' +
           '<td>' + st + '</td>' +
           '<td class="tty-param">' + t.baud + ' · ' + t.data_bits + t.parity + t.stop_bits + '</td>' +
           '<td class="tty-ops"><a class="btn primary" href="#/tty/' + encodeURIComponent(this.devid) + '/' +
             encodeURIComponent(t.alias || t.path) + '">调试</a><span class="chev">⌄</span></td></tr>';
-        if (open) {
-          r += '<tr class="tty-expand"><td colspan="4"><div class="tty-detail">' +
-            '<div class="tty-detail-row"><span>路径</span><code>' + UI.esc(t.path) + '</code></div>' +
-            '<div class="tty-detail-row"><span>参数</span><code>' + t.baud + ' · ' + t.data_bits + t.parity + t.stop_bits + '</code></div>' +
-            '<div class="tty-detail-row"><span>状态</span>' + (t.enabled ? '启用' : '禁用') + '</div>' +
-            '<div class="tty-detail-actions">' +
-            '<a class="btn" href="#/tty/' + encodeURIComponent(this.devid) + '/' +
-              encodeURIComponent(t.alias || t.path) + '?monitor=1">监听</a>' +
-            (roleOf() === 'admin' ? '<button data-take="' + UI.esc(t.alias || t.path) + '">强制接管</button>' : '') +
-            (can ? '<button data-edit="' + UI.esc(t.path) + '">编辑参数</button>' : '') +
-            (can ? '<button data-tog="' + UI.esc(t.path) + '">' + (t.enabled ? '禁用' : '启用') + '</button>' : '') +
-            '<button data-copy="' + UI.esc(t.path) + '">复制路径</button>' +
-            '</div></div></td></tr>';
-        }
+        if (open) r += '<tr class="tty-expand"><td colspan="4">' + this.ttyFormHtml(t, false) + '</td></tr>';
         return r;
       }).join('');
     } else {
-      rows = unAll.filter(d => !q || (d.path || '').toLowerCase().indexOf(q) >= 0).map(d =>
-        '<tr><td class="tty-main"><b>未配置</b><div class="tty-path" title="' + UI.esc(d.path) + '">' +
-        UI.esc(d.path) + '</div></td><td><span class="pill">未配置</span></td><td>—</td>' +
-        '<td class="tty-ops">' + (can ? '<button data-addpath="' + UI.esc(d.path) + '">添加</button>' : '') +
-        ' <button data-copy="' + UI.esc(d.path) + '">复制路径</button></td></tr>').join('');
+      rows = unAll.filter(d => !q || (d.path || '').toLowerCase().indexOf(q) >= 0).map(d => {
+        const open = this.addTtyPath === d.path;
+        let r = '<tr class="tty-row' + (open ? ' open' : '') + '" data-trow="' + UI.esc(d.path) + '">' +
+          '<td class="tty-main"><b>未配置</b><div class="tty-path" title="' + UI.esc(d.path) + '">' +
+          UI.esc(d.path) + '</div></td><td><span class="pill">未配置</span></td><td>—</td>' +
+          '<td class="tty-ops">' + (can ? '<button data-addpath="' + UI.esc(d.path) + '">添加</button>' : '') +
+          '<span class="chev">⌄</span></td></tr>';
+        if (open) {
+          r += '<tr class="tty-expand"><td colspan="4">' + this.ttyFormHtml({ path: d.path, baud: 115200,
+            data_bits: 8, parity: 'N', stop_bits: 1, enabled: true }, true) + '</td></tr>';
+        }
+        return r;
+      }).join('');
+      if (this.addTtyPath === '') {
+        rows += '<tr class="tty-expand"><td colspan="4">' + this.ttyFormHtml({ path: '', baud: 115200,
+          data_bits: 8, parity: 'N', stop_bits: 1, enabled: true }, true) + '</td></tr>';
+      }
     }
     const search = '<input id="tty-q" class="tty-search" placeholder="搜索别名 / 路径" value="' + UI.esc(this.ttyQuery || '') + '">';
     wrap.innerHTML = '<div class="panel" style="margin-bottom:16px"><div class="panel-head">' +
@@ -823,66 +869,80 @@ const AgentDetailPage = Object.assign(new Page(), {
         (tab === 'config' ? '暂无已配置串口' : (q ? '没有匹配的串口' : '没有未配置的串口')) + '</td></tr>') +
       '</table></div></div>';
     wrap.querySelectorAll('[data-tab]').forEach(b => {
-      b.onclick = () => { this.ttyTab = b.dataset.tab; this.renderTtyCard(wrap); };
+      b.onclick = () => { this.ttyTab = b.dataset.tab; this.expandTty = null; this.addTtyPath = null; this.renderTtyCard(wrap); };
     });
     const qel = document.getElementById('tty-q');
     if (qel) qel.oninput = () => {
       this.ttyQuery = qel.value;
       const v = qel.value.trim().toLowerCase();
       wrap.querySelectorAll('tbody tr').forEach(tr => {
+        if (tr.classList.contains('tty-expand')) return;
         tr.style.display = !v || tr.innerText.toLowerCase().indexOf(v) >= 0 ? '' : 'none';
       });
     };
     wrap.querySelectorAll('[data-trow]').forEach(tr => {
       tr.onclick = (e) => {
-        if (e.target.closest('a,button,input')) return;
-        this.expandTty = this.expandTty === tr.dataset.trow ? null : tr.dataset.trow;
+        if (e.target.closest('a,button,input,select,label')) return;
+        const path = tr.dataset.trow;
+        if (this.ttyTab === 'config') {
+          this.expandTty = this.expandTty === path ? null : path;
+          this.addTtyPath = null;
+        } else {
+          this.addTtyPath = this.addTtyPath === path ? null : path;
+          this.expandTty = null;
+        }
         this.renderTtyCard(wrap);
       };
     });
-    wrap.querySelectorAll('[data-copy]').forEach(b => {
+    wrap.querySelectorAll('[data-addpath]').forEach(b => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        this.addTtyPath = b.dataset.addpath;
+        this.expandTty = null;
+        this.renderTtyCard(wrap);
+      };
+    });
+    wrap.querySelectorAll('[data-tf-save]').forEach(b => {
+      b.onclick = () => this.saveTtyForm(wrap, b.closest('.tty-form').dataset.new === '1');
+    });
+    wrap.querySelectorAll('[data-tf-cancel]').forEach(b => {
+      b.onclick = () => { this.expandTty = null; this.addTtyPath = null; this.renderTtyCard(wrap); };
+    });
+    wrap.querySelectorAll('[data-tf-del]').forEach(b => {
       b.onclick = async () => {
-        try { await navigator.clipboard.writeText(b.dataset.copy); UI.toast('路径已复制'); }
+        if (!confirm('删除串口配置 ' + b.dataset.tfDel + '？')) return;
+        try {
+          await Api.del('/api/v1/agents/' + encodeURIComponent(this.devid) + '/ttys?path=' +
+            encodeURIComponent(b.dataset.tfDel));
+          this.expandTty = null;
+          await this.loadTtys(true);
+        } catch (e) { this.ttyError(e.message); }
+      };
+    });
+    wrap.querySelectorAll('[data-tf-copy]').forEach(b => {
+      b.onclick = async () => {
+        try { await navigator.clipboard.writeText(b.dataset.tfCopy); UI.toast('路径已复制'); }
         catch (e) { UI.toast('复制失败', true); }
       };
     });
-    if (!can) return;
-    wrap.querySelectorAll('[data-edit]').forEach(b => {
+    wrap.querySelectorAll('[data-tf-take]').forEach(b => {
       b.onclick = () => {
-        const it = this.ttys.find(x => x.path === b.dataset.edit);
-        if (it) this.openTtyEditor(it);
-      };
-    });
-    wrap.querySelectorAll('[data-addpath]').forEach(b => {
-      b.onclick = () => {
-        this.openTtyEditor({ path: b.dataset.addpath, alias: '', enabled: true, baud: 115200,
-          data_bits: 8, parity: 'N', stop_bits: 1, roles: 'operator,manager,admin' });
-      };
-    });
-    wrap.querySelectorAll('[data-take]').forEach(b => {
-      b.onclick = () => {
-        const name = b.dataset.take;
+        const name = b.dataset.tfTake;
         const v = prompt('强制接管会断开当前会话，输入别名确认：' + name);
         if (v !== name) return;
         location.hash = '#/tty/' + encodeURIComponent(this.devid) + '/' +
           encodeURIComponent(name) + '?takeover=1';
       };
     });
-    wrap.querySelectorAll('[data-tog]').forEach(b => {
-      b.onclick = async () => {
-        const it = this.ttys.find(x => x.path === b.dataset.tog);
-        if (!it) return;
-        try {
-          await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/ttys',
-            Object.assign({}, it, { enabled: !it.enabled }));
-          this.loadTtys(true);
-        } catch (e) { this.ttyError(e.message); }
-      };
-    });
     const rf = document.getElementById('tty-refresh');
     if (rf) rf.onclick = () => this.loadTtys(true);
     const add = document.getElementById('tty-add');
-    if (add) add.onclick = () => this.openTtyEditor(null);
+    if (add) add.onclick = () => {
+      this.ttyTab = 'unconfig';
+      this.addTtyPath = '';
+      this.expandTty = null;
+      this.renderTtyCard(wrap);
+    };
   },
   ttyError(msg) {
     if (window.UI && UI.toast) UI.toast(msg);

@@ -457,3 +457,11 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .tty-param{font-size:13px}
 .sys-item{font-size:14px}
 .sys-item .k{font-size:12px}
+.tty-form{padding:14px 0 4px;max-width:920px}
+.tty-form-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 18px;align-items:end}
+.tty-form-grid label{display:flex;flex-direction:column;gap:6px;font-size:11px;color:var(--muted)}
+.tty-form-grid input,.tty-form-grid select{padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:13px;width:100%}
+.tty-form-grid input[readonly]{opacity:.75}
+.tty-form-grid .tty-check{flex-direction:row;align-items:center;gap:8px;height:33px}
+.tty-form-foot{display:flex;align-items:center;gap:8px;margin-top:14px}
+.tty-form-left,.tty-form-right{display:flex;gap:8px}
