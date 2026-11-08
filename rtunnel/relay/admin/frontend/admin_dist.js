@@ -270,7 +270,8 @@ const TasksPage = Object.assign(new Page(), {
     document.querySelectorAll('#page .te').forEach(b => {
       b.onclick = async () => {
         const cur = new Date().getTime() + 24 * 3600 * 1000;
-        const v = prompt('新的截止时间（本地时间，最多 +24h）', toLocalInput(cur));
+        const v = await UI.prompt({ title: '延长截止时间', label: '新的截止时间（本地时间，最多 +24h）',
+          type: 'datetime-local', value: toLocalInput(cur) });
         if (!v) return;
         const t = new Date(v).getTime();
         if (!t) { UI.toast('时间格式不正确', true); return; }
@@ -378,8 +379,8 @@ const TaskDetailPage = Object.assign(new Page(), {
     if (tf) tf.onclick = () => doCheck('force');
     const ex = document.getElementById('td-extend');
     if (ex) ex.onclick = async () => {
-      const v = prompt('新的截止时间（本地时间，最多 +24h）',
-        toLocalInput(Date.now() + 24 * 3600 * 1000));
+      const v = await UI.prompt({ title: '延长截止时间', label: '新的截止时间（本地时间，最多 +24h）',
+        type: 'datetime-local', value: toLocalInput(Date.now() + 24 * 3600 * 1000) });
       if (!v) return;
       try { await Api.post('/api/v1/distributions/' + this.id + '/extend',
         { deadline_at_ms: new Date(v).getTime() }); this.refresh(); }

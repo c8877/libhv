@@ -33,16 +33,19 @@ const AgentDetailPage = Object.assign(new Page(), {
   capsFormHtml(si) {
     const caps = si.caps || {};
     const shellAllowed = roleOf() === 'admin';
-    return '<div class="ui-form"><div class="ui-form-grid caps-grid">' +
-      '<label>转发端口<input id="caps-ports" value="' + UI.esc((caps.ports || []).join(', ')) +
-        '" placeholder="22, 8080, 8099"></label>' +
-      '<label>文件目录<input id="caps-dir" value="' + UI.esc(caps.file_dir || '/opt/data/files') + '"></label>' +
-      '<label class="tty-check"><input type="checkbox" id="caps-shell"' + (caps.shell ? ' checked' : '') +
-        (shellAllowed ? '' : ' disabled') + '> 允许 Shell</label>' +
-      '</div><div class="ui-form-foot"><span class="muted" id="caps-msg">' +
-        (shellAllowed ? '' : '仅 admin 可修改 Shell') + '</span><span class="spacer"></span>' +
-      '<div class="ui-form-right"><button data-caps-cancel="1" id="caps-cancel">取消</button>' +
-      '<button class="primary" id="caps-save">保存并下发</button></div></div></div>';
+    return UI.form({
+      layout: 'grid', cols: 3,
+      rows: [
+        { label: '转发端口', control: '<input id="caps-ports" value="' + UI.esc((caps.ports || []).join(', ')) +
+          '" placeholder="22, 8080, 8099">' },
+        { label: '文件目录', control: '<input id="caps-dir" value="' + UI.esc(caps.file_dir || '/opt/data/files') + '">' },
+        { raw: '<label class="tty-check"><input type="checkbox" id="caps-shell"' + (caps.shell ? ' checked' : '') +
+          (shellAllowed ? '' : ' disabled') + '> 允许 Shell</label>' },
+      ],
+      left: '<span class="muted" id="caps-msg">' + (shellAllowed ? '' : '仅 admin 可修改 Shell') + '</span>',
+      right: '<button data-caps-cancel="1" id="caps-cancel">取消</button>' +
+        '<button class="primary" id="caps-save">保存并下发</button>',
+    });
   },
   sysGrid(si, ts) {
     const rows = [
@@ -662,21 +665,20 @@ const AgentDetailPage = Object.assign(new Page(), {
             (c.enabled ? ' checked' : '') + '><span></span></label>' : (c.enabled ? '开' : '关')) + '</td>' +
           '<td class="chev">⌄</td></tr>';
         if (open) {
-          rows += '<tr class="metric-expand"><td colspan="6"><div class="ui-form">' +
-            '<div class="ui-form-grid cols-3">' +
-            '<label>间隔（秒）<input id="me-int" type="number" min="1" max="300" value="' + c.interval_sec + '"></label>' +
-            '<label>保留点数<input id="me-pts" type="number" min="60" max="86400" value="' + c.points + '"></label>' +
-            '<div class="metric-readonly"><span>预计保留</span><b>' + dur(c) + '</b></div>' +
-            '</div>' +
-            '<div class="ui-form-foot">' +
-              '<span class="metric-sync">' + (c.enabled
-                ? (c.synced ? '已下发并确认' : '已下发，等待 agent 确认')
-                : '已禁用，不参与采样') + '</span>' +
-              '<span class="spacer"></span>' +
-              '<button data-mdel="' + UI.esc(c.series) + '">删除</button>' +
+          rows += '<tr class="metric-expand"><td colspan="6">' + UI.form({
+            layout: 'grid', cols: 3,
+            rows: [
+              { label: '间隔（秒）', control: '<input id="me-int" type="number" min="1" max="300" value="' + c.interval_sec + '">' },
+              { label: '保留点数', control: '<input id="me-pts" type="number" min="60" max="86400" value="' + c.points + '">' },
+              { raw: '<div class="metric-readonly"><span>预计保留</span><b>' + dur(c) + '</b></div>' },
+            ],
+            left: '<span class="metric-sync">' + (c.enabled
+              ? (c.synced ? '已下发并确认' : '已下发，等待 agent 确认')
+              : '已禁用，不参与采样') + '</span>',
+            right: '<button data-mdel="' + UI.esc(c.series) + '">删除</button>' +
               '<button data-mcancel="1">取消</button>' +
-              '<button class="primary" data-msave="' + UI.esc(c.series) + '">保存并下发</button>' +
-            '</div></div></td></tr>';
+              '<button class="primary" data-msave="' + UI.esc(c.series) + '">保存并下发</button>',
+          }) + '</td></tr>';
         }
       });
     });
@@ -724,8 +726,8 @@ const AgentDetailPage = Object.assign(new Page(), {
       b.onclick = () => { this.expandMetric = null; this.renderMetricCard(wrap); };
     });
     wrap.querySelectorAll('[data-mdel]').forEach(b => {
-      b.onclick = () => {
-        if (!confirm('删除指标 ' + b.dataset.mdel + '？')) return;
+      b.onclick = async () => {
+        if (!await UI.confirm({ title: '删除指标', message: '确定删除 ' + b.dataset.mdel + '？', danger: true })) return;
         save(list.filter(c => c.series !== b.dataset.mdel));
       };
     });
@@ -756,27 +758,26 @@ const AgentDetailPage = Object.assign(new Page(), {
   ttyFormHtml(it, isNew) {
     const bauds = [1200,2400,4800,9600,19200,38400,57600,115200,230400,460800,921600];
     const opts = (a, cur) => a.map(v => '<option value="' + v + '"' + (v === cur ? ' selected' : '') + '>' + v + '</option>').join('');
-    return '<div class="ui-form" data-new="' + (isNew ? '1' : '0') + '">' +
-      '<div class="ui-form-grid">' +
-      '<label>别名<input id="tf-alias" value="' + UI.esc(it.alias || '') + '" placeholder="设备内唯一"></label>' +
-      '<label>路径<input id="tf-path" value="' + UI.esc(it.path || '') + '"' +
-        (it.path && !isNew ? ' readonly' : '') + '></label>' +
-      '<label>波特率<select id="tf-baud">' + opts(bauds, it.baud) + '</select></label>' +
-      '<label>数据位<select id="tf-db">' + opts([5,6,7,8], it.data_bits) + '</select></label>' +
-      '<label>校验<select id="tf-par">' + opts(['N','E','O'], it.parity) + '</select></label>' +
-      '<label>停止位<select id="tf-stop">' + opts([1,2], it.stop_bits) + '</select></label>' +
-      '<label class="tty-check"><input type="checkbox" id="tf-en"' + (it.enabled ? ' checked' : '') + '> 启用</label>' +
-      '</div>' +
-      '<div class="ui-form-foot">' +
-        '<div class="ui-form-left">' +
-          (!isNew && roleOf() === 'admin' ? '<button data-tf-take="' + UI.esc(it.alias || it.path) + '">强制接管</button>' : '') +
-          '<button data-tf-copy="' + UI.esc(it.path || '') + '">复制路径</button>' +
-        '</div><span class="spacer"></span><div class="ui-form-right">' +
-          (!isNew && canManage() ? '<button data-tf-del="' + UI.esc(it.path) + '">删除</button>' : '') +
-          '<button data-tf-cancel="1">取消</button>' +
-          '<button class="primary" data-tf-save="1">' + (isNew ? '添加并下发' : '保存并下发') + '</button>' +
-        '</div>' +
-      '</div></div>';
+    return UI.form({
+      layout: 'grid', cols: 4,
+      attrs: 'data-new="' + (isNew ? '1' : '0') + '"',
+      rows: [
+        { label: '别名', control: '<input id="tf-alias" value="' + UI.esc(it.alias || '') + '" placeholder="设备内唯一">' },
+        { label: '路径', control: '<input id="tf-path" value="' + UI.esc(it.path || '') + '"' +
+          (it.path && !isNew ? ' readonly' : '') + '>' },
+        { label: '波特率', control: '<select id="tf-baud">' + opts(bauds, it.baud) + '</select>' },
+        { label: '数据位', control: '<select id="tf-db">' + opts([5,6,7,8], it.data_bits) + '</select>' },
+        { label: '校验', control: '<select id="tf-par">' + opts(['N','E','O'], it.parity) + '</select>' },
+        { label: '停止位', control: '<select id="tf-stop">' + opts([1,2], it.stop_bits) + '</select>' },
+        { raw: '<label class="tty-check"><input type="checkbox" id="tf-en"' + (it.enabled ? ' checked' : '') + '> 启用</label>' },
+      ],
+      left: '<div class="ui-form-left">' +
+        (!isNew && roleOf() === 'admin' ? '<button data-tf-take="' + UI.esc(it.alias || it.path) + '">强制接管</button>' : '') +
+        '<button data-tf-copy="' + UI.esc(it.path || '') + '">复制路径</button></div>',
+      right: (!isNew && canManage() ? '<button data-tf-del="' + UI.esc(it.path) + '">删除</button>' : '') +
+        '<button data-tf-cancel="1">取消</button>' +
+        '<button class="primary" data-tf-save="1">' + (isNew ? '添加并下发' : '保存并下发') + '</button>',
+    });
   },
   async saveTtyForm(wrap, isNew) {
     const alias = document.getElementById('tf-alias').value.trim();
@@ -903,7 +904,7 @@ const AgentDetailPage = Object.assign(new Page(), {
     });
     wrap.querySelectorAll('[data-tf-del]').forEach(b => {
       b.onclick = async () => {
-        if (!confirm('删除串口配置 ' + b.dataset.tfDel + '？')) return;
+        if (!await UI.confirm({ title: '删除串口配置', message: '确定删除 ' + b.dataset.tfDel + '？', danger: true })) return;
         try {
           await Api.del('/api/v1/agents/' + encodeURIComponent(this.devid) + '/ttys?path=' +
             encodeURIComponent(b.dataset.tfDel));
@@ -919,9 +920,9 @@ const AgentDetailPage = Object.assign(new Page(), {
       };
     });
     wrap.querySelectorAll('[data-tf-take]').forEach(b => {
-      b.onclick = () => {
+      b.onclick = async () => {
         const name = b.dataset.tfTake;
-        const v = prompt('强制接管会断开当前会话，输入别名确认：' + name);
+        const v = await UI.prompt({ title: '强制接管', label: '会断开当前会话，输入别名确认：' + name });
         if (v !== name) return;
         location.hash = '#/tty/' + encodeURIComponent(this.devid) + '/' +
           encodeURIComponent(name) + '?takeover=1';

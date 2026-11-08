@@ -13,9 +13,9 @@ const ClientsPage = Object.assign(new Page(), {
       columns: ['用户', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'], rows,
     });
     document.querySelectorAll('#page button.web').forEach(btn => {
-      btn.onclick = (e) => {
+      btn.onclick = async (e) => {
         e.stopPropagation();
-        const port = prompt('设备 Web 端口（需在 agent --allow 列表）', '80');
+        const port = await UI.prompt({ title: '设备 Web 端口', label: '端口（需在 agent --allow 列表）', value: '80' });
         if (!port) return;
         window.open('/device/' + encodeURIComponent(btn.dataset.devid) + '/' + encodeURIComponent(port) + '/', '_blank');
       };
@@ -54,7 +54,7 @@ const StreamsPage = Object.assign(new Page(), {
     document.querySelectorAll('#page button.bind').forEach(btn => {
       btn.onclick = async (e) => {
         e.stopPropagation();
-        const owner = prompt('绑定到账号（留空 = 解绑）', '');
+        const owner = await UI.prompt({ title: '绑定设备', label: '账号（留空 = 解绑）' });
         if (owner === null) return;
         try {
           await Api.put('/api/v1/devices/' + encodeURIComponent(btn.dataset.devid) + '/owner', { username: owner });
@@ -64,7 +64,7 @@ const StreamsPage = Object.assign(new Page(), {
     });
     document.querySelectorAll('#page button.kick').forEach(btn => {
       btn.onclick = async () => {
-        if (!confirm('踢掉会话 a_sid=' + btn.dataset.sid + '？（双侧 RESET）')) return;
+        if (!await UI.confirm({ title: '踢掉会话', message: 'a_sid=' + btn.dataset.sid + ' 将被双侧 RESET。', danger: true })) return;
         try {
           await Api.del('/api/v1/streams/' + btn.dataset.sid);
           UI.toast('已踢掉 ' + btn.dataset.sid);
@@ -149,7 +149,7 @@ const CertsPage = Object.assign(new Page(), {
     };
     document.querySelectorAll('#page button.revoke').forEach(btn => {
       btn.onclick = async () => {
-        if (!confirm('吊销 ' + btn.dataset.san + '？立即生效：在线连接被踢、后续 AUTH 被拒')) return;
+        if (!await UI.confirm({ title: '吊销证书', message: '吊销 ' + btn.dataset.san + '？在线连接会被踢，后续 AUTH 被拒。', danger: true })) return;
         try {
           await Api.post('/api/v1/certs/revoke', { san: btn.dataset.san });
           UI.toast('已吊销 ' + btn.dataset.san);
@@ -367,7 +367,7 @@ const FilesPage = Object.assign(new Page(), {
     });
     document.querySelectorAll('#page button.del').forEach(btn => {
       btn.onclick = async () => {
-        if (!confirm('删除 ' + btn.dataset.name + '？')) return;
+        if (!await UI.confirm({ title: '删除文件', message: '删除 ' + btn.dataset.name + '？', danger: true })) return;
         try {
           await Api.del('/api/v1/files/' + encodeURIComponent(btn.dataset.name));
           UI.toast('已删除 ' + btn.dataset.name);
@@ -465,8 +465,8 @@ const TerminalPage = Object.assign(new Page(), {
     document.querySelectorAll('#page button.term-tab').forEach(btn => {
       btn.onclick = () => { this.active = btn.dataset.id; this.render(); };
     });
-    document.getElementById('term-new').onclick = () => {
-      const d = prompt('设备 devid', cur.devid);
+    document.getElementById('term-new').onclick = async () => {
+      const d = await UI.prompt({ title: '新建终端', label: '设备 devid', value: cur.devid });
       if (!d) return;
       this.active = TermMgr.open(d.trim()).id;
       this.render();

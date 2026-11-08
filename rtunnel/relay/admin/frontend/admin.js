@@ -356,9 +356,9 @@ const AgentsPage = Object.assign(new Page(), {
     });
     UI.bindSearch(document.getElementById('ag-q'));
     document.querySelectorAll('#page button.web').forEach(btn => {
-      btn.onclick = (e) => {
+      btn.onclick = async (e) => {
         e.stopPropagation();
-        const port = prompt('设备 Web 端口（需在 agent --allow 列表）', '80');
+        const port = await UI.prompt({ title: '设备 Web 端口', label: '端口（需在 agent --allow 列表）', value: '80' });
         if (!port) return;
         window.open('/device/' + encodeURIComponent(btn.dataset.devid) + '/' + encodeURIComponent(port) + '/', '_blank');
       };
@@ -375,7 +375,7 @@ const AgentsPage = Object.assign(new Page(), {
     document.querySelectorAll('#page button.bind').forEach(btn => {
       btn.onclick = async (e) => {
         e.stopPropagation();
-        const owner = prompt('绑定到账号（留空 = 解绑）', '');
+        const owner = await UI.prompt({ title: '绑定设备', label: '账号（留空 = 解绑）' });
         if (owner === null) return;
         try {
           await Api.put('/api/v1/devices/' + encodeURIComponent(btn.dataset.devid) + '/owner', { username: owner });
@@ -386,7 +386,7 @@ const AgentsPage = Object.assign(new Page(), {
     document.querySelectorAll('#page button.kick').forEach(btn => {
       btn.onclick = async (e) => {
         e.stopPropagation();
-        if (!confirm('强制下线 ' + btn.dataset.devid + '？（agent 会退避重连）')) return;
+        if (!await UI.confirm({ title: '强制下线', message: btn.dataset.devid + ' 将下线并由 agent 退避重连。', danger: true })) return;
         try {
           await Api.post('/api/v1/agents/' + encodeURIComponent(btn.dataset.devid) + '/kick');
           UI.toast('已下线 ' + btn.dataset.devid);
@@ -498,7 +498,7 @@ const ProfilePage = Object.assign(new Page(), {
     };
     const sd = document.getElementById('sess-drop');
     if (sd) sd.onclick = async () => {
-      if (!confirm('确定登出所有会话？')) return;
+      if (!await UI.confirm({ title: '登出所有会话', message: '本账号全部登录会话（含当前）将被吊销。', danger: true })) return;
       try {
         await Api.post('/api/v1/me/logout-all', {});
         try { localStorage.removeItem('rt_theme'); localStorage.removeItem('rt_theme_color'); } catch (e) {}
@@ -586,7 +586,7 @@ const AccountsPage = Object.assign(new Page(), {
     };
     document.querySelectorAll('#page button.pw').forEach(btn => {
       btn.onclick = async () => {
-        const p = prompt('新密码（' + btn.dataset.name + '，≥8位）');
+        const p = await UI.prompt({ title: '修改密码', label: btn.dataset.name + ' 的新密码（≥8 位）', type: 'password' });
         if (!p) return;
         try { await Api.put('/api/v1/users/' + btn.dataset.id + '/password', { new_password: p }); UI.toast('已修改'); }
         catch (e) { UI.toast('失败：' + e.message, true); }
@@ -594,7 +594,7 @@ const AccountsPage = Object.assign(new Page(), {
     });
     document.querySelectorAll('#page button.role').forEach(btn => {
       btn.onclick = async () => {
-        const r = prompt('新角色（viewer/operator/manager）');
+        const r = await UI.prompt({ title: '修改角色', label: '新角色（viewer / operator / manager）' });
         if (!r) return;
         try { await Api.put('/api/v1/users/' + btn.dataset.id + '/role', { role: r }); this.refresh(); }
         catch (e) { UI.toast('失败：' + e.message, true); }
@@ -608,7 +608,7 @@ const AccountsPage = Object.assign(new Page(), {
     });
     document.querySelectorAll('#page button.del').forEach(btn => {
       btn.onclick = async () => {
-        if (!confirm('删除账号 ' + btn.dataset.name + '？（设备会自动解绑）')) return;
+        if (!await UI.confirm({ title: '删除账号', message: '删除 ' + btn.dataset.name + '？设备会自动解绑。', danger: true })) return;
         try { await Api.del('/api/v1/users/' + btn.dataset.id); this.refresh(); }
         catch (e) { UI.toast('失败：' + e.message, true); }
       };

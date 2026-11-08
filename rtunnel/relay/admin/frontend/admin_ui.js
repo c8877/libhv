@@ -90,10 +90,53 @@ const UI = {
     mask.innerHTML = '<div class="tty-modal"><h2>' + (opts.title || '') + '</h2>' + (opts.body || '') +
       '<div class="tty-btns">' + (opts.buttons || '') + '</div></div>';
     document.body.appendChild(mask);
-    const close = () => mask.remove();
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      mask.remove();
+      if (opts.onClose) opts.onClose();
+    };
     mask.querySelectorAll('[data-modal-close]').forEach(b => { b.onclick = close; });
     mask.onclick = e => { if (e.target === mask) close(); };
     return { el: mask, close };
+  },
+  confirm(opts) {
+    opts = opts || {};
+    return new Promise(resolve => {
+      let done = false;
+      const m = UI.modal({
+        title: opts.title || '确认',
+        body: '<div class="ui-confirm-text">' + (opts.message || '') + '</div>',
+        buttons: '<button data-modal-close>取消</button>' +
+          '<button class="' + (opts.danger ? 'danger' : 'primary') + '" data-ok>确认</button>',
+        onClose: () => { if (!done) { done = true; resolve(false); } },
+      });
+      const ok = m.el.querySelector('[data-ok]');
+      if (ok) ok.onclick = () => { done = true; m.close(); resolve(true); };
+    });
+  },
+  prompt(opts) {
+    opts = opts || {};
+    return new Promise(resolve => {
+      let done = false;
+      const m = UI.modal({
+        title: opts.title || '输入',
+        body: '<label>' + (opts.label || '值') + '<input id="ui-prompt-input" type="' +
+          (opts.type || 'text') + '" value="' + UI.esc(opts.value || '') + '" placeholder="' +
+          UI.esc(opts.placeholder || '') + '"></label>',
+        buttons: '<button data-modal-close>取消</button><button class="primary" data-ok>确定</button>',
+        onClose: () => { if (!done) { done = true; resolve(null); } },
+      });
+      const input = m.el.querySelector('#ui-prompt-input');
+      const ok = m.el.querySelector('[data-ok]');
+      const submit = () => { done = true; const v = input.value; m.close(); resolve(v); };
+      if (ok) ok.onclick = submit;
+      if (input) {
+        input.focus();
+        input.onkeydown = e => { if (e.key === 'Enter') submit(); };
+      }
+    });
   },
   formValues(root) {
     const out = {};
@@ -125,15 +168,17 @@ const UI = {
     opts = opts || {};
     const rows = opts.rows || [];
     let body;
+    const cell = r => r.raw ? r.raw : '<label>' + r.label + r.control + '</label>';
     if (opts.layout === 'grid') {
       body = '<div class="ui-form-grid ' + (opts.cols ? 'cols-' + opts.cols : '') + '">' +
-        rows.map(r => '<label>' + r.label + r.control + '</label>').join('') + '</div>';
+        rows.map(cell).join('') + '</div>';
     } else {
       body = '<div class="form-rows">' + rows.map(r =>
         '<label class="form-row"><span class="k">' + r.label + '</span>' +
         '<span class="c">' + r.control + '</span><span class="u">' + (r.unit || '') + '</span></label>').join('') + '</div>';
     }
-    return '<div class="ui-form ' + (opts.cls || '') + '"' + (opts.id ? ' id="' + UI.esc(opts.id) + '"' : '') + '>' + body +
+    return '<div class="ui-form ' + (opts.cls || '') + '"' + (opts.id ? ' id="' + UI.esc(opts.id) + '"' : '') +
+      (opts.attrs ? ' ' + opts.attrs : '') + '>' + body +
       '<div class="ui-form-foot">' + (opts.left || '') +
       '<span class="spacer"></span>' + (opts.right || '') + '</div></div>';
   },
