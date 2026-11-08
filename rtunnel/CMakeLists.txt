@@ -5,8 +5,8 @@ include_directories(${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/base ${PROJECT_S
                     ${CMAKE_CURRENT_SOURCE_DIR})
 
 find_package(ZLIB REQUIRED)
-add_library(rtunnel_gzip STATIC common/gzip_util.cpp)
-target_link_libraries(rtunnel_gzip PUBLIC ZLIB::ZLIB)
+add_library(rtunnel_gzip STATIC common/gzip_util.cpp common/lz4_util.cpp)
+target_link_libraries(rtunnel_gzip PUBLIC ZLIB::ZLIB ${CMAKE_DL_LIBS})
 
 add_library(rtnp STATIC rtnp/codec.cpp)
 target_include_directories(rtnp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
