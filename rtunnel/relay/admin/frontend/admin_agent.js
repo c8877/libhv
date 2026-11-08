@@ -674,9 +674,9 @@ const AgentDetailPage = Object.assign(new Page(), {
       '<h2>采样配置</h2><span class="muted" style="margin-left:10px">' + list.length + ' 项 · ' +
       syncCount + ' 项未同步</span><span class="spacer"></span>' +
       (can ? '<button id="metric-add">+ 添加指标</button>' : '') + '</div>' +
-      '<table class="si-table metric-table"><tr><th>指标</th><th>间隔</th><th>保留</th>' +
+      '<div class="table-shell"><table class="si-table metric-table"><tr><th>指标</th><th>间隔</th><th>保留</th>' +
       '<th>同步</th><th>启用</th><th></th></tr>' +
-      (rows || '<tr><td colspan="6" style="color:var(--muted)">暂无配置</td></tr>') + '</table></div>';
+      (rows || '<tr><td colspan="6" style="color:var(--muted)">暂无配置</td></tr>') + '</table></div></div>';
     if (!can) return;
     const save = async (next) => {
       try {

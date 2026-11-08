@@ -475,3 +475,9 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .metric-form-foot .metric-sync{margin:0}
 .metric-form-foot .spacer{flex:1}
 .metric-form-foot{justify-content:flex-start}
+.table-shell,.tty-table-wrap{border:1px solid var(--border);border-radius:8px;overflow:auto;background:rgba(255,255,255,.012)}
+.table-shell .si-table,.tty-table-wrap .si-table{border:0}
+.si-table th{background:rgba(255,255,255,.03)}
+.metric-group td{background:rgba(255,255,255,.018)}
+.metric-form,.tty-form{background:rgba(255,255,255,.022);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:4px 0}
+.metric-expand td,.tty-expand td{background:transparent!important}
