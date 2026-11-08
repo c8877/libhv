@@ -21,6 +21,7 @@ namespace {
 struct TtyWsSession {
     WebSocketChannelPtr ws;
     int fd = -1;
+    bool readonly = false;
     std::thread th;
     std::atomic<bool> closed{false};
     FILE* cap = nullptr;
@@ -77,6 +78,8 @@ bool AdminServer::handleTtyWsOpen(const WebSocketChannelPtr& channel, const Http
     if (s1 == std::string::npos) return false;
     std::string devid = proxyUrlDecode(rest.substr(0, s1));
     std::string alias = proxyUrlDecode(rest.substr(s1 + 1));
+    size_t q = alias.find('?');
+    if (q != std::string::npos) alias = alias.substr(0, q);
     AdminActor actor;
     std::string role;
     if (!wsAuthorize(req, actor, role) || (role != "admin" && role != "manager" && role != "operator")) {
@@ -91,8 +94,18 @@ bool AdminServer::handleTtyWsOpen(const WebSocketChannelPtr& channel, const Http
         channel->close();
         return true;
     }
+    bool monitor = req->GetParam("monitor") == "1";
+    bool takeover = req->GetParam("takeover") == "1";
+    if (takeover && role != "admin") {
+        channel->send("{\"op\":\"error\",\"msg\":\"takeover requires admin\"}");
+        channel->close();
+        return true;
+    }
+    uint16_t flags = 0x0002;
+    if (monitor) flags |= 0x0004;
+    if (takeover) flags |= 0x0008;
     std::string err;
-    int fd = openTtyStream(cfg_, devid, path, baud, db, parity.empty() ? 'N' : parity[0], stop, err);
+    int fd = openTtyStream(cfg_, devid, path, baud, db, parity.empty() ? 'N' : parity[0], stop, flags, err);
     if (fd < 0) {
         channel->send("{\"op\":\"error\",\"msg\":\"" + err + "\"}");
         channel->close();
@@ -101,6 +114,7 @@ bool AdminServer::handleTtyWsOpen(const WebSocketChannelPtr& channel, const Http
     auto s = std::make_shared<TtyWsSession>();
     s->ws = channel;
     s->fd = fd;
+    s->readonly = monitor;
     if (!cfg_.file_dir.empty()) {
         mkdir(cfg_.file_dir.c_str(), 0755);
         std::string dir = cfg_.file_dir + "/ttylogs";
@@ -118,7 +132,8 @@ bool AdminServer::handleTtyWsOpen(const WebSocketChannelPtr& channel, const Http
         std::lock_guard<std::mutex> lk(g_tty_mu);
         g_tty_ws[channel.get()] = s;
     }
-    audit(actor.username, "tty.debug_open", devid + " " + path);
+    audit(actor.username, takeover ? "tty.takeover" : monitor ? "tty.monitor" : "tty.debug_open",
+          devid + " " + path);
     s->th = std::thread([s, channel, devid, path]() {
         uint8_t t; uint32_t sid; std::string p;
         while (!s->closed.load()) {
@@ -150,6 +165,7 @@ bool AdminServer::handleTtyWsMessage(const WebSocketChannelPtr& channel, const s
     }
     auto j = json::parse(msg, nullptr, false);
     if (j.is_discarded() || j.value("op", "") != "write") return true;
+    if (s->readonly) return true;
     std::string data = b64decode(j.value("data", ""));
     if (!data.empty() && !s->closed.load()) {
         sendData(s->fd, 1, data);

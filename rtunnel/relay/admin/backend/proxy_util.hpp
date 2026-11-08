@@ -24,4 +24,4 @@ std::string replaceAll(std::string s, const std::string& from, const std::string
 std::string dechunk(const std::string& in);
 int openStream(const AdminConfig& cfg, const std::string& devid, int port, std::string& err);
 int openTtyStream(const AdminConfig& cfg, const std::string& devid, const std::string& path,
-                  int baud, int data_bits, char parity, int stop_bits, std::string& err);
+                  int baud, int data_bits, char parity, int stop_bits, uint16_t flags, std::string& err);

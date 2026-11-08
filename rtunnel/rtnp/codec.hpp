@@ -84,6 +84,8 @@ int send(hio_t* io, uint8_t type, uint32_t sid, const void* payload, uint16_t le
 // OPEN 的 flags 扩展位：请求设备侧直接起 shell（forkpty），而非转发到本地 TCP 端口。
 // relay 只透传不解释；agent 不支持时按协议错误拒绝。
 constexpr uint16_t OPEN_SHELL = 0x0001;
-constexpr uint16_t OPEN_TTY   = 0x0002;   // 打开设备串口，payload: str path + u32 baud + u8 db/parity/stop
+constexpr uint16_t OPEN_TTY   = 0x0002;   // 打开设备串口，payload: devid + path + baud + db/parity/stop
+constexpr uint16_t OPEN_TTY_MONITOR  = 0x0004;   // 只读监听已打开的 tty
+constexpr uint16_t OPEN_TTY_TAKEOVER = 0x0008;   // 强制接管，断开现有会话
 
 } // namespace rtnp

@@ -301,3 +301,4 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .tty-send input{flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg)}
 .tty-tools{display:flex;align-items:center;gap:14px;padding:8px 12px;font-size:12px;color:var(--muted)}
 .tty-tools label{display:flex;align-items:center;gap:4px}
+.tty-ro{padding:6px 12px;color:var(--warn);font-size:12px;border-bottom:1px solid var(--border)}

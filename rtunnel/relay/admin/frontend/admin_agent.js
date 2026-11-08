@@ -431,6 +431,9 @@ const AgentDetailPage = Object.assign(new Page(), {
         '<td class="tty-ops">' +
         '<a class="btn" href="#/tty/' + encodeURIComponent(this.devid) + '/' +
           encodeURIComponent(t.alias || t.path) + '">调试</a> ' +
+        '<a class="btn" href="#/tty/' + encodeURIComponent(this.devid) + '/' +
+          encodeURIComponent(t.alias || t.path) + '?monitor=1">监听</a> ' +
+        (roleOf() === 'admin' ? '<button data-take="' + UI.esc(t.alias || t.path) + '">接管</button> ' : '') +
         (can ? '<button data-edit="' + UI.esc(t.path) + '">编辑</button>' : '') +
         (can ? ' <button data-tog="' + UI.esc(t.path) + '">' + (t.enabled ? '禁用' : '启用') + '</button>' : '') +
         '</td></tr>';
@@ -446,6 +449,15 @@ const AgentDetailPage = Object.assign(new Page(), {
       b.onclick = () => {
         const it = this.ttys.find(x => x.path === b.dataset.edit);
         if (it) this.openTtyEditor(it);
+      };
+    });
+    wrap.querySelectorAll('[data-take]').forEach(b => {
+      b.onclick = () => {
+        const name = b.dataset.take;
+        const v = prompt('强制接管会断开当前会话，输入别名确认：' + name);
+        if (v !== name) return;
+        location.hash = '#/tty/' + encodeURIComponent(this.devid) + '/' +
+          encodeURIComponent(name) + '?takeover=1';
       };
     });
     wrap.querySelectorAll('[data-tog]').forEach(b => {

@@ -499,7 +499,10 @@ const TtyPage = Object.assign(new Page(), {
   enter(el, params) {
     this.el = el;
     this.devid = decodeURIComponent(params[0] || '');
-    this.alias = decodeURIComponent((params[1] || '').split('?')[0]);
+    const raw = params[1] || '';
+    this.alias = decodeURIComponent(raw.split('?')[0]);
+    this.monitor = /[?&]monitor=1/.test(raw);
+    this.takeover = /[?&]takeover=1/.test(raw);
     this.entries = [];
     this.paused = false;
     this.showTs = true;
@@ -511,6 +514,7 @@ const TtyPage = Object.assign(new Page(), {
       '<span id="tty-state" class="pill">连接中…</span> ' +
       '<button id="tty-close">断开</button>' +
       '<button id="tty-dl" style="display:none">下载抓流</button></div>' +
+      (this.monitor ? '<div class="tty-ro">只读监听</div>' : '') +
       '<div class="tty-console" id="tty-log"></div>' +
       '<div class="tty-send">' +
       '<select id="tty-mode"><option value="text">文本</option><option value="hex">HEX</option></select>' +
@@ -525,6 +529,9 @@ const TtyPage = Object.assign(new Page(), {
       '<label><input type="checkbox" id="tty-pause"> 暂停</label>' +
       '<button id="tty-clear">清空</button><button id="tty-save">保存日志</button>' +
       ' <a href="#/agents/' + encodeURIComponent(this.devid) + '">返回设备</a></div></div>';
+    if (this.monitor) {
+      ['tty-mode','tty-eol','tty-input','tty-send'].forEach(id => { const e = document.getElementById(id); if (e) e.disabled = true; });
+    }
     this.logEl = document.getElementById('tty-log');
     this.inputEl = document.getElementById('tty-input');
     const $ = id => document.getElementById(id);
@@ -550,8 +557,10 @@ const TtyPage = Object.assign(new Page(), {
   },
   connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = proto + '//' + location.host + '/ws/tty/' +
+    let url = proto + '//' + location.host + '/ws/tty/' +
       encodeURIComponent(this.devid) + '/' + encodeURIComponent(this.alias);
+    if (this.monitor) url += '?monitor=1';
+    if (this.takeover) url += '?takeover=1';
     const ws = new WebSocket(url);
     ws.binaryType = 'arraybuffer';
     this.ws = ws;

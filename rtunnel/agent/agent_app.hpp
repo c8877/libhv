@@ -29,6 +29,9 @@ struct LocalStream {
     htimer_t*    close_timer = nullptr;   // 半关闭 60s 超时
     pid_t        child_pid = -1;          // shell 子进程（is_shell 时）
     int          is_shell = 0;            // OPEN_SHELL：pty 而非 TCP socket
+    std::string  tty_path;                // TTY 流对应设备路径
+    int          is_monitor = 0;          // 只读监听流
+    uint32_t     monitor_of = 0;          // 监听目标 sid
     int          freed = 0;               // 防重复释放（close 回调与超时/断链并发）
     LocalStream* next = nullptr;
 };

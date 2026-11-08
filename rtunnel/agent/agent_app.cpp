@@ -120,6 +120,15 @@ void AgentApp::sendOpenFail(uint32_t sid, uint16_t code, const char* msg) {
     rtnp::send(io, rtnp::OPEN_FAIL, sid, w.data, (uint16_t)w.len);
 }
 
+static void teeToMonitors(AgentApp* app, LocalStream* s, const char* p, size_t n) {
+    for (LocalStream* m = app->streams; m; m = m->next) {
+        if (!m->is_monitor || m->monitor_of != s->sid) continue;
+        if (m->credit == 0) continue;
+        size_t k = n < m->credit ? n : m->credit;
+        if (rtnp::send(app->io, rtnp::DATA, m->sid, (const char*)p, (uint16_t)k) == 0) m->credit -= (uint32_t)k;
+    }
+}
+
 void AgentApp::flushPending(LocalStream* s) {
     // remote_closed 只表示 A→C 方向 EOF，不影响 C→A 的数据回传
     if (!s->connected) return;
@@ -130,6 +139,7 @@ void AgentApp::flushPending(LocalStream* s) {
         if (rtnp::send(io, rtnp::DATA, s->sid, s->pending.data, (uint16_t)n) != 0) {
             return;
         }
+        teeToMonitors(this, s, (const char*)s->pending.data, n);
         s->credit -= (uint32_t)n;
         s->pending.consume(n);
     }
@@ -267,6 +277,45 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
             sendOpenFail(f->sid, rtnp::PROTOCOL_ERROR, "sid in use");
             return;
         }
+        bool want_monitor = (f->flags & rtnp::OPEN_TTY_MONITOR) != 0;
+        bool want_takeover = (f->flags & rtnp::OPEN_TTY_TAKEOVER) != 0;
+        if (want_monitor) {
+            LocalStream* target = nullptr;
+            for (LocalStream* it = streams; it; it = it->next) {
+                if (!it->is_monitor && it->tty_path == path) { target = it; break; }
+            }
+            if (!target) {
+                sendOpenFail(f->sid, rtnp::TARGET_REFUSED, "tty not open");
+                return;
+            }
+            auto* m = new LocalStream{};
+            m->app = this;
+            m->sid = f->sid;
+            m->credit = rtnp::DEFAULT_CREDIT;
+            m->connected = 1;
+            m->is_monitor = 1;
+            m->monitor_of = target->sid;
+            m->tty_path = path;
+            m->next = streams;
+            streams = m;
+            rtnp::Writer w;
+            w.str("monitor");
+            w.u16(0);
+            rtnp::send(io, rtnp::OPEN_OK, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
+        if (want_takeover) {
+            LocalStream* it = streams;
+            while (it) {
+                LocalStream* nx = it->next;
+                if (!it->is_monitor && it->tty_path == path) {
+                    rtnp::send(io, rtnp::CLOSE, it->sid, NULL, 0);
+                    if (it->local) hio_close(it->local);
+                    streamFree(it);
+                }
+                it = nx;
+            }
+        }
         int fd = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK);
         if (fd < 0) {
             sendOpenFail(f->sid, rtnp::TARGET_REFUSED, "open tty failed");
@@ -305,6 +354,7 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
         if (!io) { close(fd); streamFree(s); sendOpenFail(f->sid, rtnp::TARGET_REFUSED, "hio failed"); return; }
         s->local = io;
         s->connected = 1;
+        s->tty_path = path;
         hio_set_context(io, s);
         hio_setcb_read(io, localReadCb);
         hio_setcb_close(io, localCloseCb);
@@ -1087,6 +1137,7 @@ void AgentApp::onFrame(rtnp::Frame* f) {
         if (f->len > 0) {
             hio_write(s->local, f->payload, f->len);
             s->unacked += f->len;
+            teeToMonitors(this, s, (const char*)f->payload, f->len);
         }
         maybeGrantWindow(s);
         return;

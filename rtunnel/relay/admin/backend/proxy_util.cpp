@@ -181,7 +181,7 @@ int openStream(const AdminConfig& cfg, const std::string& devid, int port, std::
 
 
 int openTtyStream(const AdminConfig& cfg, const std::string& devid, const std::string& path,
-                  int baud, int data_bits, char parity, int stop_bits, std::string& err) {
+                  int baud, int data_bits, char parity, int stop_bits, uint16_t flags, std::string& err) {
     int fd = tcpConnect("127.0.0.1", cfg.shell_relay_port, 5000);
     if (fd < 0) { err = "relay connect failed"; return -1; }
     std::string hello;
@@ -204,7 +204,7 @@ int openTtyStream(const AdminConfig& cfg, const std::string& devid, const std::s
     op.push_back((char)data_bits);
     op.push_back(parity);
     op.push_back((char)stop_bits);
-    sendFrame(fd, 0x10, 1, op, 0x0002);
+    sendFrame(fd, 0x10, 1, op, flags);
     if (!recvFrame(fd, t, sid, p) || t != 0x11) {
         err = (t == 0x12 && p.size() > 2) ? ("open failed: " + p.substr(4)) : "open failed";
         close(fd);
