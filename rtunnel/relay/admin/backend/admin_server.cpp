@@ -253,6 +253,18 @@ int AdminServer::start(const AdminConfig& cfg) {
     std::thread([this]() { distLoop(); }).detach();
     std::thread([this]() {
         for (;;) {
+            std::this_thread::sleep_for(std::chrono::seconds(10));
+            std::vector<std::string> devs;
+            db_.ttyDevids(devs);
+            for (auto& d : devs) {
+                if (!relay_->hasAgent(d.c_str())) continue;
+                std::string out;
+                if (db_.ttyList(d, out)) relay_->pushTtyCfg(d.c_str(), out);
+            }
+        }
+    }).detach();
+    std::thread([this]() {
+        for (;;) {
             std::this_thread::sleep_for(std::chrono::hours(1));
             cleanupAudit(settingInt("audit.retention_days", 30));
             db_.purgeExpiredSessions(AdminDb::nowMs());

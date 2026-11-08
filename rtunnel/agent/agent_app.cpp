@@ -254,6 +254,11 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
             if (comma == std::string::npos) break;
             pos = comma + 1;
         }
+        if (verbose) logf_("[agent] tty check %s static=%d cfgs=%zu", path, (int)allowed, tty_cfgs_.size());
+        auto ci = tty_cfgs_.find(path);
+        if (!allowed) {
+            if (ci != tty_cfgs_.end() && ci->second.enabled) allowed = true;
+        }
         if (!allowed) {
             sendOpenFail(f->sid, rtnp::TARGET_NOT_ALLOWED, "tty not allowed");
             return;
@@ -975,6 +980,63 @@ void AgentApp::onFrame(rtnp::Frame* f) {
     case rtnp::FILE_END:
         handleFileFrame(f);
         return;
+    case rtnp::TTY_LIST_REQ: {
+        nlohmann::json arr = nlohmann::json::array();
+        DIR* d = opendir("/dev");
+        if (d) {
+            struct dirent* e;
+            while ((e = readdir(d)) != NULL) {
+                std::string n = e->d_name;
+                if (n.rfind("ttyUSB", 0) != 0 && n.rfind("ttyACM", 0) != 0 &&
+                    n.rfind("ttyS", 0) != 0) continue;
+                nlohmann::json j;
+                j["path"] = "/dev/" + n;
+                arr.push_back(j);
+            }
+            closedir(d);
+        }
+        DIR* b = opendir("/dev/serial/by-id");
+        if (b) {
+            struct dirent* e;
+            while ((e = readdir(b)) != NULL) {
+                std::string n = e->d_name;
+                if (n == "." || n == "..") continue;
+                nlohmann::json j;
+                j["path"] = "/dev/serial/by-id/" + n;
+                arr.push_back(j);
+            }
+            closedir(b);
+        }
+        std::string out = arr.dump();
+        rtnp::Writer w; w.str(out.c_str());
+        rtnp::send(io, rtnp::TTY_LIST_ACK, f->sid, w.data, (uint16_t)w.len);
+        return;
+    }
+    case rtnp::TTY_CFG_SET: {
+        rtnp::Reader cr(f->payload, f->len);
+        static char cbuf[64 * 1024];
+        cr.str(cbuf, sizeof cbuf);
+        if (cr.err) return;
+        auto arr = nlohmann::json::parse(cbuf, nullptr, false);
+        if (arr.is_discarded() || !arr.is_array()) return;
+        tty_cfgs_.clear();
+        if (verbose) logf_("[agent] TTY_CFG_SET n=%zu", arr.size());
+        for (auto& j : arr) {
+            if (!j.is_object()) continue;
+            std::string path = j.value("path", "");
+            if (path.empty()) continue;
+            TtyCfg c;
+            c.enabled = j.value("enabled", true) ? 1 : 0;
+            c.baud = j.value("baud", 115200);
+            c.data_bits = j.value("data_bits", 8);
+            std::string par = j.value("parity", "N");
+            c.parity = par.empty() ? 'N' : par[0];
+            c.stop_bits = j.value("stop_bits", 1);
+            tty_cfgs_[path] = c;
+            if (verbose) logf_("[agent] tty cfg %s enabled=%d", path.c_str(), c.enabled);
+        }
+        return;
+    }
     case rtnp::METRICS_REQ: {
         rtnp::Reader r(f->payload, f->len);
         uint64_t limit = r.u64();

@@ -51,6 +51,9 @@ enum Type : uint8_t {
     FILE_CHECK_ACK = 0x22,   // C→B：str json {exists,size,sha256,error}
     METRICS_REQ    = 0x23,   // B→C：u64 limit；sid=请求号
     METRICS_ACK    = 0x24,   // C→B：str json [{ts,cpu,mem,load1}...]
+    TTY_LIST_REQ   = 0x29,   // B→C：无载荷
+    TTY_LIST_ACK   = 0x2A,   // C→B：str json [{path,by_id}]
+    TTY_CFG_SET    = 0x2B,   // B→C：str json [{path,enabled,baud,data_bits,parity,stop_bits}]
 };
 
 // 错误码

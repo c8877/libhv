@@ -32,6 +32,7 @@ void AdminServer::handleTtyList(const HttpContextPtr& ctx) {
         ctx->send("{\"error\":\"db\"}");
         return;
     }
+    relay_->pushTtyCfg(devid.c_str(), out);
     ctx->send(out);
 }
 
@@ -76,6 +77,7 @@ void AdminServer::handleTtyPut(const HttpContextPtr& ctx) {
     audit(actor.username, "tty.config", devid + " " + path + " alias=" + alias);
     std::string out;
     db_.ttyList(devid, out);
+    relay_->pushTtyCfg(devid.c_str(), out);
     ctx->send(out);
 }
 
@@ -100,5 +102,33 @@ void AdminServer::handleTtyDelete(const HttpContextPtr& ctx) {
     }
     AdminActor actor = currentActor();
     audit(actor.username, "tty.delete", devid + " " + path);
+    std::string out;
+    db_.ttyList(devid, out);
+    relay_->pushTtyCfg(devid.c_str(), out);
     ctx->send("{\"ok\":true}");
+}
+
+void AdminServer::handleTtyDiscovered(const HttpContextPtr& ctx) {
+    std::string devid = ctx->param("devid");
+    if (!ownsDevid(devid)) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return;
+    }
+    uint32_t rid = 0;
+    std::string err;
+    std::string ok = callRelay([this, &devid, &rid, &err]() {
+        return relay_->startTtyList(devid.c_str(), rid, err) ? "1" : "0";
+    });
+    if (ok != "1") {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"" + err + "\"}");
+        return;
+    }
+    std::string acc;
+    for (int i = 0; i < 20 && acc.empty(); ++i) {
+        usleep(100000);
+        acc = callRelay([this, rid]() { return relay_->takeTtyListResult(rid); });
+    }
+    ctx->send(acc.empty() ? "[]" : acc);
 }

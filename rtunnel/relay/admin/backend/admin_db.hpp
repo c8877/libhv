@@ -64,6 +64,7 @@ public:
     bool distAlreadyPushed(const std::string& devid, const std::string& sha);
 
     bool ttyList(const std::string& devid, std::string& json_out);
+    bool ttyDevids(std::vector<std::string>& out);
     bool ttyUpsert(const std::string& devid, const std::string& path, const std::string& alias,
                    int enabled, int baud, int data_bits, const std::string& parity, int stop_bits,
                    const std::string& roles, const std::string& actor, std::string& err);

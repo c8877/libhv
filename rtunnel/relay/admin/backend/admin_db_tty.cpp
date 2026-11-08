@@ -34,6 +34,15 @@ bool AdminDb::ttyList(const std::string& devid, std::string& json_out) {
     return true;
 }
 
+bool AdminDb::ttyDevids(std::vector<std::string>& out) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = NULL;
+    if (sqlite3_prepare_v2(db_, "SELECT DISTINCT devid FROM tty_config", -1, &st, NULL) != SQLITE_OK) return false;
+    while (sqlite3_step(st) == SQLITE_ROW) out.push_back((const char*)sqlite3_column_text(st, 0));
+    sqlite3_finalize(st);
+    return true;
+}
+
 bool AdminDb::ttyUpsert(const std::string& devid, const std::string& path, const std::string& alias,
                         int enabled, int baud, int data_bits, const std::string& parity, int stop_bits,
                         const std::string& roles, const std::string& actor, std::string& err) {

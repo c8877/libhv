@@ -10,6 +10,7 @@
 #include <map>
 #include <ctime>
 #include <deque>
+#include <map>
 
 class AgentApp;
 
@@ -86,6 +87,8 @@ private:
     void         handleFileFrame(const rtnp::Frame* f);
     void         sampleMetric();
     std::deque<std::string> metrics_;
+    struct TtyCfg { int enabled = 1; int baud = 115200; int data_bits = 8; char parity = 'N'; int stop_bits = 1; };
+    std::map<std::string, TtyCfg> tty_cfgs_;
     std::string  sha256File(const std::string& path);
     void         cleanupParts(const std::string& dir, time_t cutoff);
 

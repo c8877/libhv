@@ -108,6 +108,8 @@ public:
     std::unordered_map<uint32_t, std::string> check_results;
     uint32_t check_seq = 0;
     std::unordered_map<uint32_t, std::string> metrics_results;
+    std::unordered_map<uint32_t, std::string> tty_list_results;
+    uint32_t tty_list_seq = 0;
     uint32_t metrics_seq = 0;
     struct ClientCred { std::string user, token; };
     std::vector<ClientCred> client_creds;   // --client-users（user:token）
@@ -166,6 +168,10 @@ private:
     std::string  takeCheckResult(uint32_t cid);
     bool         startMetricsReq(const char* devid, uint64_t limit, uint32_t& rid, std::string& err);
     std::string  takeMetricsResult(uint32_t rid);
+    bool         startTtyList(const char* devid, uint32_t& rid, std::string& err);
+    std::string  takeTtyListResult(uint32_t rid);
+    bool         pushTtyCfg(const char* devid, const std::string& json);
+    bool         hasAgent(const char* devid);
     bool         agentOnline(const char* devid) { return findAgent(devid) != nullptr; }
     std::string  fileDirOf(const char* devid);
     void         onFileAck(RelayConn* c, const rtnp::Frame* f);
