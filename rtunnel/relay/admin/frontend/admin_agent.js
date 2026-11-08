@@ -446,14 +446,22 @@ const AgentDetailPage = Object.assign(new Page(), {
       '<div class="series-chips" id="series-chips">' +
       enabled.map(c => '<label><input type="checkbox" data-sel="' + UI.esc(c.series) + '"' +
         (this.seriesSel.indexOf(c.series) >= 0 ? ' checked' : '') + '> ' + UI.esc(c.series) + '</label>').join('') +
-      '</div><div id="series-charts"></div></div>';
+      '</div><div id="series-charts">' +
+      '<div class="series-group" id="series-wrap-percent" style="display:none"><canvas id="series-chart-percent" height="140"></canvas></div>' +
+      '<div class="series-group" id="series-wrap-load" style="display:none"><canvas id="series-chart-load" height="120"></canvas></div>' +
+      '<div class="series-group" id="series-wrap-rate" style="display:none"><canvas id="series-chart-rate" height="140"></canvas></div>' +
+      '</div></div>';
     wrap.querySelectorAll('[data-sel]').forEach(cb => {
       cb.onchange = () => {
         const on = [...wrap.querySelectorAll('[data-sel]:checked')].map(x => x.dataset.sel);
         if (!on.length) { cb.checked = true; return; }
+        const added = on.filter(x => this.seriesSel.indexOf(x) < 0);
         this.seriesSel = on;
         this.renderSeriesCharts();
-        this.pullSeriesPanel(true);
+        this.drawSeriesGroups();          // 先用已有缓存立即重绘，避免空白
+        if (added.length) {
+          this.pullSeriesNames(added, true).then(() => this.drawSeriesGroups());
+        }
       };
     });
     document.getElementById('series-full').onclick = () => this.pullSeriesPanel(true);
@@ -461,32 +469,35 @@ const AgentDetailPage = Object.assign(new Page(), {
     this.pullSeriesPanel(true);
   },
   renderSeriesCharts() {
-    const host = document.getElementById('series-charts');
-    if (!host) return;
     const groups = { percent: [], load: [], rate: [] };
     this.seriesSel.forEach(s => groups[this.seriesUnit(s)].push(s));
     const order = ['percent', 'load', 'rate'];
-    host.innerHTML = order.filter(u => groups[u].length).map((u, i) =>
-      '<div style="padding:8px 12px"><canvas id="series-chart-' + i + '" height="140"></canvas></div>').join('');
     this.seriesGroups = order.filter(u => groups[u].length).map(u => ({ unit: u, series: groups[u] }));
+    order.forEach(u => {
+      const w = document.getElementById('series-wrap-' + u);
+      if (w) w.style.display = groups[u].length ? '' : 'none';
+    });
   },
-  async pullSeriesPanel(full) {
-    if (!this.seriesSel || !this.seriesSel.length) return;
+  async pullSeriesNames(names, full) {
     this.seriesCache = this.seriesCache || {};
     this.seriesLastTs = this.seriesLastTs || {};
-    await Promise.all(this.seriesSel.map(async name => {
+    await Promise.all(names.map(async name => {
       const since = full ? 0 : (this.seriesLastTs[name] || 0);
       let r;
       try {
         r = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) +
           '/metrics/series?series=' + encodeURIComponent(name) + '&since_ts=' + since);
       } catch (e) { return; }
-      if (r.truncated && since) return this.pullSeriesPanel(true);
+      if (r.truncated && since) { this.seriesLastTs[name] = 0; return this.pullSeriesNames([name], true); }
       if (!since) this.seriesCache[name] = [];
       this.seriesCache[name] = (this.seriesCache[name] || []).concat(r.points || []);
       while (this.seriesCache[name].length > 300) this.seriesCache[name].shift();
       this.seriesLastTs[name] = r.newest_ts || since;
     }));
+  },
+  async pullSeriesPanel(full) {
+    if (!this.seriesSel || !this.seriesSel.length) return;
+    await this.pullSeriesNames(this.seriesSel, full);
     this.drawSeriesGroups();
   },
   seriesValueArray(name, points) {
@@ -506,8 +517,8 @@ const AgentDetailPage = Object.assign(new Page(), {
   },
   drawSeriesGroups() {
     if (!this.seriesGroups) return;
-    this.seriesGroups.forEach((g, gi) => {
-      const c = document.getElementById('series-chart-' + gi);
+    this.seriesGroups.forEach((g) => {
+      const c = document.getElementById('series-chart-' + g.unit);
       if (!c || !window.Chart) return;
       try { const ex = Chart.getChart(c); if (ex) ex.destroy(); } catch (e) {}
       const tsSet = new Set();
