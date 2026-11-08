@@ -336,6 +336,7 @@ const AgentDetailPage = Object.assign(new Page(), {
           plugins: [pctPlugin]
         });
       }
+      this.loadTtys();
       const ce = document.getElementById('caps-edit');
       if (ce) ce.onclick = () => {
         const caps = si.caps || {};
