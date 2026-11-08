@@ -337,7 +337,8 @@ const AgentDetailPage = Object.assign(new Page(), {
       }
       this.pullSeriesCharts();
       this.renderMetricCard(document.getElementById('si-metric'));
-      this.renderSeriesPanel();
+      if (document.getElementById('series-charts')) this.pullSeriesPanel(false);
+      else this.renderSeriesPanel();
       this.loadTtys();
       const ce = document.getElementById('caps-edit');
       if (ce) ce.onclick = () => {
@@ -420,79 +421,131 @@ const AgentDetailPage = Object.assign(new Page(), {
     });
     return out.filter((v, i) => out.indexOf(v) === i);
   },
+  seriesUnit(name) {
+    if (name === 'cpu' || name === 'mem') return 'percent';
+    if (name === 'load') return 'load';
+    return 'rate';
+  },
+  seriesColor(i) {
+    return ['#4a9eff', '#f5a623', '#57ab5a', '#b083f0', '#e5534b'][i % 5];
+  },
   renderSeriesPanel() {
     const wrap = document.getElementById('si-series');
     if (!wrap) return;
     const enabled = (this.seriesCfg || []).filter(c => c.enabled);
     if (!enabled.length) { wrap.innerHTML = ''; return; }
-    if (!this.seriesSel || !enabled.some(c => c.series === this.seriesSel)) {
-      this.seriesSel = enabled[0].series;
+    if (!this.seriesSel) {
+      this.seriesSel = enabled.map(c => c.series).filter(s => s === 'cpu' || s === 'mem');
+      if (!this.seriesSel.length) this.seriesSel = [enabled[0].series];
     }
+    this.seriesSel = this.seriesSel.filter(s => enabled.some(c => c.series === s));
+    if (!this.seriesSel.length) this.seriesSel = [enabled[0].series];
     wrap.innerHTML = '<div class="panel" style="margin-bottom:16px"><div class="panel-head">' +
-      '<h2>采样曲线</h2><select id="series-sel">' +
-      enabled.map(c => '<option ' + (c.series === this.seriesSel ? 'selected' : '') + '>' +
-        UI.esc(c.series) + '</option>').join('') + '</select>' +
-      '<span class="spacer"></span><span class="muted" id="series-last"></span> ' +
+      '<h2>采样曲线</h2><span class="spacer"></span><span class="muted" id="series-last"></span> ' +
       '<button id="series-full">全量</button></div>' +
-      '<div style="padding:10px 12px"><canvas id="series-chart" height="150"></canvas></div></div>';
-    const sel = document.getElementById('series-sel');
-    sel.onchange = () => { this.seriesSel = sel.value; this.pullSeriesChart(true); };
-    document.getElementById('series-full').onclick = () => this.pullSeriesChart(true);
-    this.pullSeriesChart(false);
+      '<div class="series-chips" id="series-chips">' +
+      enabled.map(c => '<label><input type="checkbox" data-sel="' + UI.esc(c.series) + '"' +
+        (this.seriesSel.indexOf(c.series) >= 0 ? ' checked' : '') + '> ' + UI.esc(c.series) + '</label>').join('') +
+      '</div><div id="series-charts"></div></div>';
+    wrap.querySelectorAll('[data-sel]').forEach(cb => {
+      cb.onchange = () => {
+        const on = [...wrap.querySelectorAll('[data-sel]:checked')].map(x => x.dataset.sel);
+        if (!on.length) { cb.checked = true; return; }
+        this.seriesSel = on;
+        this.renderSeriesCharts();
+        this.pullSeriesPanel(true);
+      };
+    });
+    document.getElementById('series-full').onclick = () => this.pullSeriesPanel(true);
+    this.renderSeriesCharts();
+    this.pullSeriesPanel(true);
   },
-  async pullSeriesChart(full) {
-    const name = this.seriesSel;
-    if (!name) return;
-    const since = full ? 0 : (this.seriesLastTs || {})[name] || 0;
-    let r;
-    try {
-      r = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) +
-        '/metrics/series?series=' + encodeURIComponent(name) + '&since_ts=' + since);
-    } catch (e) { return; }
-    if (r.truncated && since) return this.pullSeriesChart(true);
-    this.seriesLastTs = this.seriesLastTs || {};
+  renderSeriesCharts() {
+    const host = document.getElementById('series-charts');
+    if (!host) return;
+    const groups = { percent: [], load: [], rate: [] };
+    this.seriesSel.forEach(s => groups[this.seriesUnit(s)].push(s));
+    const order = ['percent', 'load', 'rate'];
+    host.innerHTML = order.filter(u => groups[u].length).map((u, i) =>
+      '<div style="padding:8px 12px"><canvas id="series-chart-' + i + '" height="140"></canvas></div>').join('');
+    this.seriesGroups = order.filter(u => groups[u].length).map(u => ({ unit: u, series: groups[u] }));
+  },
+  async pullSeriesPanel(full) {
+    if (!this.seriesSel || !this.seriesSel.length) return;
     this.seriesCache = this.seriesCache || {};
-    let pts = r.points || [];
-    if (!since) this.seriesCache[name] = [];
-    this.seriesCache[name] = (this.seriesCache[name] || []).concat(pts);
-    while (this.seriesCache[name].length > 300) this.seriesCache[name].shift();
-    this.seriesLastTs[name] = r.newest_ts || since;
-    this.drawSeriesChart(name, this.seriesCache[name]);
-    const last = pts.length ? pts[pts.length - 1] : null;
-    const le = document.getElementById('series-last');
-    if (le) le.textContent = last ? ('最近 ' + new Date(last.ts).toLocaleTimeString('zh-CN', { hour12: false })) : '';
+    this.seriesLastTs = this.seriesLastTs || {};
+    await Promise.all(this.seriesSel.map(async name => {
+      const since = full ? 0 : (this.seriesLastTs[name] || 0);
+      let r;
+      try {
+        r = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) +
+          '/metrics/series?series=' + encodeURIComponent(name) + '&since_ts=' + since);
+      } catch (e) { return; }
+      if (r.truncated && since) return this.pullSeriesPanel(true);
+      if (!since) this.seriesCache[name] = [];
+      this.seriesCache[name] = (this.seriesCache[name] || []).concat(r.points || []);
+      while (this.seriesCache[name].length > 300) this.seriesCache[name].shift();
+      this.seriesLastTs[name] = r.newest_ts || since;
+    }));
+    this.drawSeriesGroups();
   },
-  drawSeriesChart(name, points) {
-    const c = document.getElementById('series-chart');
-    if (!c || !window.Chart) return;
-    try { const ex = Chart.getChart(c); if (ex) ex.destroy(); } catch (e) {}
-    const isNet = name.indexOf('net:') === 0 || name.indexOf('serial:') === 0;
-    let labels = [], ds = [];
-    if (isNet) {
-      let prx = 0, ptx = 0, pts = 0;
-      const rx = [], tx = [];
-      points.forEach(p => {
-        const t = Number(p.ts) || 0;
-        const dt = pts ? Math.max(1, t - pts) / 1000 : 1;
-        rx.push(pts ? Math.max(0, (Number(p.rx) - prx) / dt) : 0);
-        tx.push(pts ? Math.max(0, (Number(p.tx) - ptx) / dt) : 0);
-        prx = Number(p.rx) || 0; ptx = Number(p.tx) || 0; pts = t;
-        labels.push(new Date(t).toLocaleTimeString('zh-CN', { hour12: false }));
-      });
-      ds = [{ label: 'RX B/s', data: rx, borderColor: cssVar('--accent', '#4a9eff'), pointRadius: 0, borderWidth: 2, fill: false },
-            { label: 'TX B/s', data: tx, borderColor: cssVar('--warn', '#f5a623'), pointRadius: 0, borderWidth: 2, fill: false }];
-    } else {
-      const vals = points.map(p => Number(p.v) || 0);
-      labels = points.map(p => new Date(Number(p.ts) || 0).toLocaleTimeString('zh-CN', { hour12: false }));
-      ds = [{ label: name, data: vals, borderColor: cssVar('--accent', '#4a9eff'), pointRadius: 0, borderWidth: 2, fill: true, backgroundColor: cssVar('--accent', '#4a9eff') + '1f' }];
+  seriesValueArray(name, points) {
+    if (this.seriesUnit(name) !== 'rate') {
+      return points.map(p => [Number(p.ts), Number(p.v) || 0]);
     }
-    new Chart(c.getContext('2d'), {
-      type: 'line',
-      data: { labels: labels, datasets: ds },
-      options: { animation: false, responsive: true, maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: { legend: { display: isNet, labels: { boxWidth: 10 } } },
-        scales: { x: { display: false }, y: { beginAtZero: true, ticks: { maxTicksLimit: 4 } } } }
+    let prx = 0, ptx = 0, pts = 0;
+    const rx = [], tx = [];
+    points.forEach(p => {
+      const t = Number(p.ts) || 0;
+      const dt = pts ? Math.max(1, t - pts) / 1000 : 1;
+      rx.push([t, pts ? Math.max(0, (Number(p.rx) - prx) / dt) : 0]);
+      tx.push([t, pts ? Math.max(0, (Number(p.tx) - ptx) / dt) : 0]);
+      prx = Number(p.rx) || 0; ptx = Number(p.tx) || 0; pts = t;
+    });
+    return { rx: rx, tx: tx };
+  },
+  drawSeriesGroups() {
+    if (!this.seriesGroups) return;
+    this.seriesGroups.forEach((g, gi) => {
+      const c = document.getElementById('series-chart-' + gi);
+      if (!c || !window.Chart) return;
+      try { const ex = Chart.getChart(c); if (ex) ex.destroy(); } catch (e) {}
+      const tsSet = new Set();
+      const dataBySeries = {};
+      g.series.forEach(name => {
+        const pts = this.seriesCache[name] || [];
+        const v = this.seriesValueArray(name, pts);
+        dataBySeries[name] = v;
+        if (Array.isArray(v)) v.forEach(x => tsSet.add(x[0]));
+        else { v.rx.forEach(x => tsSet.add(x[0])); v.tx.forEach(x => tsSet.add(x[0])); }
+      });
+      const labels = [...tsSet].sort((a, b) => a - b);
+      const idx = new Map(labels.map((t, i) => [t, i]));
+      const datasets = [];
+      g.series.forEach((name, si) => {
+        const color = this.seriesColor(si);
+        const v = dataBySeries[name];
+        const put = (arr) => {
+          const out = new Array(labels.length).fill(null);
+          arr.forEach(x => { const i = idx.get(x[0]); if (i !== undefined) out[i] = x[1]; });
+          return out;
+        };
+        if (Array.isArray(v)) {
+          datasets.push({ label: name, data: put(v), borderColor: color, backgroundColor: color + '1f',
+            borderWidth: 2, pointRadius: 0, fill: true, tension: .2 });
+        } else {
+          datasets.push({ label: name + ' RX', data: put(v.rx), borderColor: color, borderWidth: 2, pointRadius: 0, fill: false });
+          datasets.push({ label: name + ' TX', data: put(v.tx), borderColor: color, borderDash: [4, 3], borderWidth: 2, pointRadius: 0, fill: false });
+        }
+      });
+      new Chart(c.getContext('2d'), {
+        type: 'line',
+        data: { labels: labels.map(t => new Date(t).toLocaleTimeString('zh-CN', { hour12: false })), datasets: datasets },
+        options: { animation: false, responsive: true, maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: { legend: { display: true, labels: { boxWidth: 10 } } },
+          scales: { x: { display: false }, y: { beginAtZero: true, ticks: { maxTicksLimit: 4 } } } }
+      });
     });
   },
   openSeriesPicker() {

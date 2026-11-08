@@ -381,6 +381,7 @@ function canManage() { return ['admin', 'manager'].indexOf(roleOf()) >= 0; }
 const OverviewPage = Object.assign(new Page(), {
   async refresh() {
     const o = await Api.get('/api/v1/overview');
+    if (!Router.current || Router.current.page !== OverviewPage) return;
     this.el.innerHTML =
       '<div class="cards">' +
       [['在线设备', o.agents], ['在线客户端', o.clients], ['活跃会话', o.streams],
