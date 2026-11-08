@@ -180,7 +180,8 @@ const AgentDetailPage = Object.assign(new Page(), {
         (si.load5 || 0).toFixed(2) + ' / ' + (si.load15 || 0).toFixed(2) +
         ' · ' + (cpu.cores || []).length + ' 核</div></div></div>' +
         nicPanel +
-        '</div>';
+        '</div>' +
+        '<div id="si-tty"></div>';
 
       const certText = si.mtls
         ? UI.kv({ '证书主体': UI.esc(si.cert_subject || ''), '签发者': UI.esc(si.cert_issuer || ''),
@@ -401,6 +402,107 @@ const AgentDetailPage = Object.assign(new Page(), {
         URL.revokeObjectURL(a.href);
       };
     }
+  },
+
+  async loadTtys() {
+    const wrap = document.getElementById('si-tty');
+    if (!wrap) return;
+    try {
+      const list = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/ttys');
+      this.ttys = Array.isArray(list) ? list : [];
+    } catch (e) {
+      wrap.innerHTML = '';
+      return;
+    }
+    try {
+      this.ttyDisc = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/ttys/discovered');
+    } catch (e) { this.ttyDisc = []; }
+    this.renderTtyCard(wrap);
+  },
+  renderTtyCard(wrap) {
+    const can = canManage();
+    const rows = (this.ttys || []).map(t => {
+      const st = t.enabled ? '<span class="pill ok">启用</span>' : '<span class="pill">禁用</span>';
+      return '<tr><td>' + UI.esc(t.alias || '—') + '</td>' +
+        '<td><code>' + UI.esc(t.path) + '</code></td>' +
+        '<td>' + st + '</td>' +
+        '<td>' + t.baud + ' ' + t.data_bits + t.parity + t.stop_bits + '</td>' +
+        '<td class="tty-ops">' +
+        (can ? '<button data-edit="' + UI.esc(t.path) + '">编辑</button>' : '') +
+        (can ? ' <button data-tog="' + UI.esc(t.path) + '">' + (t.enabled ? '禁用' : '启用') + '</button>' : '') +
+        '</td></tr>';
+    }).join('');
+    wrap.innerHTML = '<div class="panel" style="margin-bottom:16px"><div class="panel-head">' +
+      '<h2>串口 TTY</h2><span class="spacer"></span>' +
+      (can ? '<button id="tty-add">手动添加</button>' : '') + '</div>' +
+      '<table class="si-table"><tr><th>别名</th><th>路径</th><th>状态</th><th>参数</th><th>操作</th></tr>' +
+      (rows || '<tr><td colspan="5" style="color:var(--muted)">暂无配置</td></tr>') +
+      '</table></div>';
+    if (!can) return;
+    wrap.querySelectorAll('[data-edit]').forEach(b => {
+      b.onclick = () => {
+        const it = this.ttys.find(x => x.path === b.dataset.edit);
+        if (it) this.openTtyEditor(it);
+      };
+    });
+    wrap.querySelectorAll('[data-tog]').forEach(b => {
+      b.onclick = async () => {
+        const it = this.ttys.find(x => x.path === b.dataset.tog);
+        if (!it) return;
+        try {
+          await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/ttys',
+            Object.assign({}, it, { enabled: !it.enabled }));
+          this.loadTtys();
+        } catch (e) { this.ttyError(e.message); }
+      };
+    });
+    const add = document.getElementById('tty-add');
+    if (add) add.onclick = () => this.openTtyEditor(null);
+  },
+  ttyError(msg) {
+    if (window.UI && UI.toast) UI.toast(msg);
+    else alert(msg);
+  },
+  openTtyEditor(item) {
+    const it = item || { path: '', alias: '', enabled: true, baud: 115200,
+      data_bits: 8, parity: 'N', stop_bits: 1, roles: 'operator,manager,admin' };
+    const opts = (this.ttyDisc || []).map(d => '<option value="' + UI.esc(d.path) + '">').join('');
+    const mask = document.createElement('div');
+    mask.className = 'tty-mask';
+    mask.innerHTML = '<div class="tty-modal"><h2>' + (item ? '编辑串口' : '添加串口') + '</h2>' +
+      '<label>路径<input id="tty-path" list="tty-list" value="' + UI.esc(it.path) + '"' +
+      (item ? ' readonly' : '') + '><datalist id="tty-list">' + opts + '</datalist></label>' +
+      '<label>别名<input id="tty-alias" value="' + UI.esc(it.alias || '') + '" placeholder="设备内唯一"></label>' +
+      '<label class="row"><input type="checkbox" id="tty-enabled"' + (it.enabled ? ' checked' : '') + '> 启用</label>' +
+      '<label>波特率<select id="tty-baud">' +
+      [1200,2400,4800,9600,19200,38400,57600,115200,230400,460800,921600].map(b =>
+        '<option ' + (b === it.baud ? 'selected' : '') + '>' + b + '</option>').join('') + '</select></label>' +
+      '<label>数据位<select id="tty-db">' + [5,6,7,8].map(v => '<option ' + (v === it.data_bits ? 'selected' : '') + '>' + v + '</option>').join('') + '</select></label>' +
+      '<label>校验<select id="tty-par">' +
+      ['N','E','O'].map(v => '<option ' + (v === it.parity ? 'selected' : '') + '>' + v + '</option>').join('') + '</select></label>' +
+      '<label>停止位<select id="tty-stop"><option ' + (it.stop_bits === 1 ? 'selected' : '') + '>1</option><option ' + (it.stop_bits === 2 ? 'selected' : '') + '>2</option></select></label>' +
+      '<div class="tty-btns"><button id="tty-cancel">取消</button><button id="tty-save" class="primary">保存</button></div></div>';
+    document.body.appendChild(mask);
+    const close = () => mask.remove();
+    mask.querySelector('#tty-cancel').onclick = close;
+    mask.onclick = e => { if (e.target === mask) close(); };
+    mask.querySelector('#tty-save').onclick = async () => {
+      const body = {
+        path: mask.querySelector('#tty-path').value.trim(),
+        alias: mask.querySelector('#tty-alias').value.trim(),
+        enabled: mask.querySelector('#tty-enabled').checked,
+        baud: Number(mask.querySelector('#tty-baud').value),
+        data_bits: Number(mask.querySelector('#tty-db').value),
+        parity: mask.querySelector('#tty-par').value,
+        stop_bits: Number(mask.querySelector('#tty-stop').value),
+        roles: it.roles || 'operator,manager,admin',
+      };
+      try {
+        await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/ttys', body);
+        close();
+        this.loadTtys();
+      } catch (e) { this.ttyError(e.message); }
+    };
   },
 });
 
