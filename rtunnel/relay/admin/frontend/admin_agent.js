@@ -12,25 +12,15 @@ const AgentDetailPage = Object.assign(new Page(), {
     this.seriesCfg = [];
     this.lastTs = {};
     try { await this.fetchSeriesCfg(); } catch (e) {}
-    if (this.seriesCfg.some(c => c.series === 'cpu' || c.series === 'mem')) {
-      AGENT_HIST.delete(this.devid);
-    }
     let hist = AGENT_HIST.get(this.devid);
     if (!hist) { hist = { mem: [], cpu: [] }; AGENT_HIST.set(this.devid, hist); }
+    hist.mem.length = 0;
+    hist.cpu.length = 0;
     this.memHist = hist.mem;
     this.cpuHist = hist.cpu;
     this.charts = {};
-    try {
-      const hist2 = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/metrics?limit=60');
-      if (Array.isArray(hist2) && hist2.length) {
-        hist.mem.length = 0;
-        hist.cpu.length = 0;
-        hist2.forEach(p => { hist.mem.push(Number(p.mem) || 0); hist.cpu.push(Number(p.cpu) || 0); });
-        this._lastSample = Date.now();
-      }
-    } catch (e) {}
-    this.period = Number((window.SETTINGS || {})['ui.refresh_seconds'] || 0);
-    this.auto = this.period > 0;
+    this.period = 5;
+    this.auto = false;   // 采样自动刷新默认关闭，用户显式勾选才开启
     const p = Page.prototype.enter.call(this, el, params);
     if (this.auto && !this.timer) {
       this.timer = setInterval(() => this.refresh().catch(() => {}), this.period * 1000);
@@ -428,15 +418,16 @@ const AgentDetailPage = Object.assign(new Page(), {
       const since = this.lastTs[name] || 0;
       const r = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) +
         '/metrics/series?series=' + encodeURIComponent(name) + '&since_ts=' + since);
-      const pts = (r && r.points) || [];
-      if (!since || r.truncated) {
-        this.memHist.length = 0; this.cpuHist.length = 0;   // 全量重建，单 series 分别清
+      if (r && r.truncated && since) {
+        this.lastTs[name] = 0;
+        return pull(name);
       }
+      const pts = (r && r.points) || [];
       const arr = name === 'cpu' ? this.cpuHist : this.memHist;
-      if (!since || r.truncated) arr.length = 0;
+      if (!since) arr.length = 0;
       pts.forEach(p => arr.push(Number(p.v) || 0));
       while (arr.length > 60) arr.shift();
-      this.lastTs[name] = r.newest_ts || since;
+      this.lastTs[name] = (r && r.newest_ts) || since;
     };
     try { await pull('mem'); await pull('cpu'); } catch (e) {}
     this.spark('si-mem', this.memHist, cssVar('--accent', '#4a9eff'));

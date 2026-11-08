@@ -1585,8 +1585,6 @@ int AgentApp::run(int argc, char** argv) {
     hevent_set_userdata(part_timer, this);
     loadConfig();
     init(lp);
-    restartMetricTimer();
-    loadMetricHistory();
     if (series_cfgs.empty()) {
         SeriesCfg def;
         def.enabled = 1; def.interval = 5; def.points = 720;
@@ -1599,7 +1597,6 @@ int AgentApp::run(int argc, char** argv) {
         app->seriesTick();
     }, 1000, INFINITE);
     hevent_set_userdata(series_timer, this);
-    sampleMetric();
     hloop_run(lp);
     hloop_free(&lp);
     return 0;

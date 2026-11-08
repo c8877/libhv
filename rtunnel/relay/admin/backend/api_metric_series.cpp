@@ -33,6 +33,11 @@ void AdminServer::handleMetricSeriesCfgGet(const HttpContextPtr& ctx) {
         ctx->send("{\"error\":\"forbidden\"}");
         return;
     }
+    std::string st = relay_->takeMetricStatus(devid);
+    auto sj = nlohmann::json::parse(st, nullptr, false);
+    if (!sj.is_discarded() && sj.value("applied", false)) {
+        db_.metricSeriesAck(devid, sj.value("revision", (long long)0));
+    }
     std::string out;
     db_.metricSeriesList(devid, out);
     pushMetricSeriesConfig(devid);
