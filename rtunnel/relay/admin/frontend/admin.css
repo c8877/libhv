@@ -388,3 +388,34 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .task-error b{color:var(--bad);display:block;margin-bottom:6px}
 .task-error div{color:var(--bad);font-size:13px;word-break:break-all}
 @media (max-width:900px){.task-cols{grid-template-columns:1fr}.task-head{flex-wrap:wrap}.task-actions{width:100%;justify-content:flex-end}}
+.metric-table .metric-row{cursor:pointer}
+.metric-table .metric-row:hover{background:rgba(255,255,255,.03)}
+.metric-name b{font-size:14px;font-weight:600}
+.metric-type{margin-left:10px;font-size:11px;color:var(--muted)}
+.metric-table .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.metric-table .center{text-align:center}
+.metric-table .chev{width:28px;text-align:right;color:var(--muted);transition:.15s}
+.metric-table .metric-row.open .chev{transform:rotate(180deg)}
+.metric-table .metric-row.open{background:rgba(255,255,255,.025)}
+.metric-expand td{padding:0 16px 16px 24px!important;background:rgba(255,255,255,.02)}
+.metric-form{padding:14px 0 2px}
+.metric-fields{display:flex;gap:22px;align-items:center;font-size:12px;color:var(--muted)}
+.metric-fields input{width:88px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);margin:0 4px}
+.metric-sync{margin-top:10px;font-size:12px;color:var(--muted)}
+.metric-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.dot.ok{background:#57ab5a}.dot.warn{background:#f5a623}.dot.off{background:#6b7280}
+.tty-row{cursor:pointer}
+.tty-row:hover{background:rgba(255,255,255,.03)}
+.tty-row.open{background:rgba(255,255,255,.025)}
+.tty-row .chev{display:inline-block;margin-left:10px;color:var(--muted);transition:.15s}
+.tty-row.open .chev{transform:rotate(180deg)}
+.tty-expand td{padding:0 16px 16px 24px!important;background:rgba(255,255,255,.02)}
+.tty-detail{padding:12px 0 2px;font-size:12px}
+.tty-detail-row{display:flex;gap:12px;padding:4px 0;color:var(--muted)}
+.tty-detail-row>span{width:44px;flex:none}
+.tty-detail-row code{color:var(--fg);font-size:12px}
+.tty-detail-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.si-two{align-items:start}
+.metric-expand td{padding-bottom:12px!important}
+.metric-form{padding-top:10px}

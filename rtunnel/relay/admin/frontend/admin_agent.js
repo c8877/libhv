@@ -629,54 +629,84 @@ const AgentDetailPage = Object.assign(new Page(), {
     const syncCount = list.filter(c => c.enabled && !c.synced).length;
     const dur = c => {
       const sec = (Number(c.interval_sec) || 1) * (Number(c.points) || 0);
-      if (sec >= 3600) return (sec / 3600).toFixed(sec % 3600 ? 1 : 0) + 'h';
-      if (sec >= 60) return Math.round(sec / 60) + 'm';
-      return sec + 's';
+      if (sec >= 3600) return (sec / 3600).toFixed(sec % 3600 ? 1 : 0) + ' h';
+      if (sec >= 60) return Math.round(sec / 60) + ' m';
+      return sec + ' s';
     };
-    const badge = c => !c.enabled ? '<span class="pill">禁用</span>'
-      : c.synced ? '<span class="pill ok">已同步</span>'
-      : '<span class="pill warn">未同步</span>';
+    const badge = c => !c.enabled ? '<span class="dot off"></span>禁用'
+      : c.synced ? '<span class="dot ok"></span>已同步'
+      : '<span class="dot warn"></span>未同步';
     const groupName = { percent: '百分比', load: '负载', rate: '速率' };
     let rows = '';
     ['percent', 'load', 'rate'].forEach(u => {
       if (!groups[u].length) return;
       rows += '<tr class="metric-group"><td colspan="6">' + groupName[u] + '</td></tr>';
       groups[u].forEach(c => {
-        rows += '<tr><td class="metric-name"><code>' + UI.esc(c.series) + '</code></td>' +
-          '<td>' + (can ? '<label class="switch"><input type="checkbox" data-tog="' + UI.esc(c.series) + '"' +
-            (c.enabled ? ' checked' : '') + '><span></span></label>' : (c.enabled ? '启用' : '禁用')) + '</td>' +
-          '<td>' + c.interval_sec + 's</td>' +
-          '<td>' + c.points + ' 点 · ' + dur(c) + '</td>' +
+        const open = this.expandMetric === c.series;
+        rows += '<tr class="metric-row' + (open ? ' open' : '') + '" data-mrow="' + UI.esc(c.series) + '">' +
+          '<td class="metric-name"><b>' + UI.esc(c.series) + '</b><span class="metric-type">' + groupName[u] + '</span></td>' +
+          '<td class="num">' + c.interval_sec + ' s</td>' +
+          '<td class="num">' + c.points + ' 点 <span class="muted">· ' + dur(c) + '</span></td>' +
           '<td>' + badge(c) + '</td>' +
-          '<td class="tty-ops">' + (can
-            ? '<button data-medit="' + UI.esc(c.series) + '">编辑</button> <button data-mdel="' + UI.esc(c.series) + '">删除</button>'
-            : '') + '</td></tr>';
+          '<td class="center">' + (can ? '<label class="switch"><input type="checkbox" data-tog="' + UI.esc(c.series) + '"' +
+            (c.enabled ? ' checked' : '') + '><span></span></label>' : (c.enabled ? '开' : '关')) + '</td>' +
+          '<td class="chev">⌄</td></tr>';
+        if (open) {
+          rows += '<tr class="metric-expand"><td colspan="6"><div class="metric-form">' +
+            '<div class="metric-fields">' +
+            '<label>间隔 <input id="me-int" type="number" min="1" max="300" value="' + c.interval_sec + '"> 秒</label>' +
+            '<label>保留 <input id="me-pts" type="number" min="60" max="86400" value="' + c.points + '"> 点</label>' +
+            '<span class="muted">约 ' + dur(c) + '</span></div>' +
+            '<div class="metric-sync">' + (c.enabled
+              ? (c.synced ? '已下发并确认' : '已下发，等待 agent 确认')
+              : '已禁用，不参与采样') + '</div>' +
+            '<div class="metric-actions">' +
+            '<button data-mdel="' + UI.esc(c.series) + '">删除</button>' +
+            '<button class="primary" data-msave="' + UI.esc(c.series) + '">保存并下发</button>' +
+            '</div></div></td></tr>';
+        }
       });
     });
     wrap.innerHTML = '<div class="panel" style="margin-bottom:16px"><div class="panel-head">' +
-      '<h2>监控采样</h2><span class="muted" style="margin-left:8px">' + list.length + ' 项 · ' +
+      '<h2>监控采样</h2><span class="muted" style="margin-left:10px">' + list.length + ' 项 · ' +
       syncCount + ' 项未同步</span><span class="spacer"></span>' +
-      (can ? '<button id="metric-add">添加指标</button>' : '') + '</div>' +
-      '<table class="si-table metric-table"><tr><th>指标</th><th>启用</th><th>间隔</th>' +
-      '<th>保留</th><th>同步</th><th>操作</th></tr>' +
+      (can ? '<button id="metric-add">+ 添加指标</button>' : '') + '</div>' +
+      '<table class="si-table metric-table"><tr><th>指标</th><th>间隔</th><th>保留</th>' +
+      '<th>同步</th><th>启用</th><th></th></tr>' +
       (rows || '<tr><td colspan="6" style="color:var(--muted)">暂无配置</td></tr>') + '</table></div>';
     if (!can) return;
     const save = async (next) => {
       try {
         await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/metrics/series/config',
           next.map(c => ({ series: c.series, enabled: c.enabled, interval_sec: c.interval_sec, points: c.points })));
+        this.expandMetric = null;
         await this.reloadSeries();
         this.renderSeriesPanel();
       } catch (e) { this.ttyError(e.message); }
     };
+    wrap.querySelectorAll('[data-mrow]').forEach(tr => {
+      tr.onclick = (e) => {
+        if (e.target.closest('input,button,label')) return;
+        this.expandMetric = this.expandMetric === tr.dataset.mrow ? null : tr.dataset.mrow;
+        this.renderMetricCard(wrap);
+      };
+    });
     wrap.querySelectorAll('[data-tog]').forEach(ib => {
+      ib.onclick = e => e.stopPropagation();
       ib.onchange = () => {
         const next = list.map(c => c.series === ib.dataset.tog ? Object.assign({}, c, { enabled: ib.checked }) : c);
         save(next);
       };
     });
-    wrap.querySelectorAll('[data-medit]').forEach(b => {
-      b.onclick = () => this.openSeriesEditor(list.find(c => c.series === b.dataset.medit));
+    wrap.querySelectorAll('[data-msave]').forEach(b => {
+      b.onclick = () => {
+        const name = b.dataset.msave;
+        const next = list.map(c => c.series === name ? Object.assign({}, c, {
+          interval_sec: Number(document.getElementById('me-int').value) || c.interval_sec,
+          points: Number(document.getElementById('me-pts').value) || c.points,
+        }) : c);
+        save(next);
+      };
     });
     wrap.querySelectorAll('[data-mdel]').forEach(b => {
       b.onclick = () => {
@@ -743,23 +773,31 @@ const AgentDetailPage = Object.assign(new Page(), {
     let rows = '';
     if (tab === 'config') {
       rows = (this.ttys || []).map(t => {
-        const st = t.enabled ? '<span class="pill ok">启用</span>' : '<span class="pill">禁用</span>';
+        const st = t.enabled ? '<span class="dot ok"></span>启用' : '<span class="dot off"></span>禁用';
         const label = t.alias || '—';
-        return '<tr><td class="tty-main"><b>' + UI.esc(label) + '</b>' +
+        const open = this.expandTty === t.path;
+        let r = '<tr class="tty-row' + (open ? ' open' : '') + '" data-trow="' + UI.esc(t.path) + '">' +
+          '<td class="tty-main"><b>' + UI.esc(label) + '</b>' +
           '<div class="tty-path" title="' + UI.esc(t.path) + '">' + UI.esc(t.path) + '</div></td>' +
           '<td>' + st + '</td>' +
-          '<td class="tty-param">' + t.baud + ' ' + t.data_bits + t.parity + t.stop_bits + '</td>' +
-          '<td class="tty-ops">' +
-          '<a class="btn primary" href="#/tty/' + encodeURIComponent(this.devid) + '/' +
-            encodeURIComponent(t.alias || t.path) + '">调试</a> ' +
-          '<a class="btn" href="#/tty/' + encodeURIComponent(this.devid) + '/' +
-            encodeURIComponent(t.alias || t.path) + '?monitor=1">监听</a> ' +
-          '<details class="tty-menu"><summary>更多</summary><div>' +
-          (roleOf() === 'admin' ? '<button data-take="' + UI.esc(t.alias || t.path) + '">强制接管</button>' : '') +
-          (can ? '<button data-edit="' + UI.esc(t.path) + '">编辑</button>' : '') +
-          (can ? '<button data-tog="' + UI.esc(t.path) + '">' + (t.enabled ? '禁用' : '启用') + '</button>' : '') +
-          '<button data-copy="' + UI.esc(t.path) + '">复制路径</button>' +
-          '</div></details></td></tr>';
+          '<td class="tty-param">' + t.baud + ' · ' + t.data_bits + t.parity + t.stop_bits + '</td>' +
+          '<td class="tty-ops"><a class="btn primary" href="#/tty/' + encodeURIComponent(this.devid) + '/' +
+            encodeURIComponent(t.alias || t.path) + '">调试</a><span class="chev">⌄</span></td></tr>';
+        if (open) {
+          r += '<tr class="tty-expand"><td colspan="4"><div class="tty-detail">' +
+            '<div class="tty-detail-row"><span>路径</span><code>' + UI.esc(t.path) + '</code></div>' +
+            '<div class="tty-detail-row"><span>参数</span><code>' + t.baud + ' · ' + t.data_bits + t.parity + t.stop_bits + '</code></div>' +
+            '<div class="tty-detail-row"><span>状态</span>' + (t.enabled ? '启用' : '禁用') + '</div>' +
+            '<div class="tty-detail-actions">' +
+            '<a class="btn" href="#/tty/' + encodeURIComponent(this.devid) + '/' +
+              encodeURIComponent(t.alias || t.path) + '?monitor=1">监听</a>' +
+            (roleOf() === 'admin' ? '<button data-take="' + UI.esc(t.alias || t.path) + '">强制接管</button>' : '') +
+            (can ? '<button data-edit="' + UI.esc(t.path) + '">编辑参数</button>' : '') +
+            (can ? '<button data-tog="' + UI.esc(t.path) + '">' + (t.enabled ? '禁用' : '启用') + '</button>' : '') +
+            '<button data-copy="' + UI.esc(t.path) + '">复制路径</button>' +
+            '</div></div></td></tr>';
+        }
+        return r;
       }).join('');
     } else {
       rows = unAll.filter(d => !q || (d.path || '').toLowerCase().indexOf(q) >= 0).map(d =>
@@ -792,6 +830,13 @@ const AgentDetailPage = Object.assign(new Page(), {
         tr.style.display = !v || tr.innerText.toLowerCase().indexOf(v) >= 0 ? '' : 'none';
       });
     };
+    wrap.querySelectorAll('[data-trow]').forEach(tr => {
+      tr.onclick = (e) => {
+        if (e.target.closest('a,button,input')) return;
+        this.expandTty = this.expandTty === tr.dataset.trow ? null : tr.dataset.trow;
+        this.renderTtyCard(wrap);
+      };
+    });
     wrap.querySelectorAll('[data-copy]').forEach(b => {
       b.onclick = async () => {
         try { await navigator.clipboard.writeText(b.dataset.copy); UI.toast('路径已复制'); }
