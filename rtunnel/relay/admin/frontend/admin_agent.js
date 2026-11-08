@@ -11,8 +11,11 @@ const AgentDetailPage = Object.assign(new Page(), {
     this.lastTs = {};
     try { await this.fetchSeriesCfg(); } catch (e) {}
     this.charts = {};
-    this.period = 5;
-    this.auto = false;   // 采样自动刷新默认关闭，用户显式勾选才开启
+    this.period = 10;
+    this.auto = false;   // 状态刷新默认关闭
+    this.sampleAuto = false;
+    this.seriesLastPull = {};
+    this.ttysLoaded = false;
     const p = Page.prototype.enter.call(this, el, params);
     if (this.auto && !this.timer) {
       this.timer = setInterval(() => this.refresh().catch(() => {}), this.period * 1000);
@@ -27,6 +30,49 @@ const AgentDetailPage = Object.assign(new Page(), {
     this.charts = {};
   },
   diskColor(p) { return p >= 85 ? cssVar('--bad', '#e5534b') : p >= 70 ? cssVar('--warn', '#f5a623') : cssVar('--accent', '#4a9eff'); },
+  updateSnapshot(d, si, rows) {
+    const head = document.getElementById('si-head-kv');
+    if (head) head.innerHTML = UI.kv({
+      '远端地址': UI.esc(d.remote_addr),
+      '接入时间': new Date(d.connected_at_ms).toLocaleString(),
+      '最近活跃': UI.ago(d.last_seen_ms) + ' 前',
+      '流量 ↓/↑': UI.bytes(d.bytes_in) + ' / ' + UI.bytes(d.bytes_out),
+    });
+    const nics = (si.nics || []).map(n => [UI.esc(n.name), UI.esc(n.ip), UI.esc(n.netmask),
+      n.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>']);
+    const nw = document.getElementById('si-nic-wrap');
+    if (nw) nw.innerHTML = UI.table(['接口', 'IP', '掩码', '状态'], nics);
+    const cpu = si.cpu || { usage: 0, cores: [] };
+    const sysRows = [
+      ['架构', si.machine || '—'], ['内核', si.kernel || '—'], ['CPU 型号', si.cpu_model || '—'],
+      ['核心数', ((cpu.cores || []).length) + ' 核'], ['板卡型号', si.board || '—'],
+      ['采集时间', new Date(Date.now()).toLocaleString()],
+    ];
+    const sw = document.getElementById('si-sys-wrap');
+    if (sw) sw.innerHTML = '<table class="si-table">' + sysRows.map(r =>
+      '<tr><th>' + UI.esc(r[0]) + '</th><td>' + UI.esc(r[1]) + '</td></tr>').join('') + '</table>';
+    const fw = document.getElementById('si-flows-wrap');
+    if (fw) fw.innerHTML = UI.table(['A 用户:sid', 'c_sid', '状态', '开启于'], rows);
+    this.diskRows = (si.mounts || []).map(m => {
+      const t = Number(m.total_kb) || 0, f = Number(m.free_kb) || 0;
+      return { mount: m.mount, fstype: m.fstype || '', total: t, used: t - f, free: f,
+               pct: t > 0 ? Math.round((t - f) * 100 / t) : 0 };
+    });
+    const ch = this.charts && this.charts['disk'];
+    if (ch && ch.data && ch.data.datasets.length >= 2) {
+      const labels = (si.mounts || []).map(m => m.mount.length > 16 ? m.mount.slice(0, 15) + '…' : m.mount);
+      if (labels.length === ch.data.labels.length) {
+        ch.data.labels = labels;
+        ch.data.datasets[0].data = (si.mounts || []).map(m => (Number(m.total_kb) || 0) - (Number(m.free_kb) || 0));
+        ch.data.datasets[1].data = (si.mounts || []).map(m => Number(m.free_kb) || 0);
+        ch.data.datasets[0].backgroundColor = (si.mounts || []).map(m => {
+          const t = Number(m.total_kb) || 0;
+          return this.diskColor(t > 0 ? Math.round((t - (Number(m.free_kb) || 0)) * 100 / t) : 0);
+        });
+        ch.update('none');
+      }
+    }
+  },
   async refresh() {
     const d = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid));
     let si = null, siTs = 0;
@@ -45,12 +91,20 @@ const AgentDetailPage = Object.assign(new Page(), {
     let html = '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>' + UI.esc(d.devid) + '</h2>' +
       '<span class="pill ok">在线</span><span class="spacer"></span>' +
       (si ? '<label class="si-auto"><input type="checkbox" id="si-auto"' + (this.auto ? ' checked' : '') +
-            '> 每 5s 刷新</label> <button id="si-export">导出 JSON</button>' : '') + '</div>' + UI.kv({
+            '> 状态刷新</label>' +
+            '<select id="si-period" style="margin-left:4px">' +
+            [5, 10, 30].map(v => '<option value="' + v + '"' + (this.period === v ? ' selected' : '') + '>' + v + 's</option>').join('') +
+            '</select> <button id="si-export">导出 JSON</button>' : '') + '</div><div id="si-head-kv">' + UI.kv({
         '远端地址': UI.esc(d.remote_addr),
         '接入时间': new Date(d.connected_at_ms).toLocaleString(),
         '最近活跃': UI.ago(d.last_seen_ms) + ' 前',
         '流量 ↓/↑': UI.bytes(d.bytes_in) + ' / ' + UI.bytes(d.bytes_out),
-      }) + '</div>';
+      }) + '</div></div>';
+
+    if (this._rendered && si && document.getElementById('si-head-kv')) {
+      this.updateSnapshot(d, si, rows);
+      return;
+    }
 
     if (si) {
       Object.values(this.charts || {}).forEach(c => { try { c.destroy(); } catch (e) {} });
@@ -79,7 +133,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       const nics = (si.nics || []).map(n => [UI.esc(n.name), UI.esc(n.ip), UI.esc(n.netmask),
         n.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>']);
       const nicPanel = '<div class="panel si-nic"><div class="panel-head"><h2>网卡</h2></div>' +
-        UI.table(['接口', 'IP', '掩码', '状态'], nics) + '</div>';
+        '<div id="si-nic-wrap">' + UI.table(['接口', 'IP', '掩码', '状态'], nics) + '</div></div>';
 
       const diskPanel = '<div class="panel si-disk"><div class="panel-head"><h2>存储</h2>' +
         '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">条长按最大分区归一</span></div>' +
@@ -118,14 +172,18 @@ const AgentDetailPage = Object.assign(new Page(), {
       ];
       const sysTable = '<table class="si-table">' + sysRows.map(r =>
         '<tr><th>' + UI.esc(r[0]) + '</th><td>' + UI.esc(r[1]) + '</td></tr>').join('') + '</table>';
-      html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>系统</h2></div>' + sysTable + '</div>' +
-        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>运行时</h2></div>' + runtimeTable + '</div>' +
-        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>证书</h2></div>' + certText + '</div>';
+      html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>系统</h2></div>' +
+        '<div id="si-sys-wrap">' + sysTable + '</div></div>' +
+        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>运行时</h2></div>' +
+        '<div id="si-runtime-wrap">' + runtimeTable + '</div></div>' +
+        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>证书</h2></div>' +
+        '<div id="si-cert-wrap">' + certText + '</div></div>';
     }
 
     html += '<div class="panel"><div class="panel-head"><h2>当前会话</h2></div>' +
-      UI.table(['A 用户:sid', 'c_sid', '状态', '开启于'], rows) + '</div>';
+      '<div id="si-flows-wrap">' + UI.table(['A 用户:sid', 'c_sid', '状态', '开启于'], rows) + '</div></div>';
     this.el.innerHTML = html;
+    this._rendered = true;
 
     if (si) {
       const self = this;
@@ -244,7 +302,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       this.renderMetricCard(document.getElementById('si-metric'));
       if (document.getElementById('series-charts')) this.pullSeriesPanel(false);
       else this.renderSeriesPanel();
-      this.loadTtys();
+      if (!this.ttysLoaded) this.loadTtys();
       const ce = document.getElementById('caps-edit');
       if (ce) ce.onclick = () => {
         const caps = si.caps || {};
@@ -287,17 +345,16 @@ const AgentDetailPage = Object.assign(new Page(), {
         };
       };
       const cb = document.getElementById('si-auto');
-      if (cb) cb.onchange = () => {
-        this.auto = cb.checked;
+      const ps = document.getElementById('si-period');
+      if (ps) this.period = Number(ps.value) || 10;
+      const startStateTimer = () => {
+        if (this.timer) { clearInterval(this.timer); this.timer = null; }
         if (this.auto) {
-          const sec = this.period > 0 ? this.period : 5;
-          this.timer = setInterval(() => this.refresh().catch(() => {}), sec * 1000);
-          this.refresh().catch(() => {});
-        } else if (this.timer) {
-          clearInterval(this.timer);
-          this.timer = null;
+          this.timer = setInterval(() => this.refresh().catch(() => {}), this.period * 1000);
         }
       };
+      if (cb) cb.onchange = () => { this.auto = cb.checked; startStateTimer(); };
+      if (ps) ps.onchange = () => { this.period = Number(ps.value) || 10; startStateTimer(); };
       if (si && (!si.cpu || !(si.cpu.cores || []).length) && !this._retry) {
         this._retry = setTimeout(() => { this._retry = null; this.refresh().catch(() => {}); }, 1200);
       }
@@ -345,7 +402,9 @@ const AgentDetailPage = Object.assign(new Page(), {
     }
     this.seriesSel = this.seriesSel.filter(s => enabled.some(c => c.series === s));
     wrap.innerHTML = '<div class="panel" style="margin-bottom:16px"><div class="panel-head">' +
-      '<h2>采样曲线</h2><span class="spacer"></span><span class="muted" id="series-last"></span> ' +
+      '<h2>采样曲线</h2><label class="si-auto" style="margin-left:10px"><input type="checkbox" id="sample-auto"' +
+      (this.sampleAuto ? ' checked' : '') + '> 自动采集</label>' +
+      '<span class="spacer"></span><span class="muted" id="series-last"></span> ' +
       '<button id="series-full">全量</button></div>' +
       '<div class="series-chips" id="series-chips">' +
       '<label class="chip-all"><input type="checkbox" id="sel-all"> 全选</label>' +
@@ -380,7 +439,11 @@ const AgentDetailPage = Object.assign(new Page(), {
       syncBoxes();
       this.renderSeriesCharts();
       this.drawSeriesGroups();
-      if (added.length) this.pullSeriesNames(added, true).then(() => this.drawSeriesGroups());
+      if (added.length) this.pullSeriesNames(added, true).then(() => {
+        const now = Date.now();
+        added.forEach(n => { this.seriesLastPull[n] = now; });
+        this.drawSeriesGroups();
+      });
     };
     wrap.querySelectorAll('[data-sel]').forEach(cb => {
       cb.onchange = () => {
@@ -398,6 +461,8 @@ const AgentDetailPage = Object.assign(new Page(), {
     document.getElementById('sel-all').onchange = (e) => apply(e.target.checked ? all.slice() : []);
     syncBoxes();
     document.getElementById('series-full').onclick = () => this.pullSeriesPanel(true);
+    const sa = document.getElementById('sample-auto');
+    if (sa) sa.onchange = () => { this.sampleAuto = sa.checked; this.startSampleTimer(); };
     this.renderSeriesCharts();
     this.pullSeriesPanel(true);
   },
@@ -428,9 +493,29 @@ const AgentDetailPage = Object.assign(new Page(), {
       this.seriesLastTs[name] = r.newest_ts || since;
     }));
   },
+  startSampleTimer() {
+    if (this.sampleTimer) { clearInterval(this.sampleTimer); this.sampleTimer = null; }
+    if (!this.sampleAuto) return;
+    this.sampleTimer = setInterval(() => this.sampleTick(), 1000);
+  },
+  async sampleTick() {
+    if (!this.sampleAuto || document.hidden) return;
+    const now = Date.now();
+    const due = (this.seriesSel || []).filter(name => {
+      const cfg = (this.seriesCfg || []).find(c => c.series === name);
+      if (!cfg) return false;
+      return now - (this.seriesLastPull[name] || 0) >= Math.max(1, Number(cfg.interval_sec) || 5) * 1000;
+    });
+    if (!due.length) return;
+    due.forEach(n => { this.seriesLastPull[n] = now; });
+    await this.pullSeriesNames(due, false);
+    this.drawSeriesGroups();
+  },
   async pullSeriesPanel(full) {
     if (!this.seriesSel || !this.seriesSel.length) return;
     await this.pullSeriesNames(this.seriesSel, full);
+    const now = Date.now();
+    this.seriesSel.forEach(n => { this.seriesLastPull[n] = now; });
     this.drawSeriesGroups();
   },
   seriesValueArray(name, points) {
@@ -574,9 +659,10 @@ const AgentDetailPage = Object.assign(new Page(), {
     try { await this.fetchSeriesCfg(); } catch (e) {}
     this.renderMetricCard(document.getElementById('si-metric'));
   },
-  async loadTtys() {
+  async loadTtys(force) {
     const wrap = document.getElementById('si-tty');
     if (!wrap) return;
+    if (this.ttysLoaded && !force) return;
     try {
       const list = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/ttys');
       this.ttys = Array.isArray(list) ? list : [];
@@ -587,6 +673,7 @@ const AgentDetailPage = Object.assign(new Page(), {
     try {
       this.ttyDisc = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/ttys/discovered');
     } catch (e) { this.ttyDisc = []; }
+    this.ttysLoaded = true;
     this.renderTtyCard(wrap);
   },
   renderTtyCard(wrap) {
@@ -608,17 +695,21 @@ const AgentDetailPage = Object.assign(new Page(), {
         (can ? '<button data-edit="' + UI.esc(t.path) + '">编辑</button>' : '') +
         (can ? ' <button data-tog="' + UI.esc(t.path) + '">' + (t.enabled ? '禁用' : '启用') + '</button>' : '') +
         '</td></tr>';
-    }).join('') + un.map(d =>
+    }).join('') + (this.ttyShowAll ? un : un.slice(0, 5)).map(d =>
       '<tr><td>—</td><td><code>' + UI.esc(d.path) + '</code></td>' +
       '<td><span class="pill">未配置</span></td><td>—</td><td class="tty-ops">' +
       (can ? '<button data-addpath="' + UI.esc(d.path) + '">添加</button>' : '') +
       '</td></tr>').join('');
     wrap.innerHTML = '<div class="panel" style="margin-bottom:16px"><div class="panel-head">' +
       '<h2>串口 TTY</h2><span class="spacer"></span>' +
+      '<button id="tty-refresh">刷新</button> ' +
       (can ? '<button id="tty-add">手动添加</button>' : '') + '</div>' +
       '<table class="si-table"><tr><th>别名</th><th>路径</th><th>状态</th><th>参数</th><th>操作</th></tr>' +
       (rows || '<tr><td colspan="5" style="color:var(--muted)">暂无配置</td></tr>') +
-      '</table></div>';
+      '</table>' +
+      (un.length > 5 ? '<div style="padding:8px 12px"><button id="tty-more">' +
+        (this.ttyShowAll ? '收起' : '显示全部 ' + un.length + ' 个未配置') + '</button></div>' : '') +
+      '</div>';
     if (!can) return;
     wrap.querySelectorAll('[data-edit]').forEach(b => {
       b.onclick = () => {
@@ -649,10 +740,14 @@ const AgentDetailPage = Object.assign(new Page(), {
         try {
           await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/ttys',
             Object.assign({}, it, { enabled: !it.enabled }));
-          this.loadTtys();
+          if (!this.ttysLoaded) this.loadTtys();
         } catch (e) { this.ttyError(e.message); }
       };
     });
+    const rf = document.getElementById('tty-refresh');
+    if (rf) rf.onclick = () => this.loadTtys(true);
+    const more = document.getElementById('tty-more');
+    if (more) more.onclick = () => { this.ttyShowAll = !this.ttyShowAll; this.renderTtyCard(wrap); };
     const add = document.getElementById('tty-add');
     if (add) add.onclick = () => this.openTtyEditor(null);
   },
@@ -697,7 +792,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       try {
         await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/ttys', body);
         close();
-        this.loadTtys();
+        if (!this.ttysLoaded) this.loadTtys();
       } catch (e) { this.ttyError(e.message); }
     };
   },
