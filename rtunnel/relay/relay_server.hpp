@@ -109,6 +109,9 @@ public:
     uint32_t check_seq = 0;
     std::unordered_map<uint32_t, std::string> metrics_results;
     std::unordered_map<uint32_t, std::string> tty_list_results;
+    std::unordered_map<uint32_t, std::string> metric_data_results;
+    std::unordered_map<std::string, std::string> metric_status;
+    uint32_t metric_query_seq = 0;
     uint32_t tty_list_seq = 0;
     uint32_t metrics_seq = 0;
     struct ClientCred { std::string user, token; };
@@ -172,6 +175,9 @@ private:
     std::string  takeTtyListResult(uint32_t rid);
     bool         pushTtyCfg(const char* devid, const std::string& json);
     bool         pushMetricCfg(const char* devid, const std::string& json);
+    bool         startMetricQuery(const char* devid, const std::string& json, uint32_t& rid, std::string& err);
+    std::string  takeMetricData(uint32_t rid);
+    std::string  takeMetricStatus(const std::string& devid);
     bool         hasAgent(const char* devid);
     bool         agentOnline(const char* devid) { return findAgent(devid) != nullptr; }
     std::string  fileDirOf(const char* devid);

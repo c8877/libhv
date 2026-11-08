@@ -1,5 +1,8 @@
 #include "admin_server.hpp"
 #include "common/logging.hpp"
+#include "cpputil/json.hpp"
+
+using nlohmann::json;
 #include <thread>
 #include <chrono>
 
@@ -262,11 +265,15 @@ int AdminServer::start(const AdminConfig& cfg) {
                 if (db_.ttyList(d, out)) relay_->pushTtyCfg(d.c_str(), out);
             }
             std::vector<std::string> mdevs;
-            db_.metricDevids(mdevs);
+            db_.metricSeriesDevids(mdevs);
             for (auto& d : mdevs) {
                 if (!relay_->hasAgent(d.c_str())) continue;
-                std::string out;
-                if (db_.metricGet(d, out)) relay_->pushMetricCfg(d.c_str(), out);
+                pushMetricSeriesConfig(d);
+                std::string st = relay_->takeMetricStatus(d);
+                auto sj = json::parse(st, nullptr, false);
+                if (!sj.is_discarded() && sj.value("applied", false)) {
+                    db_.metricSeriesAck(d, sj.value("revision", 0LL));
+                }
             }
         }
     }).detach();

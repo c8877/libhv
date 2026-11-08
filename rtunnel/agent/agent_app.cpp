@@ -913,6 +913,86 @@ void AgentApp::saveMetricLine(const std::string& line) {
     }
 }
 
+static bool readTtyCounters(const std::string& want, unsigned long long& rx, unsigned long long& tx) {
+    DIR* d = opendir("/proc/tty/driver");
+    if (!d) return false;
+    bool found = false;
+    struct dirent* e;
+    while ((e = readdir(d)) != NULL) {
+        if (e->d_name[0] == '.') continue;
+        std::ifstream in(std::string("/proc/tty/driver/") + e->d_name);
+        std::string line;
+        while (std::getline(in, line)) {
+            if (line.find(want) == std::string::npos) continue;
+            size_t p1 = line.find("tx:"), p2 = line.find("rx:");
+            if (p1 != std::string::npos) sscanf(line.c_str() + p1, "tx:%llu", &tx);
+            if (p2 != std::string::npos) sscanf(line.c_str() + p2, "rx:%llu", &rx);
+            found = true;
+        }
+    }
+    closedir(d);
+    return found;
+}
+
+void AgentApp::sampleSeries(const std::string& name, const SeriesCfg& cfg) {
+    nlohmann::json j;
+    j["ts"] = (long long)time(NULL) * 1000;
+    if (name == "cpu") {
+        j["v"] = cpu_usage;
+    } else if (name == "mem") {
+        std::ifstream mf("/proc/meminfo");
+        std::string line;
+        long long total = 0, avail = 0, free_kb = 0;
+        while (std::getline(mf, line)) {
+            long long v = 0;
+            if (sscanf(line.c_str(), "MemTotal: %lld", &v) == 1) total = v;
+            else if (sscanf(line.c_str(), "MemAvailable: %lld", &v) == 1) avail = v;
+            else if (sscanf(line.c_str(), "MemFree: %lld", &v) == 1) free_kb = v;
+        }
+        if (avail <= 0) avail = free_kb;
+        j["v"] = total > 0 ? (double)(total - avail) * 100.0 / total : 0.0;
+    } else if (name == "load") {
+        double la[3] = {0, 0, 0};
+        getloadavg(la, 3);
+        j["v"] = la[0];
+        j["load5"] = la[1];
+        j["load15"] = la[2];
+    } else if (name.rfind("net:", 0) == 0) {
+        std::string ifn = name.substr(4);
+        auto rd = [&](const char* f) -> unsigned long long {
+            std::ifstream in(std::string("/sys/class/net/") + ifn + "/statistics/" + f);
+            unsigned long long v = 0; in >> v; return v;
+        };
+        j["rx"] = rd("rx_bytes");
+        j["tx"] = rd("tx_bytes");
+        j["v"] = 0;
+    } else if (name.rfind("serial:", 0) == 0) {
+        unsigned long long rx = 0, tx = 0;
+        readTtyCounters(name.substr(7), rx, tx);
+        j["rx"] = rx;
+        j["tx"] = tx;
+        j["v"] = 0;
+    } else {
+        return;
+    }
+    std::string line = j.dump();
+    auto& ring = series_rings[name];
+    ring.push_back(line);
+    while ((int)ring.size() > cfg.points) ring.pop_front();
+}
+
+void AgentApp::seriesTick() {
+    agentSampleCpu(this);
+    long long now = (long long)time(NULL) * 1000;
+    for (auto& kv : series_cfgs) {
+        if (!kv.second.enabled) continue;
+        auto& last = series_last_ms[kv.first];
+        if (now - last < (long long)kv.second.interval * 1000) continue;
+        last = now;
+        sampleSeries(kv.first, kv.second);
+    }
+}
+
 void AgentApp::sampleMetric() {
     agentSampleCpu(this);
     double mem = 0;
@@ -1223,21 +1303,72 @@ void AgentApp::onFrame(rtnp::Frame* f) {
     }
     case rtnp::METRICS_CFG: {
         rtnp::Reader mc(f->payload, f->len);
-        static char mb[8192];
+        static char mb[16384];
         mc.str(mb, sizeof mb);
         if (mc.err) return;
         auto cj = nlohmann::json::parse(mb, nullptr, false);
-        if (cj.is_discarded() || !cj.is_object()) return;
-        applyMetricsConfig(cj);
-        restartMetricTimer();
-        sampleMetric();
+        if (cj.is_discarded() || !cj.is_object() || !cj.contains("series")) return;
+        series_revision = cj.value("revision", 0);
+        series_cfgs.clear();
+        for (auto& r : cj["series"]) {
+            if (!r.is_object()) continue;
+            std::string name = r.value("series", "");
+            if (name.empty()) continue;
+            SeriesCfg c;
+            c.enabled = r.value("enabled", true) ? 1 : 0;
+            c.interval = r.value("interval_sec", 5);
+            c.points = r.value("points", 720);
+            if (c.interval < 1) c.interval = 1;
+            if (c.interval > 300) c.interval = 300;
+            if (c.points < 60) c.points = 60;
+            if (c.points > 86400) c.points = 86400;
+            series_cfgs[name] = c;
+            auto it = series_rings.find(name);
+            if (it != series_rings.end()) {
+                while ((int)it->second.size() > c.points) it->second.pop_front();
+            }
+        }
         nlohmann::json st;
         st["applied"] = true;
-        st["interval_sec"] = metric_interval;
-        st["points"] = metric_points;
+        st["revision"] = series_revision;
+        st["series"] = (int)series_cfgs.size();
         std::string s2 = st.dump();
         rtnp::Writer sw; sw.str(s2.c_str());
         rtnp::send(io, rtnp::METRICS_STATUS, 0, sw.data, (uint16_t)sw.len);
+        return;
+    }
+    case rtnp::METRICS_QUERY: {
+        rtnp::Reader qr(f->payload, f->len);
+        static char qb[4096];
+        qr.str(qb, sizeof qb);
+        if (qr.err) return;
+        auto q = nlohmann::json::parse(qb, nullptr, false);
+        if (q.is_discarded() || !q.is_object()) return;
+        std::string name = q.value("series", "");
+        long long since = q.value("since_ts", (long long)0);
+        auto& ring = series_rings[name];
+        long long oldest = 0, newest = 0;
+        nlohmann::json pts = nlohmann::json::array();
+        bool truncated = false;
+        for (auto& line : ring) {
+            auto p = nlohmann::json::parse(line, nullptr, false);
+            if (p.is_discarded()) continue;
+            long long ts = p.value("ts", (long long)0);
+            if (!oldest) oldest = ts;
+            newest = ts;
+            if (since > 0 && ts <= since) continue;
+            if (since > 0 && oldest > since && ts == oldest) truncated = true;
+            pts.push_back(p);
+        }
+        nlohmann::json out;
+        out["series"] = name;
+        out["oldest_ts"] = oldest;
+        out["newest_ts"] = newest;
+        out["truncated"] = truncated;
+        out["points"] = pts;
+        std::string os = out.dump();
+        rtnp::Writer ow; ow.str(os.c_str());
+        rtnp::send(io, rtnp::METRICS_DATA, f->sid, ow.data, (uint16_t)ow.len);
         return;
     }
     case rtnp::METRICS_REQ: {
@@ -1456,6 +1587,18 @@ int AgentApp::run(int argc, char** argv) {
     init(lp);
     restartMetricTimer();
     loadMetricHistory();
+    if (series_cfgs.empty()) {
+        SeriesCfg def;
+        def.enabled = 1; def.interval = 5; def.points = 720;
+        series_cfgs["cpu"] = def;
+        series_cfgs["mem"] = def;
+        series_cfgs["load"] = def;
+    }
+    htimer_t* series_timer = htimer_add(lp, [](htimer_t* t) {
+        auto* app = (AgentApp*)hevent_userdata(t);
+        app->seriesTick();
+    }, 1000, INFINITE);
+    hevent_set_userdata(series_timer, this);
     sampleMetric();
     hloop_run(lp);
     hloop_free(&lp);

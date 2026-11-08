@@ -9,6 +9,12 @@ const AgentDetailPage = Object.assign(new Page(), {
     el.innerHTML = '<div class="panel"><div class="empty">图表组件加载中…</div></div>';
     try { await loadScriptOnce('/vendor/chart.umd.min.js'); } catch (e) {}
     this.devid = decodeURIComponent(params[0] || '');
+    this.seriesCfg = [];
+    this.lastTs = {};
+    try { await this.fetchSeriesCfg(); } catch (e) {}
+    if (this.seriesCfg.some(c => c.series === 'cpu' || c.series === 'mem')) {
+      AGENT_HIST.delete(this.devid);
+    }
     let hist = AGENT_HIST.get(this.devid);
     if (!hist) { hist = { mem: [], cpu: [] }; AGENT_HIST.set(this.devid, hist); }
     this.memHist = hist.mem;
@@ -29,8 +35,6 @@ const AgentDetailPage = Object.assign(new Page(), {
     if (this.auto && !this.timer) {
       this.timer = setInterval(() => this.refresh().catch(() => {}), this.period * 1000);
     }
-    if (this._sampler) clearInterval(this._sampler);
-    this._sampler = setInterval(() => this.sampleOnly().catch(() => {}), 5000);
     return p;
   },
   leave() {
@@ -41,6 +45,7 @@ const AgentDetailPage = Object.assign(new Page(), {
     this.charts = {};
   },
   pushSample(si) {
+    if (this.seriesCfg && this.seriesCfg.length) return;
     const now = Date.now();
     if (now - (this._lastSample || 0) < 1500) return;
     this._lastSample = now;
@@ -64,6 +69,7 @@ const AgentDetailPage = Object.assign(new Page(), {
   spark(id, data, color) {
     const c = document.getElementById(id);
     if (!c || !window.Chart) return;
+    try { const ex = Chart.getChart && Chart.getChart(c); if (ex) ex.destroy(); } catch (e) {}
     if (this.charts[id]) { try { this.charts[id].destroy(); } catch (e) {} }
     const maxY = (id === 'si-cpu' && Math.max(...(data.length ? data : [0])) <= 5) ? 10 : 100;
     this.charts['disk'] = new Chart(c.getContext('2d'), {
@@ -337,7 +343,8 @@ const AgentDetailPage = Object.assign(new Page(), {
           plugins: [pctPlugin]
         });
       }
-      this.loadMetricCfg();
+      this.pullSeriesCharts();
+      this.renderMetricCard(document.getElementById('si-metric'));
       this.loadTtys();
       const ce = document.getElementById('caps-edit');
       if (ce) ce.onclick = () => {
@@ -408,80 +415,87 @@ const AgentDetailPage = Object.assign(new Page(), {
   },
 
 
-  async loadMetricCfg() {
+
+  async fetchSeriesCfg() {
+    const list = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/metrics/series/config');
+    this.seriesCfg = Array.isArray(list) ? list : [];
+  },
+  async pullSeriesCharts() {
     const wrap = document.getElementById('si-metric');
-    if (!wrap) return;
-    try {
-      this.metricCfg = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/metrics/config');
-    } catch (e) {
-      wrap.innerHTML = '';
-      return;
-    }
-    this.renderMetricCard(wrap);
+    if (!this.seriesCfg || !this.seriesCfg.length) { if (wrap) wrap.innerHTML = ''; return; }
+    const pull = async (name) => {
+      if (!this.seriesCfg.some(c => c.series === name && c.enabled)) return;
+      const since = this.lastTs[name] || 0;
+      const r = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) +
+        '/metrics/series?series=' + encodeURIComponent(name) + '&since_ts=' + since);
+      const pts = (r && r.points) || [];
+      if (!since || r.truncated) {
+        this.memHist.length = 0; this.cpuHist.length = 0;   // 全量重建，单 series 分别清
+      }
+      const arr = name === 'cpu' ? this.cpuHist : this.memHist;
+      if (!since || r.truncated) arr.length = 0;
+      pts.forEach(p => arr.push(Number(p.v) || 0));
+      while (arr.length > 60) arr.shift();
+      this.lastTs[name] = r.newest_ts || since;
+    };
+    try { await pull('mem'); await pull('cpu'); } catch (e) {}
+    this.spark('si-mem', this.memHist, cssVar('--accent', '#4a9eff'));
+    this.spark('si-cpu', this.cpuHist, cssVar('--warn', '#f5a623'));
   },
   renderMetricCard(wrap) {
-    const c = this.metricCfg || {};
+    if (!wrap) return;
     const can = canManage();
-    const labels = { cpu: 'CPU', mem: '内存', load: '负载', net: '网卡', serial: '串口' };
-    const ms = (c.metrics || []).map(m => labels[m] || m).join(' / ') || '—';
+    const rows = (this.seriesCfg || []).map(c =>
+      '<tr><td><code>' + UI.esc(c.series) + '</code></td>' +
+      '<td>' + (c.enabled ? '<span class="pill ok">启用</span>' : '<span class="pill">禁用</span>') + '</td>' +
+      '<td>' + c.interval_sec + 's</td><td>' + c.points + '</td>' +
+      '<td>' + (c.synced ? '<span class="pill ok">已同步</span>' : '<span class="pill warn">未同步</span>') + '</td>' +
+      '<td>' + (can ? '<button data-medit="' + UI.esc(c.series) + '">编辑</button>' : '') + '</td></tr>').join('');
     wrap.innerHTML = '<div class="panel" style="margin-bottom:16px"><div class="panel-head">' +
       '<h2>监控采样</h2><span class="spacer"></span>' +
-      (can ? '<button id="metric-edit">编辑</button>' : '') + '</div>' +
-      '<table class="si-table">' +
-      '<tr><th>状态</th><td>' + (c.enabled ? '<span class="pill ok">启用</span>' : '<span class="pill">禁用</span>') +
-      ' <span class="muted">来源 ' + UI.esc(c.source || 'default') + '</span></td></tr>' +
-      '<tr><th>间隔 / 保留</th><td>' + (c.interval_sec || 5) + 's / ' + (c.points || 720) + ' 点</td></tr>' +
-      '<tr><th>指标</th><td>' + UI.esc(ms) + '</td></tr>' +
-      '<tr><th>持久化</th><td>' + (c.persist ? '开启' : '关闭') + '</td></tr>' +
-      '</table></div>';
-    const b = document.getElementById('metric-edit');
-    if (b) b.onclick = () => this.openMetricEditor();
+      (can ? '<button id="metric-add">添加指标</button>' : '') + '</div>' +
+      '<table class="si-table"><tr><th>指标</th><th>状态</th><th>间隔</th><th>点数</th><th>同步</th><th>操作</th></tr>' +
+      (rows || '<tr><td colspan="6" style="color:var(--muted)">暂无配置</td></tr>') + '</table></div>';
+    if (!can) return;
+    wrap.querySelectorAll('[data-medit]').forEach(b => {
+      b.onclick = () => this.openSeriesEditor(this.seriesCfg.find(c => c.series === b.dataset.medit));
+    });
+    const add = document.getElementById('metric-add');
+    if (add) add.onclick = () => {
+      const name = prompt('输入指标名，例如 cpu / mem / load / net:eth0 / serial:ttyUSB0');
+      if (!name) return;
+      this.openSeriesEditor({ series: name, enabled: true, interval_sec: 5, points: 720 });
+    };
   },
-  openMetricEditor() {
-    const c = this.metricCfg || {};
-    const has = m => (c.metrics || []).indexOf(m) >= 0;
+  openSeriesEditor(c) {
+    if (!c) return;
     const mask = document.createElement('div');
     mask.className = 'tty-mask';
-    mask.innerHTML = '<div class="tty-modal"><h2>采样配置</h2>' +
-      '<label class="row"><input type="checkbox" id="mc-en"' + (c.enabled !== false ? ' checked' : '') + '> 启用</label>' +
-      '<label>间隔（秒）<input id="mc-int" type="number" min="1" max="300" value="' + (c.interval_sec || 5) + '"></label>' +
-      '<label>保留点数<input id="mc-pts" type="number" min="60" max="8640" value="' + (c.points || 720) + '"></label>' +
-      '<label class="row"><input type="checkbox" id="mc-cpu"' + (has('cpu') ? ' checked' : '') + '> CPU</label>' +
-      '<label class="row"><input type="checkbox" id="mc-mem"' + (has('mem') ? ' checked' : '') + '> 内存</label>' +
-      '<label class="row"><input type="checkbox" id="mc-load"' + (has('load') ? ' checked' : '') + '> 负载</label>' +
-      '<label class="row"><input type="checkbox" id="mc-net"' + (has('net') ? ' checked' : '') + '> 网卡</label>' +
-      '<label>网卡列表<input id="mc-if" value="' + UI.esc((c.interfaces || []).join(',')) + '" placeholder="eth0,wlan0"></label>' +
-      '<label class="row"><input type="checkbox" id="mc-ser"' + (has('serial') ? ' checked' : '') + '> 串口统计</label>' +
-      '<label>串口列表<input id="mc-tty" value="' + UI.esc((c.ttys || []).join(',')) + '" placeholder="ttyUSB0,ttymxc0"></label>' +
-      '<label class="row"><input type="checkbox" id="mc-per"' + (c.persist ? ' checked' : '') + '> 本地持久化</label>' +
-      '<div class="tty-btns"><button id="mc-cancel">取消</button><button id="mc-save" class="primary">保存并下发</button></div></div>';
+    mask.innerHTML = '<div class="tty-modal"><h2>采样配置 · ' + UI.esc(c.series) + '</h2>' +
+      '<label class="row"><input type="checkbox" id="ms-en"' + (c.enabled ? ' checked' : '') + '> 启用</label>' +
+      '<label>间隔（秒）<input id="ms-int" type="number" min="1" max="300" value="' + c.interval_sec + '"></label>' +
+      '<label>保留点数<input id="ms-pts" type="number" min="60" max="86400" value="' + c.points + '"></label>' +
+      '<div class="tty-btns"><button id="ms-del">删除</button><button id="ms-cancel">取消</button>' +
+      '<button id="ms-save" class="primary">保存并下发</button></div></div>';
     document.body.appendChild(mask);
     const $ = id => mask.querySelector('#' + id);
     const close = () => mask.remove();
-    $('mc-cancel').onclick = close;
+    $('ms-cancel').onclick = close;
     mask.onclick = e => { if (e.target === mask) close(); };
-    $('mc-save').onclick = async () => {
-      const metrics = [];
-      if ($('mc-cpu').checked) metrics.push('cpu');
-      if ($('mc-mem').checked) metrics.push('mem');
-      if ($('mc-load').checked) metrics.push('load');
-      if ($('mc-net').checked) metrics.push('net');
-      if ($('mc-ser').checked) metrics.push('serial');
-      const split = v => v.split(',').map(x => x.trim()).filter(Boolean);
-      try {
-        await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/metrics/config', {
-          enabled: $('mc-en').checked,
-          interval_sec: Number($('mc-int').value),
-          points: Number($('mc-pts').value),
-          metrics: metrics,
-          interfaces: split($('mc-if').value),
-          ttys: split($('mc-tty').value),
-          persist: $('mc-per').checked,
-        });
-        close();
-        this.loadMetricCfg();
-      } catch (e) { this.ttyError(e.message); }
+    $('ms-del').onclick = async () => {
+      const list = this.seriesCfg.filter(x => x.series !== c.series);
+      try { await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/metrics/series/config', list); close(); this.reloadSeries(); } catch (e) { this.ttyError(e.message); }
     };
+    $('ms-save').onclick = async () => {
+      const next = { series: c.series, enabled: $('ms-en').checked,
+        interval_sec: Number($('ms-int').value), points: Number($('ms-pts').value) };
+      const list = this.seriesCfg.filter(x => x.series !== c.series).concat([next]);
+      try { await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/metrics/series/config', list); close(); this.reloadSeries(); } catch (e) { this.ttyError(e.message); }
+    };
+  },
+  async reloadSeries() {
+    try { await this.fetchSeriesCfg(); } catch (e) {}
+    this.renderMetricCard(document.getElementById('si-metric'));
   },
   async loadTtys() {
     const wrap = document.getElementById('si-tty');

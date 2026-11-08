@@ -56,6 +56,8 @@ enum Type : uint8_t {
     TTY_CFG_SET    = 0x2B,   // B→C：str json [{path,enabled,baud,data_bits,parity,stop_bits}]
     METRICS_CFG    = 0x2C,   // B→C：str json 采样配置
     METRICS_STATUS = 0x2D,   // C→B：str json {applied,error}
+    METRICS_QUERY  = 0x2E,   // B→C：str json {series,since_ts}
+    METRICS_DATA   = 0x2F,   // C→B：str json {series,points,...}
 };
 
 // 错误码

@@ -499,6 +499,32 @@ std::string RelayServer::takeTtyListResult(uint32_t rid) {
 
 bool RelayServer::hasAgent(const char* devid) { return findAgent(devid) != NULL; }
 
+bool RelayServer::startMetricQuery(const char* devid, const std::string& json, uint32_t& rid, std::string& err) {
+    RelayConn* a = findAgent(devid);
+    if (!a || !a->io) { err = "device offline"; return false; }
+    rid = ++metric_query_seq;
+    rtnp::Writer w;
+    w.str(json.c_str());
+    rtnp::send(a->io, rtnp::METRICS_QUERY, rid, w.data, (uint16_t)w.len);
+    return true;
+}
+
+std::string RelayServer::takeMetricData(uint32_t rid) {
+    auto it = metric_data_results.find(rid);
+    if (it == metric_data_results.end()) return std::string();
+    std::string s = it->second;
+    metric_data_results.erase(it);
+    return s;
+}
+
+std::string RelayServer::takeMetricStatus(const std::string& devid) {
+    auto it = metric_status.find(devid);
+    if (it == metric_status.end()) return std::string();
+    std::string s = it->second;
+    metric_status.erase(it);
+    return s;
+}
+
 bool RelayServer::pushMetricCfg(const char* devid, const std::string& json) {
     RelayConn* a = findAgent(devid);
     if (!a || !a->io) return false;
@@ -718,6 +744,20 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
     case rtnp::FILE_ACK:
         onFileAck(c, f);
         return;
+    case rtnp::METRICS_DATA: {
+        rtnp::Reader rr(f->payload, f->len);
+        static char md[256 * 1024];
+        rr.str(md, sizeof md);
+        if (!rr.err) metric_data_results[f->sid] = std::string(md);
+        return;
+    }
+    case rtnp::METRICS_STATUS: {
+        rtnp::Reader rr(f->payload, f->len);
+        static char ms[4096];
+        rr.str(ms, sizeof ms);
+        if (!rr.err && c->devid) metric_status[c->devid] = std::string(ms);
+        return;
+    }
     case rtnp::TTY_LIST_ACK: {
         rtnp::Reader rr(f->payload, f->len);
         static char tb[64 * 1024];

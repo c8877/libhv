@@ -63,6 +63,11 @@ public:
     bool fileMetaPut(const std::string& name, long long size, long long mtime_ms, const std::string& sha);
     bool distAlreadyPushed(const std::string& devid, const std::string& sha);
 
+    bool metricSeriesList(const std::string& devid, std::string& json_out);
+    bool metricSeriesPut(const std::string& devid, const std::string& rows_json,
+                         const std::string& actor, long long& revision, std::string& err);
+    bool metricSeriesDevids(std::vector<std::string>& out);
+    bool metricSeriesAck(const std::string& devid, long long revision);
     bool metricGet(const std::string& devid, std::string& json_out);   // 无记录返回默认
     bool metricPut(const std::string& devid, int enabled, int interval_sec, int points,
                    const std::string& metrics, const std::string& ifaces, const std::string& ttys,

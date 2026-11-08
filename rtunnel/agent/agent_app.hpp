@@ -110,6 +110,13 @@ private:
     void applyMetricsConfig(const nlohmann::json& j);
     void loadMetricHistory();
     void saveMetricLine(const std::string& line);
+    struct SeriesCfg { int enabled = 1; int interval = 5; int points = 720; };
+    std::map<std::string, SeriesCfg> series_cfgs;
+    std::map<std::string, std::deque<std::string>> series_rings;
+    std::map<std::string, long long> series_last_ms;
+    int series_revision = 0;
+    void seriesTick();
+    void sampleSeries(const std::string& name, const SeriesCfg& cfg);
     std::string  sha256File(const std::string& path);
     void         cleanupParts(const std::string& dir, time_t cutoff);
 

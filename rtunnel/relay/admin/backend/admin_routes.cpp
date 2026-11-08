@@ -22,6 +22,9 @@ void AdminServer::registerRoutes() {
     access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid", &AdminServer::handleAgentDetail);
     access(ROLE_VIEWER, "GET", "/api/v1/settings", &AdminServer::handleSettingsGet);
     access(ROLE_VIEWER, "GET", "/api/v1/me/profile", &AdminServer::handleProfileGet);
+    access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid/metrics/series/config", &AdminServer::handleMetricSeriesCfgGet);
+    access(ROLE_MANAGER, "PUT", "/api/v1/agents/:devid/metrics/series/config", &AdminServer::handleMetricSeriesCfgPut);
+    access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid/metrics/series", &AdminServer::handleMetricSeriesData);
     access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid/metrics/config", &AdminServer::handleMetricCfgGet);
     access(ROLE_MANAGER, "PUT", "/api/v1/agents/:devid/metrics/config", &AdminServer::handleMetricCfgPut);
     access(ROLE_VIEWER, "GET", "/api/v1/agents/:devid/ttys", &AdminServer::handleTtyList);
