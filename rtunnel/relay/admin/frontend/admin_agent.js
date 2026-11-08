@@ -1,7 +1,5 @@
 // 设备详情页（admin.js 之后加载，共享其全局工具）
 // ---------------------------------------------------------------- Pages.设备详情
-const AGENT_HIST = new Map();   // devid -> { mem: [], cpu: [] }
-
 const AgentDetailPage = Object.assign(new Page(), {
   refreshInterval() { return 0; },   // 由「每 5s 刷新」勾选框控制
   async enter(el, params) {
@@ -12,12 +10,6 @@ const AgentDetailPage = Object.assign(new Page(), {
     this.seriesCfg = [];
     this.lastTs = {};
     try { await this.fetchSeriesCfg(); } catch (e) {}
-    let hist = AGENT_HIST.get(this.devid);
-    if (!hist) { hist = { mem: [], cpu: [] }; AGENT_HIST.set(this.devid, hist); }
-    hist.mem.length = 0;
-    hist.cpu.length = 0;
-    this.memHist = hist.mem;
-    this.cpuHist = hist.cpu;
     this.charts = {};
     this.period = 5;
     this.auto = false;   // 采样自动刷新默认关闭，用户显式勾选才开启
@@ -33,76 +25,6 @@ const AgentDetailPage = Object.assign(new Page(), {
     if (this._retry) { clearTimeout(this._retry); this._retry = null; }
     Object.values(this.charts || {}).forEach(c => { try { c.destroy(); } catch (e) {} });
     this.charts = {};
-  },
-  pushSample(si) {
-    if (this.seriesCfg && this.seriesCfg.length) return;
-    const now = Date.now();
-    if (now - (this._lastSample || 0) < 1500) return;
-    this._lastSample = now;
-    const mem = si.mem || {};
-    const total = Number(si.mem_total_kb != null ? si.mem_total_kb : mem.total_kb) || 0;
-    const avail = Number(si.mem_available_kb != null ? si.mem_available_kb : mem.available_kb) || 0;
-    const memPct = total > 0 ? Math.round((total - avail) * 100 / total) : 0;
-    this.memHist.push(memPct);
-    this.cpuHist.push((si.cpu || {}).usage || 0);
-    if (this.memHist.length > 60) this.memHist.shift();
-    if (this.cpuHist.length > 60) this.cpuHist.shift();
-  },
-  async sampleOnly() {
-    if (!this.devid) return;
-    const r = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/sysinfo?refresh=1');
-    if (!r.sysinfo) return;
-    this.pushSample(r.sysinfo);
-    this.spark('si-mem', this.memHist, cssVar('--accent', '#4a9eff'));
-    this.spark('si-cpu', this.cpuHist, cssVar('--warn', '#f5a623'));
-  },
-  spark(id, data, color) {
-    const c = document.getElementById(id);
-    if (!c || !window.Chart) return;
-    try { const ex = Chart.getChart && Chart.getChart(c); if (ex) ex.destroy(); } catch (e) {}
-    if (this.charts[id]) { try { this.charts[id].destroy(); } catch (e) {} }
-    const maxY = (id === 'si-cpu' && Math.max(...(data.length ? data : [0])) <= 5) ? 10 : 100;
-    this.charts['disk'] = new Chart(c.getContext('2d'), {
-      type: 'line',
-      data: { labels: (data.length > 1 ? data : [data[0] || 0, data[0] || 0]).map((_, i) => i),
-        datasets: [{ data: data.length > 1 ? data : [data[0] || 0, data[0] || 0], borderColor: color, backgroundColor: color + '26',
-          fill: true, pointRadius: 2, pointHoverRadius: 5, pointBackgroundColor: color,
-          pointBorderWidth: 0, borderWidth: 2, tension: .3 }] },
-      options: { animation: false, responsive: true,
-        interaction: { mode: 'index', intersect: false },
-        scales: { x: { display: false }, y: { display: false, min: 0, max: maxY } },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            displayColors: false,
-            callbacks: {
-              title: items => items.length ? '采样 #' + (items[0].dataIndex + 1) : '',
-              label: ctx => (id === 'si-mem' ? '内存 ' : 'CPU ') +
-                            Number(ctx.parsed.y || 0).toFixed(1) + '%',
-            }
-          }
-        } },
-      plugins: [{
-        id: 'crosshair',
-        afterDraw(chart) {
-          const act = chart.tooltip && chart.tooltip.getActiveElements
-            ? chart.tooltip.getActiveElements() : [];
-          if (!act.length) return;
-          const x = act[0].element.x;
-          const a = chart.chartArea;
-          const g = chart.ctx;
-          g.save();
-          g.strokeStyle = cssVar('--muted', '#8b929c');
-          g.setLineDash([3, 3]);
-          g.lineWidth = 1;
-          g.beginPath();
-          g.moveTo(x, a.top);
-          g.lineTo(x, a.bottom);
-          g.stroke();
-          g.restore();
-        }
-      }]
-    });
   },
   diskColor(p) { return p >= 85 ? cssVar('--bad', '#e5534b') : p >= 70 ? cssVar('--warn', '#f5a623') : cssVar('--accent', '#4a9eff'); },
   async refresh() {
@@ -138,7 +60,6 @@ const AgentDetailPage = Object.assign(new Page(), {
       const avail = Number(si.mem_available_kb) || 0;
       const memPct = total > 0 ? Math.round((total - avail) * 100 / total) : 0;
       const cpu = si.cpu || { usage: 0, cores: [] };
-      this.pushSample(si);
 
       const mounts = si.mounts || [];
       const maxTotal = mounts.reduce((m, x) => Math.max(m, Number(x.total_kb) || 0), 1);
@@ -160,27 +81,14 @@ const AgentDetailPage = Object.assign(new Page(), {
       const nicPanel = '<div class="panel si-nic"><div class="panel-head"><h2>网卡</h2></div>' +
         UI.table(['接口', 'IP', '掩码', '状态'], nics) + '</div>';
 
-      html += '<div class="si-grid">' +
-        '<div class="panel si-mem"><div class="panel-head"><h2>内存</h2>' +
-        '<span class="spacer"></span><span class="si-num">' + memPct + '%</span></div>' +
-        '<div class="si-body"><canvas id="si-mem" height="56"></canvas>' +
-        '<div class="si-legend">已用 ' + kb(total - avail) + ' / ' + kb(total) +
-        ' · Swap ' + kb(si.swap_total_kb) + '</div></div></div>' +
-        '<div class="panel si-disk"><div class="panel-head"><h2>存储</h2>' +
+      const diskPanel = '<div class="panel si-disk"><div class="panel-head"><h2>存储</h2>' +
         '<span class="spacer"></span><span style="color:var(--muted);font-size:12px">条长按最大分区归一</span></div>' +
         '<div class="si-body"><canvas id="si-disk" height="' +
-          Math.max(60, (si.mounts || []).length * 24 + 16) + '"></canvas></div></div>' +
-        '<div class="panel si-cpu"><div class="panel-head"><h2>CPU</h2>' +
-        '<span class="spacer"></span><span class="si-num">' + ((cpu.cores || []).length ? (cpu.usage || 0).toFixed(0) + '%' : '—') + '</span></div>' +
-        '<div class="si-body"><canvas id="si-cpu" height="56"></canvas>' +
-        '<div class="si-legend">load ' + (si.load1 || 0).toFixed(2) + ' / ' +
-        (si.load5 || 0).toFixed(2) + ' / ' + (si.load15 || 0).toFixed(2) +
-        ' · ' + (cpu.cores || []).length + ' 核</div></div></div>' +
-        nicPanel +
-        '</div>' +
-        '<div id="si-metric"></div>' +
-        '<div id="si-series"></div>' +
-        '<div id="si-tty"></div>';
+          Math.max(60, (si.mounts || []).length * 24 + 16) + '"></canvas></div></div>';
+      html += '<div id="si-series"></div>' +
+        '<div class="si-two">' + diskPanel + nicPanel + '</div>' +
+        '<div id="si-tty"></div>' +
+        '<div id="si-metric"></div>';
 
       const certText = si.mtls
         ? UI.kv({ '证书主体': UI.esc(si.cert_subject || ''), '签发者': UI.esc(si.cert_issuer || ''),
@@ -221,8 +129,6 @@ const AgentDetailPage = Object.assign(new Page(), {
 
     if (si) {
       const self = this;
-      this.spark('si-mem', this.memHist, cssVar('--accent', '#4a9eff'));
-      this.spark('si-cpu', this.cpuHist, cssVar('--warn', '#f5a623'));
       const c = document.getElementById('si-disk');
       if (c && window.Chart) {
         const labels = (si.mounts || []).map(m =>
@@ -335,7 +241,6 @@ const AgentDetailPage = Object.assign(new Page(), {
           plugins: [pctPlugin]
         });
       }
-      this.pullSeriesCharts();
       this.renderMetricCard(document.getElementById('si-metric'));
       if (document.getElementById('series-charts')) this.pullSeriesPanel(false);
       else this.renderSeriesPanel();
@@ -617,29 +522,6 @@ const AgentDetailPage = Object.assign(new Page(), {
   async fetchSeriesCfg() {
     const list = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/metrics/series/config');
     this.seriesCfg = Array.isArray(list) ? list : [];
-  },
-  async pullSeriesCharts() {
-    const wrap = document.getElementById('si-metric');
-    if (!this.seriesCfg || !this.seriesCfg.length) { if (wrap) wrap.innerHTML = ''; return; }
-    const pull = async (name) => {
-      if (!this.seriesCfg.some(c => c.series === name && c.enabled)) return;
-      const since = this.lastTs[name] || 0;
-      const r = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) +
-        '/metrics/series?series=' + encodeURIComponent(name) + '&since_ts=' + since);
-      if (r && r.truncated && since) {
-        this.lastTs[name] = 0;
-        return pull(name);
-      }
-      const pts = (r && r.points) || [];
-      const arr = name === 'cpu' ? this.cpuHist : this.memHist;
-      if (!since) arr.length = 0;
-      pts.forEach(p => arr.push(Number(p.v) || 0));
-      while (arr.length > 60) arr.shift();
-      this.lastTs[name] = (r && r.newest_ts) || since;
-    };
-    try { await pull('mem'); await pull('cpu'); } catch (e) {}
-    this.spark('si-mem', this.memHist, cssVar('--accent', '#4a9eff'));
-    this.spark('si-cpu', this.cpuHist, cssVar('--warn', '#f5a623'));
   },
   renderMetricCard(wrap) {
     if (!wrap) return;
