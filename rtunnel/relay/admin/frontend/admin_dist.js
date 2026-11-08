@@ -86,7 +86,7 @@ const DistributePage = Object.assign(new Page(), {
             this.maxRetries + '" style="width:70px"></label>' +
         '</div>' +
       '</div>' +
-      '<div style="padding:0 16px 16px"><table class="tbl"><thead><tr><th style="width:36px"><input type="checkbox" id="dist-all"' +
+      '<div style="padding:0 16px 16px;overflow:auto"><table class="tbl"><thead><tr><th style="width:36px"><input type="checkbox" id="dist-all"' +
         (allChecked ? ' checked' : '') + '></th>' + head('devid', '设备') + head('online', '状态') +
         head('owner', '归属') + head('remote_addr', '远端地址') + '</tr></thead><tbody>' +
         view.map(a => '<tr' + (a.online ? '' : ' style="opacity:.55"') + '><td><input type="checkbox" class="dist-pick" data-dev="' +
@@ -229,7 +229,7 @@ const TasksPage = Object.assign(new Page(), {
         (this.batch ? '<span class="pill info">本批：' + UI.esc(this.batch) + ' ×</span>' : '') +
         '<span class="spacer" style="flex:1"></span>' +
         '<button id="task-refresh">刷新</button></div>' +
-      '<div style="padding:0 16px 16px"><table class="tbl"><thead><tr>' +
+      '<div style="padding:0 16px 16px;overflow:auto"><table class="tbl"><thead><tr>' +
         '<th>ID</th><th>文件</th><th>设备</th><th>目标路径</th><th>进度/大小</th>' +
         '<th>状态</th><th>重试</th><th>开始</th><th>截止</th><th>操作</th></tr></thead><tbody>' +
         (rows || '<tr><td colspan="10" class="empty">暂无任务</td></tr>') +
