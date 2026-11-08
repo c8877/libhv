@@ -226,8 +226,10 @@ const FilesPage = Object.assign(new Page(), {
   async refresh() {
     const arr = await Api.get('/api/v1/files?sort=' + this.sort + '&order=' + this.order);
     const rows = arr.map(f => [
-      '<b>' + UI.esc(f.name) + '</b>', UI.bytes(f.size),
-      '<code title="' + UI.esc(f.sha256 || '') + '">' + UI.esc((f.sha256 || '').slice(0, 8)) + '</code>',
+      '<b>' + UI.esc(f.name) + '</b>',
+      '<span style="display:block;text-align:right">' + UI.bytes(f.size) + '</span>',
+      '<code title="' + UI.esc(f.sha256 || '') + '">' + UI.esc((f.sha256 || '').slice(0, 8)) + '</code> ' +
+        (f.sha256 ? '<button class="cp" data-hash="' + UI.esc(f.sha256) + '">复制</button>' : ''),
       new Date(f.mtime_ms).toLocaleString(),
       '<button class="dl" data-name="' + UI.esc(f.name) + '">下载</button> ' +
       (canManage() ? '<button class="push" data-name="' + UI.esc(f.name) + '">分发</button> ' : '') +
@@ -242,11 +244,25 @@ const FilesPage = Object.assign(new Page(), {
       '<span id="upload-status" style="color:var(--muted)"></span>' +
       '<span style="color:var(--muted)">单文件上限 ' + uploadLimitMb() + ' MiB</span></div></div>' +
       '<div class="panel"><div class="panel-head"><h2>文件列表</h2><span class="spacer"></span>' +
+      '<input id="fl-q" class="tty-search" placeholder="搜索文件名">' +
       '<span>共 ' + arr.length + ' 个</span></div>' +
       UI.table([this.sortLink('name', '名称'), this.sortLink('size', '大小'), '哈希',
                 this.sortLink('mtime', '修改时间'), '操作'], rows) + '</div>';
 
     document.getElementById('files-refresh').onclick = () => this.refresh();
+    const fq = document.getElementById('fl-q');
+    if (fq) fq.oninput = () => {
+      const q = fq.value.trim().toLowerCase();
+      document.querySelectorAll('#page tbody tr').forEach(tr => {
+        tr.style.display = !q || tr.innerText.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
+      });
+    };
+    document.querySelectorAll('#page button.cp').forEach(btn => {
+      btn.onclick = async () => {
+        try { await navigator.clipboard.writeText(btn.dataset.hash); UI.toast('哈希已复制'); }
+        catch (e) { UI.toast('复制失败', true); }
+      };
+    });
     const MAX_UPLOAD = uploadLimitMb() * 1024 * 1024;
     const CHUNK = 8 * 1024 * 1024;
     document.getElementById('upload-btn').onclick = async () => {

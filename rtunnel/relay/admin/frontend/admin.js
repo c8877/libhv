@@ -572,28 +572,63 @@ const AccountsPage = Object.assign(new Page(), {
     const roleOpts = me.role === 'admin'
       ? '<option value="viewer">浏览者</option><option value="operator">操作员</option><option value="manager">管理员</option>'
       : '<option value="viewer">浏览者</option><option value="operator">操作员</option>';
+    const roleBadge = r => '<span class="pill ' + (r === 'admin' ? 'warn' : r === 'manager' ? 'info' : '') + '">' +
+      ({admin:'管理员',manager:'管理员',operator:'操作员',viewer:'浏览者'}[r] || r) + '</span>';
+    const rows2 = arr.map(u => [
+      '<b>' + UI.esc(u.username) + '</b>', roleBadge(u.role),
+      u.status === 'active' ? '<span class="pill ok">启用</span>' : '<span class="pill bad">禁用</span>',
+      new Date(u.created_ms).toLocaleString(),
+      (() => {
+        let ops = '<button class="pw" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">改密</button> ';
+        if (canM(u)) {
+          ops += '<button class="role" data-id="' + u.id + '">改角色</button> ';
+          ops += '<button class="st" data-id="' + u.id + '" data-st="' + (u.status === 'active' ? 'disabled' : 'active') + '">' +
+                 (u.status === 'active' ? '禁用' : '启用') + '</button> ';
+          ops += '<button class="del" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">删除</button>';
+        }
+        return ops;
+      })(),
+    ]);
     this.el.innerHTML =
-      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>创建账号</h2></div>' +
-      '<div style="padding:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
-      '<input id="nu-name" placeholder="用户名" size="14"> ' +
-      '<input id="nu-pass" type="password" placeholder="密码（≥8位）" size="16"> ' +
-      '<select id="nu-role">' + roleOpts + '</select> ' +
-      '<button class="primary" id="nu-btn">创建</button><span id="nu-result" style="color:var(--muted)"></span></div></div>' +
       '<div class="panel"><div class="panel-head"><h2>账号列表</h2><span class="spacer"></span>' +
-      '<span>共 ' + arr.length + ' 个</span></div>' +
-      UI.table(['用户名', '角色', '状态', '创建时间', '操作'], rows) + '</div>';
+      '<input id="au-q" class="tty-search" placeholder="搜索用户名">' +
+      '<span>共 ' + arr.length + ' 个</span> ' +
+      '<button class="primary" id="nu-open">+ 新建账号</button></div>' +
+      UI.table(['用户名', '角色', '状态', '创建时间', '操作'], rows2) + '</div>';
 
-    document.getElementById('nu-btn').onclick = async () => {
-      const username = document.getElementById('nu-name').value.trim();
-      const password = document.getElementById('nu-pass').value;
-      const role = document.getElementById('nu-role').value;
-      if (!username) { UI.toast('用户名不能为空', true); return; }
-      if (password.length < 8) { UI.toast('密码至少 8 位', true); return; }
-      try {
-        await Api.post('/api/v1/users', { username, password, role });
-        UI.toast('已创建 ' + username);
-        this.refresh();
-      } catch (e) { UI.toast('创建失败：' + e.message, true); }
+    const aq = document.getElementById('au-q');
+    if (aq) aq.oninput = () => {
+      const q = aq.value.trim().toLowerCase();
+      document.querySelectorAll('#page tbody tr').forEach(tr => {
+        tr.style.display = !q || tr.innerText.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
+      });
+    };
+    document.getElementById('nu-open').onclick = () => {
+      const mask = document.createElement('div');
+      mask.className = 'tty-mask';
+      mask.innerHTML = '<div class="tty-modal"><h2>新建账号</h2>' +
+        '<label>用户名<input id="nu-name" placeholder="用户名"></label>' +
+        '<label>密码<input id="nu-pass" type="password" placeholder="至少 8 位"></label>' +
+        '<label>角色<select id="nu-role">' + roleOpts + '</select></label>' +
+        '<div class="tty-btns"><button id="nu-cancel">取消</button>' +
+        '<button class="primary" id="nu-btn">创建</button></div></div>';
+      document.body.appendChild(mask);
+      const close = () => mask.remove();
+      mask.querySelector('#nu-cancel').onclick = close;
+      mask.onclick = e => { if (e.target === mask) close(); };
+      mask.querySelector('#nu-btn').onclick = async () => {
+        const username = mask.querySelector('#nu-name').value.trim();
+        const password = mask.querySelector('#nu-pass').value;
+        const role = mask.querySelector('#nu-role').value;
+        if (!username) { UI.toast('用户名不能为空', true); return; }
+        if (password.length < 8) { UI.toast('密码至少 8 位', true); return; }
+        try {
+          await Api.post('/api/v1/users', { username, password, role });
+          UI.toast('已创建 ' + username);
+          close();
+          this.refresh();
+        } catch (e) { UI.toast('创建失败：' + e.message, true); }
+      };
     };
     document.querySelectorAll('#page button.pw').forEach(btn => {
       btn.onclick = async () => {
