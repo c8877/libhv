@@ -99,6 +99,8 @@ public:
     RelayConn*  conns = nullptr;      // 全局连接表
     RelayConn*  agents = nullptr;     // devid 注册表
     std::unordered_map<std::string, SysinfoEntry> sysinfo_cache;
+    struct SysinfoLast { std::string json; bool full = true; uint64_t ts = 0; };
+    std::unordered_map<std::string, SysinfoLast> sysinfo_last;
     std::unordered_map<std::string, ConfigAck> config_acks;
     std::unordered_map<std::string, int> caps_shell;   // devid -> 0/1，用于设备列表隐藏 Shell
     std::unordered_map<std::string, std::string> caps_file_dir;
@@ -155,8 +157,9 @@ private:
     bool         isRevoked(const std::string& san) const;
     bool         revokeSan(const std::string& san);   // 写黑名单 + 踢在线连接
     void         loadRevoked();                       // 启动时读 revoked.txt
-    bool         sendSysinfoReq(const char* devid);   // 要求 agent 立即上报
+    bool         sendSysinfoReq(const char* devid, int mode = 0);   // 要求 agent 立即上报
     std::string  sysinfoOf(const char* devid, uint64_t* ts);
+    std::string  sysinfoLastOf(const char* devid, bool* full, uint64_t* ts);
     bool         sendConfig(const char* devid, uint32_t sid, const std::string& json);
     std::string  configAck(const char* devid, uint32_t sid, uint64_t* ts);
     bool         startFilePush(const char* devid, const char* path, const char* dir,

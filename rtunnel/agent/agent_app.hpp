@@ -88,7 +88,8 @@ private:
     void         handleOpen(const rtnp::Frame* f);
     int          openShellStream(LocalStream* s);
     void         killShellChild(LocalStream* s);
-    void         sendSysinfo();
+    void         sendSysinfo(int mode = 0);
+    std::string sysinfo_sig;
     void         onReady() override { sendSysinfo(); }
     void         loadConfig();
     bool         saveConfig();

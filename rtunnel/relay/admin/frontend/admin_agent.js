@@ -9,6 +9,7 @@ const AgentDetailPage = Object.assign(new Page(), {
     this.devid = decodeURIComponent(params[0] || '');
     this.seriesCfg = [];
     this.lastTs = {};
+    this._sysinfoFull = true;
     try { await this.fetchSeriesCfg(); } catch (e) {}
     this.charts = {};
     this.period = 10;
@@ -77,9 +78,27 @@ const AgentDetailPage = Object.assign(new Page(), {
     const d = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid));
     let si = null, siTs = 0;
     try {
-      const r = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/sysinfo?refresh=1');
+      const mode = this._sysinfoFull ? 'full' : 'inc';
+      const r = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/sysinfo?refresh=1&mode=' + mode);
       si = r.sysinfo; siTs = r.ts;
-      this.si = si;
+      if (r.mode === 'inc' && this.si) {
+        const base = this.si;
+        if (si.swap_free_kb != null) base.swap_free_kb = si.swap_free_kb;
+        (si.mounts || []).forEach(p => {
+          const m = (base.mounts || []).find(x => x.mount === p.mount);
+          if (m && p.free_kb != null) m.free_kb = p.free_kb;
+        });
+        (si.nics || []).forEach(p => {
+          const n = (base.nics || []).find(x => x.name === p.name);
+          if (!n) return;
+          if (p.ip != null) n.ip = p.ip;
+          if (p.up != null) n.up = p.up;
+        });
+        si = base;
+      } else {
+        this.si = si;
+      }
+      this._sysinfoFull = false;
     } catch (e) {}
 
     const rows = (d.streams || []).map(s => [

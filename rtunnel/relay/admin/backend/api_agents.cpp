@@ -195,24 +195,45 @@ void AdminServer::handleAgentSysinfo(const HttpContextPtr& ctx) {
         ctx->send("{\"error\":\"forbidden\"}");
         return;
     }
-    callRelay([this, &devid]() {
-        return relay_->sendSysinfoReq(devid.c_str()) ? std::string("1") : std::string("0");
+    bool inc = ctx->param("mode") == "inc";
+    std::string cached;
+    uint64_t ts = 0;
+    cached = callRelay([this, &devid, &ts]() { return relay_->sysinfoOf(devid.c_str(), &ts); });
+    if (cached.empty()) inc = false;
+    uint64_t start_ms = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    callRelay([this, &devid, inc]() {
+        return relay_->sendSysinfoReq(devid.c_str(), inc ? 1 : 0) ? std::string("1") : std::string("0");
     });
     std::string js;
-    uint64_t ts = 0;
     int waits = settingInt("proxy.sysinfo_wait_ms", 2000) / 50;
-    for (int i = 0; i < waits && js.empty(); ++i) {
+    for (int i = 0; i < waits; ++i) {
         usleep(50000);
         js = callRelay([this, &devid, &ts]() {
             return relay_->sysinfoOf(devid.c_str(), &ts);
         });
+        if (!js.empty() && ts >= start_ms) break;
+        js.clear();
+    }
+    if (js.empty()) {
+        js = cached;
+        ts = 0;
     }
     if (js.empty()) {
         ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
         ctx->send("{\"error\":\"device offline or no response\"}");
         return;
     }
-    std::string out = "{\"ts\":" + std::to_string(ts) + ",\"sysinfo\":" + js + "}";
+    bool last_full = true;
+    uint64_t last_ts = 0;
+    std::string last = callRelay([this, &devid, &last_full, &last_ts]() {
+        return relay_->sysinfoLastOf(devid.c_str(), &last_full, &last_ts);
+    });
+    if (inc && !last.empty() && !last_full) {
+        ctx->send("{\"ts\":" + std::to_string(last_ts) + ",\"mode\":\"inc\",\"sysinfo\":" + last + "}");
+        return;
+    }
+    std::string out = "{\"ts\":" + std::to_string(ts) + ",\"mode\":\"full\",\"sysinfo\":" + js + "}";
     ctx->send(out);
 }
 

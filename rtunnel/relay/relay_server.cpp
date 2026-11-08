@@ -658,11 +658,21 @@ std::string RelayServer::configAck(const char* devid, uint32_t sid, uint64_t* ts
     return it->second.json;
 }
 
-bool RelayServer::sendSysinfoReq(const char* devid) {
+bool RelayServer::sendSysinfoReq(const char* devid, int mode) {
     RelayConn* a = findAgent(devid);
     if (!a || !a->io) return false;
-    rtnp::send(a->io, rtnp::SYSINFO_REQ, 0, NULL, 0);
+    rtnp::Writer w;
+    w.u8((uint8_t)mode);
+    rtnp::send(a->io, rtnp::SYSINFO_REQ, 0, w.data, (uint16_t)w.len);
     return true;
+}
+
+std::string RelayServer::sysinfoLastOf(const char* devid, bool* full, uint64_t* ts) {
+    auto it = sysinfo_last.find(devid);
+    if (it == sysinfo_last.end()) { if (full) *full = true; if (ts) *ts = 0; return std::string(); }
+    if (full) *full = it->second.full;
+    if (ts) *ts = it->second.ts;
+    return it->second.json;
 }
 
 std::string RelayServer::sysinfoOf(const char* devid, uint64_t* ts) {
@@ -781,9 +791,48 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         r.str(buf, sizeof(buf));
         if (!r.err) {
             SysinfoEntry e;
-            e.json = std::string(buf);
-            e.ts = (uint64_t)time(NULL) * 1000;
-            sysinfo_cache[c->devid] = e;
+            auto part = nlohmann::json::parse(std::string(buf), nullptr, false);
+            bool full = part.is_discarded() || part.value("full", true);
+            e.ts = hloop_now_ms(loop);
+            if (full) {
+                e.json = std::string(buf);
+                sysinfo_cache[c->devid] = e;
+            } else {
+                auto it = sysinfo_cache.find(c->devid);
+                if (it == sysinfo_cache.end()) {
+                    e.json = std::string(buf);
+                    sysinfo_cache[c->devid] = e;
+                } else {
+                    auto base = nlohmann::json::parse(it->second.json, nullptr, false);
+                    if (base.is_discarded()) base = nlohmann::json::object();
+                    if (part.contains("swap_free_kb")) base["swap_free_kb"] = part["swap_free_kb"];
+                    if (part.contains("mounts") && base.contains("mounts")) {
+                        std::map<std::string, uint64_t> free_kb;
+                        for (auto& m : part["mounts"]) free_kb[m.value("mount", "")] = m.value("free_kb", (uint64_t)0);
+                        for (auto& m : base["mounts"]) {
+                            auto fi = free_kb.find(m.value("mount", ""));
+                            if (fi != free_kb.end()) m["free_kb"] = fi->second;
+                        }
+                    }
+                    if (part.contains("nics") && base.contains("nics")) {
+                        std::map<std::string, nlohmann::json> nm;
+                        for (auto& n : part["nics"]) nm[n.value("name", "")] = n;
+                        for (auto& n : base["nics"]) {
+                            auto ni = nm.find(n.value("name", ""));
+                            if (ni == nm.end()) continue;
+                            if (ni->second.contains("ip")) n["ip"] = ni->second["ip"];
+                            if (ni->second.contains("up")) n["up"] = ni->second["up"];
+                        }
+                    }
+                    e.json = base.dump();
+                    sysinfo_cache[c->devid] = e;
+                }
+            }
+            SysinfoLast sl;
+            sl.json = std::string(buf);
+            sl.full = full;
+            sl.ts = e.ts;
+            sysinfo_last[c->devid] = sl;
             auto sj = nlohmann::json::parse(e.json, nullptr, false);
             if (!sj.is_discarded() && sj.contains("caps") && sj["caps"].contains("shell")) {
                 caps_shell[c->devid] = sj["caps"]["shell"].get<bool>() ? 1 : 0;

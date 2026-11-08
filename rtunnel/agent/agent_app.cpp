@@ -934,7 +934,7 @@ void AgentApp::seriesTick() {
     }
 }
 
-void AgentApp::sendSysinfo() {
+void AgentApp::sendSysinfo(int mode) {
     using nlohmann::json;
     json j;
     j["version"] = hv_version();
@@ -1065,7 +1065,31 @@ void AgentApp::sendSysinfo() {
     }
 #endif
 
-    std::string body = j.dump();
+    nlohmann::json sig;
+    for (const char* k : {"version", "machine", "kernel", "cpu_model", "cpu_count", "board",
+                          "mem_total_kb", "swap_total_kb", "caps", "mtls", "cert_serial"}) {
+        if (j.contains(k)) sig[k] = j[k];
+    }
+    sig["mounts"] = nlohmann::json::array();
+    for (auto& m : j["mounts"]) sig["mounts"].push_back({{"mount", m["mount"]}, {"fstype", m["fstype"]}, {"total_kb", m["total_kb"]}});
+    sig["nics"] = nlohmann::json::array();
+    for (auto& n : j["nics"]) sig["nics"].push_back(n["name"]);
+    std::string sigs = sig.dump();
+
+    nlohmann::json out;
+    if (mode == 1 && !sysinfo_sig.empty() && sigs == sysinfo_sig) {
+        out["full"] = false;
+        out["swap_free_kb"] = j["swap_free_kb"];
+        out["mounts"] = nlohmann::json::array();
+        for (auto& m : j["mounts"]) out["mounts"].push_back({{"mount", m["mount"]}, {"free_kb", m["free_kb"]}});
+        out["nics"] = nlohmann::json::array();
+        for (auto& n : j["nics"]) out["nics"].push_back({{"name", n["name"]}, {"ip", n["ip"]}, {"up", n["up"]}});
+    } else {
+        sysinfo_sig = sigs;
+        j["full"] = true;
+        out = j;
+    }
+    std::string body = out.dump();
     rtnp::Writer w;
     w.str(body.c_str());
     rtnp::send(io, rtnp::SYSINFO, 0, w.data, (uint16_t)w.len);
@@ -1073,9 +1097,12 @@ void AgentApp::sendSysinfo() {
 
 void AgentApp::onFrame(rtnp::Frame* f) {
     switch (f->type) {
-    case rtnp::SYSINFO_REQ:
-        sendSysinfo();
+    case rtnp::SYSINFO_REQ: {
+        int mode = 0;
+        if (f->len > 0) { rtnp::Reader r(f->payload, f->len); mode = r.u8(); }
+        sendSysinfo(mode);
         return;
+    }
     case rtnp::CONFIG_SET:
         handleConfigSet(f);
         return;
