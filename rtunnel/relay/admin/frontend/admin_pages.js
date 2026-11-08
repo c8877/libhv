@@ -509,7 +509,8 @@ const TtyPage = Object.assign(new Page(), {
     el.innerHTML = '<div class="panel"><div class="panel-head">' +
       '<h2>串口调试 · ' + UI.esc(this.alias) + '</h2><span class="spacer"></span>' +
       '<span id="tty-state" class="pill">连接中…</span> ' +
-      '<button id="tty-close">断开</button></div>' +
+      '<button id="tty-close">断开</button>' +
+      '<button id="tty-dl" style="display:none">下载抓流</button></div>' +
       '<div class="tty-console" id="tty-log"></div>' +
       '<div class="tty-send">' +
       '<select id="tty-mode"><option value="text">文本</option><option value="hex">HEX</option></select>' +
@@ -528,6 +529,9 @@ const TtyPage = Object.assign(new Page(), {
     this.inputEl = document.getElementById('tty-input');
     const $ = id => document.getElementById(id);
     $('tty-close').onclick = () => { if (this.ws) this.ws.close(); };
+    $('tty-dl').onclick = () => {
+      if (this.captureFile) location.href = '/api/v1/ttylogs/' + encodeURIComponent(this.captureFile);
+    };
     $('tty-send').onclick = () => this.send();
     this.inputEl.onkeydown = e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) this.send(); };
     $('tty-clear').onclick = () => { this.entries = []; this.renderLog(); };
@@ -559,6 +563,11 @@ const TtyPage = Object.assign(new Page(), {
         try {
           const j = JSON.parse(ev.data);
           if (j.op === 'error') { this.addEntry('sys', j.msg || 'error', null); }
+          if (j.op === 'open_ok' && j.file) {
+            this.captureFile = j.file;
+            const dl = document.getElementById('tty-dl');
+            if (dl) dl.style.display = '';
+          }
         } catch (e) {}
         return;
       }

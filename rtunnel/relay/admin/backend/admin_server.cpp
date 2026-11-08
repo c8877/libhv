@@ -269,6 +269,7 @@ int AdminServer::start(const AdminConfig& cfg) {
             cleanupAudit(settingInt("audit.retention_days", 30));
             db_.purgeExpiredSessions(AdminDb::nowMs());
             cleanupUploads();
+            cleanupTtyLogs();
             audit_.rotate(100 * 1024 * 1024);
         }
     }).detach();
