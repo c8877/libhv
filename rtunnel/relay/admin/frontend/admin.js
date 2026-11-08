@@ -290,14 +290,15 @@ const UI = {
   table(cols, rows, onrow) {
     // 表头允许传 HTML（如排序链接）；以 '<' 开头的原样输出，其余转义
     const th = c => '<th>' + (String(c).charAt(0) === '<' ? c : UI.esc(c)) + '</th>';
-    let h = '<table><thead><tr>' + cols.map(th).join('') + '</tr></thead><tbody>';
+    let h = '<div class="detail-table-shell"><table class="detail-table"><thead><tr>' +
+      cols.map(th).join('') + '</tr></thead><tbody>';
     if (!rows.length) {
       h += '<tr><td colspan="' + cols.length + '" class="empty">暂无数据</td></tr>';
     }
     rows.forEach((r, i) => {
       h += '<tr data-i="' + i + '">' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>';
     });
-    h += '</tbody></table>';
+    h += '</tbody></table></div>';
     if (onrow) {
       setTimeout(() => {
         document.querySelectorAll('#page tbody tr').forEach(tr => {

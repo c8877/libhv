@@ -86,7 +86,7 @@ const DistributePage = Object.assign(new Page(), {
             this.maxRetries + '" style="width:70px"></label>' +
         '</div>' +
       '</div>' +
-      '<div style="padding:0 16px 16px;overflow:auto"><table class="tbl"><thead><tr><th style="width:36px"><input type="checkbox" id="dist-all"' +
+      '<div style="padding:0 16px 16px"><div class="detail-table-shell"><table class="detail-table"><thead><tr><th style="width:36px"><input type="checkbox" id="dist-all"' +
         (allChecked ? ' checked' : '') + '></th>' + head('devid', '设备') + head('online', '状态') +
         head('owner', '归属') + head('remote_addr', '远端地址') + '</tr></thead><tbody>' +
         view.map(a => '<tr' + (a.online ? '' : ' style="opacity:.55"') + '><td><input type="checkbox" class="dist-pick" data-dev="' +
@@ -95,7 +95,7 @@ const DistributePage = Object.assign(new Page(), {
           (a.online ? '<span class="pill ok">在线</span>' : '<span class="pill bad">离线</span>') +
           '</td><td>' + UI.esc(a.owner || '—') + '</td><td>' + UI.esc(a.remote_addr || '—') + '</td></tr>').join('') +
         (view.length ? '' : '<tr><td colspan="5" class="empty">没有匹配的设备</td></tr>') +
-      '</tbody></table>' +
+      '</tbody></table></div>' +
       '<div style="display:flex;align-items:center;gap:8px;margin-top:12px">' +
         '<button id="dist-prev"' + (this.page <= 1 ? ' disabled' : '') + '>上一页</button>' +
         '<span style="color:var(--muted);font-size:12px">' + this.page + ' / ' + pages + '</span>' +
@@ -229,11 +229,11 @@ const TasksPage = Object.assign(new Page(), {
         (this.batch ? '<span class="pill info">本批：' + UI.esc(this.batch) + ' ×</span>' : '') +
         '<span class="spacer" style="flex:1"></span>' +
         '<button id="task-refresh">刷新</button></div>' +
-      '<div style="padding:0 16px 16px;overflow:auto"><table class="tbl"><thead><tr>' +
+      '<div style="padding:0 16px 16px"><div class="detail-table-shell"><table class="detail-table"><thead><tr>' +
         '<th>ID</th><th>文件</th><th>设备</th><th>目标路径</th><th>进度/大小</th>' +
         '<th>状态</th><th>重试</th><th>开始</th><th>截止</th><th>操作</th></tr></thead><tbody>' +
         (rows || '<tr><td colspan="10" class="empty">暂无任务</td></tr>') +
-      '</tbody></table>' +
+      '</tbody></table></div>' +
       '<div style="display:flex;align-items:center;gap:8px;margin-top:12px">' +
         '<button id="task-prev"' + (this.page <= 1 ? ' disabled' : '') + '>上一页</button>' +
         '<span style="color:var(--muted);font-size:12px">' + this.page + ' / ' + pages +
