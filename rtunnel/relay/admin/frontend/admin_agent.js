@@ -111,6 +111,7 @@ const AgentDetailPage = Object.assign(new Page(), {
     try {
       const r = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/sysinfo?refresh=1');
       si = r.sysinfo; siTs = r.ts;
+      this.si = si;
     } catch (e) {}
 
     const rows = (d.streams || []).map(s => [
@@ -178,6 +179,7 @@ const AgentDetailPage = Object.assign(new Page(), {
         nicPanel +
         '</div>' +
         '<div id="si-metric"></div>' +
+        '<div id="si-series"></div>' +
         '<div id="si-tty"></div>';
 
       const certText = si.mtls
@@ -335,6 +337,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       }
       this.pullSeriesCharts();
       this.renderMetricCard(document.getElementById('si-metric'));
+      this.renderSeriesPanel();
       this.loadTtys();
       const ce = document.getElementById('caps-edit');
       if (ce) ce.onclick = () => {
@@ -406,6 +409,119 @@ const AgentDetailPage = Object.assign(new Page(), {
 
 
 
+
+  seriesCandidates() {
+    const out = [];
+    ['cpu', 'mem', 'load'].forEach(x => out.push(x));
+    ((this.si && this.si.nics) || []).forEach(n => { if (n && n.name) out.push('net:' + n.name); });
+    (this.ttyDisc || []).forEach(d => {
+      const b = (d.path || '').split('/').pop();
+      if (b && b.indexOf('tty') === 0) out.push('serial:' + b);
+    });
+    return out.filter((v, i) => out.indexOf(v) === i);
+  },
+  renderSeriesPanel() {
+    const wrap = document.getElementById('si-series');
+    if (!wrap) return;
+    const enabled = (this.seriesCfg || []).filter(c => c.enabled);
+    if (!enabled.length) { wrap.innerHTML = ''; return; }
+    if (!this.seriesSel || !enabled.some(c => c.series === this.seriesSel)) {
+      this.seriesSel = enabled[0].series;
+    }
+    wrap.innerHTML = '<div class="panel" style="margin-bottom:16px"><div class="panel-head">' +
+      '<h2>采样曲线</h2><select id="series-sel">' +
+      enabled.map(c => '<option ' + (c.series === this.seriesSel ? 'selected' : '') + '>' +
+        UI.esc(c.series) + '</option>').join('') + '</select>' +
+      '<span class="spacer"></span><span class="muted" id="series-last"></span> ' +
+      '<button id="series-full">全量</button></div>' +
+      '<div style="padding:10px 12px"><canvas id="series-chart" height="150"></canvas></div></div>';
+    const sel = document.getElementById('series-sel');
+    sel.onchange = () => { this.seriesSel = sel.value; this.pullSeriesChart(true); };
+    document.getElementById('series-full').onclick = () => this.pullSeriesChart(true);
+    this.pullSeriesChart(false);
+  },
+  async pullSeriesChart(full) {
+    const name = this.seriesSel;
+    if (!name) return;
+    const since = full ? 0 : (this.seriesLastTs || {})[name] || 0;
+    let r;
+    try {
+      r = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) +
+        '/metrics/series?series=' + encodeURIComponent(name) + '&since_ts=' + since);
+    } catch (e) { return; }
+    if (r.truncated && since) return this.pullSeriesChart(true);
+    this.seriesLastTs = this.seriesLastTs || {};
+    this.seriesCache = this.seriesCache || {};
+    let pts = r.points || [];
+    if (!since) this.seriesCache[name] = [];
+    this.seriesCache[name] = (this.seriesCache[name] || []).concat(pts);
+    while (this.seriesCache[name].length > 300) this.seriesCache[name].shift();
+    this.seriesLastTs[name] = r.newest_ts || since;
+    this.drawSeriesChart(name, this.seriesCache[name]);
+    const last = pts.length ? pts[pts.length - 1] : null;
+    const le = document.getElementById('series-last');
+    if (le) le.textContent = last ? ('最近 ' + new Date(last.ts).toLocaleTimeString('zh-CN', { hour12: false })) : '';
+  },
+  drawSeriesChart(name, points) {
+    const c = document.getElementById('series-chart');
+    if (!c || !window.Chart) return;
+    try { const ex = Chart.getChart(c); if (ex) ex.destroy(); } catch (e) {}
+    const isNet = name.indexOf('net:') === 0 || name.indexOf('serial:') === 0;
+    let labels = [], ds = [];
+    if (isNet) {
+      let prx = 0, ptx = 0, pts = 0;
+      const rx = [], tx = [];
+      points.forEach(p => {
+        const t = Number(p.ts) || 0;
+        const dt = pts ? Math.max(1, t - pts) / 1000 : 1;
+        rx.push(pts ? Math.max(0, (Number(p.rx) - prx) / dt) : 0);
+        tx.push(pts ? Math.max(0, (Number(p.tx) - ptx) / dt) : 0);
+        prx = Number(p.rx) || 0; ptx = Number(p.tx) || 0; pts = t;
+        labels.push(new Date(t).toLocaleTimeString('zh-CN', { hour12: false }));
+      });
+      ds = [{ label: 'RX B/s', data: rx, borderColor: cssVar('--accent', '#4a9eff'), pointRadius: 0, borderWidth: 2, fill: false },
+            { label: 'TX B/s', data: tx, borderColor: cssVar('--warn', '#f5a623'), pointRadius: 0, borderWidth: 2, fill: false }];
+    } else {
+      const vals = points.map(p => Number(p.v) || 0);
+      labels = points.map(p => new Date(Number(p.ts) || 0).toLocaleTimeString('zh-CN', { hour12: false }));
+      ds = [{ label: name, data: vals, borderColor: cssVar('--accent', '#4a9eff'), pointRadius: 0, borderWidth: 2, fill: true, backgroundColor: cssVar('--accent', '#4a9eff') + '1f' }];
+    }
+    new Chart(c.getContext('2d'), {
+      type: 'line',
+      data: { labels: labels, datasets: ds },
+      options: { animation: false, responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: isNet, labels: { boxWidth: 10 } } },
+        scales: { x: { display: false }, y: { beginAtZero: true, ticks: { maxTicksLimit: 4 } } } }
+    });
+  },
+  openSeriesPicker() {
+    const existing = (this.seriesCfg || []).map(c => c.series);
+    const cand = this.seriesCandidates();
+    const mask = document.createElement('div');
+    mask.className = 'tty-mask';
+    mask.innerHTML = '<div class="tty-modal"><h2>添加采样指标</h2>' +
+      cand.filter(x => existing.indexOf(x) < 0).map((x, i) =>
+        '<label class="row"><input type="checkbox" data-cand="' + UI.esc(x) + '"> ' + UI.esc(x) + '</label>').join('') +
+      (cand.filter(x => existing.indexOf(x) < 0).length ? '' : '<div class="muted">没有可添加的指标</div>') +
+      '<div class="tty-btns"><button id="sp-cancel">取消</button><button id="sp-add" class="primary">添加</button></div></div>';
+    document.body.appendChild(mask);
+    const close = () => mask.remove();
+    mask.querySelector('#sp-cancel').onclick = close;
+    mask.onclick = e => { if (e.target === mask) close(); };
+    mask.querySelector('#sp-add').onclick = async () => {
+      const picked = [...mask.querySelectorAll('[data-cand]:checked')].map(x => x.dataset.cand);
+      if (!picked.length) return close();
+      const list = existing.map(s => (this.seriesCfg.find(c => c.series === s))).concat(
+        picked.map(s => ({ series: s, enabled: true, interval_sec: 5, points: 720 })));
+      try {
+        await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/metrics/series/config', list);
+        close();
+        await this.reloadSeries();
+        this.renderSeriesPanel();
+      } catch (e) { this.ttyError(e.message); }
+    };
+  },
   async fetchSeriesCfg() {
     const list = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid) + '/metrics/series/config');
     this.seriesCfg = Array.isArray(list) ? list : [];
@@ -452,11 +568,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       b.onclick = () => this.openSeriesEditor(this.seriesCfg.find(c => c.series === b.dataset.medit));
     });
     const add = document.getElementById('metric-add');
-    if (add) add.onclick = () => {
-      const name = prompt('输入指标名，例如 cpu / mem / load / net:eth0 / serial:ttyUSB0');
-      if (!name) return;
-      this.openSeriesEditor({ series: name, enabled: true, interval_sec: 5, points: 720 });
-    };
+    if (add) add.onclick = () => this.openSeriesPicker();
   },
   openSeriesEditor(c) {
     if (!c) return;
