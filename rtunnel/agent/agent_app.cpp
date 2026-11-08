@@ -857,7 +857,9 @@ void AgentApp::cleanupParts(const std::string& dir, time_t cutoff) {
 static bool readTtyCounters(const std::string& want, unsigned long long& rx, unsigned long long& tx) {
     // /dev/ttyS0 对应 /proc/tty/driver 中的 "0:" 端口行
     int port = -1;
-    if (want.size() > 4 && want.compare(0, 4, "ttyS") == 0) {
+    if (want.size() > 6 && want.compare(0, 6, "ttySTM") == 0) {
+        port = atoi(want.c_str() + 6);
+    } else if (want.size() > 4 && want.compare(0, 4, "ttyS") == 0) {
         port = atoi(want.c_str() + 4);
     }
     DIR* d = opendir("/proc/tty/driver");
@@ -1054,7 +1056,7 @@ void AgentApp::sendSysinfo(int mode) {
             while ((e = readdir(d)) != NULL) {
                 std::string n = e->d_name;
                 if (n.rfind("ttyS", 0) != 0 && n.rfind("ttyUSB", 0) != 0 &&
-                    n.rfind("ttyACM", 0) != 0) continue;
+                    n.rfind("ttyACM", 0) != 0 && n.rfind("ttySTM", 0) != 0) continue;
                 paths.insert("/dev/" + n);
             }
             closedir(d);
@@ -1170,7 +1172,7 @@ void AgentApp::onFrame(rtnp::Frame* f) {
             while ((e = readdir(d)) != NULL) {
                 std::string n = e->d_name;
                 if (n.rfind("ttyUSB", 0) != 0 && n.rfind("ttyACM", 0) != 0 &&
-                    n.rfind("ttyS", 0) != 0) continue;
+                    n.rfind("ttyS", 0) != 0 && n.rfind("ttySTM", 0) != 0) continue;
                 nlohmann::json j;
                 j["path"] = "/dev/" + n;
                 arr.push_back(j);
