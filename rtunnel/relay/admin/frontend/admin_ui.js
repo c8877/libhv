@@ -133,7 +133,7 @@ const UI = {
         '<label class="form-row"><span class="k">' + r.label + '</span>' +
         '<span class="c">' + r.control + '</span><span class="u">' + (r.unit || '') + '</span></label>').join('') + '</div>';
     }
-    return '<div class="ui-form ' + (opts.cls || '') + '">' + body +
+    return '<div class="ui-form ' + (opts.cls || '') + '"' + (opts.id ? ' id="' + UI.esc(opts.id) + '"' : '') + '>' + body +
       '<div class="ui-form-foot">' + (opts.left || '') +
       '<span class="spacer"></span>' + (opts.right || '') + '</div></div>';
   },

@@ -564,15 +564,16 @@ const AccountsPage = Object.assign(new Page(), {
     document.getElementById('nu-open').onclick = () => {
       const m = UI.modal({
         title: '新建账号',
-        body: '<label>用户名<input id="nu-name" placeholder="用户名"></label>' +
-          '<label>密码<input id="nu-pass" type="password" placeholder="至少 8 位"></label>' +
-          '<label>角色<select id="nu-role">' + roleOpts + '</select></label>',
+        body: '<label>用户名<input data-field="username" placeholder="用户名"></label>' +
+          '<label>密码<input data-field="password" type="password" placeholder="至少 8 位"></label>' +
+          '<label>角色<select data-field="role">' + roleOpts + '</select></label>',
         buttons: '<button data-modal-close>取消</button><button class="primary" id="nu-btn">创建</button>',
       });
       m.el.querySelector('#nu-btn').onclick = async () => {
-        const username = m.el.querySelector('#nu-name').value.trim();
-        const password = m.el.querySelector('#nu-pass').value;
-        const role = m.el.querySelector('#nu-role').value;
+        const v = UI.formValues(m.el);
+        const username = (v.username || '').trim();
+        const password = v.password || '';
+        const role = v.role;
         if (!username) { UI.toast('用户名不能为空', true); return; }
         if (password.length < 8) { UI.toast('密码至少 8 位', true); return; }
         try {

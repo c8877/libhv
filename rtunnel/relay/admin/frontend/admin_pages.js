@@ -102,13 +102,16 @@ const CertsPage = Object.assign(new Page(), {
       ];
     });
     this.el.innerHTML =
-      UI.panel('签发新证书', '<div style="padding:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
-        'SAN <input id="issue-san" placeholder="PILE-000200" size="18">' +
-        '类型 <select id="issue-role"><option value="device">设备</option><option value="user">用户</option></select>' +
-        '有效期(天) <input id="issue-days" type="number" value="30" min="1" max="3650" style="width:80px">' +
-        '<button class="primary" id="issue-btn">签发</button>' +
-        '<span id="issue-result" style="color:var(--muted)"></span></div>',
-        { cls: 'mb16', right: '<button id="certs-refresh">刷新列表</button>' }) +
+      UI.panel('签发新证书', UI.form({
+        id: 'issue-form', layout: 'grid', cols: 3,
+        rows: [
+          { label: 'SAN', control: '<input data-field="san" placeholder="PILE-000200">' },
+          { label: '类型', control: '<select data-field="role"><option value="device">设备</option><option value="user">用户</option></select>' },
+          { label: '有效期(天)', control: '<input data-field="days" type="number" value="30" min="1" max="3650">' },
+        ],
+        left: '<span id="issue-result" style="color:var(--muted)"></span>',
+        right: '<button class="primary" id="issue-btn">签发</button>',
+      }), { cls: 'mb16', right: '<button id="certs-refresh">刷新列表</button>' }) +
       UI.panel('CSR 签名（私钥不出设备）', '<div style="padding:16px">' +
         '<textarea id="csr-input" rows="6" style="width:100%;font-family:monospace" placeholder="粘贴 CSR PEM（设备侧生成，SAN 或 CN 为身份）"></textarea>' +
         '<div style="margin-top:8px;display:flex;gap:10px;align-items:center">有效期(天) <input id="csr-days" type="number" value="30" style="width:80px">' +
@@ -123,9 +126,10 @@ const CertsPage = Object.assign(new Page(), {
     if (cr) cr.onclick = () => this.refresh();
     UI.bindSearch(document.getElementById('cert-q'));
     document.getElementById('issue-btn').onclick = async () => {
-      const san = document.getElementById('issue-san').value.trim();
-      const role = document.getElementById('issue-role').value;
-      const days = parseInt(document.getElementById('issue-days').value, 10) || 30;
+      const v = UI.formValues(document.getElementById('issue-form'));
+      const san = (v.san || '').trim();
+      const role = v.role;
+      const days = parseInt(v.days, 10) || 30;
       if (!san) { UI.toast('请填写 SAN', true); return; }
       try {
         const r = await Api.post('/api/v1/certs/issue', { san, role, days });
