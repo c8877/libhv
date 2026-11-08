@@ -1223,13 +1223,9 @@ void AgentApp::onFrame(rtnp::Frame* f) {
         out["points"] = pts;
         std::string os = out.dump();
         if (since == 0) {
-            std::string lz;
-            if (lz4Compress(os, lz)) os = std::string(1, '\2') + lz;
-            else {
-                std::string gz;
-                if (gzipCompress(os, gz)) os = std::string(1, '\1') + gz;
-                else os = std::string(1, '\0') + os;
-            }
+            std::string gz;
+            if (gzipCompress(os, gz)) os = std::string(1, '\1') + gz;
+            else os = std::string(1, '\0') + os;
         } else {
             os = std::string(1, '\0') + os;
         }
