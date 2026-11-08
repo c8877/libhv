@@ -276,10 +276,12 @@ const UI = {
   detailTable(cols, rows, opts) {
     opts = opts || {};
     const th = c => '<th>' + (String(c).charAt(0) === '<' ? c : UI.esc(c)) + '</th>';
-    let h = '<div class="detail-table-shell"><table class="detail-table"><thead><tr>' +
+    let h = '<div class="detail-table-shell ' + (opts.shellCls || '') + '"><table class="detail-table ' + (opts.cls || '') + '"><thead><tr>' +
       cols.map(th).join('') + '</tr></thead><tbody>';
     if (!rows.length) h += '<tr><td class="empty" colspan="' + cols.length + '">' + UI.esc(opts.empty || '暂无数据') + '</td></tr>';
-    rows.forEach(r => { h += '<tr>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>'; });
+    rows.forEach((r, i) => {
+      h += '<tr' + (opts.rowAttrs ? opts.rowAttrs(i) : '') + '>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>';
+    });
     return h + '</tbody></table></div>';
   },
   kvTable(rows, opts) {
@@ -527,9 +529,6 @@ const ProfilePage = Object.assign(new Page(), {
     const pageName = v => v === 'agents' ? '设备列表' : '概览';
     const timeName = v => v === 'relative' ? '相对时间' : '本地时间';
     const open = k => this.editKey === k;
-    const row = (k, label, value) =>
-      '<tr class="setting-row' + (open(k) ? ' open' : '') + '" data-pf-row="' + k + '">' +
-      '<td>' + label + '</td><td>' + value + '</td><td class="chev">⌄</td></tr>';
     const pfKeys = ['avatar_color','display_name','default_page','time_format','term_font'];
     const pfOpen = pfKeys.some(k => this.editKey === k);
     const profileForm = pfOpen ? UI.form({
@@ -544,24 +543,28 @@ const ProfilePage = Object.assign(new Page(), {
       left: '<span class="muted">保存后立即生效</span>',
       right: '<button data-pf-cancel="1">取消</button><button class="primary" id="pf-save">保存</button>',
     }) : '';
-    const profileTable = '<div class="detail-table-shell"><table class="detail-table setting-table profile-table">' +
-      '<thead><tr><th>设置项</th><th>当前值</th><th>操作</th></tr></thead><tbody>' +
-      row('avatar_color', '头像颜色', '<span class="color-dot" style="background:' + UI.esc(p.avatar_color || colors[0]) + '"></span>' +
-        '<code>' + UI.esc(p.avatar_color || colors[0]) + '</code>') +
-      row('display_name', '显示名', UI.esc(p.display_name || '—')) +
-      row('default_page', '默认页面', pageName(p.default_page)) +
-      row('time_format', '时间格式', timeName(p.time_format)) +
-      row('term_font', '终端字号', UI.esc(p.term_font || '14') + ' px') +
-      '</tbody></table></div>';
+    const profileRows = [
+      ['头像颜色', '<span class="color-dot" style="background:' + UI.esc(p.avatar_color || colors[0]) + '"></span>' +
+        '<code>' + UI.esc(p.avatar_color || colors[0]) + '</code>'],
+      ['显示名', UI.esc(p.display_name || '—')],
+      ['默认页面', pageName(p.default_page)],
+      ['时间格式', timeName(p.time_format)],
+      ['终端字号', UI.esc(p.term_font || '14') + ' px'],
+    ].map(r => [r[0], r[1], '<span class="chev">⌄</span>']);
+    const profileTable = UI.detailTable(['设置项', '当前值', '操作'], profileRows, {
+      cls: 'setting-table profile-table',
+      rowAttrs: i => ' class="setting-row' + (open(pfKeys[i]) ? ' open' : '') + '" data-pf-row="' + pfKeys[i] + '"',
+    });
 
     const pwOpen = this.editKey === 'password';
-    const securityTable = '<div class="detail-table-shell"><table class="detail-table setting-table profile-table">' +
-      '<thead><tr><th>设置项</th><th>说明</th><th>操作</th></tr></thead><tbody>' +
-      '<tr class="setting-row' + (pwOpen ? ' open' : '') + '" data-pf-row="password"><td>登录密码</td>' +
-        '<td class="muted">修改当前账号密码</td><td class="chev">⌄</td></tr>' +
-      '<tr><td>登录会话</td><td class="muted">吊销本账号全部登录会话（含当前）</td>' +
-        '<td><button class="danger" id="sess-drop">登出所有</button></td></tr>' +
-      '</tbody></table></div>' + (pwOpen ? UI.form({
+    const securityTable = UI.detailTable(['设置项', '说明', '操作'], [
+      ['登录密码', '<span class="muted">修改当前账号密码</span>', '<span class="chev">⌄</span>'],
+      ['登录会话', '<span class="muted">吊销本账号全部登录会话（含当前）</span>',
+        '<button class="danger" id="sess-drop">登出所有</button>'],
+    ], {
+      cls: 'setting-table profile-table',
+      rowAttrs: i => i === 0 ? ' class="setting-row' + (pwOpen ? ' open' : '') + '" data-pf-row="password"' : '',
+    }) + (pwOpen ? UI.form({
         cls: 'setting-form',
         rows: [
           { label: '当前密码', control: '<input type="password" id="pw-old">' },
