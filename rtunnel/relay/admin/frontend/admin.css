@@ -606,3 +606,15 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .profile-table th:nth-child(1){width:26%}
 .profile-table th:nth-child(2){width:34%}
 .profile-table th:nth-child(3){width:40%}
+.settings-kv-shell{overflow:visible}
+.settings-kv th{width:62%;font-weight:400;color:var(--fg);position:relative;white-space:normal}
+.settings-kv td{text-align:right;font-size:14px}
+.settings-kv b{font-weight:600}
+.setting-name{margin-right:6px}
+.tip{display:inline-block;color:var(--muted);cursor:help;font-size:12px;outline:none}
+.tip:hover,.tip:focus{color:var(--accent)}
+.tip::after{content:attr(data-tip);position:absolute;left:0;top:100%;margin-top:6px;z-index:30;
+  width:max-content;max-width:300px;white-space:normal;background:var(--card);color:var(--fg);
+  border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;line-height:1.5;
+  box-shadow:0 8px 24px rgba(0,0,0,.25);opacity:0;visibility:hidden;transition:.12s}
+.tip:hover::after,.tip:focus::after{opacity:1;visibility:visible}

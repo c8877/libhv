@@ -515,12 +515,18 @@ const SettingsPage = Object.assign(new Page(), {
     let html = '';
     groups.forEach(g => {
       const defs = schema.filter(d => d.group === g);
+      const tip = d => {
+        const range = (d.min === 0 && d.max === 0) ? '' :
+          '范围 ' + d.min + '–' + d.max + (d.unit ? ' ' + d.unit : '');
+        return UI.esc((d.desc || '') + (range ? ' · ' + range : ''));
+      };
       const rows = defs.map(d =>
-        '<tr><td>' + UI.esc(d.label) + '</td><td>' + UI.esc(st[d.key] || '—') + '</td>' +
-        '<td class="muted">' + UI.esc(d.unit || '—') + '</td>' +
-        '<td class="muted">' + (d.min === 0 && d.max === 0 ? '—' : d.min + ' – ' + d.max) + '</td></tr>').join('');
-      const table = '<div class="detail-table-shell"><table class="detail-table setting-table settings-table">' +
-        '<thead><tr><th>设置项</th><th>当前值</th><th>单位</th><th>范围</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+        '<tr><th><span class="setting-name">' + UI.esc(d.label) + '</span>' +
+        '<span class="tip" tabindex="0" data-tip="' + tip(d) + '">ⓘ</span></th>' +
+        '<td><b>' + UI.esc(st[d.key] || '—') + '</b>' +
+        (d.unit ? ' <span class="muted">' + UI.esc(d.unit) + '</span>' : '') + '</td></tr>').join('');
+      const table = '<div class="detail-table-shell settings-kv-shell">' +
+        '<table class="detail-table detail-kv settings-kv"><tbody>' + rows + '</tbody></table></div>';
       let form = '';
       if (this.editGroup === g) {
         form = '<div class="ui-form setting-form"><div class="form-rows">' +
