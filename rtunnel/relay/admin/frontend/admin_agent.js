@@ -635,7 +635,7 @@ const AgentDetailPage = Object.assign(new Page(), {
     wrap.innerHTML = '<div class="panel" style="margin-bottom:16px"><div class="panel-head">' +
       '<h2>监控采样</h2><span class="spacer"></span>' +
       (can ? '<button id="metric-add">添加指标</button>' : '') + '</div>' +
-      '<table class="si-table"><tr><th>指标</th><th>状态</th><th>间隔</th><th>点数</th><th>同步</th><th>操作</th></tr>' +
+      '<table class="si-table metric-table"><tr><th>指标</th><th>状态</th><th>间隔</th><th>点数</th><th>同步</th><th>操作</th></tr>' +
       (rows || '<tr><td colspan="6" style="color:var(--muted)">暂无配置</td></tr>') + '</table></div>';
     if (!can) return;
     wrap.querySelectorAll('[data-medit]').forEach(b => {
