@@ -422,6 +422,8 @@ const AgentDetailPage = Object.assign(new Page(), {
   },
   renderTtyCard(wrap) {
     const can = canManage();
+    const configured = new Set((this.ttys || []).map(t => t.path));
+    const un = (this.ttyDisc || []).filter(d => !configured.has(d.path));
     const rows = (this.ttys || []).map(t => {
       const st = t.enabled ? '<span class="pill ok">启用</span>' : '<span class="pill">禁用</span>';
       return '<tr><td>' + UI.esc(t.alias || '—') + '</td>' +
@@ -437,7 +439,11 @@ const AgentDetailPage = Object.assign(new Page(), {
         (can ? '<button data-edit="' + UI.esc(t.path) + '">编辑</button>' : '') +
         (can ? ' <button data-tog="' + UI.esc(t.path) + '">' + (t.enabled ? '禁用' : '启用') + '</button>' : '') +
         '</td></tr>';
-    }).join('');
+    }).join('') + un.map(d =>
+      '<tr><td>—</td><td><code>' + UI.esc(d.path) + '</code></td>' +
+      '<td><span class="pill">未配置</span></td><td>—</td><td class="tty-ops">' +
+      (can ? '<button data-addpath="' + UI.esc(d.path) + '">添加</button>' : '') +
+      '</td></tr>').join('');
     wrap.innerHTML = '<div class="panel" style="margin-bottom:16px"><div class="panel-head">' +
       '<h2>串口 TTY</h2><span class="spacer"></span>' +
       (can ? '<button id="tty-add">手动添加</button>' : '') + '</div>' +
@@ -449,6 +455,13 @@ const AgentDetailPage = Object.assign(new Page(), {
       b.onclick = () => {
         const it = this.ttys.find(x => x.path === b.dataset.edit);
         if (it) this.openTtyEditor(it);
+      };
+    });
+    wrap.querySelectorAll('[data-addpath]').forEach(b => {
+      b.onclick = () => {
+        const item = { path: b.dataset.addpath, alias: '', enabled: true, baud: 115200,
+          data_bits: 8, parity: 'N', stop_bits: 1, roles: 'operator,manager,admin' };
+        this.openTtyEditor(item);
       };
     });
     wrap.querySelectorAll('[data-take]').forEach(b => {
