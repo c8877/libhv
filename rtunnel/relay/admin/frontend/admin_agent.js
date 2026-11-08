@@ -33,15 +33,15 @@ const AgentDetailPage = Object.assign(new Page(), {
   capsFormHtml(si) {
     const caps = si.caps || {};
     const shellAllowed = roleOf() === 'admin';
-    return '<div class="tty-form ui-form"><div class="tty-form-grid ui-form-grid caps-grid">' +
+    return '<div class="ui-form"><div class="ui-form-grid caps-grid">' +
       '<label>转发端口<input id="caps-ports" value="' + UI.esc((caps.ports || []).join(', ')) +
         '" placeholder="22, 8080, 8099"></label>' +
       '<label>文件目录<input id="caps-dir" value="' + UI.esc(caps.file_dir || '/opt/data/files') + '"></label>' +
       '<label class="tty-check"><input type="checkbox" id="caps-shell"' + (caps.shell ? ' checked' : '') +
         (shellAllowed ? '' : ' disabled') + '> 允许 Shell</label>' +
-      '</div><div class="tty-form-foot ui-form-foot"><span class="muted" id="caps-msg">' +
+      '</div><div class="ui-form-foot"><span class="muted" id="caps-msg">' +
         (shellAllowed ? '' : '仅 admin 可修改 Shell') + '</span><span class="spacer"></span>' +
-      '<div class="tty-form-right"><button data-caps-cancel="1" id="caps-cancel">取消</button>' +
+      '<div class="ui-form-right"><button data-caps-cancel="1" id="caps-cancel">取消</button>' +
       '<button class="primary" id="caps-save">保存并下发</button></div></div></div>';
   },
   sysGrid(si, ts) {
@@ -662,13 +662,13 @@ const AgentDetailPage = Object.assign(new Page(), {
             (c.enabled ? ' checked' : '') + '><span></span></label>' : (c.enabled ? '开' : '关')) + '</td>' +
           '<td class="chev">⌄</td></tr>';
         if (open) {
-          rows += '<tr class="metric-expand"><td colspan="6"><div class="metric-form ui-form">' +
-            '<div class="metric-form-grid ui-form-grid cols-3">' +
+          rows += '<tr class="metric-expand"><td colspan="6"><div class="ui-form">' +
+            '<div class="ui-form-grid cols-3">' +
             '<label>间隔（秒）<input id="me-int" type="number" min="1" max="300" value="' + c.interval_sec + '"></label>' +
             '<label>保留点数<input id="me-pts" type="number" min="60" max="86400" value="' + c.points + '"></label>' +
             '<div class="metric-readonly"><span>预计保留</span><b>' + dur(c) + '</b></div>' +
             '</div>' +
-            '<div class="metric-form-foot ui-form-foot">' +
+            '<div class="ui-form-foot">' +
               '<span class="metric-sync">' + (c.enabled
                 ? (c.synced ? '已下发并确认' : '已下发，等待 agent 确认')
                 : '已禁用，不参与采样') + '</span>' +
@@ -732,32 +732,6 @@ const AgentDetailPage = Object.assign(new Page(), {
     const add = document.getElementById('metric-add');
     if (add) add.onclick = () => this.openSeriesPicker();
   },
-  openSeriesEditor(c) {
-    if (!c) return;
-    const mask = document.createElement('div');
-    mask.className = 'tty-mask';
-    mask.innerHTML = '<div class="tty-modal"><h2>采样配置 · ' + UI.esc(c.series) + '</h2>' +
-      '<label class="row"><input type="checkbox" id="ms-en"' + (c.enabled ? ' checked' : '') + '> 启用</label>' +
-      '<label>间隔（秒）<input id="ms-int" type="number" min="1" max="300" value="' + c.interval_sec + '"></label>' +
-      '<label>保留点数<input id="ms-pts" type="number" min="60" max="86400" value="' + c.points + '"></label>' +
-      '<div class="tty-btns"><button id="ms-del">删除</button><button id="ms-cancel">取消</button>' +
-      '<button id="ms-save" class="primary">保存并下发</button></div></div>';
-    document.body.appendChild(mask);
-    const $ = id => mask.querySelector('#' + id);
-    const close = () => mask.remove();
-    $('ms-cancel').onclick = close;
-    mask.onclick = e => { if (e.target === mask) close(); };
-    $('ms-del').onclick = async () => {
-      const list = this.seriesCfg.filter(x => x.series !== c.series);
-      try { await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/metrics/series/config', list); close(); this.reloadSeries(); } catch (e) { this.ttyError(e.message); }
-    };
-    $('ms-save').onclick = async () => {
-      const next = { series: c.series, enabled: $('ms-en').checked,
-        interval_sec: Number($('ms-int').value), points: Number($('ms-pts').value) };
-      const list = this.seriesCfg.filter(x => x.series !== c.series).concat([next]);
-      try { await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/metrics/series/config', list); close(); this.reloadSeries(); } catch (e) { this.ttyError(e.message); }
-    };
-  },
   async reloadSeries() {
     try { await this.fetchSeriesCfg(); } catch (e) {}
     this.renderMetricCard(document.getElementById('si-metric'));
@@ -782,8 +756,8 @@ const AgentDetailPage = Object.assign(new Page(), {
   ttyFormHtml(it, isNew) {
     const bauds = [1200,2400,4800,9600,19200,38400,57600,115200,230400,460800,921600];
     const opts = (a, cur) => a.map(v => '<option value="' + v + '"' + (v === cur ? ' selected' : '') + '>' + v + '</option>').join('');
-    return '<div class="tty-form ui-form" data-new="' + (isNew ? '1' : '0') + '">' +
-      '<div class="tty-form-grid ui-form-grid">' +
+    return '<div class="ui-form" data-new="' + (isNew ? '1' : '0') + '">' +
+      '<div class="ui-form-grid">' +
       '<label>别名<input id="tf-alias" value="' + UI.esc(it.alias || '') + '" placeholder="设备内唯一"></label>' +
       '<label>路径<input id="tf-path" value="' + UI.esc(it.path || '') + '"' +
         (it.path && !isNew ? ' readonly' : '') + '></label>' +
@@ -793,11 +767,11 @@ const AgentDetailPage = Object.assign(new Page(), {
       '<label>停止位<select id="tf-stop">' + opts([1,2], it.stop_bits) + '</select></label>' +
       '<label class="tty-check"><input type="checkbox" id="tf-en"' + (it.enabled ? ' checked' : '') + '> 启用</label>' +
       '</div>' +
-      '<div class="tty-form-foot ui-form-foot">' +
-        '<div class="tty-form-left">' +
+      '<div class="ui-form-foot">' +
+        '<div class="ui-form-left">' +
           (!isNew && roleOf() === 'admin' ? '<button data-tf-take="' + UI.esc(it.alias || it.path) + '">强制接管</button>' : '') +
           '<button data-tf-copy="' + UI.esc(it.path || '') + '">复制路径</button>' +
-        '</div><span class="spacer"></span><div class="tty-form-right">' +
+        '</div><span class="spacer"></span><div class="ui-form-right">' +
           (!isNew && canManage() ? '<button data-tf-del="' + UI.esc(it.path) + '">删除</button>' : '') +
           '<button data-tf-cancel="1">取消</button>' +
           '<button class="primary" data-tf-save="1">' + (isNew ? '添加并下发' : '保存并下发') + '</button>' +
@@ -922,7 +896,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       };
     });
     wrap.querySelectorAll('[data-tf-save]').forEach(b => {
-      b.onclick = () => this.saveTtyForm(wrap, b.closest('.tty-form').dataset.new === '1');
+      b.onclick = () => this.saveTtyForm(wrap, b.closest('.ui-form').dataset.new === '1');
     });
     wrap.querySelectorAll('[data-tf-cancel]').forEach(b => {
       b.onclick = () => { this.expandTty = null; this.addTtyPath = null; this.renderTtyCard(wrap); };
@@ -966,48 +940,6 @@ const AgentDetailPage = Object.assign(new Page(), {
   ttyError(msg) {
     if (window.UI && UI.toast) UI.toast(msg);
     else alert(msg);
-  },
-  openTtyEditor(item) {
-    const it = item || { path: '', alias: '', enabled: true, baud: 115200,
-      data_bits: 8, parity: 'N', stop_bits: 1, roles: 'operator,manager,admin' };
-    const opts = (this.ttyDisc || []).map(d => '<option value="' + UI.esc(d.path) + '">').join('');
-    const mask = document.createElement('div');
-    mask.className = 'tty-mask';
-    mask.innerHTML = '<div class="tty-modal"><h2>' + (item ? '编辑串口' : '添加串口') + '</h2>' +
-      '<label>路径<input id="tty-path" list="tty-list" value="' + UI.esc(it.path) + '"' +
-      (item ? ' readonly' : '') + '><datalist id="tty-list">' + opts + '</datalist></label>' +
-      '<label>别名<input id="tty-alias" value="' + UI.esc(it.alias || '') + '" placeholder="设备内唯一"></label>' +
-      '<label class="row"><input type="checkbox" id="tty-enabled"' + (it.enabled ? ' checked' : '') + '> 启用</label>' +
-      '<label>波特率<select id="tty-baud">' +
-      [1200,2400,4800,9600,19200,38400,57600,115200,230400,460800,921600].map(b =>
-        '<option ' + (b === it.baud ? 'selected' : '') + '>' + b + '</option>').join('') + '</select></label>' +
-      '<label>数据位<select id="tty-db">' + [5,6,7,8].map(v => '<option ' + (v === it.data_bits ? 'selected' : '') + '>' + v + '</option>').join('') + '</select></label>' +
-      '<label>校验<select id="tty-par">' +
-      ['N','E','O'].map(v => '<option ' + (v === it.parity ? 'selected' : '') + '>' + v + '</option>').join('') + '</select></label>' +
-      '<label>停止位<select id="tty-stop"><option ' + (it.stop_bits === 1 ? 'selected' : '') + '>1</option><option ' + (it.stop_bits === 2 ? 'selected' : '') + '>2</option></select></label>' +
-      '<div class="tty-btns"><button id="tty-cancel">取消</button><button id="tty-save" class="primary">保存</button></div></div>';
-    document.body.appendChild(mask);
-    const close = () => mask.remove();
-    mask.querySelector('#tty-cancel').onclick = close;
-    mask.onclick = e => { if (e.target === mask) close(); };
-    mask.querySelector('#tty-save').onclick = async () => {
-      const body = {
-        path: mask.querySelector('#tty-path').value.trim(),
-        alias: mask.querySelector('#tty-alias').value.trim(),
-        enabled: mask.querySelector('#tty-enabled').checked,
-        baud: Number(mask.querySelector('#tty-baud').value),
-        data_bits: Number(mask.querySelector('#tty-db').value),
-        parity: mask.querySelector('#tty-par').value,
-        stop_bits: Number(mask.querySelector('#tty-stop').value),
-        roles: it.roles || 'operator,manager,admin',
-      };
-      try {
-        await Api.put('/api/v1/agents/' + encodeURIComponent(this.devid) + '/ttys', body);
-        close();
-        if (!this.ttysLoaded) this.loadTtys();
-      else this.renderTtyCard(document.getElementById('si-tty'));
-      } catch (e) { this.ttyError(e.message); }
-    };
   },
 });
 

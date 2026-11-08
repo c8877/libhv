@@ -7,6 +7,7 @@ import os
 import sys
 
 FILES = [("admin.html", "text/html"),
+         ("admin_ui.js", "application/javascript"),
          ("admin.js", "application/javascript"),
          ("admin_agent.js", "application/javascript"),
          ("admin_pages.js", "application/javascript"),

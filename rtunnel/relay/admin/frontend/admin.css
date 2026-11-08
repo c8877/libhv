@@ -164,10 +164,6 @@ button:hover { filter: brightness(.96); }
 .si-grid .si-cpu { grid-column: 1; grid-row: 2; }
 .si-grid .si-nic { grid-column: 2; grid-row: 2; }
 .si-body { padding: 12px 16px 16px; }
-.si-legend { margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.7; }
-.si-cores { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--muted); }
-.si-cores span { display: inline-flex; align-items: center; gap: 6px; }
-.si-cores i { display: inline-block; height: 6px; background: #4a9eff; border-radius: 3px; min-width: 2px; }
 .si-disks { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; padding: 16px; }
 @media (max-width: 1100px) {
   .si-grid { grid-template-columns: 1fr; }
@@ -177,7 +173,6 @@ button:hover { filter: brightness(.96); }
 }
 
 /* 设备详情：sparkline 与分区条 */
-.si-num { font-size: 18px; font-weight: 600; }
 
 /* 设备详情：系统两列表格 */
 .si-table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -329,24 +324,12 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .tty-search{padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);width:180px;margin-right:8px}
 .tty-table-wrap{max-height:340px;overflow:auto}
 .tty-table-wrap thead{position:sticky;top:0;background:var(--card);z-index:1}
-.tbl{width:100%;border-collapse:collapse;font-size:13px}
-.tbl th{text-align:left;font-weight:500;color:var(--muted);padding:9px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
-.tbl td{padding:9px 10px;border-bottom:1px solid rgba(255,255,255,.06);vertical-align:middle}
-.tbl tbody tr:hover{background:rgba(255,255,255,.035)}
-.tbl tbody tr:last-child td{border-bottom:0}
-.tbl .empty{text-align:center;color:var(--muted);padding:28px}
 .tab{border:1px solid var(--border);border-radius:6px;background:transparent;padding:4px 10px}
 .tab.active{border-color:var(--accent);color:var(--accent);background:rgba(74,158,255,.08)}
 .tty-table td{padding-top:6px;padding-bottom:6px}
 .tty-main b{font-size:13px}
 .tty-path{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:var(--muted);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tty-param{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;white-space:nowrap}
-.tty-menu{display:inline-block;position:relative}
-.tty-menu summary{display:inline-block;cursor:pointer;padding:3px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;list-style:none}
-.tty-menu summary::-webkit-details-marker{display:none}
-.tty-menu>div{position:absolute;right:0;top:100%;z-index:20;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:4px;min-width:120px;box-shadow:0 6px 18px rgba(0,0,0,.25)}
-.tty-menu>div button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:6px 10px;border-radius:5px}
-.tty-menu>div button:hover{background:rgba(255,255,255,.06)}
 .sys-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 28px;padding:14px 16px}
 .sys-item{display:flex;gap:10px;min-width:0;font-size:13px}
 .sys-item .k{width:76px;flex:none;color:var(--muted);font-size:12px}
@@ -392,17 +375,11 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .metric-table .metric-row:hover{background:rgba(255,255,255,.03)}
 .metric-name b{font-size:14px;font-weight:600}
 .metric-type{margin-left:10px;font-size:11px;color:var(--muted)}
-.metric-table .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
-.metric-table .center{text-align:center}
 .metric-table .chev{width:28px;text-align:right;color:var(--muted);transition:.15s}
 .metric-table .metric-row.open .chev{transform:rotate(180deg)}
 .metric-table .metric-row.open{background:rgba(255,255,255,.025)}
 .metric-expand td{padding:0 16px 16px 24px!important;background:rgba(255,255,255,.02)}
-.metric-form{padding:14px 0 2px}
-.metric-fields{display:flex;gap:22px;align-items:center;font-size:12px;color:var(--muted)}
-.metric-fields input{width:88px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);margin:0 4px}
 .metric-sync{margin-top:10px;font-size:12px;color:var(--muted)}
-.metric-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:middle}
 .dot.ok{background:#57ab5a}.dot.warn{background:#f5a623}.dot.off{background:#6b7280}
 .tty-row{cursor:pointer}
@@ -411,26 +388,11 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .tty-row .chev{display:inline-block;margin-left:10px;color:var(--muted);transition:.15s}
 .tty-row.open .chev{transform:rotate(180deg)}
 .tty-expand td{padding:0 16px 16px 24px!important;background:rgba(255,255,255,.02)}
-.tty-detail{padding:12px 0 2px;font-size:12px}
-.tty-detail-row{display:flex;gap:12px;padding:4px 0;color:var(--muted)}
-.tty-detail-row>span{width:44px;flex:none}
-.tty-detail-row code{color:var(--fg);font-size:12px}
-.tty-detail-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-.si-two{align-items:start}
 .metric-expand td{padding-bottom:12px!important}
-.metric-form{padding-top:10px}
 .metric-table .num{text-align:left;font-variant-numeric:tabular-nums;white-space:nowrap}
 .metric-table .center{text-align:left}
 .metric-table .metric-name,.metric-table .metric-group td{padding-left:24px!important}
-.metric-form{max-width:720px;padding:14px 0 4px}
-.metric-fields{display:flex;gap:32px;align-items:flex-end}
-.metric-fields .field{display:flex;flex-direction:column;gap:6px}
-.metric-fields label{font-size:11px;color:var(--muted)}
-.metric-fields .control{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
-.metric-fields input{width:96px;padding:6px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);margin:0}
-.metric-fields .static{font-size:13px;padding:6px 0}
 .metric-sync{margin-top:12px;font-size:12px;color:var(--muted)}
-.metric-actions{display:flex;justify-content:flex-start;gap:8px;margin-top:14px}
 .metric-table{table-layout:fixed;width:100%}
 .metric-table th:nth-child(1){width:28%}
 .metric-table th:nth-child(2){width:10%}
@@ -457,61 +419,25 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .tty-param{font-size:13px}
 .sys-item{font-size:14px}
 .sys-item .k{font-size:12px}
-.tty-form{padding:14px 0 4px;max-width:920px}
-.tty-form-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 18px;align-items:end}
-.tty-form-grid label{display:flex;flex-direction:column;gap:6px;font-size:11px;color:var(--muted)}
-.tty-form-grid input,.tty-form-grid select{padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:13px;width:100%}
-.tty-form-grid input[readonly]{opacity:.75}
-.tty-form-grid .tty-check{flex-direction:row;align-items:center;gap:8px;height:33px}
-.tty-form-foot{display:flex;align-items:center;gap:8px;margin-top:14px}
-.tty-form-left,.tty-form-right{display:flex;gap:8px}
-.metric-form{max-width:760px;padding:14px 0 4px}
-.metric-form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px 22px;align-items:end}
-.metric-form-grid label{display:flex;flex-direction:column;gap:6px;font-size:11px;color:var(--muted)}
-.metric-form-grid input{padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:13px;width:100%}
 .metric-readonly{display:flex;flex-direction:column;gap:6px;font-size:11px;color:var(--muted)}
 .metric-readonly b{font-size:13px;color:var(--fg);font-weight:500;padding:7px 0}
-.metric-form-foot{display:flex;align-items:center;gap:8px;margin-top:14px}
-.metric-form-foot .metric-sync{margin:0}
-.metric-form-foot .spacer{flex:1}
-.metric-form-foot{justify-content:flex-start}
-.table-shell,.tty-table-wrap{border:1px solid var(--border);border-radius:8px;overflow:auto;background:rgba(255,255,255,.012)}
-.table-shell .si-table,.tty-table-wrap .si-table{border:0}
+.tty-table-wrap{border:1px solid var(--border);border-radius:8px;overflow:auto;background:rgba(255,255,255,.012)}
+.tty-table-wrap .si-table{border:0}
 .si-table th{background:rgba(255,255,255,.03)}
 .metric-group td{background:rgba(255,255,255,.018)}
-.metric-form,.tty-form{background:rgba(255,255,255,.022);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:4px 0}
 .metric-expand td,.tty-expand td{background:transparent!important}
-.metric-form,.tty-form{background:var(--bg);border-color:var(--border)}
 .si-table td{border-bottom:1px solid var(--border)}
-.table-shell .si-table tr:last-child td{border-bottom:0}
 .metric-expand td,.tty-expand td{border-bottom:0!important}
-.table-shell .si-table th{border-bottom:1px solid var(--border)}
-.metric-form-grid input,.tty-form-grid input,.tty-form-grid select{
-  background:var(--card);
-  border-color:color-mix(in srgb,var(--border) 80%,var(--fg));
-  box-shadow:inset 0 1px 0 rgba(0,0,0,.12);
-}
-.table-shell .si-table th{
   background:color-mix(in srgb,var(--th-bg) 60%,var(--border));
   font-weight:600;
   color:var(--fg);
 }
-.table-shell .si-table td{border-bottom:1px solid color-mix(in srgb,var(--border) 45%,transparent)}
 /* 表单输入控件加重 */
-.metric-form-grid input,.tty-form-grid input,.tty-form-grid select{
-  background:var(--card);
-  border-color:color-mix(in srgb, var(--border) 80%, var(--fg) 20%);
-}
-.metric-form-grid input:focus,.tty-form-grid input:focus,.tty-form-grid select:focus{
-  outline:none;border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent)
-}
 /* 表头更重、行线更轻 */
-.table-shell .si-table th{
   background:color-mix(in srgb, var(--fg) 7%, var(--card));
   font-weight:600;color:var(--fg)
 }
 .si-table td{border-bottom:1px solid color-mix(in srgb, var(--border) 55%, transparent)}
-.table-shell .si-table tr:last-child td{border-bottom:0}
 .detail-table-shell{border:1px solid var(--border);border-radius:8px;overflow:auto;background:rgba(255,255,255,.012)}
 .detail-table{width:100%;border-collapse:collapse;font-size:14px}
 .detail-table th{text-align:left;font-size:12px;font-weight:600;color:var(--fg);background:color-mix(in srgb, var(--fg) 7%, var(--card));padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
@@ -634,3 +560,4 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .settings-kv thead th{font-weight:600;color:var(--fg);background:color-mix(in srgb,var(--fg) 7%,var(--card))}
 .settings-kv th:first-child{width:220px}
 .settings-kv th:last-child{width:auto}
+.ui-form-left,.ui-form-right{display:flex;gap:8px}
