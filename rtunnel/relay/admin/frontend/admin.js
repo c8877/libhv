@@ -505,53 +505,34 @@ const ProfilePage = Object.assign(new Page(), {
   async refresh() {
     const p = await Api.get('/api/v1/me/profile');
     const colors = ['#4a9eff', '#57ab5a', '#f5a623', '#e5534b', '#b083f0', '#39c5cf', '#d4a72c', '#8b949e'];
-    const pageName = v => v === 'agents' ? '设备列表' : '概览';
-    const timeName = v => v === 'relative' ? '相对时间' : '本地时间';
-    const rows = [
-      ['头像颜色', '<span class="color-dot" style="background:' + UI.esc(p.avatar_color || colors[0]) + '"></span><code>' + UI.esc(p.avatar_color || colors[0]) + '</code>'],
-      ['显示名', UI.esc(p.display_name || '—')],
-      ['默认页面', pageName(p.default_page)],
-      ['时间格式', timeName(p.time_format)],
-      ['终端字号', UI.esc(p.term_font || '14') + ' px'],
-    ];
-    const profileTable = '<div class="detail-table-shell"><table class="detail-table setting-table profile-table">' +
-      '<thead><tr><th>设置项</th><th>当前值</th></tr></thead><tbody>' +
-      rows.map(r => '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>').join('') +
-      '</tbody></table></div>';
-    const profileForm = this.editProfile ? '<div class="ui-form setting-form"><div class="ui-form-grid cols-3">' +
-      '<label>头像颜色<input type="color" id="pf-color" value="' + UI.esc(p.avatar_color || colors[0]) + '"></label>' +
-      '<label>显示名<input type="text" id="pf-name" value="' + UI.esc(p.display_name || '') + '"></label>' +
-      '<label>默认页面<select id="pf-page"><option value="overview"' + (p.default_page === 'overview' ? ' selected' : '') + '>概览</option>' +
-        '<option value="agents"' + (p.default_page === 'agents' ? ' selected' : '') + '>设备列表</option></select></label>' +
-      '<label>时间格式<select id="pf-time"><option value="local"' + (p.time_format === 'local' ? ' selected' : '') + '>本地时间</option>' +
-        '<option value="relative"' + (p.time_format === 'relative' ? ' selected' : '') + '>相对时间</option></select></label>' +
-      '<label>终端字号<input type="number" id="pf-font" min="10" max="24" value="' + UI.esc(p.term_font || '14') + '"></label>' +
-      '</div><div class="ui-form-foot"><span class="muted">保存后立即生效</span><span class="spacer"></span>' +
-      '<button data-pf-cancel="1">取消</button><button class="primary" id="pf-save">保存</button></div></div>' : '';
+    this.el.innerHTML =
+      '<div class="panel" style="max-width:560px"><div class="panel-head"><h2>个人设置</h2></div>' +
+      '<div class="cfg-body">' +
+        '<label class="cfg-row"><span>头像颜色</span><input type="color" id="pf-color" value="' +
+          UI.esc(p.avatar_color || colors[0]) + '"><em>首字母 ' + UI.esc(p.username.slice(0, 1).toUpperCase()) + '</em></label>' +
+        '<label class="cfg-row"><span>显示名</span><input type="text" id="pf-name" value="' +
+          UI.esc(p.display_name || '') + '"></label>' +
+        '<label class="cfg-row"><span>默认页面</span><select id="pf-page">' +
+          '<option value="overview"' + (p.default_page === 'overview' ? ' selected' : '') + '>概览</option>' +
+          '<option value="agents"' + (p.default_page === 'agents' ? ' selected' : '') + '>设备列表</option></select></label>' +
+        '<label class="cfg-row"><span>时间格式</span><select id="pf-time">' +
+          '<option value="local"' + (p.time_format === 'local' ? ' selected' : '') + '>本地时间</option>' +
+          '<option value="relative"' + (p.time_format === 'relative' ? ' selected' : '') + '>相对时间</option></select></label>' +
+        '<label class="cfg-row"><span>终端字号</span><input type="number" id="pf-font" value="' +
+          UI.esc(p.term_font || '14') + '" min="10" max="24"><em>px</em></label>' +
+      '</div><div class="cfg-actions"><button class="primary" id="pf-save">保存</button></div></div>' +
 
-    const pwOpen = this.editKey === 'password';
-    const securityTable = '<div class="detail-table-shell"><table class="detail-table setting-table profile-table">' +
-      '<thead><tr><th>设置项</th><th>说明</th><th>操作</th></tr></thead><tbody>' +
-      '<tr><td>登录密码</td><td class="muted">修改当前账号密码</td><td><button data-pf-row="password">修改</button></td></tr>' +
-      (pwOpen ? '<tr class="setting-expand"><td colspan="3"><div class="ui-form">' +
-        '<div class="ui-form-grid cols-2"><label>当前密码<input type="password" id="pw-old"></label>' +
-        '<label>新密码<input type="password" id="pw-new"></label></div>' +
-        '<div class="ui-form-foot"><span class="spacer"></span><button data-pw-cancel="1">取消</button>' +
-        '<button class="primary" id="pw-save">修改密码</button></div></div></td></tr>' : '') +
-      '<tr><td>登录会话</td><td class="muted">吊销本账号全部登录会话（含当前）</td>' +
-        '<td><button class="danger" id="sess-drop">登出所有</button></td></tr>' +
-      '</tbody></table></div>';
+      '<div class="panel" style="max-width:560px;margin-top:16px"><div class="panel-head"><h2>修改密码</h2></div>' +
+      '<div class="cfg-body">' +
+        '<label class="cfg-row"><span>当前密码</span><input type="password" id="pw-old"></label>' +
+        '<label class="cfg-row"><span>新密码</span><input type="password" id="pw-new"></label>' +
+      '</div><div class="cfg-actions"><button id="pw-save">修改密码</button></div></div>' +
 
-    this.el.innerHTML = UI.panel('个人资料', profileTable + profileForm, { cls: 'mb16',
-      right: '<button data-pf-edit="1">' + (this.editProfile ? '收起' : '编辑') + '</button>' }) +
-      UI.panel('安全', securityTable, { cls: 'mb16' });
+      '<div class="panel" style="max-width:560px;margin-top:16px"><div class="panel-head"><h2>会话</h2></div>' +
+      '<div class="cfg-body"><div style="color:var(--muted);font-size:12px">吊销本账号全部登录会话（含当前）</div></div>' +
+      '<div class="cfg-actions"><button class="danger" id="sess-drop">登出所有会话</button></div></div>';
 
-    const pe = this.el.querySelector('[data-pf-edit]');
-    if (pe) pe.onclick = () => { this.editProfile = !this.editProfile; this.editKey = null; this.refresh(); };
-    const pc = this.el.querySelector('[data-pf-cancel]');
-    if (pc) pc.onclick = () => { this.editProfile = false; this.refresh(); };
-    const ps = document.getElementById('pf-save');
-    if (ps) ps.onclick = async () => {
+    document.getElementById('pf-save').onclick = async () => {
       const body = {
         avatar_color: document.getElementById('pf-color').value,
         display_name: document.getElementById('pf-name').value,
@@ -561,39 +542,32 @@ const ProfilePage = Object.assign(new Page(), {
       };
       try {
         Auth.profile = await Api.put('/api/v1/me/profile', body);
-        Auth.me.display_name = body.display_name;
-        Auth.me.avatar_color = body.avatar_color;
+        Auth.me.display_name = Auth.profile.display_name;
+        Auth.me.avatar_color = Auth.profile.avatar_color;
+        Auth.profile = Auth.profile || {};
         UI.renderUser();
-        this.editProfile = false;
         UI.toast('已保存');
-        this.refresh();
       } catch (e) { UI.toast('保存失败：' + e.message, true); }
     };
-    this.el.querySelectorAll('[data-pf-row]').forEach(b => {
-      b.onclick = () => { this.editKey = this.editKey === b.dataset.pfRow ? null : b.dataset.pfRow; this.editProfile = false; this.refresh(); };
-    });
-    const pwc = this.el.querySelector('[data-pw-cancel]');
-    if (pwc) pwc.onclick = () => { this.editKey = null; this.refresh(); };
-    const pwSave = document.getElementById('pw-save');
-    if (pwSave) pwSave.onclick = async () => {
+    document.getElementById('pw-save').onclick = async () => {
       try {
         await Api.put('/api/v1/users/' + Auth.me.id + '/password', {
           old_password: document.getElementById('pw-old').value,
           new_password: document.getElementById('pw-new').value,
         });
         UI.toast('密码已修改');
-        this.editKey = null;
-        this.refresh();
+        document.getElementById('pw-old').value = '';
+        document.getElementById('pw-new').value = '';
       } catch (e) { UI.toast('修改失败：' + e.message, true); }
     };
-    const sd = document.getElementById('sess-drop');
-    if (sd) sd.onclick = async () => {
+    document.getElementById('sess-drop').onclick = async () => {
       if (!confirm('确定登出所有会话？')) return;
       try {
         await Api.post('/api/v1/me/logout-all', {});
         try { localStorage.removeItem('rt_theme'); localStorage.removeItem('rt_theme_color'); } catch (e) {}
         location.reload();
-      } catch (e) { UI.toast('失败：' + e.message, true); }
+      }
+      catch (e) { UI.toast('失败：' + e.message, true); }
     };
   },
   enter(el) { this.el = el; return Page.prototype.enter.call(this, el, []); },
