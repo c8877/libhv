@@ -445,3 +445,15 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .tty-table th:nth-child(4){width:22%}
 .si-two{align-items:stretch}
 .si-two>.panel{height:100%}
+/* 设备详情表格统一排版 */
+.si-table{font-size:14px}
+.si-table th{font-size:12px;letter-spacing:.02em}
+.si-table td{padding-top:9px;padding-bottom:9px}
+.metric-table td{font-size:14px}
+.metric-name b{font-size:14px}
+.metric-type{font-size:12px}
+.tty-main b{font-size:14px}
+.tty-path{font-size:12px}
+.tty-param{font-size:13px}
+.sys-item{font-size:14px}
+.sys-item .k{font-size:12px}
