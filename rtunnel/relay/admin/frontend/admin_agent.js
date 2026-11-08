@@ -155,9 +155,9 @@ const AgentDetailPage = Object.assign(new Page(), {
         '<div class="si-body"><canvas id="si-disk" height="' +
           Math.max(60, (si.mounts || []).length * 24 + 16) + '"></canvas></div></div>';
       html += '<div id="si-series"></div>' +
+        '<div id="si-metric"></div>' +
         '<div class="si-two">' + diskPanel + nicPanel + '</div>' +
-        '<div id="si-tty"></div>' +
-        '<div id="si-metric"></div>';
+        '<div id="si-tty"></div>';
 
       const certText = si.mtls
         ? UI.kv({ '证书主体': UI.esc(si.cert_subject || ''), '签发者': UI.esc(si.cert_issuer || ''),
