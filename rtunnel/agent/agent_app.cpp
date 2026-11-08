@@ -1033,6 +1033,29 @@ void AgentApp::sendSysinfo(int mode) {
         }
         j["nics"] = nics;
     }
+    {
+        nlohmann::json serial = nlohmann::json::array();
+        for (auto& kv : tty_cfgs_) {
+            unsigned long long rx = 0, tx = 0;
+            char rp[PATH_MAX];
+            std::string base = kv.first;
+            if (realpath(kv.first.c_str(), rp)) {
+                std::string r = rp;
+                size_t p = r.find_last_of('/');
+                if (p != std::string::npos) base = r.substr(p + 1);
+            } else {
+                size_t p = base.find_last_of('/');
+                if (p != std::string::npos) base = base.substr(p + 1);
+            }
+            readTtyCounters(base, rx, tx);
+            nlohmann::json s;
+            s["path"] = kv.first;
+            s["rx"] = rx;
+            s["tx"] = tx;
+            serial.push_back(s);
+        }
+        j["serial"] = serial;
+    }
     j["mtls"] = (tls_cert[0] != '\0');
     {
         nlohmann::json caps;
@@ -1084,6 +1107,7 @@ void AgentApp::sendSysinfo(int mode) {
         for (auto& m : j["mounts"]) out["mounts"].push_back({{"mount", m["mount"]}, {"free_kb", m["free_kb"]}});
         out["nics"] = nlohmann::json::array();
         for (auto& n : j["nics"]) out["nics"].push_back({{"name", n["name"]}, {"ip", n["ip"]}, {"up", n["up"]}});
+        out["serial"] = j["serial"];
     } else {
         sysinfo_sig = sigs;
         j["full"] = true;

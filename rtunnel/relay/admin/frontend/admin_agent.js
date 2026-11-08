@@ -79,6 +79,16 @@ const AgentDetailPage = Object.assign(new Page(), {
         ch.update('none');
       }
     }
+    const smap2 = {};
+    (si.serial || []).forEach(x => { smap2[x.path] = x; });
+    document.querySelectorAll('[data-tty-rx]').forEach(td => {
+      const x = smap2[td.dataset.ttyRx];
+      td.textContent = x ? UI.bytes(x.rx) : '—';
+    });
+    document.querySelectorAll('[data-tty-tx]').forEach(td => {
+      const x = smap2[td.dataset.ttyTx];
+      td.textContent = x ? UI.bytes(x.tx) : '—';
+    });
   },
   async refresh() {
     const d = await Api.get('/api/v1/agents/' + encodeURIComponent(this.devid));
@@ -818,6 +828,10 @@ const AgentDetailPage = Object.assign(new Page(), {
   },
   renderTtyCard(wrap) {
     const can = canManage();
+    const smap = {};
+    ((this.si && this.si.serial) || []).forEach(x => { smap[x.path] = x; });
+    const rxTxt = p => smap[p] ? UI.bytes(smap[p].rx) : '—';
+    const txTxt = p => smap[p] ? UI.bytes(smap[p].tx) : '—';
     const configured = new Set((this.ttys || []).map(t => t.path));
     const unAll = (this.ttyDisc || []).filter(d => !configured.has(d.path));
     const tab = this.ttyTab || (this.ttys && this.ttys.length ? 'config' : 'unconfig');
@@ -833,9 +847,11 @@ const AgentDetailPage = Object.assign(new Page(), {
           '<div class="tty-path" title="' + UI.esc(t.path) + '">' + UI.esc(t.path) + '</div></td>' +
           '<td>' + st + '</td>' +
           '<td class="tty-param">' + t.baud + ' · ' + t.data_bits + t.parity + t.stop_bits + '</td>' +
+          '<td class="tty-stat" data-tty-rx="' + UI.esc(t.path) + '">' + rxTxt(t.path) + '</td>' +
+          '<td class="tty-stat" data-tty-tx="' + UI.esc(t.path) + '">' + txTxt(t.path) + '</td>' +
           '<td class="tty-ops"><a class="btn primary" href="#/tty/' + encodeURIComponent(this.devid) + '/' +
             encodeURIComponent(t.alias || t.path) + '">调试</a><span class="chev">⌄</span></td></tr>';
-        if (open) r += '<tr class="tty-expand"><td colspan="4">' + this.ttyFormHtml(t, false) + '</td></tr>';
+        if (open) r += '<tr class="tty-expand"><td colspan="6">' + this.ttyFormHtml(t, false) + '</td></tr>';
         return r;
       }).join('');
     } else {
@@ -844,16 +860,18 @@ const AgentDetailPage = Object.assign(new Page(), {
         let r = '<tr class="tty-row' + (open ? ' open' : '') + '" data-trow="' + UI.esc(d.path) + '">' +
           '<td class="tty-main"><b>未配置</b><div class="tty-path" title="' + UI.esc(d.path) + '">' +
           UI.esc(d.path) + '</div></td><td><span class="pill">未配置</span></td><td>—</td>' +
+          '<td class="tty-stat" data-tty-rx="' + UI.esc(d.path) + '">' + rxTxt(d.path) + '</td>' +
+          '<td class="tty-stat" data-tty-tx="' + UI.esc(d.path) + '">' + txTxt(d.path) + '</td>' +
           '<td class="tty-ops">' + (can ? '<button data-addpath="' + UI.esc(d.path) + '">添加</button>' : '') +
           '<span class="chev">⌄</span></td></tr>';
         if (open) {
-          r += '<tr class="tty-expand"><td colspan="4">' + this.ttyFormHtml({ path: d.path, baud: 115200,
+          r += '<tr class="tty-expand"><td colspan="6">' + this.ttyFormHtml({ path: d.path, baud: 115200,
             data_bits: 8, parity: 'N', stop_bits: 1, enabled: true }, true) + '</td></tr>';
         }
         return r;
       }).join('');
       if (this.addTtyPath === '') {
-        rows += '<tr class="tty-expand"><td colspan="4">' + this.ttyFormHtml({ path: '', baud: 115200,
+        rows += '<tr class="tty-expand"><td colspan="6">' + this.ttyFormHtml({ path: '', baud: 115200,
           data_bits: 8, parity: 'N', stop_bits: 1, enabled: true }, true) + '</td></tr>';
       }
     }
@@ -866,8 +884,8 @@ const AgentDetailPage = Object.assign(new Page(), {
       '<button id="tty-refresh">刷新</button> ' +
       (can ? '<button id="tty-add">手动添加</button>' : '') + '</div>' +
       '<div class="tty-table-wrap detail-table-shell"><table class="detail-table si-table tty-table"><tr>' +
-      '<th>设备</th><th>状态</th><th>参数</th><th>操作</th></tr>' +
-      (rows || '<tr><td colspan="4" style="color:var(--muted)">' +
+      '<th>设备</th><th>状态</th><th>参数</th><th>RX</th><th>TX</th><th>操作</th></tr>' +
+      (rows || '<tr><td colspan="6" style="color:var(--muted)">' +
         (tab === 'config' ? '暂无已配置串口' : (q ? '没有匹配的串口' : '没有未配置的串口')) + '</td></tr>') +
       '</table></div></div>';
     wrap.querySelectorAll('[data-tab]').forEach(b => {

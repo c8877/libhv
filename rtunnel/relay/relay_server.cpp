@@ -814,6 +814,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
                             if (fi != free_kb.end()) m["free_kb"] = fi->second;
                         }
                     }
+                    if (part.contains("serial")) base["serial"] = part["serial"];
                     if (part.contains("nics") && base.contains("nics")) {
                         std::map<std::string, nlohmann::json> nm;
                         for (auto& n : part["nics"]) nm[n.value("name", "")] = n;
