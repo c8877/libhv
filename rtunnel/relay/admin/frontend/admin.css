@@ -481,3 +481,8 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .metric-group td{background:rgba(255,255,255,.018)}
 .metric-form,.tty-form{background:rgba(255,255,255,.022);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:4px 0}
 .metric-expand td,.tty-expand td{background:transparent!important}
+.metric-form,.tty-form{background:var(--bg);border-color:var(--border)}
+.si-table td{border-bottom:1px solid var(--border)}
+.table-shell .si-table tr:last-child td{border-bottom:0}
+.metric-expand td,.tty-expand td{border-bottom:0!important}
+.table-shell .si-table th{border-bottom:1px solid var(--border)}
