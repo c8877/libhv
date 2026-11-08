@@ -304,3 +304,8 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .tty-ro{padding:6px 12px;color:var(--warn);font-size:12px;border-bottom:1px solid var(--border)}
 
 .series-group{padding:8px 12px}
+
+.series-chips{display:flex;flex-wrap:wrap;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);font-size:12px}
+.chip-all{font-weight:600}
+.chip-group{display:inline-flex;align-items:center;gap:8px;padding:2px 8px;border:1px solid var(--border);border-radius:6px}
+.chip-group b{color:var(--muted);font-weight:500}

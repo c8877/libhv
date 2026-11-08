@@ -439,31 +439,59 @@ const AgentDetailPage = Object.assign(new Page(), {
       if (!this.seriesSel.length) this.seriesSel = [enabled[0].series];
     }
     this.seriesSel = this.seriesSel.filter(s => enabled.some(c => c.series === s));
-    if (!this.seriesSel.length) this.seriesSel = [enabled[0].series];
     wrap.innerHTML = '<div class="panel" style="margin-bottom:16px"><div class="panel-head">' +
       '<h2>采样曲线</h2><span class="spacer"></span><span class="muted" id="series-last"></span> ' +
       '<button id="series-full">全量</button></div>' +
       '<div class="series-chips" id="series-chips">' +
-      enabled.map(c => '<label><input type="checkbox" data-sel="' + UI.esc(c.series) + '"' +
-        (this.seriesSel.indexOf(c.series) >= 0 ? ' checked' : '') + '> ' + UI.esc(c.series) + '</label>').join('') +
+      '<label class="chip-all"><input type="checkbox" id="sel-all"> 全选</label>' +
+      ['percent', 'load', 'rate'].map(u => {
+        const list = enabled.filter(c => this.seriesUnit(c.series) === u);
+        if (!list.length) return '';
+        const label = { percent: '百分比', load: '负载', rate: '速率' }[u];
+        return '<span class="chip-group"><b>' + label + '</b> ' +
+          '<label><input type="checkbox" data-all="' + u + '"> 全选</label> ' +
+          list.map(c => '<label><input type="checkbox" data-sel="' + UI.esc(c.series) + '"' +
+            (this.seriesSel.indexOf(c.series) >= 0 ? ' checked' : '') + '> ' + UI.esc(c.series) + '</label>').join('') +
+          '</span>';
+      }).join('') +
       '</div><div id="series-charts">' +
       '<div class="series-group" id="series-wrap-percent" style="display:none"><canvas id="series-chart-percent" height="140"></canvas></div>' +
       '<div class="series-group" id="series-wrap-load" style="display:none"><canvas id="series-chart-load" height="120"></canvas></div>' +
       '<div class="series-group" id="series-wrap-rate" style="display:none"><canvas id="series-chart-rate" height="140"></canvas></div>' +
       '</div></div>';
+    const all = enabled.map(c => c.series);
+    const syncBoxes = () => {
+      wrap.querySelectorAll('[data-sel]').forEach(cb => { cb.checked = this.seriesSel.indexOf(cb.dataset.sel) >= 0; });
+      wrap.querySelectorAll('[data-all]').forEach(cb => {
+        const list = enabled.filter(c => this.seriesUnit(c.series) === cb.dataset.all).map(c => c.series);
+        cb.checked = list.length > 0 && list.every(x => this.seriesSel.indexOf(x) >= 0);
+      });
+      const sa = document.getElementById('sel-all');
+      if (sa) sa.checked = all.length > 0 && all.every(x => this.seriesSel.indexOf(x) >= 0);
+    };
+    const apply = (next) => {
+      const added = next.filter(x => this.seriesSel.indexOf(x) < 0);
+      this.seriesSel = next;
+      syncBoxes();
+      this.renderSeriesCharts();
+      this.drawSeriesGroups();
+      if (added.length) this.pullSeriesNames(added, true).then(() => this.drawSeriesGroups());
+    };
     wrap.querySelectorAll('[data-sel]').forEach(cb => {
       cb.onchange = () => {
         const on = [...wrap.querySelectorAll('[data-sel]:checked')].map(x => x.dataset.sel);
-        if (!on.length) { cb.checked = true; return; }
-        const added = on.filter(x => this.seriesSel.indexOf(x) < 0);
-        this.seriesSel = on;
-        this.renderSeriesCharts();
-        this.drawSeriesGroups();          // 先用已有缓存立即重绘，避免空白
-        if (added.length) {
-          this.pullSeriesNames(added, true).then(() => this.drawSeriesGroups());
-        }
+        apply(on);
       };
     });
+    wrap.querySelectorAll('[data-all]').forEach(cb => {
+      cb.onchange = () => {
+        const list = enabled.filter(c => this.seriesUnit(c.series) === cb.dataset.all).map(c => c.series);
+        const others = this.seriesSel.filter(x => list.indexOf(x) < 0);
+        apply(cb.checked ? others.concat(list) : others);
+      };
+    });
+    document.getElementById('sel-all').onchange = (e) => apply(e.target.checked ? all.slice() : []);
+    syncBoxes();
     document.getElementById('series-full').onclick = () => this.pullSeriesPanel(true);
     this.renderSeriesCharts();
     this.pullSeriesPanel(true);
