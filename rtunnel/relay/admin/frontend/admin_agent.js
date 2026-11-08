@@ -654,15 +654,18 @@ const AgentDetailPage = Object.assign(new Page(), {
         if (open) {
           rows += '<tr class="metric-expand"><td colspan="6"><div class="metric-form">' +
             '<div class="metric-fields">' +
-            '<label>间隔 <input id="me-int" type="number" min="1" max="300" value="' + c.interval_sec + '"> 秒</label>' +
-            '<label>保留 <input id="me-pts" type="number" min="60" max="86400" value="' + c.points + '"> 点</label>' +
-            '<span class="muted">约 ' + dur(c) + '</span></div>' +
+            '<div class="field"><label>间隔</label><div class="control">' +
+              '<input id="me-int" type="number" min="1" max="300" value="' + c.interval_sec + '"><span>秒</span></div></div>' +
+            '<div class="field"><label>保留点数</label><div class="control">' +
+              '<input id="me-pts" type="number" min="60" max="86400" value="' + c.points + '"><span>点</span></div></div>' +
+            '<div class="field"><label>预计保留</label><div class="static">' + dur(c) + '</div></div>' +
+            '</div>' +
             '<div class="metric-sync">' + (c.enabled
               ? (c.synced ? '已下发并确认' : '已下发，等待 agent 确认')
               : '已禁用，不参与采样') + '</div>' +
             '<div class="metric-actions">' +
-            '<button data-mdel="' + UI.esc(c.series) + '">删除</button>' +
             '<button class="primary" data-msave="' + UI.esc(c.series) + '">保存并下发</button>' +
+            '<button data-mdel="' + UI.esc(c.series) + '">删除</button>' +
             '</div></div></td></tr>';
         }
       });
