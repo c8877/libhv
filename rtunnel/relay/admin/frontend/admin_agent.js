@@ -743,35 +743,35 @@ const AgentDetailPage = Object.assign(new Page(), {
     const unAll = (this.ttyDisc || []).filter(d => !configured.has(d.path));
     const tab = this.ttyTab || (this.ttys && this.ttys.length ? 'config' : 'unconfig');
     const q = (this.ttyQuery || '').trim().toLowerCase();
-    const un = q ? unAll.filter(d => (d.path || '').toLowerCase().indexOf(q) >= 0) : unAll;
     let rows = '';
     if (tab === 'config') {
       rows = (this.ttys || []).map(t => {
         const st = t.enabled ? '<span class="pill ok">启用</span>' : '<span class="pill">禁用</span>';
-        return '<tr><td><b>' + UI.esc(t.alias || '—') + '</b></td>' +
-          '<td><code>' + UI.esc(t.path) + '</code></td>' +
+        const label = t.alias || '—';
+        return '<tr><td class="tty-main"><b>' + UI.esc(label) + '</b>' +
+          '<div class="tty-path" title="' + UI.esc(t.path) + '">' + UI.esc(t.path) + '</div></td>' +
           '<td>' + st + '</td>' +
-          '<td>' + t.baud + ' ' + t.data_bits + t.parity + t.stop_bits + '</td>' +
+          '<td class="tty-param">' + t.baud + ' ' + t.data_bits + t.parity + t.stop_bits + '</td>' +
           '<td class="tty-ops">' +
-          '<a class="btn" href="#/tty/' + encodeURIComponent(this.devid) + '/' +
+          '<a class="btn primary" href="#/tty/' + encodeURIComponent(this.devid) + '/' +
             encodeURIComponent(t.alias || t.path) + '">调试</a> ' +
           '<a class="btn" href="#/tty/' + encodeURIComponent(this.devid) + '/' +
             encodeURIComponent(t.alias || t.path) + '?monitor=1">监听</a> ' +
-          (roleOf() === 'admin' ? '<button data-take="' + UI.esc(t.alias || t.path) + '">接管</button> ' : '') +
+          '<details class="tty-menu"><summary>更多</summary><div>' +
+          (roleOf() === 'admin' ? '<button data-take="' + UI.esc(t.alias || t.path) + '">强制接管</button>' : '') +
           (can ? '<button data-edit="' + UI.esc(t.path) + '">编辑</button>' : '') +
-          (can ? ' <button data-tog="' + UI.esc(t.path) + '">' + (t.enabled ? '禁用' : '启用') + '</button>' : '') +
-          '</td></tr>';
+          (can ? '<button data-tog="' + UI.esc(t.path) + '">' + (t.enabled ? '禁用' : '启用') + '</button>' : '') +
+          '<button data-copy="' + UI.esc(t.path) + '">复制路径</button>' +
+          '</div></details></td></tr>';
       }).join('');
     } else {
-      rows = un.map(d =>
-        '<tr><td><code>' + UI.esc(d.path) + '</code></td>' +
-        '<td><span class="pill">未配置</span></td><td class="tty-ops">' +
-        (can ? '<button data-addpath="' + UI.esc(d.path) + '">添加</button>' : '') +
-        '</td></tr>').join('');
+      rows = unAll.filter(d => !q || (d.path || '').toLowerCase().indexOf(q) >= 0).map(d =>
+        '<tr><td class="tty-main"><b>未配置</b><div class="tty-path" title="' + UI.esc(d.path) + '">' +
+        UI.esc(d.path) + '</div></td><td><span class="pill">未配置</span></td><td>—</td>' +
+        '<td class="tty-ops">' + (can ? '<button data-addpath="' + UI.esc(d.path) + '">添加</button>' : '') +
+        ' <button data-copy="' + UI.esc(d.path) + '">复制路径</button></td></tr>').join('');
     }
-    const search = tab === 'unconfig'
-      ? '<input id="tty-q" class="tty-search" placeholder="搜索路径" value="' + UI.esc(this.ttyQuery || '') + '">'
-      : '';
+    const search = '<input id="tty-q" class="tty-search" placeholder="搜索别名 / 路径" value="' + UI.esc(this.ttyQuery || '') + '">';
     wrap.innerHTML = '<div class="panel" style="margin-bottom:16px"><div class="panel-head">' +
       '<h2>串口 TTY</h2>' +
       '<span class="tty-tabs"><button data-tab="config"' + (tab === 'config' ? ' class="active"' : '') + '>已配置 ' + (this.ttys || []).length + '</button>' +
@@ -779,10 +779,9 @@ const AgentDetailPage = Object.assign(new Page(), {
       '<span class="spacer"></span>' + search +
       '<button id="tty-refresh">刷新</button> ' +
       (can ? '<button id="tty-add">手动添加</button>' : '') + '</div>' +
-      '<div class="tty-table-wrap"><table class="si-table"><tr>' +
-      (tab === 'config' ? '<th>别名</th><th>路径</th><th>状态</th><th>参数</th><th>操作</th>'
-                        : '<th>路径</th><th>状态</th><th>操作</th>') + '</tr>' +
-      (rows || '<tr><td colspan="5" style="color:var(--muted)">' +
+      '<div class="tty-table-wrap"><table class="si-table tty-table"><tr>' +
+      '<th>设备</th><th>状态</th><th>参数</th><th>操作</th></tr>' +
+      (rows || '<tr><td colspan="4" style="color:var(--muted)">' +
         (tab === 'config' ? '暂无已配置串口' : (q ? '没有匹配的串口' : '没有未配置的串口')) + '</td></tr>') +
       '</table></div></div>';
     wrap.querySelectorAll('[data-tab]').forEach(b => {
@@ -791,11 +790,17 @@ const AgentDetailPage = Object.assign(new Page(), {
     const qel = document.getElementById('tty-q');
     if (qel) qel.oninput = () => {
       this.ttyQuery = qel.value;
-      const q = qel.value.trim().toLowerCase();
+      const v = qel.value.trim().toLowerCase();
       wrap.querySelectorAll('tbody tr').forEach(tr => {
-        tr.style.display = !q || tr.innerText.toLowerCase().indexOf(q) >= 0 ? '' : 'none';
+        tr.style.display = !v || tr.innerText.toLowerCase().indexOf(v) >= 0 ? '' : 'none';
       });
     };
+    wrap.querySelectorAll('[data-copy]').forEach(b => {
+      b.onclick = async () => {
+        try { await navigator.clipboard.writeText(b.dataset.copy); UI.toast('路径已复制'); }
+        catch (e) { UI.toast('复制失败', true); }
+      };
+    });
     if (!can) return;
     wrap.querySelectorAll('[data-edit]').forEach(b => {
       b.onclick = () => {

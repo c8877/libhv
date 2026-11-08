@@ -337,3 +337,13 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .tbl .empty{text-align:center;color:var(--muted);padding:28px}
 .tab{border:1px solid var(--border);border-radius:6px;background:transparent;padding:4px 10px}
 .tab.active{border-color:var(--accent);color:var(--accent);background:rgba(74,158,255,.08)}
+.tty-table td{padding-top:6px;padding-bottom:6px}
+.tty-main b{font-size:13px}
+.tty-path{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;color:var(--muted);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tty-param{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;white-space:nowrap}
+.tty-menu{display:inline-block;position:relative}
+.tty-menu summary{display:inline-block;cursor:pointer;padding:3px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;list-style:none}
+.tty-menu summary::-webkit-details-marker{display:none}
+.tty-menu>div{position:absolute;right:0;top:100%;z-index:20;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:4px;min-width:120px;box-shadow:0 6px 18px rgba(0,0,0,.25)}
+.tty-menu>div button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:6px 10px;border-radius:5px}
+.tty-menu>div button:hover{background:rgba(255,255,255,.06)}
