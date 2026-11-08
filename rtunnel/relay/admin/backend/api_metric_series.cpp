@@ -2,7 +2,6 @@
 #include "admin_server.hpp"
 #include "cpputil/json.hpp"
 #include "common/gzip_util.hpp"
-#include "common/lz4_util.hpp"
 
 using nlohmann::json;
 
@@ -111,15 +110,7 @@ void AdminServer::handleMetricSeriesData(const HttpContextPtr& ctx) {
         ctx->send("{\"error\":\"timeout\"}");
         return;
     }
-    if (data[0] == '\2') {
-        std::string plain;
-        if (!lz4Decompress(data.data() + 1, data.size() - 1, plain)) {
-            ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
-            ctx->send("{\"error\":\"lz4 failed\"}");
-            return;
-        }
-        data.swap(plain);
-    } else if (data[0] == '\1') {
+    if (data[0] == '\1') {
         std::string plain;
         if (!gzipDecompress(data.data() + 1, data.size() - 1, plain)) {
             ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
@@ -129,6 +120,10 @@ void AdminServer::handleMetricSeriesData(const HttpContextPtr& ctx) {
         data.swap(plain);
     } else if (data[0] == '\0') {
         data.erase(0, 1);
+    } else {
+        ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+        ctx->send("{\"error\":\"bad metric payload\"}");
+        return;
     }
     bool full = since.empty() || since == "0";
     std::string ae = ctx->header("Accept-Encoding");

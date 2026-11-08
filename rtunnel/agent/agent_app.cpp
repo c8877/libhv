@@ -1,6 +1,5 @@
 #include "agent_app.hpp"
 #include "common/gzip_util.hpp"
-#include "common/lz4_util.hpp"
 #include "hversion.h"
 #include "cpputil/json.hpp"
 #include "common/logging.hpp"
