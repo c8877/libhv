@@ -204,16 +204,15 @@ const AgentDetailPage = Object.assign(new Page(), {
       const capsForm = this.capsOpen ? this.capsFormHtml(si) : '';
       const runtimeTable = '<div class="detail-table-shell"><table class="detail-table detail-kv"><tbody>' +
         '<tr><th>agent 版本</th><td>' + UI.esc(si.version || '') + '</td></tr>' +
-        '<tr><th>能力</th><td>' + capHtml +
-          (canManage() ? ' <button class="caps-edit" id="caps-edit">' +
-            (this.capsOpen ? '收起' : '编辑') + '</button>' : '') + '</td></tr>' +
+        '<tr class="caps-row' + (this.capsOpen ? ' open' : '') + '" data-caps-row="1"><th>能力</th><td>' +
+          capHtml + (canManage() ? '<span class="chev">⌄</span>' : '') + '</td></tr>' +
         (capsForm ? '<tr class="caps-expand"><td colspan="2">' + capsForm + '</td></tr>' : '') +
         '<tr><th>启动参数</th><td><code style="font-size:12px">' + UI.esc(si.args || '') + '</code></td></tr>' +
         '</tbody></table></div>';
       const sysTable = this.sysGrid(si, siTs);
       html += '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>系统</h2></div>' +
         '<div id="si-sys-wrap">' + sysTable + '</div></div>' +
-        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>运行时</h2></div>' +
+        '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>能力配置</h2></div>' +
         '<div id="si-runtime-wrap">' + runtimeTable + '</div></div>' +
         '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>证书</h2></div>' +
         '<div id="si-cert-wrap">' + certText + '</div></div>';
@@ -343,8 +342,13 @@ const AgentDetailPage = Object.assign(new Page(), {
       else this.renderSeriesPanel();
       if (!this.ttysLoaded) this.loadTtys();
       else this.renderTtyCard(document.getElementById('si-tty'));
-      const ce = document.getElementById('caps-edit');
-      if (ce) ce.onclick = () => { this.capsOpen = !this.capsOpen; this._rendered = false; this.refresh(); };
+      const cr = document.querySelector('[data-caps-row]');
+      if (cr) cr.onclick = (e) => {
+        if (e.target.closest('button,input,select,label')) return;
+        this.capsOpen = !this.capsOpen;
+        this._rendered = false;
+        this.refresh();
+      };
       const cs = document.getElementById('caps-save');
       if (cs) cs.onclick = async () => {
         const msg = document.getElementById('caps-msg');

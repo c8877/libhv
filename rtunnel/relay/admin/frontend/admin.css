@@ -530,3 +530,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .caps-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
 .caps-expand td{padding:0 16px 14px 24px!important;border-bottom:0!important}
 .tty-table-wrap.open{max-height:none;overflow:visible}
+.caps-row{cursor:pointer}
+.caps-row:hover{background:rgba(255,255,255,.03)}
+.caps-row .chev{float:right;color:var(--muted);transition:.15s}
+.caps-row.open .chev{transform:rotate(180deg)}
