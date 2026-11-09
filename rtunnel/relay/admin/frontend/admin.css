@@ -634,3 +634,12 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-tabs-attached .ui-tab.is-active::after{right:-10px;background:radial-gradient(circle at 100% 0,transparent 9px,var(--accent) 9px,var(--accent) 10px,var(--card) 10px)}
 .ui-tabs-attached .ui-tab.is-active::before,
 .ui-tabs-attached .ui-tab.is-active::after{display:block}
+.ui-tabs-attached{gap:12px}
+.ui-tabs-attached .ui-tab.is-active,
+.ui-tabs-attached .ui-tab.is-active:hover,
+.ui-tabs-attached .ui-tab.is-active:focus{background:var(--card)}
+.ui-tabs-attached{gap:16px}
+.ui-tabs-attached .ui-tab.is-active::before,
+.ui-tabs-attached .ui-tab.is-active::after{width:8px;height:8px}
+.ui-tabs-attached .ui-tab.is-active::before{left:-8px;background:radial-gradient(circle at 0 0,transparent 7px,var(--accent) 7px,var(--accent) 8px,var(--card) 8px)}
+.ui-tabs-attached .ui-tab.is-active::after{right:-8px;background:radial-gradient(circle at 100% 0,transparent 7px,var(--accent) 7px,var(--accent) 8px,var(--card) 8px)}
