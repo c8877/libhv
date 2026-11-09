@@ -191,7 +191,12 @@ button.danger { border-color: #e5534b; color: #e5534b; }
 
 /* 主题切换 */
 #themebox { position: relative; }
-#themebtn { padding: 3px 8px; font-size: 14px; }
+#themebtn { width: 32px; height: 32px; padding: 0; border-radius: 50%; display: inline-flex;
+  align-items: center; justify-content: center; border: 1px solid var(--border);
+  background: var(--card); color: var(--fg); transition: filter .15s, transform .1s; flex: none; }
+#themebtn:hover { filter: brightness(1.08); }
+#themebtn:active { filter: brightness(.94); transform: scale(.96); }
+#themebtn.th-color { border-color: transparent; box-shadow: inset 0 0 0 1px rgba(0,0,0,.16); }
 #thememenu { position: absolute; right: 0; top: calc(100% + 6px); width: 224px; z-index: 60;
   background: var(--card); border: 1px solid var(--border); border-radius: 8px;
   padding: 10px; display: none; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
@@ -204,7 +209,6 @@ button.danger { border-color: #e5534b; color: #e5534b; }
 .th-swatches i:hover { border-color: var(--fg); }
 .th-custom { display: flex; align-items: center; justify-content: space-between;
   font-size: 12px; color: var(--muted); gap: 10px; }
-#themebtn .th-dot { display: block; width: 14px; height: 14px; border-radius: 50%; }
 
 /* 纯色主题：以所选颜色派生 */
 html[data-theme="color"] {

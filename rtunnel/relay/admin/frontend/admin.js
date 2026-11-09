@@ -43,10 +43,22 @@ function updateThemeBtn() {
   const mode = p.theme || 'system';
   const color = p.theme_color;
   if (mode === 'color' && color) {
-    b.innerHTML = '<i class="th-dot" style="background:' + color + '"></i>';
+    b.classList.add('th-color');
+    b.style.background = color;
+    const m = /^#?([0-9a-f]{6})$/i.exec(color);
+    let lum = 0.5;
+    if (m) {
+      const n = parseInt(m[1], 16);
+      lum = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+    }
+    b.style.color = lum > 0.62 ? '#111' : '#fff';
+    b.innerHTML = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18h1.5a2.5 2.5 0 0 0 1.8-4.2 2 2 0 0 1 1.4-3.4H19A2 2 0 0 0 21 11.4 9 9 0 0 0 12 3z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="14.5" cy="7" r="1"/></svg>';
     b.title = '主题：自定义色';
     return;
   }
+  b.classList.remove('th-color');
+  b.style.background = '';
+  b.style.color = '';
   const sun = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></svg>';
   const moon = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
   b.innerHTML = mode === 'dark' ? moon : sun;
@@ -150,7 +162,7 @@ function themeMenu() {
   const box = document.createElement('span');
   box.id = 'themebox';
   const colors = ['#3b82f6', '#57ab5a', '#f5a623', '#e5534b', '#b083f0', '#39c5cf', '#d4a72c'];
-  box.innerHTML = '<button id="themebtn" title="主题">🎨</button>' +
+  box.innerHTML = '<button id="themebtn" title="主题" aria-label="主题"></button>' +
     '<div id="thememenu">' +
       '<div class="th-modes">' +
         '<button data-mode="light">浅色</button>' +
