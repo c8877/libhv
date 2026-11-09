@@ -118,6 +118,8 @@ public:
     bool permEffectiveClient(const std::string& user, std::string& json_out, std::string& err);
     bool permMigrateLegacy();
     bool permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::string>& users);
+    bool permAgentCandidates(long long group_id, std::string& json_out);
+    bool permAgentAddDevices(long long group_id, const std::vector<std::string>& devids, std::string& err);
 
 
 

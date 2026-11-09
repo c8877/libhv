@@ -43,7 +43,7 @@ dev_groups / dev_group_members / dev_group_caps / subject_groups
 - [x] 表格行内展开分组表单
 - [x] 客户端成员添加/移除
 - [x] 设备成员添加/移除（输入 devid）
-- [ ] 设备添加穿梭框（候选/已选双栏）
+- [x] 设备添加穿梭框（候选/已选双栏）
 - [x] ACL 矩阵编辑
 - [x] 设备分组能力上限编辑
 - [x] 行内保存/取消/错误

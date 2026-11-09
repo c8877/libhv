@@ -1,6 +1,8 @@
 // 权限页 API：客户端分组 / 设备分组 / ACL 矩阵
 #include "admin_server.hpp"
 #include "cpputil/json.hpp"
+#include <algorithm>
+#include <map>
 
 using nlohmann::json;
 
@@ -119,4 +121,69 @@ void AdminServer::handlePermEffective(const HttpContextPtr& ctx) {
     std::string out, err;
     if (!db_.permEffectiveClient(user, out, err)) { bad(ctx, err); return; }
     ctx->send(out);
+}
+
+void AdminServer::handlePermAgentCandidates(const HttpContextPtr& ctx) {
+    long long id = atoll(ctx->param("id").c_str());
+    std::string out;
+    if (!db_.permAgentCandidates(id, out)) { bad(ctx, "db error"); return; }
+    json base = json::parse(out, nullptr, false);
+    if (base.is_discarded()) { bad(ctx, "db error"); return; }
+    std::map<std::string, json> map;
+    for (auto& d : base["devices"]) map[d.value("devid", "")] = d;
+    std::string online = callRelay([this]() {
+        json arr = json::array();
+        for (RelayConn* c = relay_->agents; c; c = c->reg_next) {
+            json j;
+            j["devid"] = c->devid;
+            j["online"] = true;
+            j["last_seen_ms"] = c->last_seen_ms;
+            j["groups"] = json::array();
+            arr.push_back(j);
+        }
+        return arr.dump();
+    });
+    json oa = json::parse(online, nullptr, false);
+    if (!oa.is_discarded() && oa.is_array()) {
+        for (auto& o : oa) {
+            std::string devid = o.value("devid", "");
+            if (map.count(devid)) {
+                map[devid]["online"] = true;
+                map[devid]["source"] = "online";
+                map[devid]["last_seen_ms"] = o.value("last_seen_ms", 0LL);
+            } else {
+                map[devid] = o;
+                map[devid]["source"] = "online";
+            }
+        }
+    }
+    std::string q = ctx->param("q");
+    bool online_only = ctx->param("online") == "1";
+    json arr = json::array();
+    for (auto& kv : map) {
+        auto& d = kv.second;
+        if (online_only && !d.value("online", false)) continue;
+        if (!q.empty() && kv.first.find(q) == std::string::npos) continue;
+        arr.push_back(d);
+    }
+    std::sort(arr.begin(), arr.end(), [](const json& a, const json& b) {
+        if (a.value("online", false) != b.value("online", false)) return a.value("online", false);
+        return a.value("devid", "") < b.value("devid", "");
+    });
+    json outj;
+    outj["devices"] = arr;
+    ctx->send(outj.dump());
+}
+
+void AdminServer::handlePermAgentAddDevices(const HttpContextPtr& ctx, const std::string& role) {
+    long long id = atoll(ctx->param("id").c_str());
+    json req = json::parse(ctx->body(), nullptr, false);
+    if (req.is_discarded() || !req.is_object()) { bad(ctx, "bad json"); return; }
+    std::vector<std::string> devids;
+    if (req.contains("devids")) for (auto& v : req["devids"]) if (v.is_string()) devids.push_back(v.get<std::string>());
+    std::string err;
+    if (!db_.permAgentAddDevices(id, devids, err)) { bad(ctx, err); return; }
+    audit(role, "permission.agent.devices.add", std::to_string(id) + " n=" + std::to_string(devids.size()));
+    refreshGroupAcl();
+    ctx->send("{\"ok\":true}");
 }

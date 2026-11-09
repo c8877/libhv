@@ -496,3 +496,68 @@ bool AdminDb::permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::st
     sqlite3_finalize(st);
     return true;
 }
+
+bool AdminDb::permAgentCandidates(long long group_id, std::string& json_out) {
+    std::lock_guard<std::mutex> lk(mu_);
+    json out;
+    json devices = json::array();
+    std::set<std::string> excluded;
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, "SELECT devid FROM dev_group_members WHERE group_id=?", -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, group_id);
+        while (sqlite3_step(st) == SQLITE_ROW) excluded.insert((const char*)sqlite3_column_text(st, 0));
+    }
+    sqlite3_finalize(st);
+
+    std::map<std::string, std::set<std::string>> names;
+    st = nullptr;
+    const char* sql =
+        "SELECT m.devid,g.name FROM dev_group_members m JOIN dev_groups g ON g.id=m.group_id";
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW)
+            names[(const char*)sqlite3_column_text(st, 0)].insert((const char*)sqlite3_column_text(st, 1));
+    }
+    sqlite3_finalize(st);
+
+    std::set<std::string> all;
+    st = nullptr;
+    if (sqlite3_prepare_v2(db_, "SELECT devid FROM devices", -1, &st, nullptr) == SQLITE_OK)
+        while (sqlite3_step(st) == SQLITE_ROW) all.insert((const char*)sqlite3_column_text(st, 0));
+    sqlite3_finalize(st);
+    for (auto& kv : names) all.insert(kv.first);
+
+    for (auto& d : all) {
+        if (excluded.count(d)) continue;
+        json item;
+        item["devid"] = d;
+        item["online"] = false;
+        item["source"] = "registered";
+        item["groups"] = json::array();
+        for (auto& g : names[d]) item["groups"].push_back(g);
+        devices.push_back(item);
+    }
+    out["devices"] = devices;
+    json_out = out.dump();
+    return true;
+}
+
+bool AdminDb::permAgentAddDevices(long long group_id, const std::vector<std::string>& devids, std::string& err) {
+    if (devids.empty()) { err = "empty devids"; return false; }
+    std::lock_guard<std::mutex> lk(mu_);
+    std::string e;
+    if (!exec("BEGIN", e)) { err = e; return false; }
+    for (auto& d : devids) {
+        if (d.empty() || d.size() > 128) { exec("ROLLBACK", e); err = "bad devid"; return false; }
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db_, "INSERT OR IGNORE INTO dev_group_members(group_id,devid,added_ms) VALUES(?,?,?)",
+                               -1, &st, nullptr) != SQLITE_OK) { exec("ROLLBACK", e); err = "db error"; return false; }
+        sqlite3_bind_int64(st, 1, group_id);
+        sqlite3_bind_text(st, 2, d.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(st, 3, nowMs());
+        bool ok = sqlite3_step(st) == SQLITE_DONE;
+        sqlite3_finalize(st);
+        if (!ok) { exec("ROLLBACK", e); err = sqlite3_get_autocommit(db_) ? e : "insert failed"; return false; }
+    }
+    exec("COMMIT", e);
+    return true;
+}

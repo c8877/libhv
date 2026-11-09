@@ -564,9 +564,8 @@ const PermissionPage = Object.assign(new Page(), {
     return '<div class="perm-form">' +
       '<div class="perm-grid2"><label>名称<input id="pa-name" value="' + UI.esc(d.name || '') + '"></label>' +
       '<label>描述<input id="pa-desc" value="' + UI.esc(d.description || '') + '"></label></div>' +
-      '<h3>设备成员</h3><div class="perm-chips" id="pa-devices">' + devices + '</div>' +
-      '<div class="ui-flex" style="margin-top:8px"><input id="pa-device" placeholder="devid，可逗号分隔">' +
-      '<button id="pa-add-dev">添加设备</button></div>' +
+      '<h3>设备成员 <button id="pa-transfer">+ 添加设备</button></h3>' +
+      '<div class="perm-chips" id="pa-devices">' + devices + '</div>' +
       '<h3>能力上限</h3><div class="perm-caps">' +
       '<label><input type="checkbox" id="pa-shell"' + (this.chk(c.shell) ? ' checked' : '') + '> Shell</label>' +
       '<label><input type="checkbox" id="pa-sysinfo"' + (this.chk(c.sysinfo) ? ' checked' : '') + '> SYSINFO</label>' +
@@ -649,6 +648,7 @@ const PermissionPage = Object.assign(new Page(), {
     const cancel = document.querySelector('.perm-cancel');
     if (cancel) cancel.onclick = () => { this.expandKey = null; this.detail = null; this.refresh(); };
     this.bindChips();
+    this.bindTransfer();
     this.bindAcl();
     const cs = document.getElementById('pc-save');
     if (cs) cs.onclick = () => this.saveClient();
@@ -675,6 +675,111 @@ const PermissionPage = Object.assign(new Page(), {
     document.querySelectorAll('.perm-chip-x').forEach(b => {
       b.onclick = () => b.closest('.perm-chip').remove();
     });
+  },
+  bindTransfer() {
+    const b = document.getElementById('pa-transfer');
+    if (!b) return;
+    b.onclick = () => this.openTransfer();
+  },
+  async openTransfer() {
+    const isNew = this.expandKey === 'agent:new';
+    const id = isNew ? 0 : this.expandKey.split(':')[1];
+    let data;
+    try { data = await Api.get('/api/v1/permission/agent-groups/' + id + '/candidates'); }
+    catch (e) { UI.toast('加载设备失败：' + e.message, true); return; }
+    const all = data.devices || [];
+    const right = new Map();
+    const m = UI.modal({
+      title: '添加设备',
+      body: '<div class="transfer-toolbar"><input id="tr-q" placeholder="搜索 devid">' +
+        '<label><input type="checkbox" id="tr-online"> 仅在线</label><span id="tr-count"></span></div>' +
+        '<div class="transfer"><div class="transfer-list"><h4>可选设备</h4><div id="tr-left"></div></div>' +
+        '<div class="transfer-ops"><button id="tr-add">&gt;</button><button id="tr-addall">&gt;&gt;</button>' +
+        '<button id="tr-rem">&lt;</button><button id="tr-clear">&lt;&lt;</button></div>' +
+        '<div class="transfer-list"><h4>已选设备</h4><div id="tr-right"></div></div></div>' +
+        '<div class="transfer-foot"><span id="tr-summary"></span></div>',
+      buttons: '<button data-modal-close>取消</button><button class="primary" id="tr-ok">确定添加</button>',
+    });
+    const esc = UI.esc;
+    const render = () => {
+      const q = m.el.querySelector('#tr-q').value.trim().toLowerCase();
+      const only = m.el.querySelector('#tr-online').checked;
+      const left = all.filter(d => !right.has(d.devid) && (!only || d.online) &&
+        (!q || d.devid.toLowerCase().includes(q)));
+      m.el.querySelector('#tr-left').innerHTML = left.length ? left.map(d =>
+        '<label class="transfer-item"><input type="checkbox" class="tr-pick" value="' + esc(d.devid) + '">' +
+        '<span class="transfer-dev">' + esc(d.devid) + '</span>' +
+        '<span class="pill ' + (d.online ? 'ok' : 'info') + '">' + (d.online ? '在线' : '登记') + '</span>' +
+        ((d.groups || []).length ? '<span class="muted-sm">' + esc(d.groups.join(',')) + '</span>' : '') +
+        '</label>').join('') : '<div class="empty">没有可添加的设备</div>';
+      m.el.querySelector('#tr-right').innerHTML = right.size ? [...right.values()].map(d =>
+        '<label class="transfer-item"><input type="checkbox" class="tr-rpick" value="' + esc(d.devid) + '">' +
+        '<span class="transfer-dev">' + esc(d.devid) + '</span>' +
+        '<span class="pill ' + (d.online ? 'ok' : 'info') + '">' + (d.online ? '在线' : '登记') + '</span></label>').join('')
+        : '<div class="empty">从左侧勾选设备后点 &gt;</div>';
+      m.el.querySelector('#tr-count').textContent = '共 ' + left.length + ' 台';
+      const off = [...right.values()].filter(d => !d.online).length;
+      m.el.querySelector('#tr-summary').textContent = '已选 ' + right.size + ' 台' +
+        (off ? '，其中 ' + off + ' 台离线' : '');
+      m.el.querySelector('#tr-addall').disabled = left.length === 0;
+      m.el.querySelector('#tr-add').disabled = left.length === 0;
+      m.el.querySelector('#tr-rem').disabled = right.size === 0;
+      m.el.querySelector('#tr-clear').disabled = right.size === 0;
+    };
+    const picked = cls => [...m.el.querySelectorAll('.' + cls + ':checked')].map(x => x.value);
+    const move = (values, toRight) => {
+      const set = new Set(values);
+      if (toRight) {
+        all.filter(d => set.has(d.devid) && !right.has(d.devid)).forEach(d => right.set(d.devid, d));
+      } else {
+        set.forEach(v => right.delete(v));
+      }
+      render();
+    };
+    m.el.querySelector('#tr-add').onclick = () => move(picked('tr-pick'), true);
+    m.el.querySelector('#tr-addall').onclick = () => {
+      const q = m.el.querySelector('#tr-q').value.trim().toLowerCase();
+      const only = m.el.querySelector('#tr-online').checked;
+      move(all.filter(d => !right.has(d.devid) && (!only || d.online) &&
+        (!q || d.devid.toLowerCase().includes(q))).map(d => d.devid), true);
+    };
+    m.el.querySelector('#tr-rem').onclick = () => move(picked('tr-rpick'), false);
+    m.el.querySelector('#tr-clear').onclick = () => { right.clear(); render(); };
+    m.el.querySelector('#tr-q').oninput = render;
+    m.el.querySelector('#tr-online').onchange = render;
+    m.el.querySelector('#tr-left').onclick = (e) => {
+      const item = e.target.closest('.transfer-item');
+      if (!item) return;
+      if (e.detail === 2) move([item.querySelector('input').value], true);
+    };
+    m.el.querySelector('#tr-right').onclick = (e) => {
+      const item = e.target.closest('.transfer-item');
+      if (!item) return;
+      if (e.detail === 2) move([item.querySelector('input').value], false);
+    };
+    m.el.querySelector('#tr-ok').onclick = async () => {
+      if (!right.size) { UI.toast('请先选择设备', true); return; }
+      const devids = [...right.keys()];
+      if (isNew) {
+        const box = document.getElementById('pa-devices');
+        devids.forEach(v => {
+          if ([...box.querySelectorAll('.perm-chip')].some(c => c.dataset.v === v)) return;
+          const d = document.createElement('span');
+          d.className = 'perm-chip'; d.dataset.v = v;
+          d.innerHTML = esc(v) + ' <button class="perm-chip-x">×</button>';
+          box.appendChild(d);
+        });
+        box.querySelectorAll('.perm-chip-x').forEach(b => { b.onclick = () => b.closest('.perm-chip').remove(); });
+        m.close();
+        return;
+      }
+      try {
+        await Api.post('/api/v1/permission/agent-groups/' + id + '/devices', { devids });
+        m.close(); UI.toast('已添加 ' + devids.length + ' 台设备');
+        this.detail = null; this.refresh();
+      } catch (e) { UI.toast('添加失败：' + e.message, true); }
+    };
+    render();
   },
   bindAcl() {
     const add = document.getElementById('pc-add-acl');
