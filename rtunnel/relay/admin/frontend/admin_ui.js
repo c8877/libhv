@@ -18,6 +18,95 @@ const UI = {
     const info = document.getElementById('userinfo');
     if (info) info.textContent = name + ' · ' + (ROLE_NAMES[me.role] || me.role || '');
   },
+  tabs(container, opts) {
+    if (!container) return null;
+    opts = opts || {};
+    let items = (opts.items || []).slice();
+    let value = opts.value != null ? opts.value : (items[0] && items[0].key);
+    const variant = opts.variant || 'underline';
+    const onChange = typeof opts.onChange === 'function' ? opts.onChange : function () {};
+    container.classList.add('ui-tabs', 'ui-tabs-' + variant);
+    container.setAttribute('role', 'tablist');
+
+    const current = () => items.find(x => x.key === value) || items[0];
+    const updateInk = () => {
+      if (variant !== 'underline') return;
+      const ink = container.querySelector('.ui-tab-ink');
+      const active = container.querySelector('.ui-tab.is-active');
+      if (!ink || !active) return;
+      ink.style.width = active.offsetWidth + 'px';
+      ink.style.transform = 'translateX(' + active.offsetLeft + 'px)';
+      ink.style.opacity = '1';
+    };
+    const activate = (key, fire) => {
+      if (!items.some(x => x.key === key)) return;
+      value = key;
+      container.querySelectorAll('.ui-tab').forEach(b => {
+        const on = b.dataset.key === key;
+        b.classList.toggle('is-active', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+        b.tabIndex = on ? 0 : -1;
+      });
+      updateInk();
+      if (fire) onChange(key);
+    };
+    const bind = () => {
+      container.querySelectorAll('.ui-tab').forEach(b => {
+        b.onclick = () => activate(b.dataset.key, true);
+        b.onkeydown = (e) => {
+          const idx = items.findIndex(x => x.key === b.dataset.key);
+          let next = -1;
+          if (e.key === 'ArrowRight') next = (idx + 1) % items.length;
+          else if (e.key === 'ArrowLeft') next = (idx - 1 + items.length) % items.length;
+          else if (e.key === 'Home') next = 0;
+          else if (e.key === 'End') next = items.length - 1;
+          if (next >= 0) {
+            e.preventDefault();
+            activate(items[next].key, true);
+            const el = container.querySelector('.ui-tab[data-key="' + items[next].key + '"]');
+            if (el) el.focus();
+          }
+        };
+      });
+    };
+    const render = () => {
+      container.innerHTML = items.map(x =>
+        '<button class="ui-tab' + (x.key === value ? ' is-active' : '') + '" role="tab" ' +
+        'data-key="' + UI.esc(x.key) + '" aria-selected="' + (x.key === value ? 'true' : 'false') + '" ' +
+        'tabindex="' + (x.key === value ? '0' : '-1') + '"' + (x.disabled ? ' disabled' : '') + '>' +
+        '<span class="ui-tab-label">' + UI.esc(x.label || x.key) + '</span>' +
+        (x.count != null ? '<span class="ui-tab-count">' + Number(x.count) + '</span>' : '') +
+        '</button>').join('') +
+        (variant === 'underline' ? '<span class="ui-tab-ink"></span>' : '');
+      bind();
+      updateInk();
+    };
+    const onResize = () => updateInk();
+    window.addEventListener('resize', onResize);
+    render();
+    return {
+      el: container,
+      getValue: () => value,
+      setValue: (key, fire) => activate(key, fire !== false),
+      setCount(key, count) {
+        const it = items.find(x => x.key === key);
+        if (!it) return;
+        it.count = count;
+        const b = container.querySelector('.ui-tab[data-key="' + key + '"] .ui-tab-count');
+        if (b) b.textContent = Number(count);
+        else render();
+      },
+      setItems(next) {
+        items = (next || []).slice();
+        if (!items.some(x => x.key === value)) value = items[0] && items[0].key;
+        render();
+      },
+      destroy() {
+        window.removeEventListener('resize', onResize);
+        container.innerHTML = '';
+      },
+    };
+  },
   bytes(n) {
     n = Number(n) || 0;
     const u = ['B', 'K', 'M', 'G', 'T'];

@@ -188,9 +188,9 @@ const TasksPage = Object.assign(new Page(), {
     const items = r.items || [];
     const pages = Math.max(1, Math.ceil(r.total / this.per));
     const tabCount = { all: sum.all, active: sum.active, done: sum.done, failed_group: sum.failed, conflict: sum.conflict };
-    const tabs = [['all', '全部'], ['active', '进行中'], ['done', '已完成'],
-                  ['failed_group', '失败'], ['conflict', '冲突']]
-      .map(([k, n]) => [k, n + ' ' + (tabCount[k] || 0)]);
+    const tabItems = [['all', '全部'], ['active', '进行中'], ['done', '已完成'],
+                      ['failed_group', '失败'], ['conflict', '冲突']]
+      .map(([k, n]) => ({ key: k, label: n, count: tabCount[k] || 0 }));
 
     const rows = items.map(t => {
       const size = Number(t.file_size) || 0;
@@ -215,10 +215,10 @@ const TasksPage = Object.assign(new Page(), {
         '<td>' + ops + '</td></tr>';
     }).join('');
 
+    if (this._tabs) { this._tabs.destroy(); this._tabs = null; }
     this.el.innerHTML =
-      '<div class="panel"><div class="panel-head"><h2>任务</h2><span class="spacer"></span>' +
-        tabs.map(([k, n]) => '<button class="tab' + (this.tab === k ? ' active' : '') +
-          '" data-tab="' + k + '">' + n + '</button>').join(' ') + '</div>' +
+      '<div class="panel"><div class="panel-head"><h2>任务</h2>' +
+        '<div id="task-tabs" class="task-tabs"></div><span class="spacer"></span></div>' +
       '<div class="cfg-body ui-flex">' +
         '<input type="text" id="task-q" placeholder="搜索设备 / 文件" value="' + UI.esc(this.q) + '" class="ui-w220">' +
         (this.batch ? '<span class="pill info">本批：' + UI.esc(this.batch) + ' ×</span>' : '') +
@@ -231,8 +231,9 @@ const TasksPage = Object.assign(new Page(), {
       '</tbody></table></div>' +
       UI.pager(this.page, pages, r.total) + '</div></div>';
 
-    document.querySelectorAll('#page .tab').forEach(b => {
-      b.onclick = () => { this.tab = b.dataset.tab; this.page = 1; this.refresh(); };
+    this._tabs = UI.tabs(document.getElementById('task-tabs'), {
+      items: tabItems, value: this.tab, variant: 'segmented',
+      onChange: (key) => { this.tab = key; this.page = 1; this.refresh(); },
     });
     const q = document.getElementById('task-q');
     q.oninput = () => {

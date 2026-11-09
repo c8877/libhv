@@ -617,19 +617,26 @@ const PermissionPage = Object.assign(new Page(), {
     const head = isClient
       ? '<tr><th>名称</th><th>用户数</th><th>设备组</th><th>更新</th><th></th></tr>'
       : '<tr><th>名称</th><th>设备数</th><th>被引用</th><th>能力上限</th><th></th></tr>';
+    if (this._tabs) { this._tabs.destroy(); this._tabs = null; }
     this.el.innerHTML = UI.panel('权限管理',
-      '<div class="perm-tabs"><button class="perm-tab' + (isClient ? ' active' : '') + '" data-tab="client">客户端分组</button>' +
-      '<button class="perm-tab' + (!isClient ? ' active' : '') + '" data-tab="agent">设备分组</button>' +
-      '<span class="spacer"></span>' + (canManage() ? '<button class="primary" id="perm-new">+ 新建分组</button>' : '') + '</div>' +
+      '<div class="perm-tabbar" id="perm-tabs"></div>' +
       '<div class="perm-table-wrap"><table class="detail-table perm-table"><thead>' + head + '</thead><tbody>' +
       (newForm || '') + (rows || '<tr><td colspan="5" class="empty">暂无分组</td></tr>') + '</tbody></table></div>',
-      { right: canManage() ? '<button id="perm-dict">字典管理</button>' : '' });
+      { right: canManage() ? '<button class="primary" id="perm-new">+ 新建分组</button> <button id="perm-dict">字典管理</button>' : '' });
+    this._tabs = UI.tabs(document.getElementById('perm-tabs'), {
+      items: [
+        { key: 'client', label: '客户端分组', count: cgs.length },
+        { key: 'agent', label: '设备分组', count: ags.length },
+      ],
+      value: this.tab,
+      variant: 'underline',
+      onChange: (key) => {
+        this.tab = key; this.expandKey = null; this.detail = null; this.render();
+      },
+    });
     this.bind();
   },
   bind() {
-    document.querySelectorAll('.perm-tab').forEach(b => {
-      b.onclick = () => { this.tab = b.dataset.tab; this.expandKey = null; this.detail = null; this.render(); };
-    });
     const db = document.getElementById('perm-dict');
     if (db) db.onclick = () => this.openDictManager('ports');
     const nb = document.getElementById('perm-new');
