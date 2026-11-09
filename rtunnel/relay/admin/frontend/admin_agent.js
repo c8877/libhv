@@ -179,11 +179,11 @@ const AgentDetailPage = Object.assign(new Page(), {
       const nics = (si.nics || []).map(n => [UI.esc(n.name), UI.esc(n.ip), UI.esc(n.netmask),
         n.up ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>']);
       const nicPanel = UI.panel('网卡', '<div id="si-nic-wrap">' +
-        UI.detailTable(['接口', 'IP', '掩码', '状态'], nics) + '</div>', { cls: 'si-nic' });
+        UI.detailTable(['接口', 'IP', '掩码', '状态'], nics) + '</div>');
 
       const diskPanel = UI.panel('存储', '<div class="si-body"><canvas id="si-disk" height="' +
           Math.max(60, (si.mounts || []).length * 24 + 16) + '"></canvas></div>',
-          { cls: 'si-disk', right: '<span class="muted-sm">条长按最大分区归一</span>' });
+          { right: '<span class="muted-sm">条长按最大分区归一</span>' });
       html += '<div class="si-two">' + diskPanel + nicPanel + '</div>' +
         '<div id="si-series"></div>' +
         '<div id="si-metric"></div>' +
@@ -939,8 +939,7 @@ const AgentDetailPage = Object.assign(new Page(), {
     };
   },
   ttyError(msg) {
-    if (window.UI && UI.toast) UI.toast(msg);
-    else alert(msg);
+    UI.toast(msg);
   },
 });
 

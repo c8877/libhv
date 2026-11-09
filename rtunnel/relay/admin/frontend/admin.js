@@ -1,7 +1,6 @@
 'use strict';
-/* rtunnel admin 前端：侧边栏 + hash 路由，无框架单文件。
- * 模块划分：Api（fetch 封装）/ UI（渲染组件）/ Router（hash 路由 + 页面生命周期）/
- *           Pages.*（概览/设备/设备详情/客户端/会话，各带 enter/refresh/leave）。
+/* rtunnel admin 前端：Api / Auth / Router / 页面。
+ * 渲染组件在 admin_ui.js，页面模块在 admin_pages.js / admin_agent.js / admin_dist.js。
  */
 
 // ---------------------------------------------------------------- Api
