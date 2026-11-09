@@ -620,24 +620,3 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-tabs-attached .ui-tab::before,
 .ui-tabs-attached .ui-tab::after{display:none!important}
 .ui-tabs-attached .ui-tab{border-radius:6px 6px 0 0}
-/* 2px outward bottom corners */
-.ui-tabs-attached .ui-tab::before,
-.ui-tabs-attached .ui-tab::after{display:block!important;top:auto;bottom:-1px;width:3px;height:3px;background:var(--card);border:0;border-radius:0;box-shadow:none;z-index:0;pointer-events:none}
-.ui-tabs-attached .ui-tab::before{left:-3px;border-right:1px solid var(--tab-edge);border-bottom:1px solid var(--tab-edge);border-bottom-right-radius:2px}
-.ui-tabs-attached .ui-tab::after{right:-3px;border-left:1px solid var(--tab-edge);border-bottom:1px solid var(--tab-edge);border-bottom-left-radius:2px}
-.ui-tabs-attached .ui-tab{margin-bottom:-1px}
-.ui-tabs-attached .ui-tab::before,
-.ui-tabs-attached .ui-tab::after{bottom:0}
-.ui-tabs-attached .ui-tab::before,
-.ui-tabs-attached .ui-tab::after{width:5px;height:5px;bottom:0}
-.ui-tabs-attached .ui-tab::before{left:-5px;border-bottom-right-radius:2px}
-.ui-tabs-attached .ui-tab::after{right:-5px;border-bottom-left-radius:2px}
-.ui-tabs-attached{border-bottom:0}
-/* one-piece bottom lip: outward 2px ends, continuous line */
-.ui-tabs-attached .ui-tab::after{display:none!important}
-.ui-tabs-attached .ui-tab::before{
- content:""!important;display:block!important;position:absolute;left:-2px;right:-2px;bottom:-1px;width:auto;height:3px;
- border:0!important;border-bottom:1px solid var(--tab-edge)!important;border-radius:0 0 2px 2px!important;
- background:var(--card)!important;box-shadow:none!important;z-index:0!important;pointer-events:none;
-}
-.ui-tabs-attached .ui-tab.is-active::before{border-bottom-color:transparent!important;background:var(--card)!important}
