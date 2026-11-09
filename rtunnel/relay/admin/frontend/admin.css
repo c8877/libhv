@@ -643,3 +643,5 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-tabs-attached .ui-tab.is-active::after{width:8px;height:8px}
 .ui-tabs-attached .ui-tab.is-active::before{left:-8px;background:radial-gradient(circle at 0 0,transparent 7px,var(--accent) 7px,var(--accent) 8px,var(--card) 8px)}
 .ui-tabs-attached .ui-tab.is-active::after{right:-8px;background:radial-gradient(circle at 100% 0,transparent 7px,var(--accent) 7px,var(--accent) 8px,var(--card) 8px)}
+.ui-tabs-attached .ui-tab.is-active::before,
+.ui-tabs-attached .ui-tab.is-active::after{top:auto;bottom:0}
