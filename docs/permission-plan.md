@@ -20,14 +20,12 @@ dev_groups / dev_group_members / dev_group_caps / subject_groups
 
 ## 阶段 1：数据模型
 
-- [ ] `client_groups`
-- [ ] `client_group_members`
-- [ ] `agent_groups`
-- [ ] `agent_group_members`
-- [ ] `agent_group_caps`
-- [ ] `client_group_acl`
-- [ ] 原型表迁移
-- [ ] 旧 ACL 导入客户端分组
+- [x] `client_groups`
+- [x] `client_group_members`
+- [x] 设备分组复用原型 `dev_groups` 作为 agent group 存储
+- [x] `client_group_acl`
+- [x] 原型 client 关系迁移
+- [ ] 旧 ACL 文件导入
 
 验收：
 
@@ -38,17 +36,17 @@ dev_groups / dev_group_members / dev_group_caps / subject_groups
 
 ## 阶段 2：权限页面
 
-- [ ] 侧边栏「权限」菜单
-- [ ] `#/permission` 路由
-- [ ] 客户端分组 Tab
-- [ ] 设备分组 Tab
-- [ ] 表格行内展开分组表单
-- [ ] 客户端成员添加/移除
-- [ ] 设备成员添加/移除
-- [ ] ACL 矩阵编辑
-- [ ] 设备分组能力上限编辑
-- [ ] 行内保存/取消/错误
-- [ ] 空状态与未保存提示
+- [x] 侧边栏「权限」菜单
+- [x] `#/permission` 路由
+- [x] 客户端分组 Tab
+- [x] 设备分组 Tab
+- [x] 表格行内展开分组表单
+- [x] 客户端成员添加/移除
+- [x] 设备成员添加/移除
+- [x] ACL 矩阵编辑
+- [x] 设备分组能力上限编辑
+- [x] 行内保存/取消/错误
+- [x] 空状态
 - [ ] 旧 ACL 导入入口
 
 验收：
@@ -60,13 +58,13 @@ dev_groups / dev_group_members / dev_group_caps / subject_groups
 
 ## 阶段 3：运行时
 
-- [ ] relay 加载客户端分组 ACL
-- [ ] OPEN 按客户端分组 → 设备分组 → devid 检查
-- [ ] 端口/Shell/TTY 检查
-- [ ] 设备分组能力上限裁剪
-- [ ] agent caps 最终裁剪
-- [ ] 分组变更热更新
-- [ ] 管理台账号仍按设备分组范围
+- [x] relay 加载客户端分组 ACL
+- [x] OPEN 按客户端分组 → 设备分组 → devid 检查
+- [x] 端口/Shell/TTY 检查
+- [ ] 端口/TTY 的设备分组上限交集
+- [x] agent caps 最终裁剪
+- [x] 分组变更热更新
+- [x] 管理台账号仍按设备分组范围（原型范围）
 
 验收：
 

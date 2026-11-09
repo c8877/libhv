@@ -125,7 +125,16 @@ private:
     void handleGroupAddSubject(const HttpContextPtr& ctx, const std::string& role);
     void handleGroupRemoveSubject(const HttpContextPtr& ctx, const std::string& role);
     void handleGroupDeviceMap(const HttpContextPtr& ctx);
-    void handleAccessEffective(const HttpContextPtr& ctx);
+    void handleAccessEffective(const HttpContextPtr& ctx);    // api_permission.cpp
+    void handlePermOverview(const HttpContextPtr& ctx);
+    void handlePermClientGet(const HttpContextPtr& ctx);
+    void handlePermClientSave(const HttpContextPtr& ctx, const std::string& role);
+    void handlePermClientDelete(const HttpContextPtr& ctx, const std::string& role);
+    void handlePermAgentGet(const HttpContextPtr& ctx);
+    void handlePermAgentSave(const HttpContextPtr& ctx, const std::string& role);
+    void handlePermAgentDelete(const HttpContextPtr& ctx, const std::string& role);
+    void handlePermEffective(const HttpContextPtr& ctx);
+
     void handleAclGet(const HttpContextPtr& ctx);
     void handleAclPut(const HttpContextPtr& ctx, const std::string& role);
     void handleAclReload(const HttpContextPtr& ctx, const std::string& role);

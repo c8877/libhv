@@ -235,6 +235,7 @@ int AdminServer::start(const AdminConfig& cfg) {
         std::string db_err;
         if (db_.open(cfg_.db_path, db_err)) {
             loadSettings();
+            db_.permMigrateLegacy();
             logf_("[admin] db: %s", cfg_.db_path.c_str());
         } else {
             logf_("[admin] db open failed: %s (%s)", cfg_.db_path.c_str(), db_err.c_str());

@@ -9,6 +9,18 @@
 
 struct sqlite3;
 
+struct DbPermAcl {
+    long long agent_group_id = 0;
+    std::string tcp_ports;
+    std::string tty;
+    std::string file = "none";
+    bool shell = false;
+    bool sysinfo = false;
+    bool metrics = false;
+    bool config = false;
+    bool web = false;
+};
+
 struct DbGroupAclRule {
     std::string user;
     std::string devid;
@@ -91,7 +103,22 @@ public:
     bool groupEffective(const std::string& type, const std::string& subject,
                         std::string& json_out, std::string& err);    bool groupSubjectDevids(const std::string& type, const std::string& subject,
                             std::vector<std::string>& out, bool& has_groups);    bool groupClientRules(std::vector<DbGroupAclRule>& out);
-    bool groupClientUsers(std::set<std::string>& out);
+    bool groupClientUsers(std::set<std::string>& out);    bool permOverview(std::string& json_out);
+    bool permClientGet(long long id, std::string& json_out, std::string& err);
+    bool permClientSave(long long id, const std::string& name, const std::string& desc,
+                        const std::vector<std::string>& users,
+                        const std::vector<DbPermAcl>& acl, long long& out_id, std::string& err);
+    bool permClientDelete(long long id, std::string& err);
+    bool permAgentGet(long long id, std::string& json_out, std::string& err);
+    bool permAgentSave(long long id, const std::string& name, const std::string& desc,
+                       const std::vector<std::string>& devices,
+                       const std::map<std::string, std::string>& caps,
+                       long long& out_id, std::string& err);
+    bool permAgentDelete(long long id, std::string& err);
+    bool permEffectiveClient(const std::string& user, std::string& json_out, std::string& err);
+    bool permMigrateLegacy();
+    bool permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::string>& users);
+
 
 
 

@@ -22,10 +22,9 @@ void fail(const HttpContextPtr& ctx, const std::string& msg) {
 void AdminServer::refreshGroupAcl() {
     if (!db_.ok()) return;
     std::vector<DbGroupAclRule> rules;
-    if (!db_.groupClientRules(rules)) return;
-    std::vector<GroupAclRule> out;
     std::set<std::string> users;
-    db_.groupClientUsers(users);
+    if (!db_.permClientRules(rules, users)) return;
+    std::vector<GroupAclRule> out;
     for (auto& r : rules) {
         GroupAclRule g;
         g.user = r.user;

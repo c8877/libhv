@@ -487,6 +487,264 @@ const TerminalPage = Object.assign(new Page(), {
 
 
 // ---------------------------------------------------------------- Pages.系统配置
+// ---------------------------------------------------------------- Pages.权限
+const PermissionPage = Object.assign(new Page(), {
+  refreshInterval() { return 0; },
+  tab: 'client',
+  expandKey: null,
+  ov: null,
+  detail: null,
+  async refresh() {
+    this.ov = await Api.get('/api/v1/permission/overview');
+    if (this.expandKey && this.expandKey !== 'client:new' && this.expandKey !== 'agent:new') {
+      const [kind, id] = this.expandKey.split(':');
+      const base = kind === 'client' ? 'client-groups' : 'agent-groups';
+      try { this.detail = await Api.get('/api/v1/permission/' + base + '/' + id); }
+      catch (e) { this.expandKey = null; this.detail = null; }
+    } else {
+      this.detail = null;
+    }
+    this.render();
+  },
+  capText(c) {
+    c = c || {};
+    const bits = [];
+    if (c.shell === '1' || c.shell === true) bits.push('Shell');
+    if (c.tcp_ports) bits.push('TCP ' + c.tcp_ports);
+    if (c.tty) bits.push('TTY ' + c.tty);
+    if (c.file && c.file !== 'none') bits.push('文件 ' + c.file);
+    if (c.sysinfo === '1' || c.sysinfo === true) bits.push('SYSINFO');
+    if (c.metrics === '1' || c.metrics === true) bits.push('指标');
+    return bits.join(' · ') || '无';
+  },
+  chk(v) { return v === '1' || v === true; },
+  chip(text, cls) {
+    return '<span class="perm-chip ' + (cls || '') + '" data-v="' + UI.esc(text) + '">' +
+      UI.esc(text) + ' <button class="perm-chip-x">×</button></span>';
+  },
+  aclRow(a, groups) {
+    const opts = groups.map(g => '<option value="' + g.id + '"' +
+      (Number(a.agent_group_id) === g.id ? ' selected' : '') + '>' + UI.esc(g.name) + '</option>').join('');
+    return '<tr class="perm-acl-row">' +
+      '<td><select class="pa-agent">' + opts + '</select></td>' +
+      '<td><input class="pa-ports" value="' + UI.esc(a.tcp_ports || '') + '" placeholder="22,80,*"></td>' +
+      '<td class="center"><input type="checkbox" class="pa-shell"' + (a.shell ? ' checked' : '') + '></td>' +
+      '<td><input class="pa-tty" value="' + UI.esc(a.tty || '') + '" placeholder="ttyS*"></td>' +
+      '<td><select class="pa-file">' + ['none','ro','rw'].map(v =>
+        '<option value="' + v + '"' + ((a.file || 'none') === v ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></td>' +
+      '<td class="center"><input type="checkbox" class="pa-sysinfo"' + (a.sysinfo ? ' checked' : '') + '></td>' +
+      '<td class="center"><input type="checkbox" class="pa-metrics"' + (a.metrics ? ' checked' : '') + '></td>' +
+      '<td class="center"><input type="checkbox" class="pa-config"' + (a.config ? ' checked' : '') + '></td>' +
+      '<td class="center"><input type="checkbox" class="pa-web"' + (a.web ? ' checked' : '') + '></td>' +
+      '<td><button class="pa-del">移除</button></td></tr>';
+  },
+  clientForm(d, groups) {
+    const users = (d.users || []).map(u => this.chip(u)).join('');
+    const acl = (d.acl || []).map(a => this.aclRow(a, groups)).join('');
+    return '<div class="perm-form">' +
+      '<div class="perm-grid2"><label>名称<input id="pc-name" value="' + UI.esc(d.name || '') + '"></label>' +
+      '<label>描述<input id="pc-desc" value="' + UI.esc(d.description || '') + '"></label></div>' +
+      '<h3>客户端用户</h3><div class="perm-chips" id="pc-users">' + users + '</div>' +
+      '<div class="ui-flex" style="margin-top:8px"><input id="pc-user" placeholder="alice 或 alice,bob">' +
+      '<button id="pc-add-user">添加用户</button></div>' +
+      '<h3>ACL 配置</h3>' +
+      '<div class="perm-acl-wrap"><table class="detail-table perm-acl"><thead><tr>' +
+      '<th>设备分组</th><th>TCP 端口</th><th>Shell</th><th>TTY</th><th>文件</th>' +
+      '<th>SYSINFO</th><th>指标</th><th>配置</th><th>Web</th><th></th></tr></thead>' +
+      '<tbody id="pc-acl">' + (acl || '') + '</tbody></table></div>' +
+      '<div class="ui-flex" style="margin-top:8px"><select id="pc-agent">' + groups.map(g =>
+        '<option value="' + g.id + '">' + UI.esc(g.name) + '</option>').join('') + '</select>' +
+      '<button id="pc-add-acl">添加 ACL</button></div>' +
+      '<div class="perm-form-foot"><button class="perm-cancel">取消</button>' +
+      '<button class="primary" id="pc-save">保存</button></div></div>';
+  },
+  agentForm(d) {
+    const devices = (d.devices || []).map(x => this.chip(x)).join('');
+    const c = d.caps || {};
+    return '<div class="perm-form">' +
+      '<div class="perm-grid2"><label>名称<input id="pa-name" value="' + UI.esc(d.name || '') + '"></label>' +
+      '<label>描述<input id="pa-desc" value="' + UI.esc(d.description || '') + '"></label></div>' +
+      '<h3>设备成员</h3><div class="perm-chips" id="pa-devices">' + devices + '</div>' +
+      '<div class="ui-flex" style="margin-top:8px"><input id="pa-device" placeholder="devid，可逗号分隔">' +
+      '<button id="pa-add-dev">添加设备</button></div>' +
+      '<h3>能力上限</h3><div class="perm-caps">' +
+      '<label><input type="checkbox" id="pa-shell"' + (this.chk(c.shell) ? ' checked' : '') + '> Shell</label>' +
+      '<label><input type="checkbox" id="pa-sysinfo"' + (this.chk(c.sysinfo) ? ' checked' : '') + '> SYSINFO</label>' +
+      '<label><input type="checkbox" id="pa-metrics"' + (this.chk(c.metrics) ? ' checked' : '') + '> 指标</label>' +
+      '<label><input type="checkbox" id="pa-config"' + (this.chk(c.config) ? ' checked' : '') + '> 修改配置</label>' +
+      '<label><input type="checkbox" id="pa-web"' + (this.chk(c.web) ? ' checked' : '') + '> Web</label></div>' +
+      '<label class="perm-field">TCP 端口<input id="pa-ports" value="' + UI.esc(c.tcp_ports || '') + '"></label>' +
+      '<label class="perm-field">TTY<input id="pa-tty" value="' + UI.esc(c.tty || '') + '"></label>' +
+      '<label class="perm-field">文件<select id="pa-file">' + ['none','ro','rw'].map(v =>
+        '<option value="' + v + '"' + ((c.file || 'none') === v ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></label>' +
+      '<div class="perm-form-foot"><button class="perm-cancel">取消</button>' +
+      '<button class="primary" id="pa-save">保存</button></div></div>';
+  },
+  render() {
+    const ov = this.ov || {};
+    const cgs = ov.client_groups || [];
+    const ags = ov.agent_groups || [];
+    const isClient = this.tab === 'client';
+    const rows = isClient ? cgs.map(g => {
+      const open = this.expandKey === 'client:' + g.id;
+      return '<tr class="perm-row' + (open ? ' open' : '') + '" data-key="client:' + g.id + '">' +
+        '<td><span class="perm-chev">' + (open ? '▾' : '▸') + '</span> <b>' + UI.esc(g.name) + '</b></td>' +
+        '<td>' + (g.user_count || 0) + '</td><td>' + (g.acl_count || 0) + '</td>' +
+        '<td class="muted">' + UI.ago(g.updated_ms) + '</td>' +
+        '<td><button class="danger perm-del" data-kind="client" data-id="' + g.id + '">删除</button></td></tr>' +
+        (open ? '<tr class="perm-expand"><td colspan="5">' +
+          this.clientForm(this.detail || g, ags) + '</td></tr>' : '');
+    }).join('') : ags.map(g => {
+      const open = this.expandKey === 'agent:' + g.id;
+      return '<tr class="perm-row' + (open ? ' open' : '') + '" data-key="agent:' + g.id + '">' +
+        '<td><span class="perm-chev">' + (open ? '▾' : '▸') + '</span> <b>' + UI.esc(g.name) + '</b></td>' +
+        '<td>' + (g.device_count || 0) + '</td><td>' + (g.ref_count || 0) + '</td>' +
+        '<td class="muted">' + UI.esc(this.capText(g.caps)) + '</td>' +
+        '<td><button class="danger perm-del" data-kind="agent" data-id="' + g.id + '">删除</button></td></tr>' +
+        (open ? '<tr class="perm-expand"><td colspan="5">' +
+          this.agentForm(this.detail || g) + '</td></tr>' : '');
+    }).join('');
+    let newForm = '';
+    if (this.expandKey === 'client:new') newForm = '<tr class="perm-expand"><td colspan="5">' + this.clientForm({}, ags) + '</td></tr>';
+    if (this.expandKey === 'agent:new') newForm = '<tr class="perm-expand"><td colspan="5">' + this.agentForm({}) + '</td></tr>';
+    const head = isClient
+      ? '<tr><th>名称</th><th>用户数</th><th>设备组</th><th>更新</th><th></th></tr>'
+      : '<tr><th>名称</th><th>设备数</th><th>被引用</th><th>能力上限</th><th></th></tr>';
+    this.el.innerHTML = UI.panel('权限管理',
+      '<div class="perm-tabs"><button class="perm-tab' + (isClient ? ' active' : '') + '" data-tab="client">客户端分组</button>' +
+      '<button class="perm-tab' + (!isClient ? ' active' : '') + '" data-tab="agent">设备分组</button>' +
+      '<span class="spacer"></span>' + (canManage() ? '<button class="primary" id="perm-new">+ 新建分组</button>' : '') + '</div>' +
+      '<div class="perm-table-wrap"><table class="detail-table perm-table"><thead>' + head + '</thead><tbody>' +
+      (newForm || '') + (rows || '<tr><td colspan="5" class="empty">暂无分组</td></tr>') + '</tbody></table></div>');
+    this.bind();
+  },
+  bind() {
+    document.querySelectorAll('.perm-tab').forEach(b => {
+      b.onclick = () => { this.tab = b.dataset.tab; this.expandKey = null; this.detail = null; this.render(); };
+    });
+    const nb = document.getElementById('perm-new');
+    if (nb) nb.onclick = () => {
+      this.expandKey = this.tab + ':new';
+      this.detail = this.tab === 'client' ? { users: [], acl: [] } : { devices: [], caps: {} };
+      this.render();
+    };
+    document.querySelectorAll('.perm-row').forEach(tr => {
+      tr.onclick = (e) => {
+        if (e.target.closest('button')) return;
+        const key = tr.dataset.key;
+        this.expandKey = this.expandKey === key ? null : key;
+        this.detail = null;
+        this.refresh();
+      };
+    });
+    document.querySelectorAll('.perm-del').forEach(b => {
+      b.onclick = async (e) => {
+        e.stopPropagation();
+        if (!await UI.confirm({ title: '删除分组', message: '删除该分组？', danger: true })) return;
+        const base = b.dataset.kind === 'client' ? 'client-groups' : 'agent-groups';
+        try { await Api.del('/api/v1/permission/' + base + '/' + b.dataset.id); this.expandKey = null; this.refresh(); }
+        catch (err) { UI.toast('删除失败：' + err.message, true); }
+      };
+    });
+    const cancel = document.querySelector('.perm-cancel');
+    if (cancel) cancel.onclick = () => { this.expandKey = null; this.detail = null; this.refresh(); };
+    this.bindChips();
+    this.bindAcl();
+    const cs = document.getElementById('pc-save');
+    if (cs) cs.onclick = () => this.saveClient();
+    const as = document.getElementById('pa-save');
+    if (as) as.onclick = () => this.saveAgent();
+  },
+  bindChips() {
+    const add = (boxId, inputId, btnId) => {
+      const box = document.getElementById(boxId), input = document.getElementById(inputId), btn = document.getElementById(btnId);
+      if (!box || !input || !btn) return;
+      btn.onclick = () => {
+        input.value.split(',').map(x => x.trim()).filter(Boolean).forEach(v => {
+          if ([...box.querySelectorAll('.perm-chip')].some(c => c.dataset.v === v)) return;
+          const d = document.createElement('span');
+          d.className = 'perm-chip'; d.dataset.v = v;
+          d.innerHTML = UI.esc(v) + ' <button class="perm-chip-x">×</button>';
+          box.appendChild(d);
+        });
+        input.value = '';
+      };
+    };
+    add('pc-users', 'pc-user', 'pc-add-user');
+    add('pa-devices', 'pa-device', 'pa-add-dev');
+    document.querySelectorAll('.perm-chip-x').forEach(b => {
+      b.onclick = () => b.closest('.perm-chip').remove();
+    });
+  },
+  bindAcl() {
+    const add = document.getElementById('pc-add-acl');
+    if (add) add.onclick = () => {
+      const sel = document.getElementById('pc-agent');
+      const groups = this.ov.agent_groups || [];
+      const g = groups.find(x => String(x.id) === sel.value) || groups[0];
+      if (!g) return;
+      const tbody = document.getElementById('pc-acl');
+      const tmp = document.createElement('tbody');
+      tmp.innerHTML = this.aclRow({ agent_group_id: g.id, file: 'none' }, groups);
+      const tr = tmp.querySelector('tr');
+      tbody.appendChild(tr);
+      tr.querySelector('.pa-del').onclick = () => tr.remove();
+    };
+    document.querySelectorAll('.pa-del').forEach(b => { b.onclick = () => b.closest('tr').remove(); });
+  },
+  collectClient() {
+    const users = [...document.querySelectorAll('#pc-users .perm-chip')].map(x => x.dataset.v);
+    const acl = [...document.querySelectorAll('#pc-acl .perm-acl-row')].map(tr => ({
+      agent_group_id: Number(tr.querySelector('.pa-agent').value),
+      tcp_ports: tr.querySelector('.pa-ports').value.trim(),
+      shell: tr.querySelector('.pa-shell').checked,
+      tty: tr.querySelector('.pa-tty').value.trim(),
+      file: tr.querySelector('.pa-file').value,
+      sysinfo: tr.querySelector('.pa-sysinfo').checked,
+      metrics: tr.querySelector('.pa-metrics').checked,
+      config: tr.querySelector('.pa-config').checked,
+      web: tr.querySelector('.pa-web').checked,
+    }));
+    return { name: document.getElementById('pc-name').value.trim(),
+      description: document.getElementById('pc-desc').value.trim(), users, acl };
+  },
+  async saveClient() {
+    const body = this.collectClient();
+    if (!body.name) { UI.toast('名称不能为空', true); return; }
+    const id = this.expandKey.startsWith('client:') && this.expandKey !== 'client:new' ? this.expandKey.split(':')[1] : '';
+    try {
+      const r = await Api[id ? 'put' : 'post']('/api/v1/permission/client-groups' + (id ? '/' + id : ''), body);
+      this.expandKey = 'client:' + r.id; this.detail = null; UI.toast('已保存'); this.refresh();
+    } catch (e) { UI.toast('保存失败：' + e.message, true); }
+  },
+  collectAgent() {
+    const devices = [...document.querySelectorAll('#pa-devices .perm-chip')].map(x => x.dataset.v);
+    return { name: document.getElementById('pa-name').value.trim(),
+      description: document.getElementById('pa-desc').value.trim(), devices,
+      caps: {
+        tcp_ports: document.getElementById('pa-ports').value.trim(),
+        shell: document.getElementById('pa-shell').checked,
+        tty: document.getElementById('pa-tty').value.trim(),
+        file: document.getElementById('pa-file').value,
+        sysinfo: document.getElementById('pa-sysinfo').checked,
+        metrics: document.getElementById('pa-metrics').checked,
+        config: document.getElementById('pa-config').checked,
+        web: document.getElementById('pa-web').checked,
+      } };
+  },
+  async saveAgent() {
+    const body = this.collectAgent();
+    if (!body.name) { UI.toast('名称不能为空', true); return; }
+    const id = this.expandKey.startsWith('agent:') && this.expandKey !== 'agent:new' ? this.expandKey.split(':')[1] : '';
+    try {
+      const r = await Api[id ? 'put' : 'post']('/api/v1/permission/agent-groups' + (id ? '/' + id : ''), body);
+      this.expandKey = 'agent:' + r.id; this.detail = null; UI.toast('已保存'); this.refresh();
+    } catch (e) { UI.toast('保存失败：' + e.message, true); }
+  },
+  enter(el) { this.el = el; return Page.prototype.enter.call(this, el, []); },
+});
+
+
 // ---------------------------------------------------------------- Pages.分组
 const GroupsPage = Object.assign(new Page(), {
   refreshInterval() { return 0; },
@@ -893,5 +1151,6 @@ Router.register(/^#\/acl$/, AclPage, 'ACL');
 Router.register(/^#\/audit$/, AuditPage, '审计');
 Router.register(/^#\/files(?:\?.*)?$/, FilesPage, '文件');
 Router.register(/^#\/terminal\/([^/]+)$/, TerminalPage, '终端');
+Router.register(/^#\/permission$/, PermissionPage, '权限');
 Router.register(/^#\/groups$/, GroupsPage, '分组');
 Router.register(/^#\/settings$/, SettingsPage, '设置');

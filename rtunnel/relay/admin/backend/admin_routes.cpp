@@ -143,6 +143,36 @@ void AdminServer::registerRoutes() {
         handleAclReload(ctx, role);
         return 200;
     });
+    access(ROLE_OPERATOR, "GET", "/api/v1/permission/overview", &AdminServer::handlePermOverview);
+    access(ROLE_OPERATOR, "GET", "/api/v1/permission/client-groups/:id", &AdminServer::handlePermClientGet);
+    access(ROLE_OPERATOR, "GET", "/api/v1/permission/agent-groups/:id", &AdminServer::handlePermAgentGet);
+    access(ROLE_OPERATOR, "GET", "/api/v1/permission/effective", &AdminServer::handlePermEffective);
+
+    service_.Handle("POST", "/api/v1/permission/client-groups", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handlePermClientSave(ctx, role); return 200;
+    });
+    service_.Handle("PUT", "/api/v1/permission/client-groups/:id", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handlePermClientSave(ctx, role); return 200;
+    });
+    service_.Handle("DELETE", "/api/v1/permission/client-groups/:id", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handlePermClientDelete(ctx, role); return 200;
+    });
+    service_.Handle("POST", "/api/v1/permission/agent-groups", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handlePermAgentSave(ctx, role); return 200;
+    });
+    service_.Handle("PUT", "/api/v1/permission/agent-groups/:id", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handlePermAgentSave(ctx, role); return 200;
+    });
+    service_.Handle("DELETE", "/api/v1/permission/agent-groups/:id", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handlePermAgentDelete(ctx, role); return 200;
+    });
+
     access(ROLE_OPERATOR, "GET", "/api/v1/groups", &AdminServer::handleGroups);
     access(ROLE_OPERATOR, "GET", "/api/v1/groups/device-map", &AdminServer::handleGroupDeviceMap);
     access(ROLE_OPERATOR, "GET", "/api/v1/groups/:id", &AdminServer::handleGroupGet);

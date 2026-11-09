@@ -242,7 +242,7 @@ const Router = {
   nav: [
     { hash: '#/overview', title: '概览', icon: '▣' },
     { hash: '#/agents', title: '设备 C', icon: '▤' },
-    { hash: '#/groups', title: '分组', icon: '▦' },
+    { hash: '#/permission', title: '权限', icon: '⛨' },
     { hash: '#/clients', title: '客户端 A', icon: '▥' },
     { hash: '#/streams', title: '会话', icon: '⇄' },
     { hash: '#/certs', title: '证书', icon: '⚿' },
@@ -260,10 +260,10 @@ const Router = {
     const allow = role === 'viewer'
       ? ['#/overview', '#/agents']
       : role === 'operator'
-        ? ['#/overview', '#/agents', '#/streams', '#/files']
+        ? ['#/overview', '#/agents', '#/permission', '#/streams', '#/files']
         : role === 'manager'
-          ? ['#/overview', '#/agents', '#/clients', '#/streams', '#/accounts', '#/acl', '#/files', '#/audit', '#/tasks']
-          : ['#/overview', '#/agents', '#/clients', '#/streams', '#/certs', '#/acl', '#/accounts',
+          ? ['#/overview', '#/agents', '#/permission', '#/clients', '#/streams', '#/accounts', '#/acl', '#/files', '#/audit', '#/tasks']
+          : ['#/overview', '#/agents', '#/permission', '#/clients', '#/streams', '#/certs', '#/acl', '#/accounts',
              '#/files', '#/audit', '#/settings', '#/tasks'];
     const navs = allow ? this.nav.filter(n => allow.indexOf(n.hash) >= 0) : this.nav;
     document.getElementById('nav').innerHTML = navs.map(n =>

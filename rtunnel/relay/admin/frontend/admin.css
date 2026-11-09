@@ -499,3 +499,27 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .group-subject{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid var(--border);border-radius:12px;font-size:12px}
 .group-subject button{padding:0 4px;border:0;background:none;color:var(--muted);cursor:pointer}
 @media (max-width:900px){.group-grid{grid-template-columns:1fr}}
+.perm-tabs{display:flex;align-items:center;gap:8px;padding:0 16px 14px}
+.perm-tab{padding:7px 14px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--fg)}
+.perm-tab.active{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--card))}
+.perm-table-wrap{padding:0 16px 16px}
+.perm-row{cursor:pointer}
+.perm-row:hover{background:rgba(255,255,255,.03)}
+.perm-row.open{background:rgba(255,255,255,.025)}
+.perm-chev{display:inline-block;width:16px;color:var(--muted)}
+.perm-expand td{padding:0 16px 18px!important;background:rgba(255,255,255,.015)}
+.perm-form{padding:16px;border:1px solid var(--border);border-radius:8px;background:var(--card)}
+.perm-form h3{margin:16px 0 8px;font-size:13px}
+.perm-grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.perm-grid2 label,.perm-field{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted)}
+.perm-grid2 input,.perm-field input,.perm-field select{padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:13px}
+.perm-chips{display:flex;gap:6px;flex-wrap:wrap;min-height:26px}
+.perm-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:1px solid var(--border);border-radius:12px;font-size:12px;background:var(--bg)}
+.perm-chip button{padding:0 2px;border:0;background:none;color:var(--muted);cursor:pointer}
+.perm-acl-wrap{overflow:auto}
+.perm-acl th,.perm-acl td{padding:6px;font-size:12px}
+.perm-acl input[type=text],.perm-acl select{width:100%;min-width:70px}
+.perm-caps{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px}
+.perm-caps label{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted)}
+.perm-form-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+@media (max-width:900px){.perm-grid2{grid-template-columns:1fr}}
