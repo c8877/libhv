@@ -614,3 +614,11 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 /* active tab opens into content area */
 .ui-tabs-attached .ui-tab.is-active{margin-bottom:-1px;border-bottom-color:var(--card);z-index:2}
 .ui-tabs-attached .ui-tab.is-active:hover{background:var(--card)}
+/* active tab: outward bottom flares instead of inward rounded corners */
+.ui-tabs-attached{gap:8px}
+.ui-tabs-attached .ui-tab{border-radius:6px 6px 0 0}
+.ui-tabs-attached .ui-tab.is-active{border-radius:6px 6px 0 0;overflow:visible}
+.ui-tabs-attached .ui-tab.is-active::before,
+.ui-tabs-attached .ui-tab.is-active::after{content:"";position:absolute;bottom:-1px;width:7px;height:7px;background:var(--card);z-index:-1;pointer-events:none}
+.ui-tabs-attached .ui-tab.is-active::before{left:-7px;border-right:1px solid var(--accent);border-bottom:1px solid var(--accent);border-bottom-right-radius:7px}
+.ui-tabs-attached .ui-tab.is-active::after{right:-7px;border-left:1px solid var(--accent);border-bottom:1px solid var(--accent);border-bottom-left-radius:7px}
