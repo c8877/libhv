@@ -620,3 +620,5 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-tabs-attached .ui-tab::before,
 .ui-tabs-attached .ui-tab::after{display:none!important}
 .ui-tabs-attached .ui-tab{border-radius:6px 6px 0 0}
+.ui-tabs-attached{gap:0}
+.ui-tabs-attached .ui-tab + .ui-tab{margin-left:-1px}
