@@ -602,3 +602,21 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-tabs-minimal .ui-tab.is-active{font-weight:600}
 .ui-tabs-attached .ui-tab:not(.is-active)::before,
 .ui-tabs-attached .ui-tab:not(.is-active)::after{bottom:0;border-bottom:1px solid var(--tab-edge)}
+/* flatter flares: 8x4 instead of tall hooks */
+.ui-tabs-attached .ui-tab::before,
+.ui-tabs-attached .ui-tab::after{width:8px;height:4px}
+.ui-tabs-attached .ui-tab::before{left:-8px;background:radial-gradient(circle at 0 0,transparent 3px,var(--tab-edge) 3px,var(--tab-edge) 4px,var(--card) 4px)}
+.ui-tabs-attached .ui-tab::after{right:-8px;background:radial-gradient(circle at 100% 0,transparent 3px,var(--tab-edge) 3px,var(--tab-edge) 4px,var(--card) 4px)}
+/* restore baseline; active tab covers it, inactive flares land on it */
+.ui-tabs-attached{border-bottom:1px solid var(--border)}
+.ui-tabs-attached .ui-tab::before,
+.ui-tabs-attached .ui-tab::after{width:8px;height:8px}
+.ui-tabs-attached .ui-tab::before{left:-8px;background:radial-gradient(circle at 0 0,transparent 7px,var(--tab-edge) 7px,var(--tab-edge) 8px,var(--card) 8px)}
+.ui-tabs-attached .ui-tab::after{right:-8px;background:radial-gradient(circle at 100% 0,transparent 7px,var(--tab-edge) 7px,var(--tab-edge) 8px,var(--card) 8px)}
+.ui-tabs-attached .ui-tab.is-active{box-shadow:0 2px 0 0 var(--card)}
+.ui-tabs-attached .ui-tab.is-active::before,
+.ui-tabs-attached .ui-tab.is-active::after{box-shadow:0 2px 0 0 var(--card)}
+/* remove flare hooks entirely; use clean square bottom edge */
+.ui-tabs-attached .ui-tab::before,
+.ui-tabs-attached .ui-tab::after{display:none!important}
+.ui-tabs-attached .ui-tab{border-radius:6px 6px 0 0}
