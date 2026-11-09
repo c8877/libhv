@@ -588,63 +588,15 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-tabs-minimal .ui-tab{padding:4px 2px 7px;font-size:12px}
 .perm-tabbar{padding:0}
 .task-tabs{margin-left:14px}
-.ui-tabs-attached{gap:0;padding:0 16px;border-bottom:1px solid var(--border);overflow:visible}
-.ui-tabs-attached .ui-tab{padding:10px 16px;border:1px solid transparent;border-bottom:0;border-radius:7px 7px 0 0;margin-bottom:-1px;position:relative;z-index:0;font-size:13px}
-.ui-tabs-attached .ui-tab:hover{background:color-mix(in srgb,var(--fg) 4%,transparent)}
-.ui-tabs-attached .ui-tab + .ui-tab::before{content:"";position:absolute;left:0;top:12px;width:1px;height:18px;background:var(--border)}
-.ui-tabs-attached .ui-tab.is-active{z-index:1;background:var(--card);border-color:var(--border);border-bottom-color:var(--card);color:var(--fg);font-weight:600}
-.ui-tabs-attached .ui-tab.is-active::before,.ui-tabs-attached .ui-tab.is-active + .ui-tab::before{display:none}
-.ui-tabs-attached .ui-tab.is-active .ui-tab-count{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+.ui-tabs-attached{position:relative;gap:16px;padding:12px 16px 0;background:var(--bg);border:0;overflow:visible}
+.ui-tabs-attached .ui-tab{--tab-edge:var(--border);position:relative;padding:9px 15px;border:1px solid var(--border);border-bottom:1px solid var(--border);border-radius:6px 6px 0 0;background:var(--card);color:var(--muted);font-size:13px;margin-bottom:0;z-index:0}
+.ui-tabs-attached .ui-tab:hover{background:var(--card);border-color:color-mix(in srgb,var(--fg) 28%,var(--border));color:var(--fg)}
+.ui-tabs-attached .ui-tab.is-active{--tab-edge:var(--accent);z-index:2;background:var(--card);border-color:var(--accent);border-bottom-color:var(--card);color:var(--accent);font-weight:600;margin-bottom:-1px}
+.ui-tabs-attached .ui-tab.is-active:hover,.ui-tabs-attached .ui-tab.is-active:focus{background:var(--card)}
+.ui-tabs-attached .ui-tab.is-active .ui-tab-count{background:transparent;color:var(--accent)}
+.ui-tabs-attached .ui-tab::before,.ui-tabs-attached .ui-tab::after{content:"";position:absolute;top:auto;bottom:-1px;width:8px;height:8px;display:block;border:0;border-radius:0;z-index:0;pointer-events:none;background:transparent}
+.ui-tabs-attached .ui-tab::before{left:-8px;background:radial-gradient(circle at 0 0,transparent 7px,var(--tab-edge) 7px,var(--tab-edge) 8px,var(--card) 8px)}
+.ui-tabs-attached .ui-tab::after{right:-8px;background:radial-gradient(circle at 100% 0,transparent 7px,var(--tab-edge) 7px,var(--tab-edge) 8px,var(--card) 8px)}
 .ui-tabs-segmented .ui-tab.is-active{background:var(--accent);color:#fff;box-shadow:0 1px 3px color-mix(in srgb,var(--accent) 35%,transparent)}
 .ui-tabs-segmented .ui-tab.is-active .ui-tab-count{background:rgba(255,255,255,.22);color:#fff}
 .ui-tabs-minimal .ui-tab.is-active{font-weight:600}
-/* attached tabs v2: each tab separated, active accent-tinted background */
-.ui-tabs-attached{gap:6px;padding:12px 16px 0;background:var(--bg);border-bottom:1px solid var(--border)}
-.ui-tabs-attached .ui-tab{border:1px solid var(--border);border-bottom:0;border-radius:7px 7px 0 0;margin-bottom:-1px;background:var(--card);color:var(--muted);padding:9px 15px}
-.ui-tabs-attached .ui-tab + .ui-tab::before{display:none}
-.ui-tabs-attached .ui-tab:hover{background:color-mix(in srgb,var(--fg) 6%,var(--card));color:var(--fg)}
-.ui-tabs-attached .ui-tab.is-active{background:color-mix(in srgb,var(--accent) 20%,var(--card));border-color:var(--accent);border-bottom-color:color-mix(in srgb,var(--accent) 20%,var(--card));color:var(--accent);box-shadow:inset 0 2px 0 var(--accent),0 2px 8px color-mix(in srgb,var(--accent) 16%,transparent);font-weight:600}
-.ui-tabs-attached .ui-tab.is-active .ui-tab-count{background:var(--accent);color:#fff}
-/* attached tabs v3: outline-only active, bottom border on every tab */
-.ui-tabs-attached{background:var(--card)}
-.ui-tabs-attached .ui-tab{background:var(--card);border:1px solid var(--border);border-bottom:1px solid var(--border);border-radius:6px;margin-bottom:0;color:var(--muted);box-shadow:none}
-.ui-tabs-attached .ui-tab:hover{background:var(--card);border-color:color-mix(in srgb,var(--fg) 28%,var(--border));color:var(--fg)}
-.ui-tabs-attached .ui-tab.is-active{background:var(--card);border-color:var(--accent);border-bottom-color:var(--accent);color:var(--accent);box-shadow:none}
-.ui-tabs-attached .ui-tab.is-active .ui-tab-count{background:transparent;color:var(--accent)}
-/* active tab opens into content area */
-.ui-tabs-attached .ui-tab.is-active{margin-bottom:-1px;border-bottom-color:var(--card);z-index:2}
-.ui-tabs-attached .ui-tab.is-active:hover{background:var(--card)}
-/* active tab: outward bottom flares instead of inward rounded corners */
-.ui-tabs-attached{gap:8px}
-.ui-tabs-attached .ui-tab{border-radius:6px 6px 0 0}
-.ui-tabs-attached .ui-tab.is-active{border-radius:6px 6px 0 0;overflow:visible}
-.ui-tabs-attached .ui-tab.is-active::before,
-.ui-tabs-attached .ui-tab.is-active::after{content:"";position:absolute;bottom:-1px;width:7px;height:7px;background:var(--card);z-index:-1;pointer-events:none}
-.ui-tabs-attached .ui-tab.is-active::before{left:-7px;border-right:1px solid var(--accent);border-bottom:1px solid var(--accent);border-bottom-right-radius:7px}
-.ui-tabs-attached .ui-tab.is-active::after{right:-7px;border-left:1px solid var(--accent);border-bottom:1px solid var(--accent);border-bottom-left-radius:7px}
-/* replace broken border arcs with smooth radial flares */
-.ui-tabs-attached{overflow:visible}
-.ui-tabs-attached .ui-tab.is-active::before,
-.ui-tabs-attached .ui-tab.is-active::after{width:7px;height:7px;bottom:0;border:0;border-radius:0;background:transparent;z-index:-1}
-.ui-tabs-attached .ui-tab.is-active::before{left:-7px;background:radial-gradient(circle at 0 0,transparent 6px,var(--accent) 6px,var(--accent) 7px,var(--card) 7px)}
-.ui-tabs-attached .ui-tab.is-active::after{right:-7px;background:radial-gradient(circle at 100% 0,transparent 6px,var(--accent) 6px,var(--accent) 7px,var(--card) 7px)}
-.ui-tabs-attached .ui-tab.is-active::before,
-.ui-tabs-attached .ui-tab.is-active::after{z-index:0;width:10px;height:10px}
-.ui-tabs-attached .ui-tab.is-active::before{left:-10px;background:radial-gradient(circle at 0 0,transparent 9px,var(--accent) 9px,var(--accent) 10px,var(--card) 10px)}
-.ui-tabs-attached .ui-tab.is-active::after{right:-10px;background:radial-gradient(circle at 100% 0,transparent 9px,var(--accent) 9px,var(--accent) 10px,var(--card) 10px)}
-.ui-tabs-attached .ui-tab.is-active::before,
-.ui-tabs-attached .ui-tab.is-active::after{display:block}
-.ui-tabs-attached{gap:12px}
-.ui-tabs-attached .ui-tab.is-active,
-.ui-tabs-attached .ui-tab.is-active:hover,
-.ui-tabs-attached .ui-tab.is-active:focus{background:var(--card)}
-.ui-tabs-attached{gap:16px}
-.ui-tabs-attached .ui-tab.is-active::before,
-.ui-tabs-attached .ui-tab.is-active::after{width:8px;height:8px}
-.ui-tabs-attached .ui-tab.is-active::before{left:-8px;background:radial-gradient(circle at 0 0,transparent 7px,var(--accent) 7px,var(--accent) 8px,var(--card) 8px)}
-.ui-tabs-attached .ui-tab.is-active::after{right:-8px;background:radial-gradient(circle at 100% 0,transparent 7px,var(--accent) 7px,var(--accent) 8px,var(--card) 8px)}
-.ui-tabs-attached .ui-tab.is-active::before,
-.ui-tabs-attached .ui-tab.is-active::after{top:auto;bottom:0}
-.ui-tabs-attached .ui-tab.is-active::before,
-.ui-tabs-attached .ui-tab.is-active::after{bottom:-1px;box-shadow:0 2px 0 0 var(--card)}
-.ui-tabs-attached{border-bottom:0}
