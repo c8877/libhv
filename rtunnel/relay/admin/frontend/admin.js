@@ -430,7 +430,7 @@ const ProfilePage = Object.assign(new Page(), {
     ].map(r => [r[0], r[1], '<span class="chev">⌄</span>']);
     const profileTable = UI.detailTable(['设置项', '当前值', '操作'], profileRows, {
       cls: 'setting-table profile-table',
-      rowAttrs: i => ' class="setting-row' + (open(pfKeys[i]) ? ' open' : '') + '" data-pf-row="' + pfKeys[i] + '"',
+      rowAttrs: i => ' class="ui-row setting-row' + (open(pfKeys[i]) ? ' open' : '') + '" data-pf-row="' + pfKeys[i] + '"',
     });
 
     const pwOpen = this.editKey === 'password';
@@ -440,7 +440,7 @@ const ProfilePage = Object.assign(new Page(), {
         '<button class="danger" id="sess-drop">登出所有</button>'],
     ], {
       cls: 'setting-table profile-table',
-      rowAttrs: i => i === 0 ? ' class="setting-row' + (pwOpen ? ' open' : '') + '" data-pf-row="password"' : '',
+      rowAttrs: i => i === 0 ? ' class="ui-row setting-row' + (pwOpen ? ' open' : '') + '" data-pf-row="password"' : '',
     }) + (pwOpen ? UI.form({
         cls: 'setting-form',
         rows: [

@@ -175,12 +175,8 @@ button:hover { filter: brightness(.96); }
 /* 设备详情：sparkline 与分区条 */
 
 /* 设备详情：系统两列表格 */
-.si-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.si-table th { width: 110px; text-align: left; font-weight: normal; color: var(--muted);
   padding: 7px 16px; vertical-align: top; white-space: nowrap; }
-.si-table td { text-align: left; padding: 7px 16px 7px 0; border-bottom: 1px solid rgba(255,255,255,.06);
   word-break: break-word; }
-.si-table tr:last-child td { border-bottom: 0; }
 .si-auto { font-size: 12px; color: var(--muted); margin-right: 8px; user-select: none; }
 .chip { display: inline-block; padding: 1px 8px; margin: 2px 6px 2px 0; border-radius: 10px;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -371,22 +367,14 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .task-error b{color:var(--bad);display:block;margin-bottom:6px}
 .task-error div{color:var(--bad);font-size:13px;word-break:break-all}
 @media (max-width:900px){.task-cols{grid-template-columns:1fr}.task-head{flex-wrap:wrap}.task-actions{width:100%;justify-content:flex-end}}
-.metric-table .metric-row{cursor:pointer}
-.metric-table .metric-row:hover{background:rgba(255,255,255,.03)}
 .metric-name b{font-size:14px;font-weight:600}
 .metric-type{margin-left:10px;font-size:11px;color:var(--muted)}
-.metric-table .chev{width:28px;text-align:right;color:var(--muted);transition:.15s}
-.metric-table .metric-row.open .chev{transform:rotate(180deg)}
-.metric-table .metric-row.open{background:rgba(255,255,255,.025)}
+.metric-table .chev{width:28px;text-align:right}
 .metric-expand td{padding:0 16px 16px 24px!important;background:rgba(255,255,255,.02)}
 .metric-sync{margin-top:10px;font-size:12px;color:var(--muted)}
 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:middle}
 .dot.ok{background:#57ab5a}.dot.warn{background:#f5a623}.dot.off{background:#6b7280}
-.tty-row{cursor:pointer}
-.tty-row:hover{background:rgba(255,255,255,.03)}
-.tty-row.open{background:rgba(255,255,255,.025)}
-.tty-row .chev{display:inline-block;margin-left:10px;color:var(--muted);transition:.15s}
-.tty-row.open .chev{transform:rotate(180deg)}
+.tty-row .chev{display:inline-block;margin-left:10px}
 .tty-expand td{padding:0 16px 16px 24px!important;background:rgba(255,255,255,.02)}
 .metric-expand td{padding-bottom:12px!important}
 .metric-table .num{text-align:left;font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -408,9 +396,6 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .si-two{align-items:stretch}
 .si-two>.panel{height:100%}
 /* 设备详情表格统一排版 */
-.si-table{font-size:14px}
-.si-table th{font-size:12px;letter-spacing:.02em}
-.si-table td{padding-top:9px;padding-bottom:9px}
 .metric-table td{font-size:14px}
 .metric-name b{font-size:14px}
 .metric-type{font-size:12px}
@@ -422,11 +407,8 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .metric-readonly{display:flex;flex-direction:column;gap:6px;font-size:11px;color:var(--muted)}
 .metric-readonly b{font-size:13px;color:var(--fg);font-weight:500;padding:7px 0}
 .tty-table-wrap{border:1px solid var(--border);border-radius:8px;overflow:auto;background:rgba(255,255,255,.012)}
-.tty-table-wrap .si-table{border:0}
-.si-table th{background:rgba(255,255,255,.03)}
 .metric-group td{background:rgba(255,255,255,.018)}
 .metric-expand td,.tty-expand td{background:transparent!important}
-.si-table td{border-bottom:1px solid var(--border)}
 .metric-expand td,.tty-expand td{border-bottom:0!important}
   background:color-mix(in srgb,var(--th-bg) 60%,var(--border));
   font-weight:600;
@@ -437,7 +419,6 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
   background:color-mix(in srgb, var(--fg) 7%, var(--card));
   font-weight:600;color:var(--fg)
 }
-.si-table td{border-bottom:1px solid color-mix(in srgb, var(--border) 55%, transparent)}
 .detail-table-shell{border:1px solid var(--border);border-radius:8px;overflow:auto;background:rgba(255,255,255,.012)}
 .detail-table{width:100%;border-collapse:collapse;font-size:14px}
 .detail-table th{text-align:left;font-size:12px;font-weight:600;color:var(--fg);background:color-mix(in srgb, var(--fg) 7%, var(--card));padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
@@ -456,10 +437,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .caps-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
 .caps-expand td{padding:0 16px 14px 24px!important;border-bottom:0!important}
 .tty-table-wrap.open{max-height:none;overflow:visible}
-.caps-row{cursor:pointer}
-.caps-row:hover{background:rgba(255,255,255,.03)}
-.caps-row .chev{float:right;color:var(--muted);transition:.15s}
-.caps-row.open .chev{transform:rotate(180deg)}
+.caps-row .chev{float:right}
 .panel.mb16{margin-bottom:16px}
 .ui-form{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin:4px 0}
 .ui-form-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 18px;align-items:end}
@@ -490,11 +468,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 #page label,.modal label{font-size:12px;color:var(--muted)}
 #page .cfg-body,#page .cfg-row{gap:10px}
 .setting-table td:first-child{width:38%}
-.setting-row{cursor:pointer}
-.setting-row:hover{background:rgba(255,255,255,.03)}
-.setting-row.open{background:rgba(255,255,255,.025)}
-.setting-row .chev{text-align:right;color:var(--muted);transition:.15s}
-.setting-row.open .chev{transform:rotate(180deg)}
+.setting-row .chev{text-align:right}
 .setting-expand td{padding:0 16px 14px 24px!important;border-bottom:0!important}
 .setting-value{font-weight:500}
 .color-dot{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:8px;vertical-align:middle;border:1px solid var(--border)}
@@ -565,3 +539,10 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-pager{display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--muted);font-size:12px}
 .ui-pager .spacer{flex:1}
 .ui-confirm-text{font-size:13px;line-height:1.6;color:var(--fg);margin-bottom:14px}
+.ui-row{cursor:pointer}
+.ui-row:hover{background:rgba(255,255,255,.03)}
+.ui-row.open{background:rgba(255,255,255,.025)}
+.ui-row .chev{color:var(--muted);transition:.15s}
+.ui-row.open .chev{transform:rotate(180deg)}
+.ui-pad{padding:16px}
+.ui-pad-x{padding:0 16px 16px}

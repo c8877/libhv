@@ -112,7 +112,7 @@ const CertsPage = Object.assign(new Page(), {
         left: '<span id="issue-result" style="color:var(--muted)"></span>',
         right: '<button class="primary" id="issue-btn">签发</button>',
       }), { cls: 'mb16', right: '<button id="certs-refresh">刷新列表</button>' }) +
-      UI.panel('CSR 签名（私钥不出设备）', '<div style="padding:16px">' +
+      UI.panel('CSR 签名（私钥不出设备）', '<div class="ui-pad">' +
         '<textarea id="csr-input" rows="6" style="width:100%;font-family:monospace" placeholder="粘贴 CSR PEM（设备侧生成，SAN 或 CN 为身份）"></textarea>' +
         '<div style="margin-top:8px;display:flex;gap:10px;align-items:center">有效期(天) <input id="csr-days" type="number" value="30" style="width:80px">' +
         '<button id="csr-btn">签名</button><span id="csr-result" style="color:var(--muted)"></span></div></div>', { cls: 'mb16' }) +
@@ -182,7 +182,7 @@ const AclPage = Object.assign(new Page(), {
   refreshInterval() { return 0; },
   async refresh() {
     const d = await Api.get('/api/v1/acl/file');
-    const aclBody = '<div style="padding:16px"><textarea id="acl-content" rows="12" style="width:100%;font-family:monospace" ' +
+    const aclBody = '<div class="ui-pad"><textarea id="acl-content" rows="12" style="width:100%;font-family:monospace" ' +
       'placeholder="user=devid[,devid|*]，每行一条，# 注释">' + UI.esc(d.content) + '</textarea>' +
       '<div style="color:var(--muted);margin-top:8px">保存 = 写文件 + 热加载，只影响新 OPEN，不动已建立会话；解析失败保留旧表。</div></div>';
     this.el.innerHTML = UI.panel('ACL 文件（' + UI.esc(d.path || '未配置') + '）', aclBody, {

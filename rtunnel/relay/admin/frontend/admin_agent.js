@@ -204,7 +204,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       const capsForm = this.capsOpen ? this.capsFormHtml(si) : '';
       const runtimeTable = '<div class="detail-table-shell"><table class="detail-table detail-kv"><tbody>' +
         '<tr><th>agent 版本</th><td>' + UI.esc(si.version || '') + '</td></tr>' +
-        '<tr class="caps-row' + (this.capsOpen ? ' open' : '') + '" data-caps-row="1"><th>能力</th><td>' +
+        '<tr class="ui-row caps-row' + (this.capsOpen ? ' open' : '') + '" data-caps-row="1"><th>能力</th><td>' +
           capHtml + (canManage() ? '<span class="chev">⌄</span>' : '') + '</td></tr>' +
         (capsForm ? '<tr class="caps-expand"><td colspan="2">' + capsForm + '</td></tr>' : '') +
         '<tr><th>启动参数</th><td><code style="font-size:12px">' + UI.esc(si.args || '') + '</code></td></tr>' +
@@ -656,7 +656,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       rows += '<tr class="metric-group"><td colspan="6">' + groupName[u] + '</td></tr>';
       groups[u].forEach(c => {
         const open = this.expandMetric === c.series;
-        rows += '<tr class="metric-row' + (open ? ' open' : '') + '" data-mrow="' + UI.esc(c.series) + '">' +
+        rows += '<tr class="ui-row metric-row' + (open ? ' open' : '') + '" data-mrow="' + UI.esc(c.series) + '">' +
           '<td class="metric-name"><b>' + UI.esc(c.series) + '</b><span class="metric-type">' + groupName[u] + '</span></td>' +
           '<td class="num">' + c.interval_sec + ' s</td>' +
           '<td class="num">' + c.points + ' 点 <span class="muted">· ' + dur(c) + '</span></td>' +
@@ -682,7 +682,7 @@ const AgentDetailPage = Object.assign(new Page(), {
         }
       });
     });
-    const metricBody = '<div class="detail-table-shell"><table class="detail-table si-table metric-table"><tr><th>指标</th><th>间隔</th><th>保留</th>' +
+    const metricBody = '<div class="detail-table-shell"><table class="detail-table metric-table"><tr><th>指标</th><th>间隔</th><th>保留</th>' +
       '<th>同步</th><th>启用</th><th></th></tr>' +
       (rows || '<tr><td colspan="6" style="color:var(--muted)">暂无配置</td></tr>') + '</table></div>';
     wrap.innerHTML = UI.panel('采样配置', metricBody, { cls: 'mb16',
@@ -817,7 +817,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       rows = (this.ttys || []).map(t => {
         const st = t.enabled ? '<span class="dot ok"></span>启用' : '<span class="dot off"></span>禁用';
         const open = this.expandTty === t.path;
-        let r = '<tr class="tty-row' + (open ? ' open' : '') + '" data-trow="' + UI.esc(t.path) + '">' +
+        let r = '<tr class="ui-row tty-row' + (open ? ' open' : '') + '" data-trow="' + UI.esc(t.path) + '">' +
           '<td class="tty-main"><b>' + UI.esc(t.alias || '—') + '</b>' +
           '<div class="tty-path" title="' + UI.esc(t.path) + '">' + UI.esc(t.path) + '</div></td>' +
           '<td>' + st + '</td>' +
@@ -832,7 +832,7 @@ const AgentDetailPage = Object.assign(new Page(), {
     } else {
       rows = unAll.filter(d => !q || (d.path || '').toLowerCase().indexOf(q) >= 0).map(d => {
         const open = this.addTtyPath === d.path;
-        let r = '<tr class="tty-row' + (open ? ' open' : '') + '" data-trow="' + UI.esc(d.path) + '">' +
+        let r = '<tr class="ui-row tty-row' + (open ? ' open' : '') + '" data-trow="' + UI.esc(d.path) + '">' +
           '<td class="tty-main"><b>未配置</b><div class="tty-path" title="' + UI.esc(d.path) + '">' +
           UI.esc(d.path) + '</div></td><td><span class="pill">未配置</span></td><td>—</td>' +
           '<td class="tty-stat" data-tty-rx="' + UI.esc(d.path) + '">' + rxTxt(d.path) + '</td>' +
@@ -854,7 +854,7 @@ const AgentDetailPage = Object.assign(new Page(), {
     const search = '<input id="tty-q" class="tty-search" placeholder="搜索别名 / 路径" value="' + UI.esc(this.ttyQuery || '') + '">';
     const tabsHtml = '<span class="tty-tabs"><button data-tab="config"' + (tab === 'config' ? ' class="active"' : '') + '>已配置 ' + (this.ttys || []).length + '</button>' +
       '<button data-tab="unconfig"' + (tab === 'unconfig' ? ' class="active"' : '') + '>未配置 ' + unAll.length + '</button></span>';
-    const ttyBody = '<div class="tty-table-wrap detail-table-shell' + (openAny ? ' open' : '') + '"><table class="detail-table si-table tty-table"><tr>' +
+    const ttyBody = '<div class="tty-table-wrap detail-table-shell' + (openAny ? ' open' : '') + '"><table class="detail-table tty-table"><tr>' +
       '<th>设备</th><th>状态</th><th>参数</th><th>RX</th><th>TX</th><th>操作</th></tr>' +
       (rows || '<tr><td colspan="6" style="color:var(--muted)">' +
         (tab === 'config' ? '暂无已配置串口' : (q ? '没有匹配的串口' : '没有未配置的串口')) + '</td></tr>') +
