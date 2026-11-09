@@ -586,13 +586,14 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-tabs-minimal{gap:18px;border-bottom:1px solid var(--border)}
 .ui-tabs-minimal .ui-tab{padding:4px 2px 7px;font-size:12px}
 .ui-tabs-minimal .ui-tab.is-active{font-weight:600}
-.perm-tabbar{padding:0}
-.task-tabs{margin-left:14px}
 /* attached：页面级平底标签，相邻共享一条边框，选中项底边与内容区连通 */
-.ui-tabs-attached{position:relative;gap:0;padding:12px 16px 0;background:var(--bg);border:0;border-bottom:1px solid var(--border);overflow:visible}
+.ui-tabs-attached{position:relative;gap:0;padding:0;background:var(--bg);border:0;border-bottom:1px solid var(--border);overflow:visible}
 .ui-tabs-attached .ui-tab{padding:9px 15px;border:1px solid var(--border);border-radius:6px 6px 0 0;background:color-mix(in srgb,#000 4%,var(--card));color:var(--muted);font-size:13px}
 .ui-tabs-attached .ui-tab + .ui-tab{margin-left:-1px}
 .ui-tabs-attached .ui-tab:hover{background:color-mix(in srgb,#000 2%,var(--card));border-color:color-mix(in srgb,var(--fg) 28%,var(--border));color:var(--fg)}
 .ui-tabs-attached .ui-tab.is-active{z-index:2;background:var(--card);border-color:var(--accent);border-bottom-color:var(--card);color:var(--accent);font-weight:600;margin-bottom:-1px}
 .ui-tabs-attached .ui-tab.is-active:hover{background:var(--card);color:var(--accent)}
 .ui-tabs-attached .ui-tab.is-active .ui-tab-count{background:transparent;color:var(--accent)}
+.ui-tabpanel{padding:16px}
+.dict-modal .ui-tabs-attached{background:transparent}
+.ui-tabs-attached + .dict-toolbar{margin-top:12px}

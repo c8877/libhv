@@ -217,14 +217,12 @@ const TasksPage = Object.assign(new Page(), {
 
     if (this._tabs) { this._tabs.destroy(); this._tabs = null; }
     this.el.innerHTML =
-      '<div class="panel"><div class="panel-head"><h2>任务</h2>' +
-        '<div id="task-tabs" class="task-tabs"></div><span class="spacer"></span></div>' +
-      '<div class="cfg-body ui-flex">' +
+      '<div class="panel"><div class="panel-head"><h2>任务</h2><span class="spacer"></span>' +
         '<input type="text" id="task-q" placeholder="搜索设备 / 文件" value="' + UI.esc(this.q) + '" class="ui-w220">' +
         (this.batch ? '<span class="pill info">本批：' + UI.esc(this.batch) + ' ×</span>' : '') +
-        '<span class="spacer"></span>' +
         '<button id="task-refresh">刷新</button></div>' +
-      '<div class="ui-pad-x"><div class="detail-table-shell"><table class="detail-table"><thead><tr>' +
+      '<div id="task-tabs"></div>' +
+      '<div class="ui-tabpanel"><div class="detail-table-shell"><table class="detail-table"><thead><tr>' +
         '<th>ID</th><th>文件</th><th>设备</th><th>目标路径</th><th>进度/大小</th>' +
         '<th>状态</th><th>重试</th><th>开始</th><th>截止</th><th>操作</th></tr></thead><tbody>' +
         (rows || '<tr><td colspan="10" class="empty">暂无任务</td></tr>') +
@@ -232,7 +230,7 @@ const TasksPage = Object.assign(new Page(), {
       UI.pager(this.page, pages, r.total) + '</div></div>';
 
     this._tabs = UI.tabs(document.getElementById('task-tabs'), {
-      items: tabItems, value: this.tab, variant: 'segmented',
+      items: tabItems, value: this.tab, variant: 'attached',
       onChange: (key) => { this.tab = key; this.page = 1; this.refresh(); },
     });
     const q = document.getElementById('task-q');

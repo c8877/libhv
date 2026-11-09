@@ -619,7 +619,7 @@ const PermissionPage = Object.assign(new Page(), {
       : '<tr><th>名称</th><th>设备数</th><th>被引用</th><th>能力上限</th><th></th></tr>';
     if (this._tabs) { this._tabs.destroy(); this._tabs = null; }
     this.el.innerHTML = UI.panel('权限管理',
-      '<div class="perm-tabbar" id="perm-tabs"></div>' +
+      '<div id="perm-tabs"></div>' +
       '<div class="perm-table-wrap"><table class="detail-table perm-table"><thead>' + head + '</thead><tbody>' +
       (newForm || '') + (rows || '<tr><td colspan="5" class="empty">暂无分组</td></tr>') + '</tbody></table></div>',
       { right: canManage() ? '<button class="primary" id="perm-new">+ 新建分组</button> <button id="perm-dict">字典管理</button>' : '' });
@@ -1019,8 +1019,9 @@ const PermissionPage = Object.assign(new Page(), {
     let tabs;
     const m = UI.modal({
       title: '字典管理',
-      body: '<div class="dict-toolbar"><span id="dict-tabs"></span><span class="spacer"></span>' +
-        '<input id="dict-q" placeholder="搜索"><button id="dict-batch">+ 批量新增</button></div>' +
+      body: '<div id="dict-tabs"></div>' +
+        '<div class="dict-toolbar"><input id="dict-q" placeholder="搜索">' +
+        '<span class="spacer"></span><button id="dict-batch">+ 批量新增</button></div>' +
         '<div id="dict-body"></div>',
       buttons: '<button data-modal-close>关闭</button><button class="danger" id="dict-del">删除选中</button>',
       onClose: () => { if (tabs) tabs.destroy(); },
@@ -1066,7 +1067,7 @@ const PermissionPage = Object.assign(new Page(), {
     };
     tabs = UI.tabs(m.el.querySelector('#dict-tabs'), {
       items: [{ key: 'ports', label: '端口字典' }, { key: 'ttys', label: 'TTY 字典' }],
-      value: state.kind, variant: 'segmented',
+      value: state.kind, variant: 'attached',
       onChange: key => { state.kind = key; state.sel.clear(); load(); },
     });
     m.el.querySelector('#dict-q').oninput = e => { state.q = e.target.value.trim(); render(); };
@@ -1341,8 +1342,9 @@ const GroupsPage = Object.assign(new Page(), {
     let tabs;
     const m = UI.modal({
       title: '字典管理',
-      body: '<div class="dict-toolbar"><span id="dict-tabs"></span><span class="spacer"></span>' +
-        '<input id="dict-q" placeholder="搜索"><button id="dict-batch">+ 批量新增</button></div>' +
+      body: '<div id="dict-tabs"></div>' +
+        '<div class="dict-toolbar"><input id="dict-q" placeholder="搜索">' +
+        '<span class="spacer"></span><button id="dict-batch">+ 批量新增</button></div>' +
         '<div id="dict-body"></div>',
       buttons: '<button data-modal-close>关闭</button><button class="danger" id="dict-del">删除选中</button>',
       onClose: () => { if (tabs) tabs.destroy(); },
@@ -1388,7 +1390,7 @@ const GroupsPage = Object.assign(new Page(), {
     };
     tabs = UI.tabs(m.el.querySelector('#dict-tabs'), {
       items: [{ key: 'ports', label: '端口字典' }, { key: 'ttys', label: 'TTY 字典' }],
-      value: state.kind, variant: 'segmented',
+      value: state.kind, variant: 'attached',
       onChange: key => { state.kind = key; state.sel.clear(); load(); },
     });
     m.el.querySelector('#dict-q').oninput = e => { state.q = e.target.value.trim(); render(); };
@@ -1571,8 +1573,9 @@ const SettingsPage = Object.assign(new Page(), {
     let tabs;
     const m = UI.modal({
       title: '字典管理',
-      body: '<div class="dict-toolbar"><span id="dict-tabs"></span><span class="spacer"></span>' +
-        '<input id="dict-q" placeholder="搜索"><button id="dict-batch">+ 批量新增</button></div>' +
+      body: '<div id="dict-tabs"></div>' +
+        '<div class="dict-toolbar"><input id="dict-q" placeholder="搜索">' +
+        '<span class="spacer"></span><button id="dict-batch">+ 批量新增</button></div>' +
         '<div id="dict-body"></div>',
       buttons: '<button data-modal-close>关闭</button><button class="danger" id="dict-del">删除选中</button>',
       onClose: () => { if (tabs) tabs.destroy(); },
@@ -1618,7 +1621,7 @@ const SettingsPage = Object.assign(new Page(), {
     };
     tabs = UI.tabs(m.el.querySelector('#dict-tabs'), {
       items: [{ key: 'ports', label: '端口字典' }, { key: 'ttys', label: 'TTY 字典' }],
-      value: state.kind, variant: 'segmented',
+      value: state.kind, variant: 'attached',
       onChange: key => { state.kind = key; state.sel.clear(); load(); },
     });
     m.el.querySelector('#dict-q').oninput = e => { state.q = e.target.value.trim(); render(); };
