@@ -7,6 +7,9 @@
 
 using nlohmann::json;
 
+static int portRefs(sqlite3* db, int lo, int hi);
+static int ttyRefs(sqlite3* db, const std::string& pattern);
+
 static bool parsePortRange(const std::string& value, int& lo, int& hi) {
     if (value.empty()) return false;
     size_t dash = value.find('-');
@@ -40,6 +43,7 @@ bool AdminDb::dictPorts(const std::string& q, std::string& json_out) {
         j["name"] = (const char*)sqlite3_column_text(st, 3);
         j["description"] = (const char*)sqlite3_column_text(st, 4);
         j["enabled"] = sqlite3_column_int(st, 5) != 0;
+        j["refs"] = portRefs(db_, lo, hi);
         arr.push_back(j);
     }
     sqlite3_finalize(st);
@@ -95,6 +99,7 @@ bool AdminDb::dictTtys(const std::string& q, std::string& json_out) {
         j["description"] = (const char*)sqlite3_column_text(st, 3);
         j["kind"] = (const char*)sqlite3_column_text(st, 4);
         j["enabled"] = sqlite3_column_int(st, 5) != 0;
+        j["refs"] = ttyRefs(db_, (const char*)sqlite3_column_text(st, 1));
         arr.push_back(j);
     }
     sqlite3_finalize(st);
@@ -131,5 +136,198 @@ bool AdminDb::dictTtyAdd(const std::string& pattern, const std::string& name, co
     sqlite3_finalize(st);
     if (!ok) { err = "insert failed"; return false; }
     out_id = sqlite3_last_insert_rowid(db_);
+    return true;
+}
+
+static bool portOverlap(int a1, int a2, int b1, int b2) {
+    return a1 <= b2 && b1 <= a2;
+}
+
+static int portRefs(sqlite3* db, int lo, int hi) {
+    int n = 0;
+    const char* queries[] = {
+        "SELECT tcp_ports FROM client_group_acl",
+        "SELECT value FROM dev_group_caps WHERE cap='tcp_ports'"
+    };
+    for (auto* q : queries) {
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db, q, -1, &st, nullptr) != SQLITE_OK) continue;
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            std::string s = (const char*)sqlite3_column_text(st, 0);
+            char buf[2048]; snprintf(buf, sizeof(buf), "%s", s.c_str());
+            char* save = nullptr;
+            for (char* p = strtok_r(buf, ",", &save); p; p = strtok_r(nullptr, ",", &save)) {
+                while (*p == ' ' || *p == '\t') p++;
+                if (strcmp(p, "*") == 0) { n++; break; }
+                int a = atoi(p), b = a;
+                char* dash = strchr(p, '-');
+                if (dash) b = atoi(dash + 1);
+                if (portOverlap(lo, hi, a, b)) { n++; break; }
+            }
+        }
+        sqlite3_finalize(st);
+    }
+    return n;
+}
+
+static int ttyRefs(sqlite3* db, const std::string& pattern) {
+    int n = 0;
+    const char* queries[] = {
+        "SELECT tty FROM client_group_acl",
+        "SELECT value FROM dev_group_caps WHERE cap='tty'"
+    };
+    for (auto* q : queries) {
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db, q, -1, &st, nullptr) != SQLITE_OK) continue;
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            std::string s = (const char*)sqlite3_column_text(st, 0);
+            char buf[2048]; snprintf(buf, sizeof(buf), "%s", s.c_str());
+            char* save = nullptr;
+            for (char* p = strtok_r(buf, ",", &save); p; p = strtok_r(nullptr, ",", &save)) {
+                while (*p == ' ' || *p == '\t') p++;
+                if (pattern == p) { n++; break; }
+            }
+        }
+        sqlite3_finalize(st);
+    }
+    return n;
+}
+
+bool AdminDb::dictBatchAdd(const std::string& kind, const std::vector<std::string>& values,
+                           const std::string& name_prefix, std::string& json_out, std::string& err) {
+    bool is_port = kind == "ports";
+    json added = json::array(), existing = json::array(), invalid = json::array();
+    std::set<std::string> seen;
+    std::vector<std::pair<std::string, int>> parsed;
+    for (auto v : values) {
+        while (!v.empty() && (v.back() == ' ' || v.back() == '\t' || v.back() == '\r' || v.back() == '\n')) v.pop_back();
+        while (!v.empty() && (v.front() == ' ' || v.front() == '\t')) v.erase(0, 1);
+        if (v.empty()) continue;
+        if (!seen.insert(v).second) continue;
+        if (is_port) {
+            int lo = 0, hi = 0;
+            if (!parsePortRange(v, lo, hi)) { invalid.push_back(v); continue; }
+            parsed.push_back({v, 1});
+        } else {
+            bool ok = !v.empty();
+            for (char c : v) if (!(isalnum((unsigned char)c) || c == '/' || c == '_' || c == '-' || c == '*' || c == '?')) ok = false;
+            if (!ok) { invalid.push_back(v); continue; }
+            parsed.push_back({v, 0});
+        }
+    }
+    if (!invalid.empty()) {
+        json out; out["invalid"] = invalid; json_out = out.dump();
+        err = "invalid values"; return false;
+    }
+    std::lock_guard<std::mutex> lk(mu_);
+    std::string e;
+    if (!exec("BEGIN", e)) { err = e; return false; }
+    for (auto& pv : parsed) {
+        const std::string& value = pv.first;
+        std::string name = name_prefix.empty() ? value : name_prefix + " " + value;
+        sqlite3_stmt* st = nullptr;
+        if (is_port) {
+            int lo = 0, hi = 0; parsePortRange(value, lo, hi);
+            if (sqlite3_prepare_v2(db_, "SELECT id FROM port_dict WHERE port_start=? AND port_end=?", -1, &st, nullptr) != SQLITE_OK) {
+                exec("ROLLBACK", e); err = "db error"; return false;
+            }
+            sqlite3_bind_int(st, 1, lo); sqlite3_bind_int(st, 2, hi);
+            if (sqlite3_step(st) == SQLITE_ROW) {
+                existing.push_back(value); sqlite3_finalize(st); continue;
+            }
+            sqlite3_finalize(st);
+            if (sqlite3_prepare_v2(db_, "INSERT INTO port_dict(port_start,port_end,name,description,enabled,created_ms,updated_ms) VALUES(?,?,?,?,1,?,?)",
+                                   -1, &st, nullptr) != SQLITE_OK) { exec("ROLLBACK", e); err = "db error"; return false; }
+            sqlite3_bind_int(st, 1, lo); sqlite3_bind_int(st, 2, hi);
+            sqlite3_bind_text(st, 3, name.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(st, 4, "", -1, SQLITE_STATIC);
+            sqlite3_bind_int64(st, 5, nowMs()); sqlite3_bind_int64(st, 6, nowMs());
+            if (sqlite3_step(st) != SQLITE_DONE) { sqlite3_finalize(st); exec("ROLLBACK", e); err = "insert failed"; return false; }
+            sqlite3_finalize(st);
+        } else {
+            if (sqlite3_prepare_v2(db_, "SELECT id FROM tty_dict WHERE pattern=?", -1, &st, nullptr) != SQLITE_OK) {
+                exec("ROLLBACK", e); err = "db error"; return false;
+            }
+            sqlite3_bind_text(st, 1, value.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(st) == SQLITE_ROW) {
+                existing.push_back(value); sqlite3_finalize(st); continue;
+            }
+            sqlite3_finalize(st);
+            if (sqlite3_prepare_v2(db_, "INSERT INTO tty_dict(pattern,name,description,kind,enabled,created_ms,updated_ms) VALUES(?,?,?,?,1,?,?)",
+                                   -1, &st, nullptr) != SQLITE_OK) { exec("ROLLBACK", e); err = "db error"; return false; }
+            sqlite3_bind_text(st, 1, value.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(st, 2, name.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(st, 3, "", -1, SQLITE_STATIC);
+            sqlite3_bind_text(st, 4, "serial", -1, SQLITE_STATIC);
+            sqlite3_bind_int64(st, 5, nowMs()); sqlite3_bind_int64(st, 6, nowMs());
+            if (sqlite3_step(st) != SQLITE_DONE) { sqlite3_finalize(st); exec("ROLLBACK", e); err = "insert failed"; return false; }
+            sqlite3_finalize(st);
+        }
+        added.push_back(value);
+    }
+    exec("COMMIT", e);
+    json out; out["added"] = added; out["existing"] = existing;
+    json_out = out.dump();
+    return true;
+}
+
+bool AdminDb::dictUpdate(const std::string& kind, long long id, const std::string& name,
+                         const std::string& desc, int enabled, std::string& err) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    const char* sql = kind == "ports"
+        ? "UPDATE port_dict SET name=?,description=?,enabled=?,updated_ms=? WHERE id=?"
+        : "UPDATE tty_dict SET name=?,description=?,enabled=?,updated_ms=? WHERE id=?";
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
+    sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, desc.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(st, 3, enabled ? 1 : 0);
+    sqlite3_bind_int64(st, 4, nowMs());
+    sqlite3_bind_int64(st, 5, id);
+    bool ok = sqlite3_step(st) == SQLITE_DONE;
+    sqlite3_finalize(st);
+    if (!ok) err = "update failed";
+    return ok;
+}
+
+bool AdminDb::dictDelete(const std::string& kind, long long id, std::string& err) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    if (kind == "ports") {
+        int lo = 0, hi = 0;
+        if (sqlite3_prepare_v2(db_, "SELECT port_start,port_end FROM port_dict WHERE id=?", -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
+        sqlite3_bind_int64(st, 1, id);
+        if (sqlite3_step(st) != SQLITE_ROW) { sqlite3_finalize(st); err = "not found"; return false; }
+        lo = sqlite3_column_int(st, 0); hi = sqlite3_column_int(st, 1);
+        sqlite3_finalize(st);
+        if (portRefs(db_, lo, hi) > 0) { err = "referenced"; return false; }
+        if (sqlite3_prepare_v2(db_, "DELETE FROM port_dict WHERE id=?", -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
+    } else {
+        std::string pattern;
+        if (sqlite3_prepare_v2(db_, "SELECT pattern FROM tty_dict WHERE id=?", -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
+        sqlite3_bind_int64(st, 1, id);
+        if (sqlite3_step(st) != SQLITE_ROW) { sqlite3_finalize(st); err = "not found"; return false; }
+        pattern = (const char*)sqlite3_column_text(st, 0);
+        sqlite3_finalize(st);
+        if (ttyRefs(db_, pattern) > 0) { err = "referenced"; return false; }
+        if (sqlite3_prepare_v2(db_, "DELETE FROM tty_dict WHERE id=?", -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
+    }
+    sqlite3_bind_int64(st, 1, id);
+    bool ok = sqlite3_step(st) == SQLITE_DONE;
+    sqlite3_finalize(st);
+    if (!ok) err = "delete failed";
+    return ok;
+}
+
+bool AdminDb::dictBatchDelete(const std::string& kind, const std::vector<long long>& ids,
+                              std::string& json_out) {
+    json deleted = json::array(), skipped = json::array();
+    for (long long id : ids) {
+        std::string err;
+        if (dictDelete(kind, id, err)) deleted.push_back(id);
+        else skipped.push_back({{"id", id}, {"error", err}});
+    }
+    json out; out["deleted"] = deleted; out["skipped"] = skipped;
+    json_out = out.dump();
     return true;
 }

@@ -127,6 +127,13 @@ public:
     bool dictTtys(const std::string& q, std::string& json_out);
     bool dictTtyAdd(const std::string& pattern, const std::string& name, const std::string& desc,
                     long long& out_id, std::string& err);
+    bool dictBatchAdd(const std::string& kind, const std::vector<std::string>& values,
+                      const std::string& name_prefix, std::string& json_out, std::string& err);
+    bool dictUpdate(const std::string& kind, long long id, const std::string& name,
+                    const std::string& desc, int enabled, std::string& err);
+    bool dictDelete(const std::string& kind, long long id, std::string& err);
+    bool dictBatchDelete(const std::string& kind, const std::vector<long long>& ids,
+                         std::string& json_out);
 
 
 

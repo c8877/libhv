@@ -149,6 +149,38 @@ void AdminServer::registerRoutes() {
     access(ROLE_OPERATOR, "GET", "/api/v1/permission/effective", &AdminServer::handlePermEffective);    access(ROLE_OPERATOR, "GET", "/api/v1/permission/dict/ports", &AdminServer::handleDictPorts);
     access(ROLE_OPERATOR, "GET", "/api/v1/permission/dict/ttys", &AdminServer::handleDictTtys);
 
+    service_.Handle("POST", "/api/v1/permission/dict/ports/batch-delete", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handleDictBatchDelete(ctx, role, "ports"); return 200;
+    });
+    service_.Handle("POST", "/api/v1/permission/dict/ttys/batch-delete", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handleDictBatchDelete(ctx, role, "ttys"); return 200;
+    });
+    service_.Handle("POST", "/api/v1/permission/dict/ports/batch", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handleDictBatchAdd(ctx, role, "ports"); return 200;
+    });
+    service_.Handle("POST", "/api/v1/permission/dict/ttys/batch", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handleDictBatchAdd(ctx, role, "ttys"); return 200;
+    });
+    service_.Handle("PUT", "/api/v1/permission/dict/ports/:id", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handleDictUpdate(ctx, role, "ports"); return 200;
+    });
+    service_.Handle("PUT", "/api/v1/permission/dict/ttys/:id", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handleDictUpdate(ctx, role, "ttys"); return 200;
+    });
+    service_.Handle("DELETE", "/api/v1/permission/dict/ports/:id", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handleDictDelete(ctx, role, "ports"); return 200;
+    });
+    service_.Handle("DELETE", "/api/v1/permission/dict/ttys/:id", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handleDictDelete(ctx, role, "ttys"); return 200;
+    });
     service_.Handle("POST", "/api/v1/permission/dict/ports", [this](const HttpContextPtr& ctx) {
         std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
         handleDictPortAdd(ctx, role); return 200;

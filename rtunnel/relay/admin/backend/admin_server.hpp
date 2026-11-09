@@ -137,7 +137,11 @@ private:
     void handlePermAgentAddDevices(const HttpContextPtr& ctx, const std::string& role);    void handleDictPorts(const HttpContextPtr& ctx);
     void handleDictPortAdd(const HttpContextPtr& ctx, const std::string& role);
     void handleDictTtys(const HttpContextPtr& ctx);
-    void handleDictTtyAdd(const HttpContextPtr& ctx, const std::string& role);
+    void handleDictTtyAdd(const HttpContextPtr& ctx, const std::string& role);    void handleDictBatchAdd(const HttpContextPtr& ctx, const std::string& role, const std::string& kind);
+    void handleDictUpdate(const HttpContextPtr& ctx, const std::string& role, const std::string& kind);
+    void handleDictDelete(const HttpContextPtr& ctx, const std::string& role, const std::string& kind);
+    void handleDictBatchDelete(const HttpContextPtr& ctx, const std::string& role, const std::string& kind);
+
 
 
 

@@ -221,3 +221,52 @@ void AdminServer::handleDictTtyAdd(const HttpContextPtr& ctx, const std::string&
     audit(role, "permission.dict.tty.add", req.value("value", ""));
     json out; out["ok"] = true; out["id"] = id; ctx->send(out.dump());
 }
+
+void AdminServer::handleDictBatchAdd(const HttpContextPtr& ctx, const std::string& role, const std::string& kind) {
+    json req = json::parse(ctx->body(), nullptr, false);
+    if (req.is_discarded() || !req.is_object()) { bad(ctx, "bad json"); return; }
+    std::vector<std::string> values;
+    if (req.contains("values")) for (auto& v : req["values"]) if (v.is_string()) values.push_back(v.get<std::string>());
+    std::string out, err;
+    if (!db_.dictBatchAdd(kind, values, req.value("name_prefix", ""), out, err)) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send(out.empty() ? "{\"error\":\"" + err + "\"}" : out);
+        return;
+    }
+    audit(role, "permission.dict." + kind + ".batch_add", "n=" + std::to_string(values.size()));
+    ctx->send(out);
+}
+
+void AdminServer::handleDictUpdate(const HttpContextPtr& ctx, const std::string& role, const std::string& kind) {
+    long long id = atoll(ctx->param("id").c_str());
+    json req = json::parse(ctx->body(), nullptr, false);
+    if (req.is_discarded() || !req.is_object()) { bad(ctx, "bad json"); return; }
+    std::string err;
+    if (!db_.dictUpdate(kind, id, req.value("name", ""), req.value("description", ""),
+                        req.value("enabled", true) ? 1 : 0, err)) { bad(ctx, err); return; }
+    audit(role, "permission.dict." + kind + ".update", std::to_string(id));
+    ctx->send("{\"ok\":true}");
+}
+
+void AdminServer::handleDictDelete(const HttpContextPtr& ctx, const std::string& role, const std::string& kind) {
+    long long id = atoll(ctx->param("id").c_str());
+    std::string err;
+    if (!db_.dictDelete(kind, id, err)) {
+        ctx->response->status_code = err == "referenced" ? HTTP_STATUS_CONFLICT : HTTP_STATUS_BAD_REQUEST;
+        json j; j["error"] = err; ctx->send(j.dump());
+        return;
+    }
+    audit(role, "permission.dict." + kind + ".delete", std::to_string(id));
+    ctx->send("{\"ok\":true}");
+}
+
+void AdminServer::handleDictBatchDelete(const HttpContextPtr& ctx, const std::string& role, const std::string& kind) {
+    json req = json::parse(ctx->body(), nullptr, false);
+    if (req.is_discarded() || !req.is_object()) { bad(ctx, "bad json"); return; }
+    std::vector<long long> ids;
+    if (req.contains("ids")) for (auto& v : req["ids"]) if (v.is_number_integer()) ids.push_back(v.get<long long>());
+    std::string out;
+    db_.dictBatchDelete(kind, ids, out);
+    audit(role, "permission.dict." + kind + ".batch_delete", "n=" + std::to_string(ids.size()));
+    ctx->send(out);
+}
