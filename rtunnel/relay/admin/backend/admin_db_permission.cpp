@@ -618,8 +618,132 @@ bool AdminDb::permEffectiveClient(const std::string& user, std::string& json_out
     return true;
 }
 
-bool AdminDb::permMigrateLegacy() {
-    std::lock_guard<std::mutex> lk(mu_);
+bool AdminDb::permImportAcl(const std::string& content, const std::vector<std::string>& extra_devices,
+                            std::string& json_out, std::string& err) {
+    struct Entry { std::string user; std::vector<std::string> patterns; };
+    std::vector<Entry> entries;
+    size_t pos = 0;
+    while (pos <= content.size()) {
+        size_t nl = content.find('\n', pos);
+        std::string line = content.substr(pos, nl == std::string::npos ? std::string::npos : nl - pos);
+        pos = (nl == std::string::npos) ? content.size() + 1 : nl + 1;
+        size_t hash = line.find('#');
+        if (hash != std::string::npos) line = line.substr(0, hash);
+        size_t b = line.find_first_not_of(" \t\r");
+        size_t e = line.find_last_not_of(" \t\r");
+        if (b == std::string::npos) continue;
+        line = line.substr(b, e - b + 1);
+        size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string user = line.substr(0, eq);
+        size_t ub = user.find_first_not_of(" \t");
+        size_t ue = user.find_last_not_of(" \t");
+        if (ub == std::string::npos) continue;
+        user = user.substr(ub, ue - ub + 1);
+        std::vector<std::string> pats = splitCsv(line.substr(eq + 1));
+        if (user.empty() || pats.empty()) continue;
+        entries.push_back({user, pats});
+    }
+
+    std::set<std::string> known;
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        const char* qs[] = {"SELECT devid FROM devices", "SELECT DISTINCT devid FROM dev_group_members"};
+        for (auto* q : qs) {
+            sqlite3_stmt* st = nullptr;
+            if (sqlite3_prepare_v2(db_, q, -1, &st, nullptr) == SQLITE_OK)
+                while (sqlite3_step(st) == SQLITE_ROW) known.insert((const char*)sqlite3_column_text(st, 0));
+            sqlite3_finalize(st);
+        }
+    }
+    for (auto& d : extra_devices) if (!d.empty()) known.insert(d);
+
+    std::map<std::string, std::string> allCaps;
+    allCaps["tcp_ports"] = "*";
+    allCaps["shell"] = "1";
+    allCaps["tty"] = "*";
+    allCaps["file"] = "rw";
+    allCaps["sysinfo"] = "1";
+    allCaps["metrics"] = "1";
+    allCaps["config"] = "1";
+    allCaps["web"] = "1";
+
+    json out;
+    json skipped = json::array();
+    int imported = 0, devCount = 0;
+    for (auto& en : entries) {
+        auto exists = [&](const char* table, const std::string& name) {
+            std::lock_guard<std::mutex> lk(mu_);
+            sqlite3_stmt* st = nullptr;
+            std::string sql = std::string("SELECT 1 FROM ") + table + " WHERE name=?";
+            bool found = false;
+            if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) == SQLITE_OK) {
+                sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+                found = sqlite3_step(st) == SQLITE_ROW;
+            }
+            sqlite3_finalize(st);
+            return found;
+        };
+        std::string gname = "导入-" + en.user;
+        if (exists("client_groups", en.user) || exists("dev_groups", gname)) {
+            json s;
+            s["user"] = en.user;
+            s["reason"] = "已存在同名分组";
+            skipped.push_back(s);
+            continue;
+        }
+        std::vector<std::string> devs;
+        for (auto& d : known) {
+            for (auto& p : en.patterns) {
+                bool m;
+                if (!p.empty() && p[p.size() - 1] == '*') {
+                    std::string prefix = p.substr(0, p.size() - 1);
+                    m = d.compare(0, prefix.size(), prefix) == 0;
+                } else {
+                    m = d == p;
+                }
+                if (m) { devs.push_back(d); break; }
+            }
+        }
+        long long gid = 0;
+        std::string e;
+        if (!permAgentSave(0, gname, "由旧 ACL 导入", devs, allCaps, gid, e)) {
+            json s;
+            s["user"] = en.user;
+            s["reason"] = e;
+            skipped.push_back(s);
+            continue;
+        }
+        DbPermAcl a;
+        a.agent_group_id = gid;
+        a.tcp_ports = "*";
+        a.tty = "*";
+        a.file = "rw";
+        a.shell = a.sysinfo = a.metrics = a.config = a.web = true;
+        std::vector<DbPermAcl> acl;
+        acl.push_back(a);
+        long long cid = 0;
+        if (!permClientSave(0, en.user, "由旧 ACL 导入", {en.user}, acl, cid, e)) {
+            permAgentDelete(gid, e);
+            json s;
+            s["user"] = en.user;
+            s["reason"] = e;
+            skipped.push_back(s);
+            continue;
+        }
+        imported++;
+        devCount += (int)devs.size();
+    }
+    out["ok"] = true;
+    out["imported"] = imported;
+    out["devices"] = devCount;
+    out["skipped"] = skipped;
+    json_out = out.dump();
+    (void)err;
+    return true;
+}
+
+bool AdminDb::permMigrateLegacy() {    std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, "SELECT COUNT(*) FROM client_groups", -1, &st, nullptr) != SQLITE_OK) return false;
     bool empty = false;

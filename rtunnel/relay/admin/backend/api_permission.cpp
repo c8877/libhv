@@ -123,6 +123,29 @@ void AdminServer::handlePermEffective(const HttpContextPtr& ctx) {
     ctx->send(out);
 }
 
+void AdminServer::handlePermImportAcl(const HttpContextPtr& ctx, const std::string& role) {
+    json req = json::parse(ctx->body(), nullptr, false);
+    if (req.is_discarded() || !req.is_object()) { bad(ctx, "bad json"); return; }
+    std::string content = req.value("content", "");
+    std::string online = callRelay([this]() {
+        json arr = json::array();
+        for (RelayConn* c = relay_->agents; c; c = c->reg_next) arr.push_back(c->devid);
+        return arr.dump();
+    });
+    std::vector<std::string> extra;
+    json oa = json::parse(online, nullptr, false);
+    if (!oa.is_discarded() && oa.is_array()) {
+        for (auto& v : oa) if (v.is_string()) extra.push_back(v.get<std::string>());
+    }
+    std::string out, err;
+    if (!db_.permImportAcl(content, extra, out, err)) { bad(ctx, err); return; }
+    json res = json::parse(out, nullptr, false);
+    int n = res.is_object() ? res.value("imported", 0) : 0;
+    audit(role, "permission.acl.import", "imported=" + std::to_string(n));
+    refreshGroupAcl();
+    ctx->send(out);
+}
+
 void AdminServer::handlePermAgentCandidates(const HttpContextPtr& ctx) {
     long long id = atoll(ctx->param("id").c_str());
     std::string out;

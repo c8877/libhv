@@ -116,6 +116,8 @@ public:
                        long long& out_id, std::string& err);
     bool permAgentDelete(long long id, std::string& err);
     bool permEffectiveClient(const std::string& user, std::string& json_out, std::string& err);
+    bool permImportAcl(const std::string& content, const std::vector<std::string>& extra_devices,
+                       std::string& json_out, std::string& err);
     bool permMigrateLegacy();
     bool permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::string>& users);
     bool permAgentCandidates(long long group_id, std::string& json_out);

@@ -59,7 +59,7 @@ dev_groups / dev_group_members / dev_group_caps / subject_groups
 - [x] 行内保存/取消/错误
 - [x] 空状态
 - [x] 统一 Tab 组件（underline/segmented/minimal）
-- [ ] 旧 ACL 导入入口
+- [x] 旧 ACL 导入入口
 
 验收：
 

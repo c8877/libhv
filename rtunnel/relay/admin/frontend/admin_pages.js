@@ -604,6 +604,7 @@ const PermissionPage = Object.assign(new Page(), {
       '<div class="perm-table-wrap"><table class="detail-table perm-table"><thead>' + head + '</thead><tbody>' +
       (newForm || '') + (rows || '<tr><td colspan="6" class="empty">暂无分组</td></tr>') + '</tbody></table></div>',
       { right: '<button id="perm-effective">有效权限</button> ' +
+        (roleOf() === 'admin' ? '<button id="perm-import">导入 ACL</button> ' : '') +
         (canManage() ? '<button id="perm-acl">ACL 文件</button> <button id="perm-dict">字典管理</button> ' +
           '<button class="primary" id="perm-new">+ 新建分组</button>' : '') });
     this._tabs = UI.tabs(document.getElementById('perm-tabs'), {
@@ -626,6 +627,8 @@ const PermissionPage = Object.assign(new Page(), {
     if (eb) eb.onclick = () => this.openEffective();
     const ab = document.getElementById('perm-acl');
     if (ab) ab.onclick = () => this.openAclEditor();
+    const ib = document.getElementById('perm-import');
+    if (ib) ib.onclick = () => this.openImportAcl();
     const nb = document.getElementById('perm-new');
     if (nb) nb.onclick = () => {
       this.expandKey = this.tab + ':new';
@@ -1061,6 +1064,36 @@ const PermissionPage = Object.assign(new Page(), {
     m.el.querySelector('#acl-reload').onclick = async () => {
       try { await Api.post('/api/v1/acl/reload'); UI.toast('已重新加载'); }
       catch (e) { UI.toast('重载失败：' + e.message, true); }
+    };
+  },
+  async openImportAcl() {
+    let d;
+    try { d = await Api.get('/api/v1/acl/file'); }
+    catch (e) { UI.toast('加载 ACL 失败：' + e.message, true); return; }
+    const cli = (d.cli || []).join('\n');
+    let content = d.content || '';
+    if (cli) content += (content && content[content.length - 1] !== '\n' ? '\n' : '') + cli;
+    const m = UI.modal({
+      title: '导入旧 ACL',
+      body: '<p class="muted-sm">每条 <code>user=devid[,devid|*]</code> 生成一个客户端分组和一个设备分组，' +
+        '能力默认全开；同名分组会跳过。</p>' +
+        '<textarea id="ia-content" rows="12" class="ui-textarea" placeholder="alice=dev1,dev2">' +
+        UI.esc(content) + '</textarea>' +
+        '<div id="ia-result" class="muted-sm"></div>',
+      buttons: '<button data-modal-close>取消</button><button class="primary" id="ia-ok">导入</button>',
+    });
+    m.el.querySelector('.tty-modal').classList.add('acl-modal');
+    const ta = m.el.querySelector('#ia-content');
+    const result = m.el.querySelector('#ia-result');
+    m.el.querySelector('#ia-ok').onclick = async () => {
+      result.textContent = '导入中…';
+      try {
+        const r = await Api.post('/api/v1/permission/import-acl', { content: ta.value });
+        const skipped = (r.skipped || []).map(x => x.user + '（' + x.reason + '）').join('、');
+        result.textContent = '已导入 ' + r.imported + ' 个客户端分组，关联 ' + r.devices + ' 台设备' +
+          (skipped ? '；跳过：' + skipped : '');
+        if (r.imported) setTimeout(() => { m.close(); this.refresh(); }, 600);
+      } catch (e) { result.textContent = '导入失败：' + e.message; }
     };
   },
   async openDictManager(kind) {
