@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
 #include <string>
 #include <mutex>
 
@@ -90,6 +91,7 @@ public:
     bool groupEffective(const std::string& type, const std::string& subject,
                         std::string& json_out, std::string& err);    bool groupSubjectDevids(const std::string& type, const std::string& subject,
                             std::vector<std::string>& out, bool& has_groups);    bool groupClientRules(std::vector<DbGroupAclRule>& out);
+    bool groupClientUsers(std::set<std::string>& out);
 
 
 

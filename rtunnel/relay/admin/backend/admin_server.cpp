@@ -235,7 +235,6 @@ int AdminServer::start(const AdminConfig& cfg) {
         std::string db_err;
         if (db_.open(cfg_.db_path, db_err)) {
             loadSettings();
-            refreshGroupAcl();
             logf_("[admin] db: %s", cfg_.db_path.c_str());
         } else {
             logf_("[admin] db open failed: %s (%s)", cfg_.db_path.c_str(), db_err.c_str());
@@ -248,6 +247,11 @@ int AdminServer::start(const AdminConfig& cfg) {
         relay_->loadRevoked();
         audit_.init(cfg_.cert_dir + "/audit.log");
     }
+
+    std::thread([this]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        refreshGroupAcl();
+    }).detach();
 
     db_.purgeExpiredSessions(AdminDb::nowMs());
     if (cfg_.addr.rfind("0.0.0.0", 0) == 0) {
@@ -282,7 +286,12 @@ int AdminServer::start(const AdminConfig& cfg) {
         for (;;) {
             std::this_thread::sleep_for(std::chrono::hours(1));
             cleanupAudit(settingInt("audit.retention_days", 30));
-            db_.purgeExpiredSessions(AdminDb::nowMs());
+            std::thread([this]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        refreshGroupAcl();
+    }).detach();
+
+    db_.purgeExpiredSessions(AdminDb::nowMs());
             cleanupUploads();
             cleanupTtyLogs();
             audit_.rotate(100 * 1024 * 1024);

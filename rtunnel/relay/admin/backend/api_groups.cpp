@@ -25,6 +25,7 @@ void AdminServer::refreshGroupAcl() {
     if (!db_.groupClientRules(rules)) return;
     std::vector<GroupAclRule> out;
     std::set<std::string> users;
+    db_.groupClientUsers(users);
     for (auto& r : rules) {
         GroupAclRule g;
         g.user = r.user;

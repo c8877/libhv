@@ -472,3 +472,14 @@ bool AdminDb::groupClientRules(std::vector<DbGroupAclRule>& out) {
     for (auto& kv : rules) out.push_back(kv.second);
     return true;
 }
+
+bool AdminDb::groupClientUsers(std::set<std::string>& out) {
+    std::lock_guard<std::mutex> lk(mu_);
+    out.clear();
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, "SELECT DISTINCT subject_id FROM subject_groups WHERE subject_type='client'",
+                           -1, &st, nullptr) != SQLITE_OK) return false;
+    while (sqlite3_step(st) == SQLITE_ROW) out.insert((const char*)sqlite3_column_text(st, 0));
+    sqlite3_finalize(st);
+    return true;
+}
