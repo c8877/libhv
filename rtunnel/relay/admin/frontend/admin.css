@@ -622,3 +622,5 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-tabs-attached .ui-tab{border-radius:6px 6px 0 0}
 .ui-tabs-attached{gap:0}
 .ui-tabs-attached .ui-tab + .ui-tab{margin-left:-1px}
+.ui-tabs-attached .ui-tab:not(.is-active){background:color-mix(in srgb,#000 4%,var(--card));color:var(--muted)}
+.ui-tabs-attached .ui-tab:not(.is-active):hover{background:color-mix(in srgb,#000 2%,var(--card));color:var(--fg)}
