@@ -203,7 +203,8 @@ CREATE TABLE client_acl_ttys (
 
 - 端口字典项可以是单端口或范围：`22`、`8000-8100`。
 - TTY 字典项可以是具体路径或模式：`ttyS0`、`ttyUSB*`。
-- 旧 `client_group_acl.tcp_ports` / `tty` 和 `agent_group_caps` 中的文本字段仅用于迁移，迁移后以关联表为准。
+- `client_group_acl.tcp_ports` / `tty` 与 `dev_group_caps` 的文本值保留为可读快照；
+  运行期以关联表为准，保存时同步写入。启动时按文本重建一次，兼容旧库。
 - 字典项禁用后立即从有效权限中移除，已建立会话不打断。
 
 说明：

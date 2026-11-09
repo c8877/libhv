@@ -3,6 +3,7 @@
 #include "sqlite3.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -206,6 +207,218 @@ std::set<std::string> disabledTtyPatterns(sqlite3* db) {
         while (sqlite3_step(st) == SQLITE_ROW) out.insert((const char*)sqlite3_column_text(st, 0));
     }
     sqlite3_finalize(st);
+    return out;
+}
+
+// ---- 端口/TTY 字典关联 ----
+
+long long msNow() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+std::string portLabel(int lo, int hi) {
+    if (lo == 1 && hi == 65535) return "*";
+    if (lo == hi) return std::to_string(lo);
+    return std::to_string(lo) + "-" + std::to_string(hi);
+}
+
+long long ensurePortId(sqlite3* db, int lo, int hi) {
+    sqlite3_stmt* st = nullptr;
+    long long id = 0;
+    if (sqlite3_prepare_v2(db, "SELECT id FROM port_dict WHERE port_start=? AND port_end=?", -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int(st, 1, lo);
+        sqlite3_bind_int(st, 2, hi);
+        if (sqlite3_step(st) == SQLITE_ROW) id = sqlite3_column_int64(st, 0);
+        sqlite3_finalize(st);
+    }
+    if (id) return id;
+    if (sqlite3_prepare_v2(db, "INSERT INTO port_dict(port_start,port_end,name,description,enabled,created_ms,updated_ms) "
+                               "VALUES(?,?,?,'',1,?,?)", -1, &st, nullptr) != SQLITE_OK) return 0;
+    std::string name = portLabel(lo, hi);
+    sqlite3_bind_int(st, 1, lo);
+    sqlite3_bind_int(st, 2, hi);
+    sqlite3_bind_text(st, 3, name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 4, msNow());
+    sqlite3_bind_int64(st, 5, msNow());
+    if (sqlite3_step(st) == SQLITE_DONE) id = sqlite3_last_insert_rowid(db);
+    sqlite3_finalize(st);
+    return id;
+}
+
+long long ensureTtyId(sqlite3* db, const std::string& pattern) {
+    sqlite3_stmt* st = nullptr;
+    long long id = 0;
+    if (sqlite3_prepare_v2(db, "SELECT id FROM tty_dict WHERE pattern=?", -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, pattern.c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(st) == SQLITE_ROW) id = sqlite3_column_int64(st, 0);
+        sqlite3_finalize(st);
+    }
+    if (id) return id;
+    if (sqlite3_prepare_v2(db, "INSERT INTO tty_dict(pattern,name,description,kind,enabled,created_ms,updated_ms) "
+                               "VALUES(?,?,'','serial',1,?,?)", -1, &st, nullptr) != SQLITE_OK) return 0;
+    sqlite3_bind_text(st, 1, pattern.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, pattern.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 3, msNow());
+    sqlite3_bind_int64(st, 4, msNow());
+    if (sqlite3_step(st) == SQLITE_DONE) id = sqlite3_last_insert_rowid(db);
+    sqlite3_finalize(st);
+    return id;
+}
+
+void insertAclPort(sqlite3* db, long long cg, long long ag, long long port) {
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO client_acl_ports(client_group_id,agent_group_id,port_id) VALUES(?,?,?)",
+                           -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, cg);
+        sqlite3_bind_int64(st, 2, ag);
+        sqlite3_bind_int64(st, 3, port);
+        sqlite3_step(st);
+    }
+    sqlite3_finalize(st);
+}
+
+void insertAclTty(sqlite3* db, long long cg, long long ag, long long tty) {
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO client_acl_ttys(client_group_id,agent_group_id,tty_id) VALUES(?,?,?)",
+                           -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, cg);
+        sqlite3_bind_int64(st, 2, ag);
+        sqlite3_bind_int64(st, 3, tty);
+        sqlite3_step(st);
+    }
+    sqlite3_finalize(st);
+}
+
+void syncAclDictIds(sqlite3* db, long long cg, long long ag, const std::string& ports, const std::string& tty) {
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, "DELETE FROM client_acl_ports WHERE client_group_id=? AND agent_group_id=?", -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, cg);
+        sqlite3_bind_int64(st, 2, ag);
+        sqlite3_step(st);
+    }
+    sqlite3_finalize(st);
+    st = nullptr;
+    if (sqlite3_prepare_v2(db, "DELETE FROM client_acl_ttys WHERE client_group_id=? AND agent_group_id=?", -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, cg);
+        sqlite3_bind_int64(st, 2, ag);
+        sqlite3_step(st);
+    }
+    sqlite3_finalize(st);
+    for (auto& r : parsePorts(ports)) {
+        long long pid = ensurePortId(db, r.lo, r.hi);
+        if (pid) insertAclPort(db, cg, ag, pid);
+    }
+    for (auto& p : splitCsv(tty)) {
+        long long tid = ensureTtyId(db, p);
+        if (tid) insertAclTty(db, cg, ag, tid);
+    }
+}
+
+void syncCapDictIds(sqlite3* db, long long gid, const std::string& cap, const std::string& value) {
+    bool is_port = cap == "tcp_ports";
+    if (!is_port && cap != "tty") return;
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, is_port ? "DELETE FROM agent_group_ports WHERE group_id=?" : "DELETE FROM agent_group_ttys WHERE group_id=?",
+                           -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, gid);
+        sqlite3_step(st);
+    }
+    sqlite3_finalize(st);
+    if (is_port) {
+        for (auto& r : parsePorts(value)) {
+            long long pid = ensurePortId(db, r.lo, r.hi);
+            if (!pid) continue;
+            st = nullptr;
+            if (sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO agent_group_ports(group_id,port_id) VALUES(?,?)", -1, &st, nullptr) == SQLITE_OK) {
+                sqlite3_bind_int64(st, 1, gid);
+                sqlite3_bind_int64(st, 2, pid);
+                sqlite3_step(st);
+            }
+            sqlite3_finalize(st);
+        }
+    } else {
+        for (auto& p : splitCsv(value)) {
+            long long tid = ensureTtyId(db, p);
+            if (!tid) continue;
+            st = nullptr;
+            if (sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO agent_group_ttys(group_id,tty_id) VALUES(?,?)", -1, &st, nullptr) == SQLITE_OK) {
+                sqlite3_bind_int64(st, 1, gid);
+                sqlite3_bind_int64(st, 2, tid);
+                sqlite3_step(st);
+            }
+            sqlite3_finalize(st);
+        }
+    }
+}
+
+std::string aclPortsText(sqlite3* db, long long cg, long long ag, const std::string& fallback) {
+    sqlite3_stmt* st = nullptr;
+    std::vector<PortRange> ranges;
+    if (sqlite3_prepare_v2(db, "SELECT d.port_start,d.port_end FROM client_acl_ports r "
+                               "JOIN port_dict d ON d.id=r.port_id "
+                               "WHERE r.client_group_id=? AND r.agent_group_id=?", -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, cg);
+        sqlite3_bind_int64(st, 2, ag);
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            PortRange r;
+            r.lo = sqlite3_column_int(st, 0);
+            r.hi = sqlite3_column_int(st, 1);
+            ranges.push_back(r);
+        }
+    }
+    sqlite3_finalize(st);
+    if (ranges.empty()) return fallback;
+    return joinRanges(ranges);
+}
+
+std::string aclTtyText(sqlite3* db, long long cg, long long ag, const std::string& fallback) {
+    sqlite3_stmt* st = nullptr;
+    std::set<std::string> pats;
+    if (sqlite3_prepare_v2(db, "SELECT d.pattern FROM client_acl_ttys r "
+                               "JOIN tty_dict d ON d.id=r.tty_id "
+                               "WHERE r.client_group_id=? AND r.agent_group_id=? ORDER BY d.pattern", -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, cg);
+        sqlite3_bind_int64(st, 2, ag);
+        while (sqlite3_step(st) == SQLITE_ROW) pats.insert((const char*)sqlite3_column_text(st, 0));
+    }
+    sqlite3_finalize(st);
+    if (pats.empty()) return fallback;
+    std::string out;
+    for (auto& p : pats) { if (!out.empty()) out += ","; out += p; }
+    return out;
+}
+
+std::string capPortsText(sqlite3* db, long long gid, const std::string& fallback) {
+    sqlite3_stmt* st = nullptr;
+    std::vector<PortRange> ranges;
+    if (sqlite3_prepare_v2(db, "SELECT d.port_start,d.port_end FROM agent_group_ports r "
+                               "JOIN port_dict d ON d.id=r.port_id WHERE r.group_id=?", -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, gid);
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            PortRange r;
+            r.lo = sqlite3_column_int(st, 0);
+            r.hi = sqlite3_column_int(st, 1);
+            ranges.push_back(r);
+        }
+    }
+    sqlite3_finalize(st);
+    if (ranges.empty()) return fallback;
+    return joinRanges(ranges);
+}
+
+std::string capTtyText(sqlite3* db, long long gid, const std::string& fallback) {
+    sqlite3_stmt* st = nullptr;
+    std::set<std::string> pats;
+    if (sqlite3_prepare_v2(db, "SELECT d.pattern FROM agent_group_ttys r "
+                               "JOIN tty_dict d ON d.id=r.tty_id WHERE r.group_id=? ORDER BY d.pattern", -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, gid);
+        while (sqlite3_step(st) == SQLITE_ROW) pats.insert((const char*)sqlite3_column_text(st, 0));
+    }
+    sqlite3_finalize(st);
+    if (pats.empty()) return fallback;
+    std::string out;
+    for (auto& p : pats) { if (!out.empty()) out += ","; out += p; }
     return out;
 }
 } // namespace
@@ -442,6 +655,7 @@ bool AdminDb::permClientSave(long long id, const std::string& name, const std::s
         ok = sqlite3_step(x) == SQLITE_DONE;
         if (!ok) e = sqlite3_errmsg(db_);
         sqlite3_finalize(x);
+        if (ok) syncAclDictIds(db_, id, a.agent_group_id, a.tcp_ports, a.tty);
     }
     exec(ok ? "COMMIT" : "ROLLBACK", e);
     if (!ok) { err = e; return false; }
@@ -537,6 +751,7 @@ bool AdminDb::permAgentSave(long long id, const std::string& name, const std::st
         sqlite3_bind_text(c, 3, kv.second.c_str(), -1, SQLITE_TRANSIENT);
         ok = sqlite3_step(c) == SQLITE_DONE;
         sqlite3_finalize(c);
+        if (ok) syncCapDictIds(db_, id, kv.first, kv.second);
     }
     exec(ok ? "COMMIT" : "ROLLBACK", e);
     if (!ok) { err = e; return false; }
@@ -570,30 +785,31 @@ bool AdminDb::permEffectiveClient(const std::string& user, std::string& json_out
     std::set<std::string> disabledTtys = disabledTtyPatterns(db_);
     sqlite3_stmt* st = nullptr;
     const char* sql =
-        "SELECT a.agent_group_id,a.tcp_ports,a.allow_shell,a.tty,a.file,a.sysinfo,a.metrics,a.config,a.web,"
-        "cg.name FROM client_group_members m "
+        "SELECT a.client_group_id,a.agent_group_id,a.tcp_ports,a.allow_shell,a.tty,a.file,"
+        "a.sysinfo,a.metrics,a.config,a.web,cg.name FROM client_group_members m "
         "JOIN client_group_acl a ON a.client_group_id=m.group_id "
         "JOIN client_groups cg ON cg.id=m.group_id WHERE m.username=?";
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
     sqlite3_bind_text(st, 1, user.c_str(), -1, SQLITE_TRANSIENT);
     while (sqlite3_step(st) == SQLITE_ROW) {
-        long long gid = sqlite3_column_int64(st, 0);
-        if (sqlite3_column_text(st, 9)) groupSet.insert((const char*)sqlite3_column_text(st, 9));
-        std::string p = intersectPorts((const char*)sqlite3_column_text(st, 1),
-                                       capValue(db_, gid, "tcp_ports"), disabledPorts);
+        long long cgid = sqlite3_column_int64(st, 0);
+        long long gid = sqlite3_column_int64(st, 1);
+        if (sqlite3_column_text(st, 10)) groupSet.insert((const char*)sqlite3_column_text(st, 10));
+        std::string p = intersectPorts(aclPortsText(db_, cgid, gid, (const char*)sqlite3_column_text(st, 2)),
+                                       capPortsText(db_, gid, capValue(db_, gid, "tcp_ports")), disabledPorts);
         for (auto& x : splitCsv(p)) portSet.insert(x);
-        if (sqlite3_column_int(st, 2) && truthy(capValue(db_, gid, "shell"))) shell = true;
-        std::string t = intersectTty((const char*)sqlite3_column_text(st, 3),
-                                     capValue(db_, gid, "tty"), disabledTtys);
+        if (sqlite3_column_int(st, 3) && truthy(capValue(db_, gid, "shell"))) shell = true;
+        std::string t = intersectTty(aclTtyText(db_, cgid, gid, (const char*)sqlite3_column_text(st, 4)),
+                                     capTtyText(db_, gid, capValue(db_, gid, "tty")), disabledTtys);
         for (auto& x : splitCsv(t)) ttySet.insert(x);
-        std::string f = (const char*)sqlite3_column_text(st, 4);
+        std::string f = (const char*)sqlite3_column_text(st, 5);
         std::string cf = capValue(db_, gid, "file");
         if (rank(cf) < rank(f)) f = cf;
         if (rank(f) > rank(file)) file = f;
-        if (sqlite3_column_int(st, 5) && truthy(capValue(db_, gid, "sysinfo"))) sysinfo = true;
-        if (sqlite3_column_int(st, 6) && truthy(capValue(db_, gid, "metrics"))) metrics = true;
-        if (sqlite3_column_int(st, 7) && truthy(capValue(db_, gid, "config"))) config = true;
-        if (sqlite3_column_int(st, 8) && truthy(capValue(db_, gid, "web"))) web = true;
+        if (sqlite3_column_int(st, 6) && truthy(capValue(db_, gid, "sysinfo"))) sysinfo = true;
+        if (sqlite3_column_int(st, 7) && truthy(capValue(db_, gid, "metrics"))) metrics = true;
+        if (sqlite3_column_int(st, 8) && truthy(capValue(db_, gid, "config"))) config = true;
+        if (sqlite3_column_int(st, 9) && truthy(capValue(db_, gid, "web"))) web = true;
         sqlite3_stmt* d = nullptr;
         if (sqlite3_prepare_v2(db_, "SELECT devid FROM dev_group_members WHERE group_id=?", -1, &d, nullptr) == SQLITE_OK) {
             sqlite3_bind_int64(d, 1, gid);
@@ -894,19 +1110,20 @@ bool AdminDb::permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::st
     std::vector<PortRange> disabledPorts = disabledPortRanges(db_);
     std::set<std::string> disabledTtys = disabledTtyPatterns(db_);
     const char* sql =
-        "SELECT m.username,a.agent_group_id,a.tcp_ports,a.allow_shell,a.tty "
+        "SELECT m.username,a.client_group_id,a.agent_group_id,a.tcp_ports,a.allow_shell,a.tty "
         "FROM client_group_members m JOIN client_group_acl a ON a.client_group_id=m.group_id";
     st = nullptr;
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
     while (sqlite3_step(st) == SQLITE_ROW) {
         std::string user = (const char*)sqlite3_column_text(st, 0);
-        long long gid = sqlite3_column_int64(st, 1);
-        std::string ports = (const char*)sqlite3_column_text(st, 2);
-        bool shell = sqlite3_column_int(st, 3) != 0;
-        std::string tty = (const char*)sqlite3_column_text(st, 4);
+        long long cgid = sqlite3_column_int64(st, 1);
+        long long gid = sqlite3_column_int64(st, 2);
+        std::string ports = aclPortsText(db_, cgid, gid, (const char*)sqlite3_column_text(st, 3));
+        bool shell = sqlite3_column_int(st, 4) != 0;
+        std::string tty = aclTtyText(db_, cgid, gid, (const char*)sqlite3_column_text(st, 5));
         if (!truthy(capValue(db_, gid, "shell"))) shell = false;
-        ports = intersectPorts(ports, capValue(db_, gid, "tcp_ports"), disabledPorts);
-        tty = intersectTty(tty, capValue(db_, gid, "tty"), disabledTtys);
+        ports = intersectPorts(ports, capPortsText(db_, gid, capValue(db_, gid, "tcp_ports")), disabledPorts);
+        tty = intersectTty(tty, capTtyText(db_, gid, capValue(db_, gid, "tty")), disabledTtys);
         sqlite3_stmt* d = nullptr;
         if (sqlite3_prepare_v2(db_, "SELECT devid FROM dev_group_members WHERE group_id=?", -1, &d, nullptr) == SQLITE_OK) {
             sqlite3_bind_int64(d, 1, gid);
@@ -923,6 +1140,38 @@ bool AdminDb::permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::st
         sqlite3_finalize(d);
     }
     sqlite3_finalize(st);
+    return true;
+}
+
+bool AdminDb::permSyncDictIds() {
+    std::lock_guard<std::mutex> lk(mu_);
+    std::string e;
+    if (!exec("BEGIN", e)) return false;
+    exec("DELETE FROM client_acl_ports", e);
+    exec("DELETE FROM client_acl_ttys", e);
+    exec("DELETE FROM agent_group_ports", e);
+    exec("DELETE FROM agent_group_ttys", e);
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, "SELECT client_group_id,agent_group_id,tcp_ports,tty FROM client_group_acl",
+                           -1, &st, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            std::string ports = sqlite3_column_text(st, 2) ? (const char*)sqlite3_column_text(st, 2) : "";
+            std::string tty = sqlite3_column_text(st, 3) ? (const char*)sqlite3_column_text(st, 3) : "";
+            syncAclDictIds(db_, sqlite3_column_int64(st, 0), sqlite3_column_int64(st, 1), ports, tty);
+        }
+    }
+    sqlite3_finalize(st);
+    st = nullptr;
+    if (sqlite3_prepare_v2(db_, "SELECT group_id,cap,value FROM dev_group_caps "
+                               "WHERE cap IN ('tcp_ports','tty')", -1, &st, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            syncCapDictIds(db_, sqlite3_column_int64(st, 0),
+                           (const char*)sqlite3_column_text(st, 1),
+                           sqlite3_column_text(st, 2) ? (const char*)sqlite3_column_text(st, 2) : "");
+        }
+    }
+    sqlite3_finalize(st);
+    exec("COMMIT", e);
     return true;
 }
 

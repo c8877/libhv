@@ -7,8 +7,8 @@
 
 using nlohmann::json;
 
-static int portRefs(sqlite3* db, int lo, int hi);
-static int ttyRefs(sqlite3* db, const std::string& pattern);
+static int portRefs(sqlite3* db, long long id);
+static int ttyRefs(sqlite3* db, long long id);
 
 static bool parsePortRange(const std::string& value, int& lo, int& hi) {
     if (value.empty()) return false;
@@ -39,11 +39,12 @@ bool AdminDb::dictPorts(const std::string& q, std::string& json_out) {
         int lo = sqlite3_column_int(st, 1), hi = sqlite3_column_int(st, 2);
         json j;
         j["id"] = sqlite3_column_int64(st, 0);
-        j["value"] = lo == hi ? std::to_string(lo) : std::to_string(lo) + "-" + std::to_string(hi);
+        j["value"] = (lo == 1 && hi == 65535) ? "*"
+            : (lo == hi ? std::to_string(lo) : std::to_string(lo) + "-" + std::to_string(hi));
         j["name"] = (const char*)sqlite3_column_text(st, 3);
         j["description"] = (const char*)sqlite3_column_text(st, 4);
         j["enabled"] = sqlite3_column_int(st, 5) != 0;
-        j["refs"] = portRefs(db_, lo, hi);
+        j["refs"] = portRefs(db_, j["id"].get<long long>());
         arr.push_back(j);
     }
     sqlite3_finalize(st);
@@ -99,7 +100,7 @@ bool AdminDb::dictTtys(const std::string& q, std::string& json_out) {
         j["description"] = (const char*)sqlite3_column_text(st, 3);
         j["kind"] = (const char*)sqlite3_column_text(st, 4);
         j["enabled"] = sqlite3_column_int(st, 5) != 0;
-        j["refs"] = ttyRefs(db_, (const char*)sqlite3_column_text(st, 1));
+        j["refs"] = ttyRefs(db_, j["id"].get<long long>());
         arr.push_back(j);
     }
     sqlite3_finalize(st);
@@ -139,58 +140,29 @@ bool AdminDb::dictTtyAdd(const std::string& pattern, const std::string& name, co
     return true;
 }
 
-static bool portOverlap(int a1, int a2, int b1, int b2) {
-    return a1 <= b2 && b1 <= a2;
-}
-
-static int portRefs(sqlite3* db, int lo, int hi) {
+static int refCount(sqlite3* db, const char* acl_sql, const char* cap_sql, long long id) {
     int n = 0;
-    const char* queries[] = {
-        "SELECT tcp_ports FROM client_group_acl",
-        "SELECT value FROM dev_group_caps WHERE cap='tcp_ports'"
-    };
+    const char* queries[] = {acl_sql, cap_sql};
     for (auto* q : queries) {
         sqlite3_stmt* st = nullptr;
         if (sqlite3_prepare_v2(db, q, -1, &st, nullptr) != SQLITE_OK) continue;
-        while (sqlite3_step(st) == SQLITE_ROW) {
-            std::string s = (const char*)sqlite3_column_text(st, 0);
-            char buf[2048]; snprintf(buf, sizeof(buf), "%s", s.c_str());
-            char* save = nullptr;
-            for (char* p = strtok_r(buf, ",", &save); p; p = strtok_r(nullptr, ",", &save)) {
-                while (*p == ' ' || *p == '\t') p++;
-                if (strcmp(p, "*") == 0) { n++; break; }
-                int a = atoi(p), b = a;
-                char* dash = strchr(p, '-');
-                if (dash) b = atoi(dash + 1);
-                if (portOverlap(lo, hi, a, b)) { n++; break; }
-            }
-        }
+        sqlite3_bind_int64(st, 1, id);
+        if (sqlite3_step(st) == SQLITE_ROW) n += sqlite3_column_int(st, 0);
         sqlite3_finalize(st);
     }
     return n;
 }
 
-static int ttyRefs(sqlite3* db, const std::string& pattern) {
-    int n = 0;
-    const char* queries[] = {
-        "SELECT tty FROM client_group_acl",
-        "SELECT value FROM dev_group_caps WHERE cap='tty'"
-    };
-    for (auto* q : queries) {
-        sqlite3_stmt* st = nullptr;
-        if (sqlite3_prepare_v2(db, q, -1, &st, nullptr) != SQLITE_OK) continue;
-        while (sqlite3_step(st) == SQLITE_ROW) {
-            std::string s = (const char*)sqlite3_column_text(st, 0);
-            char buf[2048]; snprintf(buf, sizeof(buf), "%s", s.c_str());
-            char* save = nullptr;
-            for (char* p = strtok_r(buf, ",", &save); p; p = strtok_r(nullptr, ",", &save)) {
-                while (*p == ' ' || *p == '\t') p++;
-                if (pattern == p) { n++; break; }
-            }
-        }
-        sqlite3_finalize(st);
-    }
-    return n;
+static int portRefs(sqlite3* db, long long id) {
+    return refCount(db,
+                    "SELECT COUNT(*) FROM client_acl_ports WHERE port_id=?",
+                    "SELECT COUNT(*) FROM agent_group_ports WHERE port_id=?", id);
+}
+
+static int ttyRefs(sqlite3* db, long long id) {
+    return refCount(db,
+                    "SELECT COUNT(*) FROM client_acl_ttys WHERE tty_id=?",
+                    "SELECT COUNT(*) FROM agent_group_ttys WHERE tty_id=?", id);
 }
 
 bool AdminDb::dictBatchAdd(const std::string& kind, const std::vector<std::string>& values,
@@ -294,22 +266,18 @@ bool AdminDb::dictDelete(const std::string& kind, long long id, std::string& err
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
     if (kind == "ports") {
-        int lo = 0, hi = 0;
-        if (sqlite3_prepare_v2(db_, "SELECT port_start,port_end FROM port_dict WHERE id=?", -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
+        if (sqlite3_prepare_v2(db_, "SELECT 1 FROM port_dict WHERE id=?", -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
         sqlite3_bind_int64(st, 1, id);
         if (sqlite3_step(st) != SQLITE_ROW) { sqlite3_finalize(st); err = "not found"; return false; }
-        lo = sqlite3_column_int(st, 0); hi = sqlite3_column_int(st, 1);
         sqlite3_finalize(st);
-        if (portRefs(db_, lo, hi) > 0) { err = "referenced"; return false; }
+        if (portRefs(db_, id) > 0) { err = "referenced"; return false; }
         if (sqlite3_prepare_v2(db_, "DELETE FROM port_dict WHERE id=?", -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
     } else {
-        std::string pattern;
-        if (sqlite3_prepare_v2(db_, "SELECT pattern FROM tty_dict WHERE id=?", -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
+        if (sqlite3_prepare_v2(db_, "SELECT 1 FROM tty_dict WHERE id=?", -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
         sqlite3_bind_int64(st, 1, id);
         if (sqlite3_step(st) != SQLITE_ROW) { sqlite3_finalize(st); err = "not found"; return false; }
-        pattern = (const char*)sqlite3_column_text(st, 0);
         sqlite3_finalize(st);
-        if (ttyRefs(db_, pattern) > 0) { err = "referenced"; return false; }
+        if (ttyRefs(db_, id) > 0) { err = "referenced"; return false; }
         if (sqlite3_prepare_v2(db_, "DELETE FROM tty_dict WHERE id=?", -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
     }
     sqlite3_bind_int64(st, 1, id);

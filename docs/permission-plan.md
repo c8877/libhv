@@ -27,7 +27,7 @@ dev_groups / dev_group_members / dev_group_caps / subject_groups
 - [x] `port_dict` / `tty_dict`
 - [x] 端口/TTY 字典 API
 - [x] 旧文本值打开编辑器时自动入库
-- [ ] 端口/TTY 关联表
+- [x] 端口/TTY 关联表
 - [x] 旧文本端口/TTY 自动入库
 - [x] 原型 client 关系迁移
 - [x] 旧 ACL 文件导入
@@ -73,7 +73,7 @@ dev_groups / dev_group_members / dev_group_caps / subject_groups
 - [x] relay 加载客户端分组 ACL
 - [x] OPEN 按客户端分组 → 设备分组 → devid 检查
 - [x] 端口/Shell/TTY 检查
-- [ ] 端口/TTY 改按字典 ID 检查（当前仍写文本字段）
+- [x] 端口/TTY 改按字典 ID 检查（文本保留为快照）
 - [x] 字典停用即时生效
 - [x] 端口/TTY 的设备分组上限交集
 - [x] agent caps 最终裁剪
