@@ -605,3 +605,9 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-tabs-attached .ui-tab:hover{background:color-mix(in srgb,var(--fg) 6%,var(--card));color:var(--fg)}
 .ui-tabs-attached .ui-tab.is-active{background:color-mix(in srgb,var(--accent) 20%,var(--card));border-color:var(--accent);border-bottom-color:color-mix(in srgb,var(--accent) 20%,var(--card));color:var(--accent);box-shadow:inset 0 2px 0 var(--accent),0 2px 8px color-mix(in srgb,var(--accent) 16%,transparent);font-weight:600}
 .ui-tabs-attached .ui-tab.is-active .ui-tab-count{background:var(--accent);color:#fff}
+/* attached tabs v3: outline-only active, bottom border on every tab */
+.ui-tabs-attached{background:var(--card)}
+.ui-tabs-attached .ui-tab{background:var(--card);border:1px solid var(--border);border-bottom:1px solid var(--border);border-radius:6px;margin-bottom:0;color:var(--muted);box-shadow:none}
+.ui-tabs-attached .ui-tab:hover{background:var(--card);border-color:color-mix(in srgb,var(--fg) 28%,var(--border));color:var(--fg)}
+.ui-tabs-attached .ui-tab.is-active{background:var(--card);border-color:var(--accent);border-bottom-color:var(--accent);color:var(--accent);box-shadow:none}
+.ui-tabs-attached .ui-tab.is-active .ui-tab-count{background:transparent;color:var(--accent)}
