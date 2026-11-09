@@ -450,21 +450,23 @@ const TerminalPage = Object.assign(new Page(), {
     if (!ids.length) { Router.go('#/agents'); return; }
     if (!TermMgr.sessions.has(this.active)) this.active = ids[ids.length - 1];
     const cur = TermMgr.sessions.get(this.active);
-    const tabs = ids.map(id => {
-      const s = TermMgr.sessions.get(id);
-      return '<button class="term-tab' + (id === this.active ? ' active' : '') + '" data-id="' + id + '">' +
-        UI.esc(s.devid) + (s.alive ? '' : ' ✕') + '</button>';
-    }).join('');
+    if (this._tabs) { this._tabs.destroy(); this._tabs = null; }
     this.el.innerHTML = '<div class="panel"><div class="panel-head"><h2>终端</h2>' +
-      '<span class="spacer"></span><span class="term-tabs">' + tabs + '</span> ' +
+      '<span class="spacer"></span>' +
       '<button id="term-new">新开</button> <button id="term-close">关闭当前</button></div>' +
+      '<div id="term-tabs" class="term-tabbar"></div>' +
       '<div id="term-host" class="ui-term"></div></div>';
+    this._tabs = UI.tabs(document.getElementById('term-tabs'), {
+      items: ids.map(id => {
+        const s = TermMgr.sessions.get(id);
+        return { key: id, label: s.devid + (s.alive ? '' : ' ✕') };
+      }),
+      value: this.active, variant: 'attached',
+      onChange: key => { this.active = key; this.render(); },
+    });
     const host = document.getElementById('term-host');
     if (!cur.opened) { cur.term.open(cur.box); cur.opened = true; }
     host.appendChild(cur.box);
-    document.querySelectorAll('#page button.term-tab').forEach(btn => {
-      btn.onclick = () => { this.active = btn.dataset.id; this.render(); };
-    });
     document.getElementById('term-new').onclick = async () => {
       const d = await UI.prompt({ title: '新建终端', label: '设备 devid', value: cur.devid });
       if (!d) return;
@@ -480,6 +482,7 @@ const TerminalPage = Object.assign(new Page(), {
   },
   leave() {
     if (this._rs) { window.removeEventListener('resize', this._rs); this._rs = null; }
+    if (this._tabs) { this._tabs.destroy(); this._tabs = null; }
     const s = TermMgr.sessions.get(this.active);
     if (s && s.box.parentNode) s.box.parentNode.removeChild(s.box);   // 仅摘 DOM，会话保留
   },
