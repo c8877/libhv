@@ -622,3 +622,15 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-tabs-attached .ui-tab.is-active::after{content:"";position:absolute;bottom:-1px;width:7px;height:7px;background:var(--card);z-index:-1;pointer-events:none}
 .ui-tabs-attached .ui-tab.is-active::before{left:-7px;border-right:1px solid var(--accent);border-bottom:1px solid var(--accent);border-bottom-right-radius:7px}
 .ui-tabs-attached .ui-tab.is-active::after{right:-7px;border-left:1px solid var(--accent);border-bottom:1px solid var(--accent);border-bottom-left-radius:7px}
+/* replace broken border arcs with smooth radial flares */
+.ui-tabs-attached{overflow:visible}
+.ui-tabs-attached .ui-tab.is-active::before,
+.ui-tabs-attached .ui-tab.is-active::after{width:7px;height:7px;bottom:0;border:0;border-radius:0;background:transparent;z-index:-1}
+.ui-tabs-attached .ui-tab.is-active::before{left:-7px;background:radial-gradient(circle at 0 0,transparent 6px,var(--accent) 6px,var(--accent) 7px,var(--card) 7px)}
+.ui-tabs-attached .ui-tab.is-active::after{right:-7px;background:radial-gradient(circle at 100% 0,transparent 6px,var(--accent) 6px,var(--accent) 7px,var(--card) 7px)}
+.ui-tabs-attached .ui-tab.is-active::before,
+.ui-tabs-attached .ui-tab.is-active::after{z-index:0;width:10px;height:10px}
+.ui-tabs-attached .ui-tab.is-active::before{left:-10px;background:radial-gradient(circle at 0 0,transparent 9px,var(--accent) 9px,var(--accent) 10px,var(--card) 10px)}
+.ui-tabs-attached .ui-tab.is-active::after{right:-10px;background:radial-gradient(circle at 100% 0,transparent 9px,var(--accent) 9px,var(--accent) 10px,var(--card) 10px)}
+.ui-tabs-attached .ui-tab.is-active::before,
+.ui-tabs-attached .ui-tab.is-active::after{display:block}
