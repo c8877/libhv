@@ -645,3 +645,6 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-tabs-attached .ui-tab.is-active::after{right:-8px;background:radial-gradient(circle at 100% 0,transparent 7px,var(--accent) 7px,var(--accent) 8px,var(--card) 8px)}
 .ui-tabs-attached .ui-tab.is-active::before,
 .ui-tabs-attached .ui-tab.is-active::after{top:auto;bottom:0}
+.ui-tabs-attached .ui-tab.is-active::before,
+.ui-tabs-attached .ui-tab.is-active::after{bottom:-1px;box-shadow:0 2px 0 0 var(--card)}
+.ui-tabs-attached{border-bottom:0}
