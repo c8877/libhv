@@ -176,8 +176,8 @@ button:hover { filter: brightness(.96); }
 
 /* Avatar 与账号菜单 */
 #userbtn { display: inline-flex; align-items: center; gap: 8px; }
-.avatar { width: 26px; height: 26px; border-radius: 50%; display: inline-flex;
-  align-items: center; justify-content: center; color: #fff; font-size: 13px; font-weight: 600; }
+.avatar { width: 32px; height: 32px; border-radius: 50%; display: inline-flex;
+  align-items: center; justify-content: center; color: #fff; font-size: 14px; font-weight: 600; }
 #userbtn .uname { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #userbtn .caret { color: var(--muted); font-size: 11px; }
 #usermenu a { display: block; padding: 8px 10px; border-radius: 6px; color: inherit;
