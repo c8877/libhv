@@ -24,6 +24,9 @@ dev_groups / dev_group_members / dev_group_caps / subject_groups
 - [x] `client_group_members`
 - [x] 设备分组复用原型 `dev_groups` 作为 agent group 存储
 - [x] `client_group_acl`
+- [ ] `port_dict` / `tty_dict`
+- [ ] 端口/TTY 关联表
+- [ ] 旧文本端口/TTY 自动入库
 - [x] 原型 client 关系迁移
 - [ ] 旧 ACL 文件导入
 
@@ -45,6 +48,8 @@ dev_groups / dev_group_members / dev_group_caps / subject_groups
 - [x] 设备成员添加/移除（输入 devid）
 - [x] 设备添加穿梭框（候选/已选双栏）
 - [x] ACL 矩阵编辑
+- [ ] 端口/TTY 字典与能力穿梭框
+- [ ] 字典管理抽屉
 - [x] 设备分组能力上限编辑
 - [x] 行内保存/取消/错误
 - [x] 空状态
@@ -62,6 +67,8 @@ dev_groups / dev_group_members / dev_group_caps / subject_groups
 - [x] relay 加载客户端分组 ACL
 - [x] OPEN 按客户端分组 → 设备分组 → devid 检查
 - [x] 端口/Shell/TTY 检查
+- [ ] 端口/TTY 改按字典 ID 检查
+- [ ] 字典停用即时生效
 - [ ] 端口/TTY 的设备分组上限交集
 - [x] agent caps 最终裁剪
 - [x] 分组变更热更新

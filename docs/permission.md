@@ -134,6 +134,78 @@ CREATE TABLE client_group_acl (
 );
 ```
 
+### 5.1 能力字典
+
+TCP 端口和 TTY 不再用自由文本，改为全局字典 + 关联表。
+
+```sql
+CREATE TABLE port_dict (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    port_start INTEGER NOT NULL,
+    port_end INTEGER NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT NOT NULL DEFAULT '',
+    created_ms INTEGER NOT NULL,
+    updated_ms INTEGER NOT NULL,
+    UNIQUE(port_start, port_end)
+);
+
+CREATE TABLE tty_dict (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT 'serial',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT NOT NULL DEFAULT '',
+    created_ms INTEGER NOT NULL,
+    updated_ms INTEGER NOT NULL
+);
+```
+
+设备分组能力上限：
+
+```sql
+CREATE TABLE agent_group_ports (
+    group_id INTEGER NOT NULL,
+    port_id INTEGER NOT NULL,
+    PRIMARY KEY(group_id, port_id)
+);
+
+CREATE TABLE agent_group_ttys (
+    group_id INTEGER NOT NULL,
+    tty_id INTEGER NOT NULL,
+    PRIMARY KEY(group_id, tty_id)
+);
+```
+
+客户端分组 ACL：
+
+```sql
+CREATE TABLE client_acl_ports (
+    client_group_id INTEGER NOT NULL,
+    agent_group_id INTEGER NOT NULL,
+    port_id INTEGER NOT NULL,
+    PRIMARY KEY(client_group_id, agent_group_id, port_id)
+);
+
+CREATE TABLE client_acl_ttys (
+    client_group_id INTEGER NOT NULL,
+    agent_group_id INTEGER NOT NULL,
+    tty_id INTEGER NOT NULL,
+    PRIMARY KEY(client_group_id, agent_group_id, tty_id)
+);
+```
+
+说明：
+
+- 端口字典项可以是单端口或范围：`22`、`8000-8100`。
+- TTY 字典项可以是具体路径或模式：`ttyS0`、`ttyUSB*`。
+- 旧 `client_group_acl.tcp_ports` / `tty` 和 `agent_group_caps` 中的文本字段仅用于迁移，迁移后以关联表为准。
+- 字典项禁用后立即从有效权限中移除，已建立会话不打断。
+
 说明：
 
 - `agent_group_caps` 是设备分组的**能力上限**，不是最终授权。
@@ -198,6 +270,34 @@ PUT    /api/v1/permission/agent-groups/:id/caps
 GET    /api/v1/permission/agent-groups/:id/candidates?q=&online=1
 ```
 
+### 能力字典
+
+```text
+GET    /api/v1/permission/dict/ports?q=&enabled=1
+POST   /api/v1/permission/dict/ports
+PUT    /api/v1/permission/dict/ports/:id
+DELETE /api/v1/permission/dict/ports/:id
+
+GET    /api/v1/permission/dict/ttys?q=&enabled=1
+POST   /api/v1/permission/dict/ttys
+PUT    /api/v1/permission/dict/ttys/:id
+DELETE /api/v1/permission/dict/ttys/:id
+```
+
+新增端口：
+
+```json
+{ "port_start": 8080, "port_end": 8080, "name": "Web 调试", "description": "" }
+```
+
+新增 TTY：
+
+```json
+{ "pattern": "ttyUSB*", "name": "USB 串口", "kind": "serial" }
+```
+
+重复新增返回已有条目 id，幂等。
+
 ### 预览
 
 ```text
@@ -227,9 +327,9 @@ GET /api/v1/permission/effective?client=alice
 
 | 位置 | 检查 |
 |---|---|
-| OPEN | devid 在有效设备集合内，端口在 ACL ∩ 上限内 |
+| OPEN | devid 在有效设备集合内，所选端口字典项在 ACL ∩ 上限内 |
 | OPEN_SHELL | ACL allow_shell + 设备组上限 + shell-users + agent caps |
-| OPEN_TTY | ACL tty 模式 + 设备组上限 + agent tty 配置 |
+| OPEN_TTY | ACL 所选 TTY 字典项 + 设备组上限 + agent tty 配置 |
 | 管理台设备列表 | 管理账号的 agent group 范围 |
 | 文件/分发 | 设备范围 + file 能力 |
 | SYSINFO | sysinfo 能力 |
