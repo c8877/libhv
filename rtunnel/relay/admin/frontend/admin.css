@@ -611,3 +611,6 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-tabs-attached .ui-tab:hover{background:var(--card);border-color:color-mix(in srgb,var(--fg) 28%,var(--border));color:var(--fg)}
 .ui-tabs-attached .ui-tab.is-active{background:var(--card);border-color:var(--accent);border-bottom-color:var(--accent);color:var(--accent);box-shadow:none}
 .ui-tabs-attached .ui-tab.is-active .ui-tab-count{background:transparent;color:var(--accent)}
+/* active tab opens into content area */
+.ui-tabs-attached .ui-tab.is-active{margin-bottom:-1px;border-bottom-color:var(--card);z-index:2}
+.ui-tabs-attached .ui-tab.is-active:hover{background:var(--card)}
