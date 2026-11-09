@@ -604,8 +604,7 @@ const PermissionPage = Object.assign(new Page(), {
       '<div class="perm-table-wrap"><table class="detail-table perm-table"><thead>' + head + '</thead><tbody>' +
       (newForm || '') + (rows || '<tr><td colspan="6" class="empty">暂无分组</td></tr>') + '</tbody></table></div>',
       { right: '<button id="perm-effective">有效权限</button> ' +
-        (roleOf() === 'admin' ? '<button id="perm-import">导入 ACL</button> ' : '') +
-        (canManage() ? '<button id="perm-acl">ACL 文件</button> <button id="perm-dict">字典管理</button> ' +
+        (canManage() ? '<button id="perm-legacy">旧 ACL</button> <button id="perm-dict">字典管理</button> ' +
           '<button class="primary" id="perm-new">+ 新建分组</button>' : '') });
     this._tabs = UI.tabs(document.getElementById('perm-tabs'), {
       items: [
@@ -625,10 +624,8 @@ const PermissionPage = Object.assign(new Page(), {
     if (db) db.onclick = () => this.openDictManager('ports');
     const eb = document.getElementById('perm-effective');
     if (eb) eb.onclick = () => this.openEffective();
-    const ab = document.getElementById('perm-acl');
-    if (ab) ab.onclick = () => this.openAclEditor();
-    const ib = document.getElementById('perm-import');
-    if (ib) ib.onclick = () => this.openImportAcl();
+    const lb = document.getElementById('perm-legacy');
+    if (lb) lb.onclick = () => this.openLegacyAcl();
     const nb = document.getElementById('perm-new');
     if (nb) nb.onclick = () => {
       this.expandKey = this.tab + ':new';
@@ -1040,60 +1037,87 @@ const PermissionPage = Object.assign(new Page(), {
     input.onkeydown = e => { if (e.key === 'Enter') run(); };
     input.focus();
   },
-  async openAclEditor() {
-    let d;
+  async openLegacyAcl() {
+    const isAdmin = roleOf() === 'admin';
+    let d = { content: '', path: '', cli: [] };
     try { d = await Api.get('/api/v1/acl/file'); }
-    catch (e) { UI.toast('加载 ACL 失败：' + e.message, true); return; }
-    const m = UI.modal({
-      title: 'ACL 文件（' + (d.path || '未配置') + '）',
-      body: '<textarea id="acl-content" rows="14" class="ui-textarea" ' +
-        'placeholder="user=devid[,devid|*]，每行一条，# 注释">' + UI.esc(d.content) + '</textarea>' +
-        '<div class="muted-sm">保存 = 写文件 + 热加载，只影响新 OPEN，不动已建立会话；命令行条目 ' +
-        (d.cli || []).length + ' 条。</div>',
-      buttons: '<button data-modal-close>关闭</button><button id="acl-reload">重新加载</button>' +
-        '<button class="primary" id="acl-save">保存并热加载</button>',
-    });
-    m.el.querySelector('.tty-modal').classList.add('acl-modal');
-    const ta = m.el.querySelector('#acl-content');
-    m.el.querySelector('#acl-save').onclick = async () => {
-      try {
-        const r = await Api.put('/api/v1/acl/file', { content: ta.value });
-        UI.toast('已保存，' + r.entries + ' 条授权生效');
-      } catch (e) { UI.toast('保存失败：' + e.message, true); }
-    };
-    m.el.querySelector('#acl-reload').onclick = async () => {
-      try { await Api.post('/api/v1/acl/reload'); UI.toast('已重新加载'); }
-      catch (e) { UI.toast('重载失败：' + e.message, true); }
-    };
-  },
-  async openImportAcl() {
-    let d;
-    try { d = await Api.get('/api/v1/acl/file'); }
-    catch (e) { UI.toast('加载 ACL 失败：' + e.message, true); return; }
+    catch (e) { /* 未配置 ACL 文件时仍可导出 */ }
     const cli = (d.cli || []).join('\n');
-    let content = d.content || '';
-    if (cli) content += (content && content[content.length - 1] !== '\n' ? '\n' : '') + cli;
+    let importText = d.content || '';
+    if (cli) importText += (importText && importText[importText.length - 1] !== '\n' ? '\n' : '') + cli;
+    let tabs;
     const m = UI.modal({
-      title: '导入旧 ACL',
-      body: '<p class="muted-sm">每条 <code>user=devid[,devid|*]</code> 生成一个客户端分组和一个设备分组，' +
+      title: '旧 ACL（' + (d.path || '未配置文件') + '）',
+      body: '<div id="legacy-tabs"></div>' +
+        '<div id="legacy-import">' +
+        '<p class="muted-sm ui-mt8">每条 <code>user=devid[,devid|*]</code> 生成一个客户端分组和一个设备分组，' +
         '能力默认全开；同名分组会跳过。</p>' +
-        '<textarea id="ia-content" rows="12" class="ui-textarea" placeholder="alice=dev1,dev2">' +
-        UI.esc(content) + '</textarea>' +
-        '<div id="ia-result" class="muted-sm"></div>',
-      buttons: '<button data-modal-close>取消</button><button class="primary" id="ia-ok">导入</button>',
+        '<textarea id="ia-content" rows="11" class="ui-textarea ui-mt8" placeholder="alice=dev1,dev2">' +
+        UI.esc(importText) + '</textarea>' +
+        '<div id="ia-result" class="muted-sm ui-mt8"></div></div>' +
+        '<div id="legacy-export" hidden>' +
+        '<p class="muted-sm ui-mt8">从当前分组生成旧 ACL 文本（只读）。只有能力全开的 ACL 能导出，' +
+        '受限条目会在文末注释里列出。</p>' +
+        '<textarea id="ea-content" rows="11" class="ui-textarea ui-mt8" readonly ' +
+        'placeholder="点「生成导出」"></textarea>' +
+        '<div id="ea-result" class="muted-sm ui-mt8"></div></div>',
+      buttons: '<button data-modal-close>关闭</button>' +
+        (isAdmin ? '<button class="primary" id="ia-ok">导入</button>' : '') +
+        '<button id="ea-run">生成导出</button><button id="ea-copy">复制</button>',
+      onClose: () => { if (tabs) tabs.destroy(); },
     });
     m.el.querySelector('.tty-modal').classList.add('acl-modal');
-    const ta = m.el.querySelector('#ia-content');
-    const result = m.el.querySelector('#ia-result');
-    m.el.querySelector('#ia-ok').onclick = async () => {
-      result.textContent = '导入中…';
+    const imp = m.el.querySelector('#ia-content');
+    const exp = m.el.querySelector('#ea-content');
+    const iaRes = m.el.querySelector('#ia-result');
+    const eaRes = m.el.querySelector('#ea-result');
+    const iaBtn = m.el.querySelector('#ia-ok');
+    const eaRun = m.el.querySelector('#ea-run');
+    const eaCopy = m.el.querySelector('#ea-copy');
+    const show = (key) => {
+      m.el.querySelector('#legacy-import').hidden = key !== 'import';
+      m.el.querySelector('#legacy-export').hidden = key !== 'export';
+      if (iaBtn) iaBtn.hidden = key !== 'import';
+      eaRun.hidden = key !== 'export';
+      eaCopy.hidden = key !== 'export';
+    };
+    const items = [];
+    if (isAdmin) items.push({ key: 'import', label: '导入' });
+    items.push({ key: 'export', label: '导出' });
+    tabs = UI.tabs(m.el.querySelector('#legacy-tabs'), {
+      items, value: items[0].key, variant: 'attached', onChange: show,
+    });
+    show(items[0].key);
+    if (iaBtn) {
+      iaBtn.onclick = async () => {
+        iaRes.textContent = '导入中…';
+        try {
+          const r = await Api.post('/api/v1/permission/import-acl', { content: imp.value });
+          const skipped = (r.skipped || []).map(x => x.user + '（' + x.reason + '）').join('、');
+          iaRes.textContent = '已导入 ' + r.imported + ' 个客户端分组，关联 ' + r.devices + ' 台设备' +
+            (skipped ? '；跳过：' + skipped : '');
+          if (r.imported) setTimeout(() => { m.close(); this.refresh(); }, 600);
+        } catch (e) { iaRes.textContent = '导入失败：' + e.message; }
+      };
+    }
+    eaRun.onclick = async () => {
+      eaRes.textContent = '生成中…';
       try {
-        const r = await Api.post('/api/v1/permission/import-acl', { content: ta.value });
-        const skipped = (r.skipped || []).map(x => x.user + '（' + x.reason + '）').join('、');
-        result.textContent = '已导入 ' + r.imported + ' 个客户端分组，关联 ' + r.devices + ' 台设备' +
-          (skipped ? '；跳过：' + skipped : '');
-        if (r.imported) setTimeout(() => { m.close(); this.refresh(); }, 600);
-      } catch (e) { result.textContent = '导入失败：' + e.message; }
+        const r = await Api.get('/api/v1/permission/export-acl');
+        exp.value = r.content || '';
+        eaRes.textContent = '已导出 ' + r.clients + ' 个客户端、' + r.devices + ' 条授权' +
+          (r.restricted ? '；跳过 ' + r.restricted + ' 条受限 ACL' : '');
+      } catch (e) { eaRes.textContent = '导出失败：' + e.message; }
+    };
+    eaCopy.onclick = async () => {
+      if (!exp.value) { eaRes.textContent = '先点「生成导出」'; return; }
+      try {
+        await navigator.clipboard.writeText(exp.value);
+      } catch (e) {
+        exp.select();
+        document.execCommand('copy');
+      }
+      eaRes.textContent = '已复制到剪贴板';
     };
   },
   async openDictManager(kind) {

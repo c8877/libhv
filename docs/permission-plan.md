@@ -28,9 +28,9 @@ dev_groups / dev_group_members / dev_group_caps / subject_groups
 - [x] 端口/TTY 字典 API
 - [x] 旧文本值打开编辑器时自动入库
 - [ ] 端口/TTY 关联表
-- [ ] 旧文本端口/TTY 自动入库
+- [x] 旧文本端口/TTY 自动入库
 - [x] 原型 client 关系迁移
-- [ ] 旧 ACL 文件导入
+- [x] 旧 ACL 文件导入
 
 验收：
 
@@ -89,9 +89,9 @@ dev_groups / dev_group_members / dev_group_caps / subject_groups
 
 ## 阶段 4：收口
 
-- [ ] 旧 ACL 文件只保留导入/导出
+- [x] 旧 ACL 文件只保留导入/导出
 - [x] `#/acl` 重定向到 `#/permission`
 - [x] 有效权限预览页面
-- [ ] 审计覆盖全部权限变更
+- [x] 审计覆盖全部权限变更
 - [ ] 删除原型表兼容代码
 - [ ] 运维说明

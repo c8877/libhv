@@ -101,9 +101,10 @@ public:
     bool groupRemoveSubject(long long id, const std::string& type, const std::string& subject);
     bool groupDeviceMap(std::string& json_out);
     bool groupEffective(const std::string& type, const std::string& subject,
-                        std::string& json_out, std::string& err);    bool groupSubjectDevids(const std::string& type, const std::string& subject,
-                            std::vector<std::string>& out, bool& has_groups);    bool groupClientRules(std::vector<DbGroupAclRule>& out);
-    bool groupClientUsers(std::set<std::string>& out);    bool permOverview(std::string& json_out);
+                        std::string& json_out, std::string& err);
+    bool groupSubjectDevids(const std::string& type, const std::string& subject,
+                            std::vector<std::string>& out, bool& has_groups);
+    bool permOverview(std::string& json_out);
     bool permClientGet(long long id, std::string& json_out, std::string& err);
     bool permClientSave(long long id, const std::string& name, const std::string& desc,
                         const std::vector<std::string>& users,
@@ -118,6 +119,7 @@ public:
     bool permEffectiveClient(const std::string& user, std::string& json_out, std::string& err);
     bool permImportAcl(const std::string& content, const std::vector<std::string>& extra_devices,
                        std::string& json_out, std::string& err);
+    bool permExportAcl(std::string& json_out);
     bool permMigrateLegacy();
     bool permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::string>& users);
     bool permAgentCandidates(long long group_id, std::string& json_out);

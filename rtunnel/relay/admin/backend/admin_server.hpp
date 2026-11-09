@@ -135,6 +135,7 @@ private:
     void handlePermAgentDelete(const HttpContextPtr& ctx, const std::string& role);
     void handlePermEffective(const HttpContextPtr& ctx);
     void handlePermImportAcl(const HttpContextPtr& ctx, const std::string& role);
+    void handlePermExportAcl(const HttpContextPtr& ctx);
     void handlePermAgentCandidates(const HttpContextPtr& ctx);
     void handlePermAgentAddDevices(const HttpContextPtr& ctx, const std::string& role);    void handleDictPorts(const HttpContextPtr& ctx);
     void handleDictPortAdd(const HttpContextPtr& ctx, const std::string& role);

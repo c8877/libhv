@@ -60,7 +60,8 @@ void AdminServer::handlePermClientSave(const HttpContextPtr& ctx, const std::str
         return;
     }
     audit(role, id ? "permission.client.update" : "permission.client.create",
-          std::to_string(out_id) + " " + req.value("name", ""));
+          std::to_string(out_id) + " " + req.value("name", "") +
+              " users=" + std::to_string(users.size()) + " acl=" + std::to_string(acl.size()));
     refreshGroupAcl();
     json out; out["ok"] = true; out["id"] = out_id; ctx->send(out.dump());
 }
@@ -102,7 +103,8 @@ void AdminServer::handlePermAgentSave(const HttpContextPtr& ctx, const std::stri
         return;
     }
     audit(role, id ? "permission.agent.update" : "permission.agent.create",
-          std::to_string(out_id) + " " + req.value("name", ""));
+          std::to_string(out_id) + " " + req.value("name", "") +
+              " devices=" + std::to_string(devices.size()) + " caps=" + std::to_string(caps.size()));
     refreshGroupAcl();
     json out; out["ok"] = true; out["id"] = out_id; ctx->send(out.dump());
 }
@@ -143,6 +145,12 @@ void AdminServer::handlePermImportAcl(const HttpContextPtr& ctx, const std::stri
     int n = res.is_object() ? res.value("imported", 0) : 0;
     audit(role, "permission.acl.import", "imported=" + std::to_string(n));
     refreshGroupAcl();
+    ctx->send(out);
+}
+
+void AdminServer::handlePermExportAcl(const HttpContextPtr& ctx) {
+    std::string out;
+    if (!db_.permExportAcl(out)) { bad(ctx, "db error"); return; }
     ctx->send(out);
 }
 

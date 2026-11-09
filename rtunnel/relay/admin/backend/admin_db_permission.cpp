@@ -122,6 +122,13 @@ std::string joinRanges(std::vector<PortRange> v) {
     return out;
 }
 
+std::string trimWs(const std::string& s) {
+    size_t b = s.find_first_not_of(" \t\r\n");
+    if (b == std::string::npos) return "";
+    size_t e = s.find_last_not_of(" \t\r\n");
+    return s.substr(b, e - b + 1);
+}
+
 bool wildcard(const std::string& p) { return !p.empty() && p[p.size() - 1] == '*'; }
 std::string wildcardPrefix(const std::string& p) { return p.substr(0, p.size() - 1); }
 
@@ -743,7 +750,69 @@ bool AdminDb::permImportAcl(const std::string& content, const std::vector<std::s
     return true;
 }
 
-bool AdminDb::permMigrateLegacy() {    std::lock_guard<std::mutex> lk(mu_);
+bool AdminDb::permExportAcl(std::string& json_out) {
+    std::lock_guard<std::mutex> lk(mu_);
+    std::map<std::string, std::set<std::string>> granted;
+    std::set<std::string> restricted;
+    sqlite3_stmt* st = nullptr;
+    const char* sql =
+        "SELECT m.username,d.devid,a.tcp_ports,a.allow_shell,a.tty,a.file,"
+        "a.sysinfo,a.metrics,a.config,a.web,g.name "
+        "FROM client_group_members m "
+        "JOIN client_group_acl a ON a.client_group_id=m.group_id "
+        "JOIN dev_groups g ON g.id=a.agent_group_id "
+        "JOIN dev_group_members d ON d.group_id=a.agent_group_id "
+        "ORDER BY m.username,d.devid";
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        std::string user = (const char*)sqlite3_column_text(st, 0);
+        std::string devid = (const char*)sqlite3_column_text(st, 1);
+        std::string ports = (const char*)sqlite3_column_text(st, 2);
+        bool shell = sqlite3_column_int(st, 3) != 0;
+        std::string tty = (const char*)sqlite3_column_text(st, 4);
+        std::string file = (const char*)sqlite3_column_text(st, 5);
+        bool full = trimWs(ports) == "*" && shell && trimWs(tty) == "*" && file == "rw" &&
+                    sqlite3_column_int(st, 6) && sqlite3_column_int(st, 7) &&
+                    sqlite3_column_int(st, 8) && sqlite3_column_int(st, 9);
+        if (!full) {
+            const char* gname = (const char*)sqlite3_column_text(st, 10);
+            restricted.insert(user + " <- " + (gname ? gname : "?"));
+            continue;
+        }
+        granted[user].insert(devid);
+    }
+    sqlite3_finalize(st);
+
+    std::string content = "# rtunnel permission export\n";
+    content += "# 旧 ACL 只能表达 user=devid，能力限制无法表达；\n";
+    content += "# 仅导出能力全开的 ACL，受限条目见文末注释。\n";
+    int ndev = 0;
+    for (auto& kv : granted) {
+        content += kv.first + "=";
+        bool first = true;
+        for (auto& d : kv.second) {
+            if (!first) content += ",";
+            content += d;
+            first = false;
+            ndev++;
+        }
+        content += "\n";
+    }
+    if (!restricted.empty()) {
+        content += "\n# 受限 ACL（未导出）：\n";
+        for (auto& r : restricted) content += "# " + r + "\n";
+    }
+    json out;
+    out["content"] = content;
+    out["clients"] = (int)granted.size();
+    out["devices"] = ndev;
+    out["restricted"] = (int)restricted.size();
+    json_out = out.dump();
+    return true;
+}
+
+bool AdminDb::permMigrateLegacy() {
+    std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, "SELECT COUNT(*) FROM client_groups", -1, &st, nullptr) != SQLITE_OK) return false;
     bool empty = false;
