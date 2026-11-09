@@ -1157,11 +1157,11 @@ const PermissionPage = Object.assign(new Page(), {
       });
       m.el.querySelectorAll('.dict-edit').forEach(b => b.onclick = () => {
         const d = state.list.find(x => x.id === Number(b.dataset.id));
-        if (d) this.editDictItem(state, d, render);
+        if (d) this.editDictItem(state, d, load);
       });
       m.el.querySelectorAll('.dict-del').forEach(b => b.onclick = () => {
         const d = state.list.find(x => x.id === Number(b.dataset.id));
-        if (d) this.deleteDictItems(state, [d.id], render);
+        if (d) this.deleteDictItems(state, [d.id], load);
       });
       m.el.querySelector('#dict-del').disabled = state.sel.size === 0;
     };
@@ -1390,11 +1390,11 @@ const SettingsPage = Object.assign(new Page(), {
       });
       m.el.querySelectorAll('.dict-edit').forEach(b => b.onclick = () => {
         const d = state.list.find(x => x.id === Number(b.dataset.id));
-        if (d) this.editDictItem(state, d, render);
+        if (d) this.editDictItem(state, d, load);
       });
       m.el.querySelectorAll('.dict-del').forEach(b => b.onclick = () => {
         const d = state.list.find(x => x.id === Number(b.dataset.id));
-        if (d) this.deleteDictItems(state, [d.id], render);
+        if (d) this.deleteDictItems(state, [d.id], load);
       });
       m.el.querySelector('#dict-del').disabled = state.sel.size === 0;
     };
