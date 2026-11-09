@@ -90,8 +90,8 @@ dev_groups / dev_group_members / dev_group_caps / subject_groups
 ## 阶段 4：收口
 
 - [ ] 旧 ACL 文件只保留导入/导出
-- [ ] `#/acl` 重定向到 `#/permission`
-- [ ] 有效权限预览页面
+- [x] `#/acl` 重定向到 `#/permission`
+- [x] 有效权限预览页面
 - [ ] 审计覆盖全部权限变更
 - [ ] 删除原型表兼容代码
 - [ ] 运维说明

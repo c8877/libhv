@@ -555,34 +555,38 @@ bool AdminDb::permAgentDelete(long long id, std::string& err) {
 
 bool AdminDb::permEffectiveClient(const std::string& user, std::string& json_out, std::string& err) {
     std::lock_guard<std::mutex> lk(mu_);
-    json groups = json::array();
-    std::set<std::string> devices;
-    std::map<std::string, std::string> caps;
-    std::map<std::string, std::string> ports;
-    std::map<std::string, std::string> ttys;
+    std::set<std::string> groupSet, devices, portSet, ttySet;
+    bool shell = false, sysinfo = false, metrics = false, config = false, web = false;
+    std::string file = "none";
+    auto rank = [](const std::string& v) { return v == "rw" ? 3 : v == "ro" ? 2 : 1; };
+    std::vector<PortRange> disabledPorts = disabledPortRanges(db_);
+    std::set<std::string> disabledTtys = disabledTtyPatterns(db_);
     sqlite3_stmt* st = nullptr;
     const char* sql =
         "SELECT a.agent_group_id,a.tcp_ports,a.allow_shell,a.tty,a.file,a.sysinfo,a.metrics,a.config,a.web,"
-        "g.name FROM client_group_members m "
+        "cg.name FROM client_group_members m "
         "JOIN client_group_acl a ON a.client_group_id=m.group_id "
-        "LEFT JOIN dev_groups g ON g.id=a.agent_group_id WHERE m.username=?";
+        "JOIN client_groups cg ON cg.id=m.group_id WHERE m.username=?";
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
     sqlite3_bind_text(st, 1, user.c_str(), -1, SQLITE_TRANSIENT);
     while (sqlite3_step(st) == SQLITE_ROW) {
         long long gid = sqlite3_column_int64(st, 0);
-        groups.push_back(sqlite3_column_text(st, 9) ? (const char*)sqlite3_column_text(st, 9) : "");
-        std::string p = (const char*)sqlite3_column_text(st, 1);
-        if (!p.empty()) ports[std::to_string(gid)] = p;
-        if (sqlite3_column_int(st, 2)) caps["shell"] = "1";
-        std::string t = (const char*)sqlite3_column_text(st, 3);
-        if (!t.empty()) ttys[std::to_string(gid)] = t;
+        if (sqlite3_column_text(st, 9)) groupSet.insert((const char*)sqlite3_column_text(st, 9));
+        std::string p = intersectPorts((const char*)sqlite3_column_text(st, 1),
+                                       capValue(db_, gid, "tcp_ports"), disabledPorts);
+        for (auto& x : splitCsv(p)) portSet.insert(x);
+        if (sqlite3_column_int(st, 2) && truthy(capValue(db_, gid, "shell"))) shell = true;
+        std::string t = intersectTty((const char*)sqlite3_column_text(st, 3),
+                                     capValue(db_, gid, "tty"), disabledTtys);
+        for (auto& x : splitCsv(t)) ttySet.insert(x);
         std::string f = (const char*)sqlite3_column_text(st, 4);
-        auto rank = [](const std::string& v) { return v == "rw" ? 3 : v == "ro" ? 2 : 1; };
-        if (rank(f) > rank(caps["file"])) caps["file"] = f;
-        if (sqlite3_column_int(st, 5)) caps["sysinfo"] = "1";
-        if (sqlite3_column_int(st, 6)) caps["metrics"] = "1";
-        if (sqlite3_column_int(st, 7)) caps["config"] = "1";
-        if (sqlite3_column_int(st, 8)) caps["web"] = "1";
+        std::string cf = capValue(db_, gid, "file");
+        if (rank(cf) < rank(f)) f = cf;
+        if (rank(f) > rank(file)) file = f;
+        if (sqlite3_column_int(st, 5) && truthy(capValue(db_, gid, "sysinfo"))) sysinfo = true;
+        if (sqlite3_column_int(st, 6) && truthy(capValue(db_, gid, "metrics"))) metrics = true;
+        if (sqlite3_column_int(st, 7) && truthy(capValue(db_, gid, "config"))) config = true;
+        if (sqlite3_column_int(st, 8) && truthy(capValue(db_, gid, "web"))) web = true;
         sqlite3_stmt* d = nullptr;
         if (sqlite3_prepare_v2(db_, "SELECT devid FROM dev_group_members WHERE group_id=?", -1, &d, nullptr) == SQLITE_OK) {
             sqlite3_bind_int64(d, 1, gid);
@@ -593,18 +597,22 @@ bool AdminDb::permEffectiveClient(const std::string& user, std::string& json_out
     sqlite3_finalize(st);
     json out;
     out["client"] = user;
-    out["groups"] = groups;
+    out["groups"] = json::array();
+    for (auto& g : groupSet) out["groups"].push_back(g);
     out["devices"] = json::array();
     for (auto& d : devices) out["devices"].push_back(d);
-    json c = json::object();
     std::string portJoin, ttyJoin;
-    for (auto& kv : ports) { if (!portJoin.empty()) portJoin += ","; portJoin += kv.second; }
-    for (auto& kv : ttys) { if (!ttyJoin.empty()) ttyJoin += ","; ttyJoin += kv.second; }
+    for (auto& p : portSet) { if (!portJoin.empty()) portJoin += ","; portJoin += p; }
+    for (auto& t : ttySet) { if (!ttyJoin.empty()) ttyJoin += ","; ttyJoin += t; }
+    json c = json::object();
     c["tcp_ports"] = portJoin;
-    c["shell"] = caps.count("shell") ? "1" : "0";
+    c["shell"] = shell ? "1" : "0";
     c["tty"] = ttyJoin;
-    c["file"] = caps.count("file") ? caps["file"] : "none";
-    for (auto* k : {"sysinfo","metrics","config","web"}) c[k] = caps.count(k) ? "1" : "0";
+    c["file"] = file;
+    c["sysinfo"] = sysinfo ? "1" : "0";
+    c["metrics"] = metrics ? "1" : "0";
+    c["config"] = config ? "1" : "0";
+    c["web"] = web ? "1" : "0";
     out["caps"] = c;
     json_out = out.dump();
     return true;

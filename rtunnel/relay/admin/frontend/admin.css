@@ -558,6 +558,12 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .perm-chip.sm{font-family:monospace}
 .perm-field>span{display:flex;align-items:center;gap:8px}
 .dict-modal{width:min(860px,92vw);max-width:860px;padding:22px;max-height:88vh}
+.effective-modal{width:min(640px,92vw)}
+.acl-modal{width:min(720px,92vw)}
+.pe-body h3{margin:14px 0 6px;font-size:13px}
+.pe-body h3:first-child{margin-top:2px}
+.pe-scroll{max-height:150px;overflow:auto}
+.pe-note{margin-top:12px}
 .dict-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:12px}
 .dict-toolbar input{width:240px;padding:7px 9px}
 .dict-table{width:100%}

@@ -176,34 +176,6 @@ const CertsPage = Object.assign(new Page(), {
   },
 });
 
-// ---------------------------------------------------------------- Pages.ACL
-const AclPage = Object.assign(new Page(), {
-  // textarea 正在编辑时不能被 5s 刷新覆盖
-  refreshInterval() { return 0; },
-  async refresh() {
-    const d = await Api.get('/api/v1/acl/file');
-    const aclBody = '<div class="ui-pad"><textarea id="acl-content" rows="12" class="ui-textarea" ' +
-      'placeholder="user=devid[,devid|*]，每行一条，# 注释">' + UI.esc(d.content) + '</textarea>' +
-      '<div class="muted ui-mt8">保存 = 写文件 + 热加载，只影响新 OPEN，不动已建立会话；解析失败保留旧表。</div></div>';
-    this.el.innerHTML = UI.panel('ACL 文件（' + UI.esc(d.path || '未配置') + '）', aclBody, {
-      cls: 'mb16', right: '<button id="acl-reload">重新加载</button> ' +
-        '<button class="primary" id="acl-save">保存并热加载</button>',
-    }) + UI.panel('命令行条目（只读）', UI.table(['条目'], (d.cli || []).map(x => [UI.esc(x)])));
-    document.getElementById('acl-save').onclick = async () => {
-      try {
-        const r = await Api.put('/api/v1/acl/file', { content: document.getElementById('acl-content').value });
-        UI.toast('已保存，' + r.entries + ' 条授权生效');
-      } catch (e) { UI.toast('保存失败：' + e.message, true); }
-    };
-    document.getElementById('acl-reload').onclick = async () => {
-      try {
-        await Api.post('/api/v1/acl/reload');
-        UI.toast('已重新加载');
-      } catch (e) { UI.toast('重载失败：' + e.message, true); }
-    };
-  },
-});
-
 // ---------------------------------------------------------------- Pages.审计
 const AuditPage = Object.assign(new Page(), {
   async refresh() {
@@ -631,7 +603,9 @@ const PermissionPage = Object.assign(new Page(), {
       '<div id="perm-tabs"></div>' +
       '<div class="perm-table-wrap"><table class="detail-table perm-table"><thead>' + head + '</thead><tbody>' +
       (newForm || '') + (rows || '<tr><td colspan="6" class="empty">暂无分组</td></tr>') + '</tbody></table></div>',
-      { right: canManage() ? '<button class="primary" id="perm-new">+ 新建分组</button> <button id="perm-dict">字典管理</button>' : '' });
+      { right: '<button id="perm-effective">有效权限</button> ' +
+        (canManage() ? '<button id="perm-acl">ACL 文件</button> <button id="perm-dict">字典管理</button> ' +
+          '<button class="primary" id="perm-new">+ 新建分组</button>' : '') });
     this._tabs = UI.tabs(document.getElementById('perm-tabs'), {
       items: [
         { key: 'client', label: '客户端分组', count: cgs.length },
@@ -648,6 +622,10 @@ const PermissionPage = Object.assign(new Page(), {
   bind() {
     const db = document.getElementById('perm-dict');
     if (db) db.onclick = () => this.openDictManager('ports');
+    const eb = document.getElementById('perm-effective');
+    if (eb) eb.onclick = () => this.openEffective();
+    const ab = document.getElementById('perm-acl');
+    if (ab) ab.onclick = () => this.openAclEditor();
     const nb = document.getElementById('perm-new');
     if (nb) nb.onclick = () => {
       this.expandKey = this.tab + ':new';
@@ -1023,6 +1001,67 @@ const PermissionPage = Object.assign(new Page(), {
       const r = await Api[id ? 'put' : 'post']('/api/v1/permission/agent-groups' + (id ? '/' + id : ''), body);
       this.expandKey = 'agent:' + r.id; this.detail = null; UI.toast('已保存'); this.refresh();
     } catch (e) { UI.toast('保存失败：' + e.message, true); }
+  },
+  async openEffective() {
+    const m = UI.modal({
+      title: '有效权限预览',
+      body: '<div class="ui-flex"><input id="pe-client" placeholder="客户端用户名，例如 alice">' +
+        '<button class="primary" id="pe-check">查询</button></div>' +
+        '<div id="pe-body" class="pe-body"><div class="empty">输入用户名后查询</div></div>',
+      buttons: '<button data-modal-close>关闭</button>',
+    });
+    m.el.querySelector('.tty-modal').classList.add('effective-modal');
+    const input = m.el.querySelector('#pe-client');
+    const body = m.el.querySelector('#pe-body');
+    const run = async () => {
+      const u = input.value.trim();
+      if (!u) { input.focus(); return; }
+      body.innerHTML = '<div class="empty">查询中…</div>';
+      let d;
+      try { d = await Api.get('/api/v1/permission/effective?client=' + encodeURIComponent(u)); }
+      catch (e) { body.innerHTML = '<div class="empty">查询失败：' + UI.esc(e.message) + '</div>'; return; }
+      const chip = x => '<span class="perm-chip sm">' + UI.esc(x) + '</span>';
+      const groups = (d.groups || []).map(chip).join('');
+      const devs = (d.devices || []).map(chip).join('');
+      const caps = this.capText(d.caps);
+      const capHtml = caps === '无' ? '<span class="muted-sm">无</span>' : caps.split(' · ').map(chip).join('');
+      body.innerHTML =
+        '<h3>所属客户端分组</h3><div class="perm-chips">' +
+          (groups || '<span class="muted-sm">未加入客户端分组，按旧 ACL / allow-all 策略</span>') + '</div>' +
+        '<h3>可访问设备 · ' + (d.devices || []).length + '</h3><div class="perm-chips pe-scroll">' +
+          (devs || '<span class="muted-sm">无</span>') + '</div>' +
+        '<h3>有效能力</h3><div class="perm-chips">' + capHtml + '</div>' +
+        '<p class="muted-sm pe-note">已按设备分组能力上限和字典停用过滤；设备侧还会按启动参数再校验。</p>';
+    };
+    m.el.querySelector('#pe-check').onclick = run;
+    input.onkeydown = e => { if (e.key === 'Enter') run(); };
+    input.focus();
+  },
+  async openAclEditor() {
+    let d;
+    try { d = await Api.get('/api/v1/acl/file'); }
+    catch (e) { UI.toast('加载 ACL 失败：' + e.message, true); return; }
+    const m = UI.modal({
+      title: 'ACL 文件（' + (d.path || '未配置') + '）',
+      body: '<textarea id="acl-content" rows="14" class="ui-textarea" ' +
+        'placeholder="user=devid[,devid|*]，每行一条，# 注释">' + UI.esc(d.content) + '</textarea>' +
+        '<div class="muted-sm">保存 = 写文件 + 热加载，只影响新 OPEN，不动已建立会话；命令行条目 ' +
+        (d.cli || []).length + ' 条。</div>',
+      buttons: '<button data-modal-close>关闭</button><button id="acl-reload">重新加载</button>' +
+        '<button class="primary" id="acl-save">保存并热加载</button>',
+    });
+    m.el.querySelector('.tty-modal').classList.add('acl-modal');
+    const ta = m.el.querySelector('#acl-content');
+    m.el.querySelector('#acl-save').onclick = async () => {
+      try {
+        const r = await Api.put('/api/v1/acl/file', { content: ta.value });
+        UI.toast('已保存，' + r.entries + ' 条授权生效');
+      } catch (e) { UI.toast('保存失败：' + e.message, true); }
+    };
+    m.el.querySelector('#acl-reload').onclick = async () => {
+      try { await Api.post('/api/v1/acl/reload'); UI.toast('已重新加载'); }
+      catch (e) { UI.toast('重载失败：' + e.message, true); }
+    };
   },
   async openDictManager(kind) {
     const state = { kind, q: '', sel: new Set(), list: [] };
@@ -1898,7 +1937,7 @@ Router.register(/^#\/agents\/([^/]+)$/, AgentDetailPage, '设备详情');
 Router.register(/^#\/clients$/, ClientsPage, '客户端 A');
 Router.register(/^#\/streams$/, StreamsPage, '会话');
 Router.register(/^#\/certs$/, CertsPage, '证书');
-Router.register(/^#\/acl$/, AclPage, 'ACL');
+Router.register(/^#\/acl$/, { enter() { location.replace('#/permission'); } }, '权限');
 Router.register(/^#\/audit$/, AuditPage, '审计');
 Router.register(/^#\/files(?:\?.*)?$/, FilesPage, '文件');
 Router.register(/^#\/terminal\/([^/]+)$/, TerminalPage, '终端');
