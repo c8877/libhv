@@ -492,7 +492,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .group-subject{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid var(--border);border-radius:12px;font-size:12px}
 .group-subject button{padding:0 4px;border:0;background:none;color:var(--muted);cursor:pointer}
 @media (max-width:900px){.group-grid{grid-template-columns:1fr}}
-.perm-table-wrap{padding:0 16px 16px}
+.perm-table-wrap{padding:16px}
 .perm-row{cursor:pointer}
 .perm-row:hover{background:rgba(255,255,255,.03)}
 .perm-row.open{background:rgba(255,255,255,.025)}
@@ -599,7 +599,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-tabs-segmented .ui-tab.is-active .ui-tab-count{background:rgba(255,255,255,.22);color:#fff}
 .ui-tabs-minimal .ui-tab.is-active{font-weight:600}
 /* attached tabs v2: each tab separated, active accent-tinted background */
-.ui-tabs-attached{gap:6px;padding:8px 16px 0;background:var(--bg);border-bottom:1px solid var(--border)}
+.ui-tabs-attached{gap:6px;padding:12px 16px 0;background:var(--bg);border-bottom:1px solid var(--border)}
 .ui-tabs-attached .ui-tab{border:1px solid var(--border);border-bottom:0;border-radius:7px 7px 0 0;margin-bottom:-1px;background:var(--card);color:var(--muted);padding:9px 15px}
 .ui-tabs-attached .ui-tab + .ui-tab::before{display:none}
 .ui-tabs-attached .ui-tab:hover{background:color-mix(in srgb,var(--fg) 6%,var(--card));color:var(--fg)}
