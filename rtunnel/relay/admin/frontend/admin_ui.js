@@ -18,29 +18,18 @@ const UI = {
     const info = document.getElementById('userinfo');
     if (info) info.textContent = name + ' · ' + (ROLE_NAMES[me.role] || me.role || '');
   },
-  // 统一 Tab 组件。variant: underline(默认) / segmented / minimal / attached
-  // opts: { items:[{key,label,count,disabled}], value, variant, onChange(key) }
+  // 统一 Tab 组件（attached 样式）
+  // opts: { items:[{key,label,count,disabled}], value, onChange(key) }
   // 返回: { el, getValue, setValue, setCount, setItems, destroy }
   tabs(container, opts) {
     if (!container) return null;
     opts = opts || {};
     let items = (opts.items || []).slice();
     let value = opts.value != null ? opts.value : (items[0] && items[0].key);
-    const variant = opts.variant || 'underline';
     const onChange = typeof opts.onChange === 'function' ? opts.onChange : function () {};
-    container.classList.add('ui-tabs', 'ui-tabs-' + variant);
+    container.classList.add('ui-tabs', 'ui-tabs-attached');
     container.setAttribute('role', 'tablist');
 
-    const current = () => items.find(x => x.key === value) || items[0];
-    const updateInk = () => {
-      if (variant !== 'underline') return;
-      const ink = container.querySelector('.ui-tab-ink');
-      const active = container.querySelector('.ui-tab.is-active');
-      if (!ink || !active) return;
-      ink.style.width = active.offsetWidth + 'px';
-      ink.style.transform = 'translateX(' + active.offsetLeft + 'px)';
-      ink.style.opacity = '1';
-    };
     const activate = (key, fire) => {
       if (!items.some(x => x.key === key)) return;
       value = key;
@@ -50,7 +39,6 @@ const UI = {
         b.setAttribute('aria-selected', on ? 'true' : 'false');
         b.tabIndex = on ? 0 : -1;
       });
-      updateInk();
       if (fire) onChange(key);
     };
     const bind = () => {
@@ -79,13 +67,9 @@ const UI = {
         'tabindex="' + (x.key === value ? '0' : '-1') + '"' + (x.disabled ? ' disabled' : '') + '>' +
         '<span class="ui-tab-label">' + UI.esc(x.label || x.key) + '</span>' +
         (x.count != null ? '<span class="ui-tab-count">' + Number(x.count) + '</span>' : '') +
-        '</button>').join('') +
-        (variant === 'underline' ? '<span class="ui-tab-ink"></span>' : '');
+        '</button>').join('');
       bind();
-      updateInk();
     };
-    const onResize = () => updateInk();
-    if (variant === 'underline') window.addEventListener('resize', onResize);
     render();
     return {
       el: container,
@@ -105,7 +89,6 @@ const UI = {
         render();
       },
       destroy() {
-        if (variant === 'underline') window.removeEventListener('resize', onResize);
         container.innerHTML = '';
       },
     };

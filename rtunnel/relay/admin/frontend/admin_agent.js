@@ -860,7 +860,6 @@ const AgentDetailPage = Object.assign(new Page(), {
         { key: 'unconfig', label: '未配置', count: unAll.length },
       ],
       value: tab,
-      variant: 'attached',
       onChange: (key) => {
         this.ttyTab = key; this.expandTty = null; this.addTtyPath = null; this.renderTtyCard(wrap);
       },

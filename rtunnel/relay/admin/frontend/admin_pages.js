@@ -433,7 +433,7 @@ const TerminalPage = Object.assign(new Page(), {
         const s = TermMgr.sessions.get(id);
         return { key: id, label: s.devid + (s.alive ? '' : ' ✕') };
       }),
-      value: this.active, variant: 'attached',
+      value: this.active,
       onChange: key => { this.active = key; this.render(); },
     });
     const host = document.getElementById('term-host');
@@ -576,7 +576,7 @@ const PermissionPage = Object.assign(new Page(), {
       return '<tr class="perm-row' + (open ? ' open' : '') + '" data-key="client:' + g.id + '">' +
         '<td><span class="perm-chev">' + (open ? '▾' : '▸') + '</span> <b>' + UI.esc(g.name) + '</b></td>' +
         '<td>' + (g.user_count || 0) + '</td><td>' + (g.acl_count || 0) + '</td>' +
-        '<td class="muted">' + UI.esc(this.capText(g.caps)) + '</td>' +
+        '<td class="muted"><div class="perm-sum">' + UI.esc(this.capText(g.caps)) + '</div></td>' +
         '<td class="muted">' + UI.ago(g.updated_ms) + '</td>' +
         '<td><button class="danger perm-del" data-kind="client" data-id="' + g.id + '">删除</button></td></tr>' +
         (open ? '<tr class="perm-expand"><td colspan="6">' +
@@ -586,7 +586,7 @@ const PermissionPage = Object.assign(new Page(), {
       return '<tr class="perm-row' + (open ? ' open' : '') + '" data-key="agent:' + g.id + '">' +
         '<td><span class="perm-chev">' + (open ? '▾' : '▸') + '</span> <b>' + UI.esc(g.name) + '</b></td>' +
         '<td>' + (g.device_count || 0) + '</td><td>' + (g.ref_count || 0) + '</td>' +
-        '<td class="muted">' + UI.esc(this.capText(g.caps)) + '</td>' +
+        '<td class="muted"><div class="perm-sum">' + UI.esc(this.capText(g.caps)) + '</div></td>' +
         '<td class="muted">' + UI.ago(g.updated_ms) + '</td>' +
         '<td><button class="danger perm-del" data-kind="agent" data-id="' + g.id + '">删除</button></td></tr>' +
         (open ? '<tr class="perm-expand"><td colspan="6">' +
@@ -612,7 +612,6 @@ const PermissionPage = Object.assign(new Page(), {
         { key: 'agent', label: '设备分组', count: ags.length },
       ],
       value: this.tab,
-      variant: 'attached',
       onChange: (key) => {
         this.tab = key; this.expandKey = null; this.detail = null; this.render();
       },
@@ -1085,7 +1084,7 @@ const PermissionPage = Object.assign(new Page(), {
     if (isAdmin) items.push({ key: 'import', label: '导入' });
     items.push({ key: 'export', label: '导出' });
     tabs = UI.tabs(m.el.querySelector('#legacy-tabs'), {
-      items, value: items[0].key, variant: 'attached', onChange: show,
+      items, value: items[0].key, onChange: show,
     });
     show(items[0].key);
     if (iaBtn) {
@@ -1173,7 +1172,7 @@ const PermissionPage = Object.assign(new Page(), {
     };
     tabs = UI.tabs(m.el.querySelector('#dict-tabs'), {
       items: [{ key: 'ports', label: '端口字典' }, { key: 'ttys', label: 'TTY 字典' }],
-      value: state.kind, variant: 'attached',
+      value: state.kind,
       onChange: key => { state.kind = key; state.sel.clear(); load(); },
     });
     m.el.querySelector('#dict-q').oninput = e => { state.q = e.target.value.trim(); render(); };
@@ -1406,7 +1405,7 @@ const SettingsPage = Object.assign(new Page(), {
     };
     tabs = UI.tabs(m.el.querySelector('#dict-tabs'), {
       items: [{ key: 'ports', label: '端口字典' }, { key: 'ttys', label: 'TTY 字典' }],
-      value: state.kind, variant: 'attached',
+      value: state.kind,
       onChange: key => { state.kind = key; state.sel.clear(); load(); },
     });
     m.el.querySelector('#dict-q').oninput = e => { state.q = e.target.value.trim(); render(); };

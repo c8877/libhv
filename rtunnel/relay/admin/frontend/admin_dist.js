@@ -230,7 +230,7 @@ const TasksPage = Object.assign(new Page(), {
       UI.pager(this.page, pages, r.total) + '</div></div>';
 
     this._tabs = UI.tabs(document.getElementById('task-tabs'), {
-      items: tabItems, value: this.tab, variant: 'attached',
+      items: tabItems, value: this.tab,
       onChange: (key) => { this.tab = key; this.page = 1; this.refresh(); },
     });
     const q = document.getElementById('task-q');
