@@ -9,9 +9,9 @@
 // =============================================================================
 #define HV_VERSION_MAJOR    1
 #define HV_VERSION_MINOR    3
-#define HV_VERSION_PATCH    226
+#define HV_VERSION_PATCH    227
 
-#define HV_VERSION_STRING   "1.3.226"
+#define HV_VERSION_STRING   "1.3.227"
 
 const char* hv_version(void) {
     return HV_VERSION_STRING;

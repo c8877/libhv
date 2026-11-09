@@ -535,3 +535,30 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .transfer-ops{display:flex;flex-direction:column;justify-content:center;gap:8px}
 .transfer-ops button{padding:5px 0;text-align:center}
 .transfer-foot{margin-top:10px;font-size:12px;color:var(--muted)}
+.transfer-modal{width:min(980px,92vw);max-width:980px;padding:22px;max-height:88vh}
+.transfer-modal h2{font-size:16px;margin-bottom:4px}
+.transfer-modal .tty-btns{margin-top:14px;padding-top:12px;border-top:1px solid var(--border)}
+.transfer-modal .tty-btns button{padding:7px 16px;font-size:13px}
+.transfer-modal .transfer-toolbar{font-size:13px;gap:16px;margin-bottom:14px}
+.transfer-modal .transfer-toolbar input[type=text],.transfer-modal .transfer-toolbar input:not([type]){width:320px;padding:8px 10px;font-size:13px}
+.transfer-modal .transfer-toolbar input[type=checkbox]{width:16px;height:16px}
+.transfer-modal .transfer{grid-template-columns:minmax(0,1fr) 64px minmax(0,1fr);gap:14px}
+.transfer-modal .transfer-list{min-height:430px;display:flex;flex-direction:column}
+.transfer-modal .transfer-list h4{padding:11px 14px;font-size:13px;color:var(--fg);font-weight:600}
+.transfer-modal .transfer-list>div{height:auto;flex:1;overflow:auto;padding:8px;min-height:380px}
+.transfer-modal .transfer-item{padding:9px 10px;font-size:13px;border-radius:7px;gap:10px}
+.transfer-modal .transfer-item+.transfer-item{margin-top:2px}
+.transfer-modal .transfer-dev{font-size:13px}
+.transfer-modal .transfer-ops{gap:12px}
+.transfer-modal .transfer-ops button{height:36px;font-size:15px;border-radius:7px}
+.transfer-modal .transfer-item input[type=checkbox]{width:16px;height:16px}
+.transfer-modal .transfer-foot{font-size:13px}
+.transfer-modal .empty{padding:60px 12px}
+@media (max-width:760px){.transfer-modal{width:96vw}.transfer-modal .transfer{grid-template-columns:1fr}.transfer-modal .transfer-ops{flex-direction:row;justify-content:center}.transfer-modal .transfer-list{min-height:240px}.transfer-modal .transfer-list>div{min-height:190px}}
+.transfer-modal .transfer-item,.transfer-modal .transfer-toolbar label{display:flex;flex-direction:row;align-items:center;gap:8px;color:var(--fg)}
+.transfer-modal .transfer-toolbar label{font-size:13px;color:var(--muted);white-space:nowrap}
+.transfer-modal .transfer-item{width:100%;box-sizing:border-box}
+.transfer-modal .transfer-item input[type=checkbox]{flex:none}
+.transfer-modal .transfer-dev{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.transfer-modal .transfer-item .pill{flex:none}
+.transfer-modal .transfer-item .muted-sm{max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

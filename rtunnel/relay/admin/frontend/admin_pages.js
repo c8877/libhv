@@ -690,16 +690,18 @@ const PermissionPage = Object.assign(new Page(), {
     const all = data.devices || [];
     const right = new Map();
     const m = UI.modal({
-      title: '添加设备',
+      title: '添加设备到「' + UI.esc((this.detail && this.detail.name) || '当前分组') + '」',
       body: '<div class="transfer-toolbar"><input id="tr-q" placeholder="搜索 devid">' +
         '<label><input type="checkbox" id="tr-online"> 仅在线</label><span id="tr-count"></span></div>' +
-        '<div class="transfer"><div class="transfer-list"><h4>可选设备</h4><div id="tr-left"></div></div>' +
+        '<div class="transfer"><div class="transfer-list"><h4 id="tr-left-title">可选设备</h4><div id="tr-left"></div></div>' +
         '<div class="transfer-ops"><button id="tr-add">&gt;</button><button id="tr-addall">&gt;&gt;</button>' +
         '<button id="tr-rem">&lt;</button><button id="tr-clear">&lt;&lt;</button></div>' +
-        '<div class="transfer-list"><h4>已选设备</h4><div id="tr-right"></div></div></div>' +
+        '<div class="transfer-list"><h4 id="tr-right-title">已选设备</h4><div id="tr-right"></div></div></div>' +
         '<div class="transfer-foot"><span id="tr-summary"></span></div>',
       buttons: '<button data-modal-close>取消</button><button class="primary" id="tr-ok">确定添加</button>',
     });
+    const modalEl = m.el.querySelector('.tty-modal');
+    if (modalEl) modalEl.classList.add('transfer-modal');
     const esc = UI.esc;
     const render = () => {
       const q = m.el.querySelector('#tr-q').value.trim().toLowerCase();
@@ -718,6 +720,8 @@ const PermissionPage = Object.assign(new Page(), {
         '<span class="pill ' + (d.online ? 'ok' : 'info') + '">' + (d.online ? '在线' : '登记') + '</span></label>').join('')
         : '<div class="empty">从左侧勾选设备后点 &gt;</div>';
       m.el.querySelector('#tr-count').textContent = '共 ' + left.length + ' 台';
+      m.el.querySelector('#tr-left-title').textContent = '可选设备 · ' + left.length;
+      m.el.querySelector('#tr-right-title').textContent = '已选设备 · ' + right.size;
       const off = [...right.values()].filter(d => !d.online).length;
       m.el.querySelector('#tr-summary').textContent = '已选 ' + right.size + ' 台' +
         (off ? '，其中 ' + off + ' 台离线' : '');
