@@ -600,3 +600,5 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-tabs-segmented .ui-tab.is-active{background:var(--accent);color:#fff;box-shadow:0 1px 3px color-mix(in srgb,var(--accent) 35%,transparent)}
 .ui-tabs-segmented .ui-tab.is-active .ui-tab-count{background:rgba(255,255,255,.22);color:#fff}
 .ui-tabs-minimal .ui-tab.is-active{font-weight:600}
+.ui-tabs-attached .ui-tab:not(.is-active)::before,
+.ui-tabs-attached .ui-tab:not(.is-active)::after{bottom:0;border-bottom:1px solid var(--tab-edge)}
