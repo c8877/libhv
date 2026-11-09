@@ -629,7 +629,7 @@ const PermissionPage = Object.assign(new Page(), {
         { key: 'agent', label: '设备分组', count: ags.length },
       ],
       value: this.tab,
-      variant: 'underline',
+      variant: 'attached',
       onChange: (key) => {
         this.tab = key; this.expandKey = null; this.detail = null; this.render();
       },
