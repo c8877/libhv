@@ -194,6 +194,8 @@ POST   /api/v1/permission/agent-groups/:id/devices
 DELETE /api/v1/permission/agent-groups/:id/devices/:devid
 
 PUT    /api/v1/permission/agent-groups/:id/caps
+
+GET    /api/v1/permission/agent-groups/:id/candidates?q=&online=1
 ```
 
 ### 预览
