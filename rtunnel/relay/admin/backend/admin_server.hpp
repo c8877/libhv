@@ -112,6 +112,18 @@ private:
     // api_ops.cpp
     void handleKickStream(const HttpContextPtr& ctx, const std::string& role);
     void handleKickAgent(const HttpContextPtr& ctx, const std::string& role);
+    // api_groups.cpp
+    void handleGroups(const HttpContextPtr& ctx);
+    void handleGroupCreate(const HttpContextPtr& ctx, const std::string& role);
+    void handleGroupGet(const HttpContextPtr& ctx);
+    void handleGroupUpdate(const HttpContextPtr& ctx, const std::string& role);
+    void handleGroupDelete(const HttpContextPtr& ctx, const std::string& role);
+    void handleGroupAddDevices(const HttpContextPtr& ctx, const std::string& role);
+    void handleGroupRemoveDevice(const HttpContextPtr& ctx, const std::string& role);
+    void handleGroupAddSubject(const HttpContextPtr& ctx, const std::string& role);
+    void handleGroupRemoveSubject(const HttpContextPtr& ctx, const std::string& role);
+    void handleGroupDeviceMap(const HttpContextPtr& ctx);
+    void handleAccessEffective(const HttpContextPtr& ctx);
     void handleAclGet(const HttpContextPtr& ctx);
     void handleAclPut(const HttpContextPtr& ctx, const std::string& role);
     void handleAclReload(const HttpContextPtr& ctx, const std::string& role);

@@ -63,6 +63,25 @@ public:
     bool fileMetaPut(const std::string& name, long long size, long long mtime_ms, const std::string& sha);
     bool distAlreadyPushed(const std::string& devid, const std::string& sha);
 
+    // 设备分组
+    bool groupList(std::string& json_out);
+    bool groupGet(long long id, std::string& json_out, std::string& err);
+    bool groupCreate(const std::string& name, const std::string& desc,
+                     long long& out_id, std::string& err);
+    bool groupUpdate(long long id, const std::string& name, const std::string& desc,
+                     std::string& err);
+    bool groupDelete(long long id, std::string& err);
+    bool groupAddDevice(long long id, const std::string& devid, std::string& err);
+    bool groupRemoveDevice(long long id, const std::string& devid);
+    bool groupSetCaps(long long id, const std::map<std::string, std::string>& caps,
+                      std::string& err);
+    bool groupAddSubject(long long id, const std::string& type, const std::string& subject,
+                         std::string& err);
+    bool groupRemoveSubject(long long id, const std::string& type, const std::string& subject);
+    bool groupDeviceMap(std::string& json_out);
+    bool groupEffective(const std::string& type, const std::string& subject,
+                        std::string& json_out, std::string& err);
+
     bool metricSeriesList(const std::string& devid, std::string& json_out);
     bool metricSeriesPut(const std::string& devid, const std::string& rows_json,
                          const std::string& actor, long long& revision, std::string& err);

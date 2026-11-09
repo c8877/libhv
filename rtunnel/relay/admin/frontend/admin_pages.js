@@ -487,6 +487,173 @@ const TerminalPage = Object.assign(new Page(), {
 
 
 // ---------------------------------------------------------------- Pages.系统配置
+// ---------------------------------------------------------------- Pages.分组
+const GroupsPage = Object.assign(new Page(), {
+  refreshInterval() { return 0; },
+  capText(c) {
+    const bits = [];
+    if (c.shell === '1' || c.shell === 'true') bits.push('Shell');
+    if (c.tcp_ports) bits.push('TCP ' + c.tcp_ports);
+    if (c.tty) bits.push('TTY ' + c.tty);
+    if (c.file && c.file !== 'none') bits.push('文件 ' + c.file);
+    if (c.sysinfo === '1' || c.sysinfo === 'true') bits.push('SYSINFO');
+    if (c.metrics === '1' || c.metrics === 'true') bits.push('指标');
+    return bits.join(' · ') || '无';
+  },
+  capOn(c, k) { return c[k] === '1' || c[k] === 'true'; },
+  async refresh() {
+    if (this.editId) return this.renderDetail();
+    const arr = await Api.get('/api/v1/groups');
+    const rows = arr.map(g => [
+      '<b>' + UI.esc(g.name) + '</b>',
+      g.device_count,
+      g.subject_count,
+      '<span class="muted">' + UI.esc(this.capText(g.caps || {})) + '</span>',
+      UI.ago(g.updated_ms),
+      '<button class="g-edit" data-id="' + g.id + '">编辑</button> ' +
+      '<button class="g-del" data-id="' + g.id + '" data-name="' + UI.esc(g.name) + '">删除</button>',
+    ]);
+    this.el.innerHTML = UI.panel('分组',
+      UI.detailTable(['名称', '设备数', '账号数', '能力', '更新时间', '操作'], rows),
+      { right: '<button class="primary" id="g-new">+ 新建分组</button>' });
+    document.getElementById('g-new').onclick = () => {
+      const m = UI.modal({
+        title: '新建分组',
+        body: '<label>名称<input id="g-new-name" placeholder="例如 产线A"></label>' +
+          '<label>描述<input id="g-new-desc" placeholder="可选"></label>',
+        buttons: '<button data-modal-close>取消</button><button class="primary" id="g-new-ok">创建</button>',
+      });
+      m.el.querySelector('#g-new-ok').onclick = async () => {
+        const name = m.el.querySelector('#g-new-name').value.trim();
+        if (!name) { UI.toast('名称不能为空', true); return; }
+        try {
+          const r = await Api.post('/api/v1/groups', {
+            name,
+            description: m.el.querySelector('#g-new-desc').value.trim(),
+          });
+          m.close();
+          this.editId = r.id;
+          this.refresh();
+        } catch (e) { UI.toast('创建失败：' + e.message, true); }
+      };
+    };
+    this.el.querySelectorAll('.g-edit').forEach(b => {
+      b.onclick = (e) => { e.stopPropagation(); this.editId = Number(b.dataset.id); this.refresh(); };
+    });
+    this.el.querySelectorAll('.g-del').forEach(b => {
+      b.onclick = async (e) => {
+        e.stopPropagation();
+        if (!await UI.confirm({ title: '删除分组', message: '删除 ' + b.dataset.name + '？有关联账号时会拒绝。', danger: true })) return;
+        try { await Api.del('/api/v1/groups/' + b.dataset.id); UI.toast('已删除'); this.refresh(); }
+        catch (err) { UI.toast('删除失败：' + err.message, true); }
+      };
+    });
+  },
+  async renderDetail() {
+    const g = await Api.get('/api/v1/groups/' + this.editId);
+    const caps = g.caps || {};
+    const members = (g.devices || []).map(d =>
+      '<tr><td><code>' + UI.esc(d) + '</code></td><td style="text-align:right">' +
+      '<button class="g-mdel" data-dev="' + UI.esc(d) + '">移出</button></td></tr>').join('') ||
+      '<tr><td colspan="2" class="empty">暂无设备</td></tr>';
+    const subjects = (g.subjects || []).map(x =>
+      '<span class="group-subject"><b>' + (x.type === 'admin' ? '管理员' : '客户端') + '</b> ' +
+      UI.esc(x.id) + ' <button class="g-sdel" data-type="' + x.type + '" data-id="' + UI.esc(x.id) + '">×</button></span>').join(' ') ||
+      '<span class="muted">暂无账号</span>';
+    const body =
+      '<div class="cfg-body group-basic">' +
+        '<label>名称 <input id="g-name" value="' + UI.esc(g.name) + '"></label>' +
+        '<label>描述 <input id="g-desc" value="' + UI.esc(g.description || '') + '" placeholder="可选"></label>' +
+      '</div>' +
+      '<div class="group-grid">' +
+        '<div class="group-box"><h3>设备成员</h3>' +
+          '<div class="ui-flex"><input id="g-dev" placeholder="输入 devid，可逗号分隔"><button id="g-add">添加</button></div>' +
+          '<table class="detail-table"><tbody>' + members + '</tbody></table></div>' +
+        '<div class="group-box"><h3>能力策略</h3>' +
+          '<div class="group-caps">' +
+            '<label class="group-cap"><input type="checkbox" id="g-shell"' + (this.capOn(caps,'shell') ? ' checked' : '') + '> Shell</label>' +
+            '<label class="group-cap"><input type="checkbox" id="g-sysinfo"' + (this.capOn(caps,'sysinfo') ? ' checked' : '') + '> SYSINFO</label>' +
+            '<label class="group-cap"><input type="checkbox" id="g-metrics"' + (this.capOn(caps,'metrics') ? ' checked' : '') + '> 指标</label>' +
+            '<label class="group-cap"><input type="checkbox" id="g-config"' + (this.capOn(caps,'config') ? ' checked' : '') + '> 修改配置</label>' +
+            '<label class="group-cap"><input type="checkbox" id="g-web"' + (this.capOn(caps,'web') ? ' checked' : '') + '> Web</label>' +
+          '</div>' +
+          '<label class="group-field">TCP 端口 <input id="g-ports" value="' + UI.esc(caps.tcp_ports || '') + '" placeholder="22,80,8000-8100 或 *"></label>' +
+          '<label class="group-field">TTY <input id="g-tty" value="' + UI.esc(caps.tty || '') + '" placeholder="ttyS*,ttyUSB0"></label>' +
+          '<label class="group-field">文件 <select id="g-file">' +
+            ['none','ro','rw'].map(v => '<option value="' + v + '"' + ((caps.file || 'none') === v ? ' selected' : '') + '>' + v + '</option>').join('') +
+          '</select></label></div>' +
+      '</div>' +
+      '<div class="group-box"><h3>关联账号</h3>' +
+        '<div class="group-subjects">' + subjects + '</div>' +
+        '<div class="ui-flex" style="margin-top:10px">' +
+          '<select id="g-stype"><option value="admin">管理员</option><option value="client">客户端</option></select>' +
+          '<input id="g-sid" placeholder="用户名"><button id="g-sadd">加入分组</button>' +
+        '</div></div>' +
+      '<div class="ui-form-foot"><span class="spacer"></span>' +
+        '<button id="g-back">返回</button><button class="primary" id="g-save">保存分组</button></div>';
+    this.el.innerHTML = UI.panel('分组：' + UI.esc(g.name), body,
+      { right: '<button class="danger" id="g-remove">删除分组</button>' });
+
+    document.getElementById('g-back').onclick = () => { this.editId = null; this.refresh(); };
+    document.getElementById('g-remove').onclick = async () => {
+      if (!await UI.confirm({ title: '删除分组', message: '删除 ' + g.name + '？', danger: true })) return;
+      try { await Api.del('/api/v1/groups/' + g.id); this.editId = null; UI.toast('已删除'); this.refresh(); }
+      catch (e) { UI.toast('删除失败：' + e.message, true); }
+    };
+    document.getElementById('g-save').onclick = async () => {
+      const caps = {
+        tcp_ports: document.getElementById('g-ports').value.trim(),
+        shell: document.getElementById('g-shell').checked ? '1' : '0',
+        tty: document.getElementById('g-tty').value.trim(),
+        file: document.getElementById('g-file').value,
+        sysinfo: document.getElementById('g-sysinfo').checked ? '1' : '0',
+        metrics: document.getElementById('g-metrics').checked ? '1' : '0',
+        config: document.getElementById('g-config').checked ? '1' : '0',
+        web: document.getElementById('g-web').checked ? '1' : '0',
+      };
+      try {
+        await Api.put('/api/v1/groups/' + g.id, {
+          name: document.getElementById('g-name').value.trim(),
+          description: document.getElementById('g-desc').value.trim(),
+          caps,
+        });
+        UI.toast('已保存');
+        this.refresh();
+      } catch (e) { UI.toast('保存失败：' + e.message, true); }
+    };
+    document.getElementById('g-add').onclick = async () => {
+      const raw = document.getElementById('g-dev').value.trim();
+      const devids = raw.split(',').map(x => x.trim()).filter(Boolean);
+      if (!devids.length) return;
+      try { await Api.post('/api/v1/groups/' + g.id + '/devices', { devids }); this.refresh(); }
+      catch (e) { UI.toast('添加失败：' + e.message, true); }
+    };
+    this.el.querySelectorAll('.g-mdel').forEach(b => {
+      b.onclick = async () => {
+        try { await Api.del('/api/v1/groups/' + g.id + '/devices/' + encodeURIComponent(b.dataset.dev)); this.refresh(); }
+        catch (e) { UI.toast('移出失败：' + e.message, true); }
+      };
+    });
+    document.getElementById('g-sadd').onclick = async () => {
+      const type = document.getElementById('g-stype').value;
+      const id = document.getElementById('g-sid').value.trim();
+      if (!id) return;
+      try { await Api.post('/api/v1/groups/' + g.id + '/subjects', { type, id }); this.refresh(); }
+      catch (e) { UI.toast('加入失败：' + e.message, true); }
+    };
+    this.el.querySelectorAll('.g-sdel').forEach(b => {
+      b.onclick = async () => {
+        try {
+          await Api.del('/api/v1/groups/' + g.id + '/subjects/' + b.dataset.type + '/' + encodeURIComponent(b.dataset.id));
+          this.refresh();
+        } catch (e) { UI.toast('移出失败：' + e.message, true); }
+      };
+    });
+  },
+  enter(el) { this.el = el; return Page.prototype.enter.call(this, el, []); },
+});
+
+
 const SettingsPage = Object.assign(new Page(), {
   refreshInterval() { return 0; },
   async refresh() {
@@ -726,4 +893,5 @@ Router.register(/^#\/acl$/, AclPage, 'ACL');
 Router.register(/^#\/audit$/, AuditPage, '审计');
 Router.register(/^#\/files(?:\?.*)?$/, FilesPage, '文件');
 Router.register(/^#\/terminal\/([^/]+)$/, TerminalPage, '终端');
+Router.register(/^#\/groups$/, GroupsPage, '分组');
 Router.register(/^#\/settings$/, SettingsPage, '设置');

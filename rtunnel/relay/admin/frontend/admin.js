@@ -242,6 +242,7 @@ const Router = {
   nav: [
     { hash: '#/overview', title: '概览', icon: '▣' },
     { hash: '#/agents', title: '设备 C', icon: '▤' },
+    { hash: '#/groups', title: '分组', icon: '▦' },
     { hash: '#/clients', title: '客户端 A', icon: '▥' },
     { hash: '#/streams', title: '会话', icon: '⇄' },
     { hash: '#/certs', title: '证书', icon: '⚿' },
@@ -343,9 +344,12 @@ const OverviewPage = Object.assign(new Page(), {
 const AgentsPage = Object.assign(new Page(), {
   async refresh() {
     const arr = await Api.get('/api/v1/agents');
+    let gmap = {};
+    try { gmap = await Api.get('/api/v1/groups/device-map'); } catch (e) {}
     const rows = arr.map(a => [
       '<b>' + UI.esc(a.devid) + '</b>',
       '<span class="pill ok">在线</span>',
+      ((gmap[a.devid] || []).map(g => '<span class="group-tag">' + UI.esc(g) + '</span>').join(' ') || '<span class="muted">—</span>'),
       UI.esc(a.remote_addr),
       UI.ago(a.last_seen_ms) + ' 前活跃',
       a.streams,
@@ -362,7 +366,7 @@ const AgentsPage = Object.assign(new Page(), {
       title: '设备（C 侧）',
       summary: '共 ' + arr.length + ' 台 · 5s 自动刷新',
       search: { id: 'ag-q', placeholder: '搜索 devid / 地址' },
-      columns: ['devid', '状态', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'],
+      columns: ['devid', '状态', '分组', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'],
       rows,
     });
     UI.bindSearch(document.getElementById('ag-q'));
