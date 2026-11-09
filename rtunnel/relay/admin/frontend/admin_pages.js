@@ -522,14 +522,20 @@ const PermissionPage = Object.assign(new Page(), {
     return '<span class="perm-chip ' + (cls || '') + '" data-v="' + UI.esc(text) + '">' +
       UI.esc(text) + ' <button class="perm-chip-x">×</button></span>';
   },
+  capChips(v) {
+    return String(v || '').split(',').map(x => x.trim()).filter(Boolean)
+      .map(x => '<span class="perm-chip sm">' + UI.esc(x) + '</span>').join('');
+  },
   aclRow(a, groups) {
     const opts = groups.map(g => '<option value="' + g.id + '"' +
       (Number(a.agent_group_id) === g.id ? ' selected' : '') + '>' + UI.esc(g.name) + '</option>').join('');
     return '<tr class="perm-acl-row">' +
       '<td><select class="pa-agent">' + opts + '</select></td>' +
-      '<td><input class="pa-ports" value="' + UI.esc(a.tcp_ports || '') + '" placeholder="22,80,*"></td>' +
+      '<td><div class="perm-cap-cell"><span class="pa-ports-text">' + UI.esc(a.tcp_ports || '—') + '</span>' +
+        '<button class="pa-ports-edit">编辑</button><input type="hidden" class="pa-ports" value="' + UI.esc(a.tcp_ports || '') + '"></div></td>' +
       '<td class="center"><input type="checkbox" class="pa-shell"' + (a.shell ? ' checked' : '') + '></td>' +
-      '<td><input class="pa-tty" value="' + UI.esc(a.tty || '') + '" placeholder="ttyS*"></td>' +
+      '<td><div class="perm-cap-cell"><span class="pa-tty-text">' + UI.esc(a.tty || '—') + '</span>' +
+        '<button class="pa-tty-edit">编辑</button><input type="hidden" class="pa-tty" value="' + UI.esc(a.tty || '') + '"></div></td>' +
       '<td><select class="pa-file">' + ['none','ro','rw'].map(v =>
         '<option value="' + v + '"' + ((a.file || 'none') === v ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></td>' +
       '<td class="center"><input type="checkbox" class="pa-sysinfo"' + (a.sysinfo ? ' checked' : '') + '></td>' +
@@ -572,8 +578,10 @@ const PermissionPage = Object.assign(new Page(), {
       '<label><input type="checkbox" id="pa-metrics"' + (this.chk(c.metrics) ? ' checked' : '') + '> 指标</label>' +
       '<label><input type="checkbox" id="pa-config"' + (this.chk(c.config) ? ' checked' : '') + '> 修改配置</label>' +
       '<label><input type="checkbox" id="pa-web"' + (this.chk(c.web) ? ' checked' : '') + '> Web</label></div>' +
-      '<label class="perm-field">TCP 端口<input id="pa-ports" value="' + UI.esc(c.tcp_ports || '') + '"></label>' +
-      '<label class="perm-field">TTY<input id="pa-tty" value="' + UI.esc(c.tty || '') + '"></label>' +
+      '<div class="perm-field"><span>TCP 端口 <button id="pa-ports-edit">编辑</button></span>' +
+        '<div class="perm-chips" id="pa-ports-view">' + this.capChips(c.tcp_ports) + '</div><input type="hidden" id="pa-ports" value="' + UI.esc(c.tcp_ports || '') + '"></div>' +
+      '<div class="perm-field"><span>TTY <button id="pa-tty-edit">编辑</button></span>' +
+        '<div class="perm-chips" id="pa-tty-view">' + this.capChips(c.tty) + '</div><input type="hidden" id="pa-tty" value="' + UI.esc(c.tty || '') + '"></div>' +
       '<label class="perm-field">文件<select id="pa-file">' + ['none','ro','rw'].map(v =>
         '<option value="' + v + '"' + ((c.file || 'none') === v ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></label>' +
       '<div class="perm-form-foot"><button class="perm-cancel">取消</button>' +
@@ -650,6 +658,7 @@ const PermissionPage = Object.assign(new Page(), {
     this.bindChips();
     this.bindTransfer();
     this.bindAcl();
+    this.bindCapEditors();
     const cs = document.getElementById('pc-save');
     if (cs) cs.onclick = () => this.saveClient();
     const as = document.getElementById('pa-save');
@@ -785,6 +794,150 @@ const PermissionPage = Object.assign(new Page(), {
     };
     render();
   },
+  bindCapEditors() {
+    document.querySelectorAll('.pa-ports-edit').forEach(b => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const tr = b.closest('tr');
+        this.openCapTransfer('ports', tr.querySelector('.pa-ports').value, v => {
+          tr.querySelector('.pa-ports').value = v;
+          tr.querySelector('.pa-ports-text').textContent = v || '—';
+        });
+      };
+    });
+    document.querySelectorAll('.pa-tty-edit').forEach(b => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        const tr = b.closest('tr');
+        this.openCapTransfer('ttys', tr.querySelector('.pa-tty').value, v => {
+          tr.querySelector('.pa-tty').value = v;
+          tr.querySelector('.pa-tty-text').textContent = v || '—';
+        });
+      };
+    });
+    const pe = document.getElementById('pa-ports-edit');
+    if (pe) pe.onclick = () => {
+      const input = document.getElementById('pa-ports');
+      this.openCapTransfer('ports', input.value, v => {
+        input.value = v;
+        document.getElementById('pa-ports-view').innerHTML = this.capChips(v);
+      });
+    };
+    const te = document.getElementById('pa-tty-edit');
+    if (te) te.onclick = () => {
+      const input = document.getElementById('pa-tty');
+      this.openCapTransfer('ttys', input.value, v => {
+        input.value = v;
+        document.getElementById('pa-tty-view').innerHTML = this.capChips(v);
+      });
+    };
+  },
+  async openDictAdd(kind, onAdded) {
+    const isPort = kind === 'ports';
+    const m = UI.modal({
+      title: isPort ? '新增端口字典' : '新增 TTY 字典',
+      body: '<label>' + (isPort ? '端口/范围' : '路径/模式') +
+        '<input id="dict-val" placeholder="' + (isPort ? '8080 或 8000-8100' : 'ttyUSB*') + '"></label>' +
+        '<label>名称<input id="dict-name" placeholder="可选"></label>' +
+        '<label>描述<input id="dict-desc" placeholder="可选"></label>',
+      buttons: '<button data-modal-close>取消</button><button class="primary" id="dict-ok">保存并加入</button>',
+    });
+    m.el.querySelector('#dict-ok').onclick = async () => {
+      const value = m.el.querySelector('#dict-val').value.trim();
+      if (!value) { UI.toast('请输入值', true); return; }
+      try {
+        const name = m.el.querySelector('#dict-name').value.trim();
+        const description = m.el.querySelector('#dict-desc').value.trim();
+        const r = await Api.post('/api/v1/permission/dict/' + kind, { value, name, description });
+        m.close();
+        onAdded({ id: r.id, value, name: name || value, enabled: true });
+      } catch (e) { UI.toast('保存失败：' + e.message, true); }
+    };
+    const val = m.el.querySelector('#dict-val');
+    val.focus();
+    val.onkeydown = e => { if (e.key === 'Enter') m.el.querySelector('#dict-ok').click(); };
+  },
+  async openCapTransfer(kind, current, onSave) {
+    const isPort = kind === 'ports';
+    let list;
+    try { list = await Api.get('/api/v1/permission/dict/' + kind); }
+    catch (e) { UI.toast('加载字典失败：' + e.message, true); return; }
+    list = (list || []).slice();
+    const selected = new Map();
+    const values = String(current || '').split(',').map(x => x.trim()).filter(Boolean);
+    for (const v of values) {
+      let item = list.find(x => x.value === v);
+      if (!item) {
+        try {
+          const r = await Api.post('/api/v1/permission/dict/' + kind, { value: v, name: v });
+          item = { id: r.id, value: v, name: v, enabled: true };
+          list.push(item);
+        } catch (e) {
+          item = { id: 0, value: v, name: '未入库', enabled: true };
+        }
+      }
+      selected.set(v, item);
+    }
+    const m = UI.modal({
+      title: isPort ? '选择 TCP 端口' : '选择 TTY',
+      body: '<div class="transfer-toolbar"><input id="cap-q" placeholder="搜索">' +
+        '<label><input type="checkbox" id="cap-enabled" checked> 仅启用</label>' +
+        '<span id="cap-count"></span><span class="spacer"></span><button id="cap-add">+ 新增字典项</button></div>' +
+        '<div class="transfer"><div class="transfer-list"><h4 id="cap-left-title">备选</h4><div id="cap-left"></div></div>' +
+        '<div class="transfer-ops"><button id="cap-add-sel">></button><button id="cap-add-all">>></button>' +
+        '<button id="cap-rem">&lt;</button><button id="cap-clear">&lt;&lt;</button></div>' +
+        '<div class="transfer-list"><h4 id="cap-right-title">已选</h4><div id="cap-right"></div></div></div>' +
+        '<div class="transfer-foot" id="cap-summary"></div>',
+      buttons: '<button data-modal-close>取消</button><button class="primary" id="cap-ok">确定</button>',
+    });
+    m.el.querySelector('.tty-modal').classList.add('transfer-modal');
+    const esc = UI.esc;
+    const render = () => {
+      const q = m.el.querySelector('#cap-q').value.trim().toLowerCase();
+      const only = m.el.querySelector('#cap-enabled').checked;
+      const left = list.filter(d => !selected.has(d.value) && (!only || d.enabled !== false) &&
+        (!q || d.value.toLowerCase().includes(q) || (d.name || '').toLowerCase().includes(q)));
+      m.el.querySelector('#cap-left').innerHTML = left.length ? left.map(d =>
+        '<label class="transfer-item"><input type="checkbox" class="cap-pick" value="' + esc(d.value) + '">' +
+        '<span class="transfer-dev">' + esc(d.value) + '</span><span class="muted-sm">' + esc(d.name || '') + '</span></label>').join('')
+        : '<div class="empty">没有可用字典项</div>';
+      m.el.querySelector('#cap-right').innerHTML = selected.size ? [...selected.values()].map(d =>
+        '<label class="transfer-item"><input type="checkbox" class="cap-rpick" value="' + esc(d.value) + '">' +
+        '<span class="transfer-dev">' + esc(d.value) + '</span><span class="muted-sm">' + esc(d.name || '') + '</span></label>').join('')
+        : '<div class="empty">从左侧选择</div>';
+      m.el.querySelector('#cap-left-title').textContent = (isPort ? '备选端口' : '备选 TTY') + ' · ' + left.length;
+      m.el.querySelector('#cap-right-title').textContent = '已选 · ' + selected.size;
+      m.el.querySelector('#cap-count').textContent = '字典 ' + list.length + ' 项';
+      m.el.querySelector('#cap-summary').textContent = '已选 ' + selected.size + ' 项';
+    };
+    const picked = cls => [...m.el.querySelectorAll('.' + cls + ':checked')].map(x => x.value);
+    const add = vals => { vals.forEach(v => { const d = list.find(x => x.value === v); if (d && !selected.has(v)) selected.set(v, d); }); render(); };
+    const remove = vals => { vals.forEach(v => selected.delete(v)); render(); };
+    m.el.querySelector('#cap-add-sel').onclick = () => add(picked('cap-pick'));
+    m.el.querySelector('#cap-add-all').onclick = () => {
+      const q = m.el.querySelector('#cap-q').value.trim().toLowerCase();
+      const only = m.el.querySelector('#cap-enabled').checked;
+      add(list.filter(d => !selected.has(d.value) && (!only || d.enabled !== false) &&
+        (!q || d.value.toLowerCase().includes(q) || (d.name || '').toLowerCase().includes(q))).map(d => d.value));
+    };
+    m.el.querySelector('#cap-rem').onclick = () => remove(picked('cap-rpick'));
+    m.el.querySelector('#cap-clear').onclick = () => { selected.clear(); render(); };
+    m.el.querySelector('#cap-q').oninput = render;
+    m.el.querySelector('#cap-enabled').onchange = render;
+    m.el.querySelector('#cap-left').onclick = e => {
+      const item = e.target.closest('.transfer-item');
+      if (item && e.detail === 2) add([item.querySelector('input').value]);
+    };
+    m.el.querySelector('#cap-right').onclick = e => {
+      const item = e.target.closest('.transfer-item');
+      if (item && e.detail === 2) remove([item.querySelector('input').value]);
+    };
+    m.el.querySelector('#cap-add').onclick = () => this.openDictAdd(kind, d => {
+      list.push(d); selected.set(d.value, d); render();
+    });
+    m.el.querySelector('#cap-ok').onclick = () => { m.close(); onSave([...selected.keys()].join(',')); };
+    render();
+  },
   bindAcl() {
     const add = document.getElementById('pc-add-acl');
     if (add) add.onclick = () => {
@@ -798,6 +951,7 @@ const PermissionPage = Object.assign(new Page(), {
       const tr = tmp.querySelector('tr');
       tbody.appendChild(tr);
       tr.querySelector('.pa-del').onclick = () => tr.remove();
+      this.bindCapEditors();
     };
     document.querySelectorAll('.pa-del').forEach(b => { b.onclick = () => b.closest('tr').remove(); });
   },

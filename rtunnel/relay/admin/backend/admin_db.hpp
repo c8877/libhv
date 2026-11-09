@@ -121,6 +121,13 @@ public:
     bool permAgentCandidates(long long group_id, std::string& json_out);
     bool permAgentAddDevices(long long group_id, const std::vector<std::string>& devids, std::string& err);
 
+    bool dictPorts(const std::string& q, std::string& json_out);
+    bool dictPortAdd(const std::string& value, const std::string& name, const std::string& desc,
+                     long long& out_id, std::string& err);
+    bool dictTtys(const std::string& q, std::string& json_out);
+    bool dictTtyAdd(const std::string& pattern, const std::string& name, const std::string& desc,
+                    long long& out_id, std::string& err);
+
 
 
 

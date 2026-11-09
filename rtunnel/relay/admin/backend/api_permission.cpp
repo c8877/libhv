@@ -187,3 +187,37 @@ void AdminServer::handlePermAgentAddDevices(const HttpContextPtr& ctx, const std
     refreshGroupAcl();
     ctx->send("{\"ok\":true}");
 }
+
+void AdminServer::handleDictPorts(const HttpContextPtr& ctx) {
+    std::string out;
+    if (!db_.dictPorts(ctx->param("q"), out)) { bad(ctx, "db error"); return; }
+    ctx->send(out);
+}
+
+void AdminServer::handleDictPortAdd(const HttpContextPtr& ctx, const std::string& role) {
+    json req = json::parse(ctx->body(), nullptr, false);
+    if (req.is_discarded() || !req.is_object()) { bad(ctx, "bad json"); return; }
+    long long id = 0; std::string err;
+    if (!db_.dictPortAdd(req.value("value", ""), req.value("name", ""), req.value("description", ""), id, err)) {
+        bad(ctx, err); return;
+    }
+    audit(role, "permission.dict.port.add", req.value("value", ""));
+    json out; out["ok"] = true; out["id"] = id; ctx->send(out.dump());
+}
+
+void AdminServer::handleDictTtys(const HttpContextPtr& ctx) {
+    std::string out;
+    if (!db_.dictTtys(ctx->param("q"), out)) { bad(ctx, "db error"); return; }
+    ctx->send(out);
+}
+
+void AdminServer::handleDictTtyAdd(const HttpContextPtr& ctx, const std::string& role) {
+    json req = json::parse(ctx->body(), nullptr, false);
+    if (req.is_discarded() || !req.is_object()) { bad(ctx, "bad json"); return; }
+    long long id = 0; std::string err;
+    if (!db_.dictTtyAdd(req.value("value", ""), req.value("name", ""), req.value("description", ""), id, err)) {
+        bad(ctx, err); return;
+    }
+    audit(role, "permission.dict.tty.add", req.value("value", ""));
+    json out; out["ok"] = true; out["id"] = id; ctx->send(out.dump());
+}

@@ -146,7 +146,18 @@ void AdminServer::registerRoutes() {
     access(ROLE_OPERATOR, "GET", "/api/v1/permission/overview", &AdminServer::handlePermOverview);
     access(ROLE_OPERATOR, "GET", "/api/v1/permission/client-groups/:id", &AdminServer::handlePermClientGet);
     access(ROLE_OPERATOR, "GET", "/api/v1/permission/agent-groups/:id", &AdminServer::handlePermAgentGet);
-    access(ROLE_OPERATOR, "GET", "/api/v1/permission/effective", &AdminServer::handlePermEffective);    access(ROLE_OPERATOR, "GET", "/api/v1/permission/agent-groups/:id/candidates", &AdminServer::handlePermAgentCandidates);
+    access(ROLE_OPERATOR, "GET", "/api/v1/permission/effective", &AdminServer::handlePermEffective);    access(ROLE_OPERATOR, "GET", "/api/v1/permission/dict/ports", &AdminServer::handleDictPorts);
+    access(ROLE_OPERATOR, "GET", "/api/v1/permission/dict/ttys", &AdminServer::handleDictTtys);
+
+    service_.Handle("POST", "/api/v1/permission/dict/ports", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handleDictPortAdd(ctx, role); return 200;
+    });
+    service_.Handle("POST", "/api/v1/permission/dict/ttys", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handleDictTtyAdd(ctx, role); return 200;
+    });
+    access(ROLE_OPERATOR, "GET", "/api/v1/permission/agent-groups/:id/candidates", &AdminServer::handlePermAgentCandidates);
 
     service_.Handle("POST", "/api/v1/permission/agent-groups/:id/devices", [this](const HttpContextPtr& ctx) {
         std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;

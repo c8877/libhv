@@ -47,6 +47,7 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
                relay/admin/backend/admin_db.cpp
                relay/admin/backend/admin_db_groups.cpp
                relay/admin/backend/admin_db_permission.cpp
+               relay/admin/backend/admin_db_dict.cpp
                relay/admin/backend/admin_db_dist.cpp
                relay/admin/backend/admin_db_tty.cpp
                relay/admin/backend/admin_db_metric_series.cpp

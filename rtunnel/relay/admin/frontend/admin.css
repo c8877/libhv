@@ -562,3 +562,8 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .transfer-modal .transfer-dev{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .transfer-modal .transfer-item .pill{flex:none}
 .transfer-modal .transfer-item .muted-sm{max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.perm-cap-cell{display:flex;align-items:center;gap:6px;justify-content:space-between;min-width:90px}
+.perm-cap-cell span{font-family:monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.perm-cap-cell button,.perm-field button{padding:2px 7px;font-size:11px}
+.perm-chip.sm{font-family:monospace}
+.perm-field>span{display:flex;align-items:center;gap:8px}
