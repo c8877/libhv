@@ -161,15 +161,6 @@ const AgentDetailPage = Object.assign(new Page(), {
       this.charts = {};
       const kb = n => UI.bytes((Number(n) || 0) * 1024);
 
-      const mounts = si.mounts || [];
-      const maxTotal = mounts.reduce((m, x) => Math.max(m, Number(x.total_kb) || 0), 1);
-      const labels = mounts.map(m => m.mount);
-      const usedData = mounts.map(m => (Number(m.total_kb) || 0) - (Number(m.free_kb) || 0));
-      const freeData = mounts.map(m => Number(m.free_kb) || 0);
-      const usedColors = mounts.map(m => {
-        const t = Number(m.total_kb) || 0;
-        return this.diskColor(t > 0 ? Math.round((t - (Number(m.free_kb) || 0)) * 100 / t) : 0);
-      });
       const diskRows = (si.mounts || []).map(m => {
         const t = Number(m.total_kb) || 0, f = Number(m.free_kb) || 0;
         return { mount: m.mount, fstype: m.fstype || '', total: t, used: t - f, free: f,

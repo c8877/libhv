@@ -299,16 +299,6 @@ const TaskDetailPage = Object.assign(new Page(), {
     const pct = size ? Math.min(100, Math.floor(sent * 100 / size)) : 0;
     const cls = t.status === 'success' ? 'ok' : (t.status === 'failed' || t.status === 'timeout') ? 'bad'
       : (t.status === 'canceled' ? 'info' : 'warn');
-    const meta = [
-      ['设备', UI.esc(t.devid)],
-      ['目标路径', UI.esc(t.target_path || '—')],
-      ['重试', t.retry_count + ' / ' + t.max_retries],
-      ['开始时间', new Date(t.start_at_ms).toLocaleString()],
-      ['截止时间', new Date(t.deadline_at_ms).toLocaleString()],
-      ['创建时间', new Date(t.created_ms).toLocaleString()],
-      ['操作人', UI.esc(t.actor || '—')],
-      ['批次', UI.esc(t.batch_id || '—')],
-    ];
     const trans = [
       ['设备', UI.esc(t.devid)],
       ['目标路径', UI.esc(t.target_path || '—')],
@@ -346,8 +336,7 @@ const TaskDetailPage = Object.assign(new Page(), {
             UI.bytes(sent) + ' / ' + UI.bytes(size) + '</span></div>' +
         '</div>' +
         '<div class="task-cols">' +
-          '<div class="panel"><div class="panel-head"><h2>传输</h2></div>' + kv(trans) + '</div>' +
-          '<div class="panel"><div class="panel-head"><h2>时间与操作</h2></div>' + kv(times) + '</div>' +
+          UI.panel('传输', kv(trans)) + UI.panel('时间与操作', kv(times)) +
         '</div>' +
         (t.error ? '<div class="panel task-error"><b>错误</b><div>' + UI.esc(t.error) + '</div></div>' : '') +
       '</div>';
