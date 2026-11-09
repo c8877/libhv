@@ -8,6 +8,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <set>
 
 class RelayServer;
 struct RelayConn;
@@ -85,11 +86,20 @@ struct AclEntry {
     AclEntry* next = nullptr;
 };
 
+struct GroupAclRule {
+    std::string user;
+    std::string devid;
+    std::string ports;
+    std::string tty;
+    bool        shell = false;
+};
+
 class RelayServer {
     friend class AdminServer;
 
 public:
     int run(int argc, char** argv);
+    void setGroupAcl(std::vector<GroupAclRule> rules, std::set<std::string> users);
 
     hloop_t*    loop = nullptr;
     void*       admin = nullptr;      // AdminServer*（--admin 启用时创建）
@@ -123,6 +133,8 @@ public:
     int         verbose = 0;
     AclEntry*   acl_cli = nullptr;    // --acl 命令行条目（固定）
     AclEntry*   acl_file = nullptr;   // --acl-file 文件条目（SIGHUP 热加载）
+    std::vector<GroupAclRule> acl_groups;       // 管理台分组授权（relay 线程只读）
+    std::set<std::string>     acl_grouped_users;
     char        acl_file_path[256] = {0};
     PendingOpen* pending = nullptr;   // 等待 A 侧 agent 上线的 OPEN_SHELL
     hio_t*      listenio = nullptr;
@@ -132,6 +144,9 @@ public:
 
 private:
     int          aclCheck(const char* user, const char* devid);
+    bool         groupAclDevice(const char* user, const char* devid);
+    bool         groupAclCheck(const char* user, const char* devid, uint16_t port,
+                               int is_shell, const char* tty_path);
     bool         clientAuthEnabled() const { return !client_creds.empty() || !client_token.empty(); }
     bool         shellAllowed(const char* user) const;
     RelayConn*   findClientByUser(const char* user);

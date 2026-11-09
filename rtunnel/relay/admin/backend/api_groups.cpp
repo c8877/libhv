@@ -19,6 +19,28 @@ void fail(const HttpContextPtr& ctx, const std::string& msg) {
 }
 } // namespace
 
+void AdminServer::refreshGroupAcl() {
+    if (!db_.ok()) return;
+    std::vector<DbGroupAclRule> rules;
+    if (!db_.groupClientRules(rules)) return;
+    std::vector<GroupAclRule> out;
+    std::set<std::string> users;
+    for (auto& r : rules) {
+        GroupAclRule g;
+        g.user = r.user;
+        g.devid = r.devid;
+        g.ports = r.ports;
+        g.tty = r.tty;
+        g.shell = r.shell;
+        out.push_back(g);
+        users.insert(r.user);
+    }
+    callRelay([this, out, users]() {
+        relay_->setGroupAcl(out, users);
+        return std::string();
+    });
+}
+
 void AdminServer::handleGroups(const HttpContextPtr& ctx) {
     std::string out;
     if (!db_.groupList(out)) {
@@ -38,6 +60,7 @@ void AdminServer::handleGroupCreate(const HttpContextPtr& ctx, const std::string
     std::string err;
     if (!db_.groupCreate(name, desc, id, err)) { bad(ctx, err); return; }
     audit(role, "groups.create", name);
+    refreshGroupAcl();
     json out;
     out["id"] = id;
     out["ok"] = true;
@@ -75,6 +98,7 @@ void AdminServer::handleGroupUpdate(const HttpContextPtr& ctx, const std::string
         if (!db_.groupSetCaps(id, caps, err)) { bad(ctx, err); return; }
         audit(role, "groups.caps", std::to_string(id));
     }
+    refreshGroupAcl();
     ctx->send("{\"ok\":true}");
 }
 
@@ -83,6 +107,7 @@ void AdminServer::handleGroupDelete(const HttpContextPtr& ctx, const std::string
     std::string err;
     if (!db_.groupDelete(id, err)) { bad(ctx, err); return; }
     audit(role, "groups.delete", std::to_string(id));
+    refreshGroupAcl();
     ctx->send("{\"ok\":true}");
 }
 
@@ -102,6 +127,7 @@ void AdminServer::handleGroupAddDevices(const HttpContextPtr& ctx, const std::st
         if (!db_.groupAddDevice(id, d, err)) { bad(ctx, err); return; }
     }
     audit(role, "groups.devices.add", std::to_string(id) + " n=" + std::to_string(devids.size()));
+    refreshGroupAcl();
     ctx->send("{\"ok\":true,\"added\":" + std::to_string(devids.size()) + "}");
 }
 
@@ -111,6 +137,7 @@ void AdminServer::handleGroupRemoveDevice(const HttpContextPtr& ctx, const std::
     if (devid.empty()) { bad(ctx, "empty devid"); return; }
     if (!db_.groupRemoveDevice(id, devid)) { bad(ctx, "remove failed"); return; }
     audit(role, "groups.devices.remove", std::to_string(id) + " " + devid);
+    refreshGroupAcl();
     ctx->send("{\"ok\":true}");
 }
 
@@ -124,6 +151,7 @@ void AdminServer::handleGroupAddSubject(const HttpContextPtr& ctx, const std::st
     std::string err;
     if (!db_.groupAddSubject(id, type, subject, err)) { bad(ctx, err); return; }
     audit(role, "groups.subjects.add", type + ":" + subject);
+    refreshGroupAcl();
     ctx->send("{\"ok\":true}");
 }
 
@@ -133,6 +161,7 @@ void AdminServer::handleGroupRemoveSubject(const HttpContextPtr& ctx, const std:
     std::string subject = ctx->param("subject");
     if (!db_.groupRemoveSubject(id, type, subject)) { bad(ctx, "remove failed"); return; }
     audit(role, "groups.subjects.remove", type + ":" + subject);
+    refreshGroupAcl();
     ctx->send("{\"ok\":true}");
 }
 

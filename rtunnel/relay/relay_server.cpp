@@ -173,6 +173,73 @@ void RelayServer::dropPendingFor(RelayConn* a) {
     }
 }
 
+void RelayServer::setGroupAcl(std::vector<GroupAclRule> rules, std::set<std::string> users) {
+    acl_groups = std::move(rules);
+    acl_grouped_users = std::move(users);
+    if (verbose) logf_("[relay] group acl: %zu rules, %zu grouped users",
+                       acl_groups.size(), acl_grouped_users.size());
+}
+
+static bool aclPortAllowed(const std::string& ports, uint16_t port) {
+    if (ports.empty()) return false;
+    size_t pos = 0;
+    while (pos <= ports.size()) {
+        size_t comma = ports.find(',', pos);
+        std::string one = ports.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+        while (!one.empty() && (one[0] == ' ' || one[0] == '\t')) one.erase(0, 1);
+        if (one == "*") return true;
+        size_t dash = one.find('-');
+        if (dash == std::string::npos) {
+            if (atoi(one.c_str()) == port) return true;
+        } else {
+            int lo = atoi(one.substr(0, dash).c_str());
+            int hi = atoi(one.substr(dash + 1).c_str());
+            if (lo <= port && port <= hi) return true;
+        }
+        if (comma == std::string::npos) break;
+        pos = comma + 1;
+    }
+    return false;
+}
+
+static bool aclTtyAllowed(const std::string& ttys, const char* path) {
+    if (ttys.empty() || !path || !path[0]) return false;
+    size_t pos = 0;
+    while (pos <= ttys.size()) {
+        size_t comma = ttys.find(',', pos);
+        std::string one = ttys.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+        while (!one.empty() && (one[0] == ' ' || one[0] == '\t')) one.erase(0, 1);
+        if (!one.empty() && pattern_match(one.c_str(), path)) return true;
+        if (comma == std::string::npos) break;
+        pos = comma + 1;
+    }
+    return false;
+}
+
+bool RelayServer::groupAclDevice(const char* user, const char* devid) {
+    for (auto& r : acl_groups) {
+        if (r.user != user) continue;
+        if (pattern_match(r.devid.c_str(), devid)) return true;
+    }
+    return false;
+}
+
+bool RelayServer::groupAclCheck(const char* user, const char* devid, uint16_t port,
+                                int is_shell, const char* tty_path) {
+    for (auto& r : acl_groups) {
+        if (r.user != user) continue;
+        if (!pattern_match(r.devid.c_str(), devid)) continue;
+        if (is_shell) {
+            if (r.shell) return true;
+        } else if (tty_path && tty_path[0]) {
+            if (aclTtyAllowed(r.tty, tty_path)) return true;
+        } else if (aclPortAllowed(r.ports, port)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int RelayServer::aclCheck(const char* user, const char* devid) {
     if (allow_all) return 1;
     if (user[0] == '\0') return 0;
@@ -918,7 +985,9 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         r.str(devid, sizeof(devid));
         int online = 0;
         uint32_t active = 0;
-        if (!r.err && c->authed && c->role == rtnp::ROLE_CLIENT && aclCheck(c->user, devid)) {
+        bool allowed = c->authed && c->role == rtnp::ROLE_CLIENT &&
+            (acl_grouped_users.count(c->user) ? groupAclDevice(c->user, devid) : aclCheck(c->user, devid));
+        if (!r.err && allowed) {
             RelayConn* agent = findAgent(devid);
             if (agent) {
                 online = 1;
@@ -952,6 +1021,12 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             // OPEN_SHELL 无目标端口（设备侧 forkpty），port=0 合法；普通 OPEN 必须非 0
             bool is_shell = (f->flags & rtnp::OPEN_SHELL) != 0;
             bool is_tty = (f->flags & rtnp::OPEN_TTY) != 0;
+            char tty_path[256] = {0};
+            if (is_tty && !r.err) {
+                char tdev[128] = {0};
+                r.str(tdev, sizeof(tdev));
+                r.str(tty_path, sizeof(tty_path));
+            }
             if (r.err || devid[0] == '\0' || (!is_shell && !is_tty && port == 0)) {
                 sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::PROTOCOL_ERROR, "bad open");
                 return;
@@ -960,7 +1035,11 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
                 sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::PROTOCOL_ERROR, "sid in use");
                 return;
             }
-            if (!aclCheck(c->user, devid)) {
+            bool grouped = acl_grouped_users.count(c->user) != 0;
+            bool acl_ok = grouped
+                ? groupAclCheck(c->user, devid, port, is_shell ? 1 : 0, tty_path)
+                : aclCheck(c->user, devid);
+            if (!acl_ok) {
                 sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::ACL_DENIED, "acl denied");
                 return;
             }

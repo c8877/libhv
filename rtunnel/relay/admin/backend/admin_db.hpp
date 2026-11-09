@@ -8,6 +8,14 @@
 
 struct sqlite3;
 
+struct DbGroupAclRule {
+    std::string user;
+    std::string devid;
+    std::string ports;
+    std::string tty;
+    bool shell = false;
+};
+
 struct DbUser {
     long long   id = 0;
     std::string username;
@@ -81,7 +89,8 @@ public:
     bool groupDeviceMap(std::string& json_out);
     bool groupEffective(const std::string& type, const std::string& subject,
                         std::string& json_out, std::string& err);    bool groupSubjectDevids(const std::string& type, const std::string& subject,
-                            std::vector<std::string>& out, bool& has_groups);
+                            std::vector<std::string>& out, bool& has_groups);    bool groupClientRules(std::vector<DbGroupAclRule>& out);
+
 
 
     bool metricSeriesList(const std::string& devid, std::string& json_out);

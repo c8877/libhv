@@ -1,4 +1,6 @@
 #include "admin_db.hpp"
+#include <utility>
+#include <map>
 #include "cpputil/json.hpp"
 #include "sqlite3.h"
 
@@ -414,5 +416,59 @@ bool AdminDb::groupSubjectDevids(const std::string& type, const std::string& sub
     sqlite3_bind_text(st, 2, subject.c_str(), -1, SQLITE_TRANSIENT);
     while (sqlite3_step(st) == SQLITE_ROW) out.push_back((const char*)sqlite3_column_text(st, 0));
     sqlite3_finalize(st);
+    return true;
+}
+
+bool AdminDb::groupClientRules(std::vector<DbGroupAclRule>& out) {
+    std::lock_guard<std::mutex> lk(mu_);
+    out.clear();
+    std::map<std::pair<std::string, std::string>, DbGroupAclRule> rules;
+    std::map<std::pair<std::string, std::string>, std::set<std::string>> ports;
+    std::map<std::pair<std::string, std::string>, std::set<std::string>> ttys;
+    sqlite3_stmt* st = nullptr;
+    const char* sql =
+        "SELECT s.subject_id,m.devid,c.cap,c.value "
+        "FROM subject_groups s "
+        "JOIN dev_group_members m ON m.group_id=s.group_id "
+        "LEFT JOIN dev_group_caps c ON c.group_id=s.group_id "
+        "WHERE s.subject_type='client'";
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        std::string user = (const char*)sqlite3_column_text(st, 0);
+        std::string devid = (const char*)sqlite3_column_text(st, 1);
+        std::string cap = sqlite3_column_text(st, 2) ? (const char*)sqlite3_column_text(st, 2) : "";
+        std::string val = sqlite3_column_text(st, 3) ? (const char*)sqlite3_column_text(st, 3) : "";
+        auto key = std::make_pair(user, devid);
+        auto& r = rules[key];
+        r.user = user;
+        r.devid = devid;
+        if (cap == "tcp_ports") {
+            char buf[1024];
+            snprintf(buf, sizeof(buf), "%s", val.c_str());
+            char* save = nullptr;
+            for (char* p = strtok_r(buf, ",", &save); p; p = strtok_r(nullptr, ",", &save))
+                ports[key].insert(p);
+        } else if (cap == "tty") {
+            char buf[1024];
+            snprintf(buf, sizeof(buf), "%s", val.c_str());
+            char* save = nullptr;
+            for (char* p = strtok_r(buf, ",", &save); p; p = strtok_r(nullptr, ",", &save))
+                ttys[key].insert(p);
+        } else if (cap == "shell") {
+            if (val == "1" || val == "true") r.shell = true;
+        }
+    }
+    sqlite3_finalize(st);
+    for (auto& kv : ports) {
+        std::string joined;
+        for (auto& p : kv.second) { if (!joined.empty()) joined += ","; joined += p; }
+        rules[kv.first].ports = joined;
+    }
+    for (auto& kv : ttys) {
+        std::string joined;
+        for (auto& t : kv.second) { if (!joined.empty()) joined += ","; joined += t; }
+        rules[kv.first].tty = joined;
+    }
+    for (auto& kv : rules) out.push_back(kv.second);
     return true;
 }

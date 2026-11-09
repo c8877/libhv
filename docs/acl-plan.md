@@ -34,13 +34,13 @@
 - 直接访问范围外设备详情失败；
 - 分组变更后新请求立即生效。
 
-## 阶段 3：A 侧 ACL（未开始）
+## 阶段 3：A 侧 ACL（已接入，旧 ACL 导入待做）
 
-- [ ] relay 加载分组快照
-- [ ] OPEN 按 devid + 端口检查
-- [ ] OPEN_SHELL 按 shell 能力检查
-- [ ] TTY 按 tty 模式检查
-- [ ] 分组变更投递 relay 线程热更新
+- [x] relay 加载分组快照
+- [x] OPEN 按 devid + 端口检查
+- [x] OPEN_SHELL 按 shell 能力检查
+- [x] TTY 按 tty 模式检查
+- [x] 分组变更投递 relay 线程热更新
 - [ ] 旧 ACL 导入 `legacy:<user>` 分组
 
 验收：
