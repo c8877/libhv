@@ -275,13 +275,17 @@ GET    /api/v1/permission/agent-groups/:id/candidates?q=&online=1
 ```text
 GET    /api/v1/permission/dict/ports?q=&enabled=1
 POST   /api/v1/permission/dict/ports
+POST   /api/v1/permission/dict/ports/batch
 PUT    /api/v1/permission/dict/ports/:id
 DELETE /api/v1/permission/dict/ports/:id
+POST   /api/v1/permission/dict/ports/batch-delete
 
 GET    /api/v1/permission/dict/ttys?q=&enabled=1
 POST   /api/v1/permission/dict/ttys
+POST   /api/v1/permission/dict/ttys/batch
 PUT    /api/v1/permission/dict/ttys/:id
 DELETE /api/v1/permission/dict/ttys/:id
+POST   /api/v1/permission/dict/ttys/batch-delete
 ```
 
 新增端口：
