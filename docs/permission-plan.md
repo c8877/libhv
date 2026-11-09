@@ -93,5 +93,5 @@ dev_groups / dev_group_members / dev_group_caps / subject_groups
 - [x] `#/acl` 重定向到 `#/permission`
 - [x] 有效权限预览页面
 - [x] 审计覆盖全部权限变更
-- [ ] 删除原型表兼容代码
-- [ ] 运维说明
+- [x] 删除原型表兼容代码（`subject_groups` 保留给账号范围）
+- [x] 运维说明

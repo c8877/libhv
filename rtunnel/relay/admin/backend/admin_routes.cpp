@@ -228,60 +228,7 @@ void AdminServer::registerRoutes() {
         handlePermAgentDelete(ctx, role); return 200;
     });
 
-    access(ROLE_OPERATOR, "GET", "/api/v1/groups", &AdminServer::handleGroups);
     access(ROLE_OPERATOR, "GET", "/api/v1/groups/device-map", &AdminServer::handleGroupDeviceMap);
-    access(ROLE_OPERATOR, "GET", "/api/v1/groups/:id", &AdminServer::handleGroupGet);
-    access(ROLE_OPERATOR, "GET", "/api/v1/access/effective", &AdminServer::handleAccessEffective);
-
-    service_.Handle("POST", "/api/v1/groups", [this](const HttpContextPtr& ctx) {
-        std::string role;
-        int rc = requireRole(ctx, ROLE_MANAGER, role);
-        if (rc) return rc;
-        handleGroupCreate(ctx, role);
-        return 200;
-    });
-    service_.Handle("PUT", "/api/v1/groups/:id", [this](const HttpContextPtr& ctx) {
-        std::string role;
-        int rc = requireRole(ctx, ROLE_MANAGER, role);
-        if (rc) return rc;
-        handleGroupUpdate(ctx, role);
-        return 200;
-    });
-    service_.Handle("DELETE", "/api/v1/groups/:id", [this](const HttpContextPtr& ctx) {
-        std::string role;
-        int rc = requireRole(ctx, ROLE_MANAGER, role);
-        if (rc) return rc;
-        handleGroupDelete(ctx, role);
-        return 200;
-    });
-    service_.Handle("POST", "/api/v1/groups/:id/devices", [this](const HttpContextPtr& ctx) {
-        std::string role;
-        int rc = requireRole(ctx, ROLE_MANAGER, role);
-        if (rc) return rc;
-        handleGroupAddDevices(ctx, role);
-        return 200;
-    });
-    service_.Handle("DELETE", "/api/v1/groups/:id/devices/:devid", [this](const HttpContextPtr& ctx) {
-        std::string role;
-        int rc = requireRole(ctx, ROLE_MANAGER, role);
-        if (rc) return rc;
-        handleGroupRemoveDevice(ctx, role);
-        return 200;
-    });
-    service_.Handle("POST", "/api/v1/groups/:id/subjects", [this](const HttpContextPtr& ctx) {
-        std::string role;
-        int rc = requireRole(ctx, ROLE_MANAGER, role);
-        if (rc) return rc;
-        handleGroupAddSubject(ctx, role);
-        return 200;
-    });
-    service_.Handle("DELETE", "/api/v1/groups/:id/subjects/:type/:subject", [this](const HttpContextPtr& ctx) {
-        std::string role;
-        int rc = requireRole(ctx, ROLE_MANAGER, role);
-        if (rc) return rc;
-        handleGroupRemoveSubject(ctx, role);
-        return 200;
-    });
 
     service_.Handle("POST", "/api/v1/certs/issue", [this](const HttpContextPtr& ctx) {
         std::string role;
@@ -385,6 +332,20 @@ void AdminServer::registerRoutes() {
         if (rc) return rc;
         handleUserDelete(ctx, currentActor());
         return 200;
+    });
+    service_.Handle("GET", "/api/v1/users/:id/groups", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
+        if (rc) return rc;
+        handleUserGroups(ctx);
+        return (int)ctx->response->status_code;
+    });
+    service_.Handle("PUT", "/api/v1/users/:id/groups", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_ADMIN, role);
+        if (rc) return rc;
+        handleUserGroupsSave(ctx, currentActor());
+        return (int)ctx->response->status_code;
     });
     service_.Handle("GET", "/api/v1/devices", [this](const HttpContextPtr& ctx) {
         std::string role;

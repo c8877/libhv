@@ -535,17 +535,6 @@ const AccountsPage = Object.assign(new Page(), {
     const arr = await Api.get('/api/v1/users');
     const canM = (u) => u.role !== 'admin' && u.username !== me.username &&
       (me.role === 'admin' || (me.role === 'manager' && (u.role === 'operator' || u.role === 'viewer')));
-    const rows = arr.map(u => {
-      let ops = '<button class="pw" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">改密</button> ';
-      if (canM(u)) {
-        ops += '<button class="role" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">改角色</button> ';
-        ops += '<button class="st" data-id="' + u.id + '" data-st="' + (u.status === 'active' ? 'disabled' : 'active') + '">' +
-               (u.status === 'active' ? '禁用' : '启用') + '</button> ';
-        ops += '<button class="del" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">删除</button>';
-      }
-      return ['<b>' + UI.esc(u.username) + '</b>', UI.esc(u.role), UI.esc(u.status),
-              new Date(u.created_ms).toLocaleString(), ops];
-    });
     const roleOpts = me.role === 'admin'
       ? '<option value="viewer">浏览者</option><option value="operator">操作员</option><option value="manager">管理员</option>'
       : '<option value="viewer">浏览者</option><option value="operator">操作员</option>';
@@ -557,6 +546,9 @@ const AccountsPage = Object.assign(new Page(), {
       new Date(u.created_ms).toLocaleString(),
       (() => {
         let ops = '<button class="pw" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">改密</button> ';
+        if (me.role === 'admin' && u.role !== 'admin') {
+          ops += '<button class="scope" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">范围</button> ';
+        }
         if (canM(u)) {
           ops += '<button class="role" data-id="' + u.id + '">改角色</button> ';
           ops += '<button class="st" data-id="' + u.id + '" data-st="' + (u.status === 'active' ? 'disabled' : 'active') + '">' +
@@ -627,6 +619,38 @@ const AccountsPage = Object.assign(new Page(), {
         catch (e) { UI.toast('失败：' + e.message, true); }
       };
     });
+    document.querySelectorAll('#page button.scope').forEach(btn => {
+      btn.onclick = () => this.openScope(btn.dataset.id, btn.dataset.name);
+    });
+  },
+  async openScope(id, name) {
+    let d;
+    try { d = await Api.get('/api/v1/users/' + id + '/groups'); }
+    catch (e) { UI.toast('加载范围失败：' + e.message, true); return; }
+    const groups = d.groups || [];
+    const body = '<p class="muted-sm">勾选后该账号只能访问所选分组的设备；不选则按角色默认：' +
+      '管理员/负责人不限，操作员/浏览者仅自己绑定的设备。</p>' +
+      (groups.length
+        ? '<div class="scope-list">' + groups.map(g =>
+          '<label class="scope-item"><input type="checkbox" value="' + g.id + '"' +
+          (g.selected ? ' checked' : '') + '><span>' + UI.esc(g.name) + '</span>' +
+          '<span class="muted-sm">' + g.device_count + ' 台</span></label>').join('') + '</div>'
+        : '<p class="muted-sm">还没有设备分组，先到权限页创建。</p>');
+    const m = UI.modal({
+      title: '设备范围：' + name,
+      body,
+      buttons: '<button data-modal-close>取消</button><button class="primary" id="scope-ok">保存</button>',
+    });
+    m.el.querySelector('.tty-modal').classList.add('scope-modal');
+    m.el.querySelector('#scope-ok').onclick = async () => {
+      const ids = [...m.el.querySelectorAll('.scope-item input:checked')].map(x => Number(x.value));
+      try {
+        await Api.put('/api/v1/users/' + id + '/groups', { groups: ids });
+        UI.toast('已保存');
+        m.close();
+        this.refresh();
+      } catch (e) { UI.toast('保存失败：' + e.message, true); }
+    };
   },
 });
 

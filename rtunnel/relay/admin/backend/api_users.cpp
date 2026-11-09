@@ -428,3 +428,53 @@ void AdminServer::handleDeviceBind(const HttpContextPtr& ctx, const AdminActor& 
     audit(actor.username, "device.bind", devid + " -> " + (owner.empty() ? "(none)" : owner));
     ctx->send("{\"ok\":true}");
 }
+
+void AdminServer::handleUserGroups(const HttpContextPtr& ctx) {
+    long long id = atoll(ctx->param("id").c_str());
+    DbUser u;
+    if (!db_.findUserById(id, u)) {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"no such account\"}");
+        return;
+    }
+    std::string out;
+    if (!db_.userGroupList(u.username, out)) {
+        ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+        ctx->send("{\"error\":\"db error\"}");
+        return;
+    }
+    ctx->send(out);
+}
+
+void AdminServer::handleUserGroupsSave(const HttpContextPtr& ctx, const AdminActor& actor) {
+    long long id = atoll(ctx->param("id").c_str());
+    DbUser u;
+    if (!db_.findUserById(id, u)) {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"no such account\"}");
+        return;
+    }
+    if (u.role == "admin") {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"admin 账号不受设备范围限制\"}");
+        return;
+    }
+    json req = json::parse(ctx->body(), nullptr, false);
+    if (req.is_discarded() || !req.is_object()) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"bad json\"}");
+        return;
+    }
+    std::vector<long long> ids;
+    if (req.contains("groups")) {
+        for (auto& v : req["groups"]) if (v.is_number_integer()) ids.push_back(v.get<long long>());
+    }
+    std::string err;
+    if (!db_.userSetGroups(u.username, ids, err)) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        json j; j["error"] = err; ctx->send(j.dump());
+        return;
+    }
+    audit(actor.username, "account.scope", u.username + " groups=" + std::to_string(ids.size()));
+    ctx->send("{\"ok\":true}");
+}

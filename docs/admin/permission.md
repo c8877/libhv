@@ -918,6 +918,9 @@ viewer 只能看，不显示写操作按钮。
 | 添加用户 | `POST /api/v1/permission/client-groups/:id/users` |
 | 保存 ACL | `PUT /api/v1/permission/client-groups/:id/acl` |
 | 有效权限预览 | `GET /api/v1/permission/effective?client=alice` |
+| 导入旧 ACL | `POST /api/v1/permission/import-acl` |
+| 导出为旧 ACL | `GET /api/v1/permission/export-acl` |
+| 账号设备范围 | `GET` / `PUT /api/v1/users/:id/groups` |
 
 ---
 
@@ -948,3 +951,57 @@ expandedKey = "client:1" | "agent:3"
 ```
 
 同一时间只渲染一个展开表单。
+
+---
+
+# 12. 运维要点
+
+## 生效时机
+
+```
+保存分组 / 字典启停   立即重建规则，只影响新的 OPEN
+已建立会话            不受影响，需要断开重连
+客户端分组优先        用户一旦在任一分组内，不再看 ACL 文件
+```
+
+## 从旧 ACL 迁移
+
+```
+1. 权限页 →「旧 ACL」→ 导入，确认预填内容
+2. 每个 user= 生成客户端分组 + 导入-<user> 设备分组，能力全开
+3. 「有效权限」核对每个用户的设备和能力
+4. 按需收紧 ACL 和设备分组上限
+5. 最后移除 relay 的 --acl / --acl-file，重启
+```
+
+导入只做新增：同名客户端分组或 `导入-<user>` 设备分组已存在时跳过。
+
+## 账号范围
+
+管理台账号（manager / operator / viewer）的设备范围在「账号」页 →「范围」维护：
+
+```
+勾选设备分组   只能看到这些分组的设备
+不勾选         按角色默认：manager 不限，operator/viewer 仅自己绑定的设备
+admin          不受范围限制，页面上不提供范围按钮
+```
+
+## 字典
+
+```
+停用   已授权限立即失效，引用它的 ACL 保留但暂时不生效
+删除   被引用的条目会被拒绝，先解除引用
+引用   列表中的「引用」= ACL 与设备分组上限里引用该项的数量
+```
+
+## 排障
+
+```
+看某用户最终权限    权限页 →「有效权限」，输入用户名
+看谁改了什么        审计页，事件前缀 permission.* / account.scope
+设备侧仍拒绝        检查 agent 的 --allow，设备侧还有一道校验
+```
+
+## 备份
+
+单个 SQLite 文件：`--admin-db` 指向的 `admin.db`，连同 `--admin-file-dir` 一起备份。

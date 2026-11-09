@@ -115,17 +115,7 @@ private:
     void handleKickStream(const HttpContextPtr& ctx, const std::string& role);
     void handleKickAgent(const HttpContextPtr& ctx, const std::string& role);
     // api_groups.cpp
-    void handleGroups(const HttpContextPtr& ctx);
-    void handleGroupCreate(const HttpContextPtr& ctx, const std::string& role);
-    void handleGroupGet(const HttpContextPtr& ctx);
-    void handleGroupUpdate(const HttpContextPtr& ctx, const std::string& role);
-    void handleGroupDelete(const HttpContextPtr& ctx, const std::string& role);
-    void handleGroupAddDevices(const HttpContextPtr& ctx, const std::string& role);
-    void handleGroupRemoveDevice(const HttpContextPtr& ctx, const std::string& role);
-    void handleGroupAddSubject(const HttpContextPtr& ctx, const std::string& role);
-    void handleGroupRemoveSubject(const HttpContextPtr& ctx, const std::string& role);
     void handleGroupDeviceMap(const HttpContextPtr& ctx);
-    void handleAccessEffective(const HttpContextPtr& ctx);    // api_permission.cpp
     void handlePermOverview(const HttpContextPtr& ctx);
     void handlePermClientGet(const HttpContextPtr& ctx);
     void handlePermClientSave(const HttpContextPtr& ctx, const std::string& role);
@@ -171,6 +161,8 @@ private:
     void handleUserStatus(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleUserRole(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleUserDelete(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleUserGroups(const HttpContextPtr& ctx);
+    void handleUserGroupsSave(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleDeviceList(const HttpContextPtr& ctx);
     void handleDeviceBind(const HttpContextPtr& ctx, const AdminActor& actor);
     // api_proxy.cpp
