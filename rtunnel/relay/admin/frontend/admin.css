@@ -590,7 +590,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .task-tabs{margin-left:14px}
 .ui-tabs-attached{position:relative;gap:16px;padding:12px 16px 0;background:var(--bg);border:0;overflow:visible}
 .ui-tabs-attached .ui-tab{--tab-edge:var(--border);position:relative;padding:9px 15px;border:1px solid var(--border);border-bottom:1px solid var(--border);border-radius:6px 6px 0 0;background:var(--card);color:var(--muted);font-size:13px;margin-bottom:0;z-index:0}
-.ui-tabs-attached .ui-tab:hover{background:var(--card);border-color:color-mix(in srgb,var(--fg) 28%,var(--border));color:var(--fg)}
+.ui-tabs-attached .ui-tab:hover{--tab-edge:color-mix(in srgb,var(--fg) 28%,var(--border));background:var(--card);border-color:var(--tab-edge);color:var(--fg)}
 .ui-tabs-attached .ui-tab.is-active{--tab-edge:var(--accent);z-index:2;background:var(--card);border-color:var(--accent);border-bottom-color:var(--card);color:var(--accent);font-weight:600;margin-bottom:-1px}
 .ui-tabs-attached .ui-tab.is-active:hover,.ui-tabs-attached .ui-tab.is-active:focus{background:var(--card)}
 .ui-tabs-attached .ui-tab.is-active .ui-tab-count{background:transparent;color:var(--accent)}
