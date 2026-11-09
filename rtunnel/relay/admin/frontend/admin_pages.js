@@ -587,6 +587,10 @@ const PermissionPage = Object.assign(new Page(), {
         '<div class="perm-chips" id="pa-tty-view">' + this.capChips(c.tty) + '</div><input type="hidden" id="pa-tty" value="' + UI.esc(c.tty || '') + '"></div>' +
       '<label class="perm-field">文件<select id="pa-file">' + ['none','ro','rw'].map(v =>
         '<option value="' + v + '"' + ((c.file || 'none') === v ? ' selected' : '') + '>' + v + '</option>').join('') + '</select></label>' +
+      '<h3>被客户端分组引用</h3><div class="perm-chips">' +
+        ((d.referenced_by || []).length
+          ? d.referenced_by.map(x => '<span class="perm-chip sm">' + UI.esc(x) + '</span>').join('')
+          : '<span class="muted-sm">未被引用</span>') + '</div>' +
       '<div class="perm-form-foot"><button class="perm-cancel">取消</button>' +
       '<button class="primary" id="pa-save">保存</button></div></div>';
   },
@@ -600,9 +604,10 @@ const PermissionPage = Object.assign(new Page(), {
       return '<tr class="perm-row' + (open ? ' open' : '') + '" data-key="client:' + g.id + '">' +
         '<td><span class="perm-chev">' + (open ? '▾' : '▸') + '</span> <b>' + UI.esc(g.name) + '</b></td>' +
         '<td>' + (g.user_count || 0) + '</td><td>' + (g.acl_count || 0) + '</td>' +
+        '<td class="muted">' + UI.esc(this.capText(g.caps)) + '</td>' +
         '<td class="muted">' + UI.ago(g.updated_ms) + '</td>' +
         '<td><button class="danger perm-del" data-kind="client" data-id="' + g.id + '">删除</button></td></tr>' +
-        (open ? '<tr class="perm-expand"><td colspan="5">' +
+        (open ? '<tr class="perm-expand"><td colspan="6">' +
           this.clientForm(this.detail || g, ags) + '</td></tr>' : '');
     }).join('') : ags.map(g => {
       const open = this.expandKey === 'agent:' + g.id;
@@ -610,21 +615,22 @@ const PermissionPage = Object.assign(new Page(), {
         '<td><span class="perm-chev">' + (open ? '▾' : '▸') + '</span> <b>' + UI.esc(g.name) + '</b></td>' +
         '<td>' + (g.device_count || 0) + '</td><td>' + (g.ref_count || 0) + '</td>' +
         '<td class="muted">' + UI.esc(this.capText(g.caps)) + '</td>' +
+        '<td class="muted">' + UI.ago(g.updated_ms) + '</td>' +
         '<td><button class="danger perm-del" data-kind="agent" data-id="' + g.id + '">删除</button></td></tr>' +
-        (open ? '<tr class="perm-expand"><td colspan="5">' +
+        (open ? '<tr class="perm-expand"><td colspan="6">' +
           this.agentForm(this.detail || g) + '</td></tr>' : '');
     }).join('');
     let newForm = '';
-    if (this.expandKey === 'client:new') newForm = '<tr class="perm-expand"><td colspan="5">' + this.clientForm({}, ags) + '</td></tr>';
-    if (this.expandKey === 'agent:new') newForm = '<tr class="perm-expand"><td colspan="5">' + this.agentForm({}) + '</td></tr>';
+    if (this.expandKey === 'client:new') newForm = '<tr class="perm-expand"><td colspan="6">' + this.clientForm({}, ags) + '</td></tr>';
+    if (this.expandKey === 'agent:new') newForm = '<tr class="perm-expand"><td colspan="6">' + this.agentForm({}) + '</td></tr>';
     const head = isClient
-      ? '<tr><th>名称</th><th>用户数</th><th>设备组</th><th>更新</th><th></th></tr>'
-      : '<tr><th>名称</th><th>设备数</th><th>被引用</th><th>能力上限</th><th></th></tr>';
+      ? '<tr><th>名称</th><th>用户数</th><th>设备组</th><th>能力摘要</th><th>更新</th><th></th></tr>'
+      : '<tr><th>名称</th><th>设备数</th><th>被引用</th><th>能力上限</th><th>更新</th><th></th></tr>';
     if (this._tabs) { this._tabs.destroy(); this._tabs = null; }
     this.el.innerHTML = UI.panel('权限管理',
       '<div id="perm-tabs"></div>' +
       '<div class="perm-table-wrap"><table class="detail-table perm-table"><thead>' + head + '</thead><tbody>' +
-      (newForm || '') + (rows || '<tr><td colspan="5" class="empty">暂无分组</td></tr>') + '</tbody></table></div>',
+      (newForm || '') + (rows || '<tr><td colspan="6" class="empty">暂无分组</td></tr>') + '</tbody></table></div>',
       { right: canManage() ? '<button class="primary" id="perm-new">+ 新建分组</button> <button id="perm-dict">字典管理</button>' : '' });
     this._tabs = UI.tabs(document.getElementById('perm-tabs'), {
       items: [
@@ -687,6 +693,7 @@ const PermissionPage = Object.assign(new Page(), {
           const d = document.createElement('span');
           d.className = 'perm-chip'; d.dataset.v = v;
           d.innerHTML = UI.esc(v) + ' <button class="perm-chip-x">×</button>';
+          d.querySelector('.perm-chip-x').onclick = () => d.remove();
           box.appendChild(d);
         });
         input.value = '';

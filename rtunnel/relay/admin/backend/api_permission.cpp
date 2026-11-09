@@ -245,6 +245,7 @@ void AdminServer::handleDictUpdate(const HttpContextPtr& ctx, const std::string&
     if (!db_.dictUpdate(kind, id, req.value("name", ""), req.value("description", ""),
                         req.value("enabled", true) ? 1 : 0, err)) { bad(ctx, err); return; }
     audit(role, "permission.dict." + kind + ".update", std::to_string(id));
+    refreshGroupAcl();
     ctx->send("{\"ok\":true}");
 }
 

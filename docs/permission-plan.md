@@ -74,8 +74,8 @@ dev_groups / dev_group_members / dev_group_caps / subject_groups
 - [x] OPEN 按客户端分组 → 设备分组 → devid 检查
 - [x] 端口/Shell/TTY 检查
 - [ ] 端口/TTY 改按字典 ID 检查（当前仍写文本字段）
-- [ ] 字典停用即时生效
-- [ ] 端口/TTY 的设备分组上限交集
+- [x] 字典停用即时生效
+- [x] 端口/TTY 的设备分组上限交集
 - [x] agent caps 最终裁剪
 - [x] 分组变更热更新
 - [x] 管理台账号仍按设备分组范围（原型范围）

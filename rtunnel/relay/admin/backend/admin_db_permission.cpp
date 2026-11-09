@@ -38,6 +38,169 @@ json agentCaps(sqlite3* db, long long group) {
     sqlite3_finalize(st);
     return caps;
 }
+
+// ---- 端口/TTY 上限求交 ----
+struct PortRange { int lo = 0; int hi = 0; };
+
+std::vector<std::string> splitCsv(const std::string& s) {
+    std::vector<std::string> out;
+    size_t pos = 0;
+    while (pos <= s.size()) {
+        size_t comma = s.find(',', pos);
+        std::string one = s.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+        size_t b = one.find_first_not_of(" \t");
+        size_t e = one.find_last_not_of(" \t");
+        if (b != std::string::npos) out.push_back(one.substr(b, e - b + 1));
+        if (comma == std::string::npos) break;
+        pos = comma + 1;
+    }
+    return out;
+}
+
+bool parsePort(const std::string& t, PortRange& r) {
+    if (t == "*") { r.lo = 1; r.hi = 65535; return true; }
+    size_t d = t.find('-');
+    int lo, hi;
+    if (d == std::string::npos) {
+        lo = hi = atoi(t.c_str());
+    } else {
+        lo = atoi(t.substr(0, d).c_str());
+        hi = atoi(t.substr(d + 1).c_str());
+    }
+    if (lo < 1 || hi > 65535 || lo > hi) return false;
+    r.lo = lo; r.hi = hi;
+    return true;
+}
+
+std::vector<PortRange> parsePorts(const std::string& s) {
+    std::vector<PortRange> out;
+    for (auto& t : splitCsv(s)) {
+        PortRange r;
+        if (parsePort(t, r)) out.push_back(r);
+    }
+    return out;
+}
+
+std::vector<PortRange> intersectRanges(const std::vector<PortRange>& a, const std::vector<PortRange>& b) {
+    std::vector<PortRange> out;
+    for (auto& x : a) for (auto& y : b) {
+        PortRange r;
+        r.lo = std::max(x.lo, y.lo);
+        r.hi = std::min(x.hi, y.hi);
+        if (r.lo <= r.hi) out.push_back(r);
+    }
+    return out;
+}
+
+void subtractRange(std::vector<PortRange>& v, PortRange d) {
+    std::vector<PortRange> out;
+    for (auto& r : v) {
+        if (d.hi < r.lo || d.lo > r.hi) { out.push_back(r); continue; }
+        if (r.lo < d.lo) { PortRange x; x.lo = r.lo; x.hi = d.lo - 1; out.push_back(x); }
+        if (r.hi > d.hi) { PortRange x; x.lo = d.hi + 1; x.hi = r.hi; out.push_back(x); }
+    }
+    v.swap(out);
+}
+
+std::string joinRanges(std::vector<PortRange> v) {
+    if (v.empty()) return "";
+    std::sort(v.begin(), v.end(), [](const PortRange& a, const PortRange& b) { return a.lo < b.lo; });
+    std::vector<PortRange> merged;
+    for (auto& r : v) {
+        if (!merged.empty() && r.lo <= merged.back().hi + 1) merged.back().hi = std::max(merged.back().hi, r.hi);
+        else merged.push_back(r);
+    }
+    if (merged.size() == 1 && merged[0].lo == 1 && merged[0].hi == 65535) return "*";
+    std::string out;
+    char buf[32];
+    for (auto& r : merged) {
+        if (!out.empty()) out += ",";
+        if (r.lo == r.hi) snprintf(buf, sizeof(buf), "%d", r.lo);
+        else snprintf(buf, sizeof(buf), "%d-%d", r.lo, r.hi);
+        out += buf;
+    }
+    return out;
+}
+
+bool wildcard(const std::string& p) { return !p.empty() && p[p.size() - 1] == '*'; }
+std::string wildcardPrefix(const std::string& p) { return p.substr(0, p.size() - 1); }
+
+// cap 是否覆盖 acl 模式
+bool ttyCovers(const std::string& cap, const std::string& acl) {
+    if (cap == "*" || cap == acl) return true;
+    if (wildcard(cap)) {
+        std::string cp = wildcardPrefix(cap);
+        if (wildcard(acl)) {
+            std::string ap = wildcardPrefix(acl);
+            return ap.compare(0, cp.size(), cp) == 0 || cp.compare(0, ap.size(), ap) == 0;
+        }
+        return acl.compare(0, cp.size(), cp) == 0;
+    }
+    if (wildcard(acl)) {
+        std::string ap = wildcardPrefix(acl);
+        return cap.compare(0, ap.size(), ap) == 0;
+    }
+    return false;
+}
+
+// 取交集中更窄的一项（前缀更长者更窄；字面量比通配窄）
+std::string ttyNarrow(const std::string& cap, const std::string& acl) {
+    if (cap == "*" || cap == acl) return acl;
+    if (wildcard(cap)) {
+        if (!wildcard(acl)) return acl;
+        return wildcardPrefix(acl).size() >= wildcardPrefix(cap).size() ? acl : cap;
+    }
+    return cap;
+}
+
+std::string intersectTty(const std::string& acl, const std::string& cap, const std::set<std::string>& disabled) {
+    std::vector<std::string> out;
+    for (auto& a : splitCsv(acl)) {
+        if (disabled.count(a)) continue;
+        std::string keep;
+        for (auto& c : splitCsv(cap)) {
+            if (!ttyCovers(c, a)) continue;
+            std::string n = ttyNarrow(c, a);
+            if (keep.empty() || n.size() > keep.size()) keep = n;
+        }
+        if (keep.empty() || disabled.count(keep)) continue;
+        if (std::find(out.begin(), out.end(), keep) == out.end()) out.push_back(keep);
+    }
+    std::string joined;
+    for (auto& x : out) { if (!joined.empty()) joined += ","; joined += x; }
+    return joined;
+}
+
+std::string intersectPorts(const std::string& acl, const std::string& cap, const std::vector<PortRange>& disabled) {
+    std::vector<PortRange> r = intersectRanges(parsePorts(acl), parsePorts(cap));
+    for (auto& d : disabled) subtractRange(r, d);
+    return joinRanges(r);
+}
+
+std::vector<PortRange> disabledPortRanges(sqlite3* db) {
+    std::vector<PortRange> out;
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, "SELECT port_start,port_end FROM port_dict WHERE enabled=0", -1, &st, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            PortRange r;
+            r.lo = sqlite3_column_int(st, 0);
+            r.hi = sqlite3_column_int(st, 1);
+            out.push_back(r);
+        }
+    }
+    sqlite3_finalize(st);
+    return out;
+}
+
+std::set<std::string> disabledTtyPatterns(sqlite3* db) {
+    std::set<std::string> out;
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, "SELECT pattern FROM tty_dict WHERE enabled=0", -1, &st, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(st) == SQLITE_ROW) out.insert((const char*)sqlite3_column_text(st, 0));
+    }
+    sqlite3_finalize(st);
+    return out;
+}
 } // namespace
 
 bool AdminDb::permOverview(std::string& json_out) {
@@ -68,6 +231,52 @@ bool AdminDb::permOverview(std::string& json_out) {
                 if (sqlite3_step(c) == SQLITE_ROW) g["acl_count"] = sqlite3_column_int64(c, 0);
             }
             sqlite3_finalize(c);
+            c = nullptr;
+            json caps = json::object();
+            std::set<std::string> ports, ttys;
+            bool shell = false, sysinfo = false, metrics = false, config = false, web = false;
+            std::string file = "none";
+            if (sqlite3_prepare_v2(db_, "SELECT tcp_ports,allow_shell,tty,file,sysinfo,metrics,config,web "
+                                        "FROM client_group_acl WHERE client_group_id=?",
+                                   -1, &c, nullptr) == SQLITE_OK) {
+                sqlite3_bind_int64(c, 1, id);
+                while (sqlite3_step(c) == SQLITE_ROW) {
+                    char buf[2048];
+                    snprintf(buf, sizeof(buf), "%s", (const char*)sqlite3_column_text(c, 0));
+                    char* save = nullptr;
+                    for (char* p = strtok_r(buf, ",", &save); p; p = strtok_r(nullptr, ",", &save)) {
+                        while (*p == ' ' || *p == '\t') p++;
+                        if (*p) ports.insert(p);
+                    }
+                    if (sqlite3_column_int(c, 1)) shell = true;
+                    snprintf(buf, sizeof(buf), "%s", (const char*)sqlite3_column_text(c, 2));
+                    save = nullptr;
+                    for (char* p = strtok_r(buf, ",", &save); p; p = strtok_r(nullptr, ",", &save)) {
+                        while (*p == ' ' || *p == '\t') p++;
+                        if (*p) ttys.insert(p);
+                    }
+                    std::string f = (const char*)sqlite3_column_text(c, 3);
+                    auto rank = [](const std::string& v) { return v == "rw" ? 3 : v == "ro" ? 2 : 1; };
+                    if (rank(f) > rank(file)) file = f;
+                    if (sqlite3_column_int(c, 4)) sysinfo = true;
+                    if (sqlite3_column_int(c, 5)) metrics = true;
+                    if (sqlite3_column_int(c, 6)) config = true;
+                    if (sqlite3_column_int(c, 7)) web = true;
+                }
+            }
+            sqlite3_finalize(c);
+            std::string pj, tj;
+            for (auto& p : ports) { if (!pj.empty()) pj += ","; pj += p; }
+            for (auto& t : ttys) { if (!tj.empty()) tj += ","; tj += t; }
+            caps["tcp_ports"] = pj;
+            caps["shell"] = shell ? "1" : "0";
+            caps["tty"] = tj;
+            caps["file"] = file;
+            caps["sysinfo"] = sysinfo ? "1" : "0";
+            caps["metrics"] = metrics ? "1" : "0";
+            caps["config"] = config ? "1" : "0";
+            caps["web"] = web ? "1" : "0";
+            g["caps"] = caps;
             cg.push_back(g);
         }
     }
@@ -247,7 +456,22 @@ bool AdminDb::permClientDelete(long long id, std::string& err) {
 }
 
 bool AdminDb::permAgentGet(long long id, std::string& json_out, std::string& err) {
-    return groupGet(id, json_out, err);
+    if (!groupGet(id, json_out, err)) return false;
+    std::lock_guard<std::mutex> lk(mu_);
+    json g = json::parse(json_out, nullptr, false);
+    if (g.is_discarded()) return true;
+    json refs = json::array();
+    sqlite3_stmt* st = nullptr;
+    const char* sql = "SELECT c.name FROM client_group_acl a JOIN client_groups c ON c.id=a.client_group_id "
+                      "WHERE a.agent_group_id=? ORDER BY c.name";
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, id);
+        while (sqlite3_step(st) == SQLITE_ROW) refs.push_back((const char*)sqlite3_column_text(st, 0));
+    }
+    sqlite3_finalize(st);
+    g["referenced_by"] = refs;
+    json_out = g.dump();
+    return true;
 }
 
 bool AdminDb::permAgentSave(long long id, const std::string& name, const std::string& desc,
@@ -466,6 +690,8 @@ bool AdminDb::permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::st
         while (sqlite3_step(st) == SQLITE_ROW) users.insert((const char*)sqlite3_column_text(st, 0));
     }
     sqlite3_finalize(st);
+    std::vector<PortRange> disabledPorts = disabledPortRanges(db_);
+    std::set<std::string> disabledTtys = disabledTtyPatterns(db_);
     const char* sql =
         "SELECT m.username,a.agent_group_id,a.tcp_ports,a.allow_shell,a.tty "
         "FROM client_group_members m JOIN client_group_acl a ON a.client_group_id=m.group_id";
@@ -478,6 +704,8 @@ bool AdminDb::permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::st
         bool shell = sqlite3_column_int(st, 3) != 0;
         std::string tty = (const char*)sqlite3_column_text(st, 4);
         if (!truthy(capValue(db_, gid, "shell"))) shell = false;
+        ports = intersectPorts(ports, capValue(db_, gid, "tcp_ports"), disabledPorts);
+        tty = intersectTty(tty, capValue(db_, gid, "tty"), disabledTtys);
         sqlite3_stmt* d = nullptr;
         if (sqlite3_prepare_v2(db_, "SELECT devid FROM dev_group_members WHERE group_id=?", -1, &d, nullptr) == SQLITE_OK) {
             sqlite3_bind_int64(d, 1, gid);
