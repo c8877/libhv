@@ -624,13 +624,13 @@ function authForm(kind) {
   if (nav) nav.innerHTML = '';
   const el = document.getElementById('page');
   const isSetup = kind === 'setup';
-  el.innerHTML = '<div class="panel" style="max-width:420px;margin:60px auto"><div class="panel-head"><h2>' +
-    (isSetup ? '初始化超级管理员' : '登录') + '</h2></div><div style="padding:20px;display:flex;flex-direction:column;gap:10px">' +
+  el.innerHTML = '<div class="panel ui-login"><div class="panel-head"><h2>' +
+    (isSetup ? '初始化超级管理员' : '登录') + '</h2></div><div class="ui-login-body">' +
     (isSetup ? '<input id="af-token" placeholder="部署 token" type="password">' : '') +
     '<input id="af-user" placeholder="用户名" autocomplete="username">' +
     '<input id="af-pass" placeholder="密码" type="password" autocomplete="current-password">' +
     '<button class="primary" id="af-btn">' + (isSetup ? '创建并登录' : '登录') + '</button>' +
-    '<span id="af-msg" style="color:var(--muted)"></span></div></div>';
+    '<span id="af-msg" class="muted"></span></div></div>';
   document.getElementById('af-btn').onclick = async () => {
     const msg = document.getElementById('af-msg');
     const body = { username: document.getElementById('af-user').value.trim(),

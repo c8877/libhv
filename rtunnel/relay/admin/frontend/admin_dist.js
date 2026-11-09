@@ -68,28 +68,28 @@ const DistributePage = Object.assign(new Page(), {
       (this.sortKey === k ? (this.sortAsc ? ' ▲' : ' ▼') : '') + '</th>';
 
     this.el.innerHTML =
-      '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>分发文件：' +
+      '<div class="panel mb16"><div class="panel-head"><h2>分发文件：' +
         UI.esc(this.file) + '</h2><span class="spacer"></span>' +
-        '<span style="color:var(--muted);font-size:12px">已选 ' + this.sel.size +
+        '<span class="muted-sm">已选 ' + this.sel.size +
         ' / 在线 ' + onlineIds.length + ' / 共 ' + total + '</span></div>' +
       '<div class="cfg-body">' +
-        '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">' +
-          '<input type="text" id="dist-q" placeholder="搜索设备 / 归属" value="' + UI.esc(this.q) + '" style="width:220px">' +
-          '<input type="text" id="dist-dir" placeholder="目标子目录（可选）" style="width:220px">' +
+        '<div class="ui-flex">' +
+          '<input type="text" id="dist-q" placeholder="搜索设备 / 归属" value="' + UI.esc(this.q) + '" class="ui-w220">' +
+          '<input type="text" id="dist-dir" placeholder="目标子目录（可选）" class="ui-w220">' +
         '</div>' +
-        '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px">' +
-          '<label style="font-size:12px;color:var(--muted)">开始时间 <input type="datetime-local" id="dist-start" value="' +
+        '<div class="ui-flex ui-mt8">' +
+          '<label class="muted-sm">开始时间 <input type="datetime-local" id="dist-start" value="' +
             toLocalInput(this.startMs) + '"></label>' +
-          '<label style="font-size:12px;color:var(--muted)">结束时间 <input type="datetime-local" id="dist-end" value="' +
+          '<label class="muted-sm">结束时间 <input type="datetime-local" id="dist-end" value="' +
             toLocalInput(this.endMs) + '"></label>' +
-          '<label style="font-size:12px;color:var(--muted)">最大重试 <input type="number" id="dist-retry" min="0" max="10" value="' +
-            this.maxRetries + '" style="width:70px"></label>' +
+          '<label class="muted-sm">最大重试 <input type="number" id="dist-retry" min="0" max="10" value="' +
+            this.maxRetries + '" class="ui-w70"></label>' +
         '</div>' +
       '</div>' +
-      '<div class="ui-pad-x"><div class="detail-table-shell"><table class="detail-table"><thead><tr><th style="width:36px"><input type="checkbox" id="dist-all"' +
+      '<div class="ui-pad-x"><div class="detail-table-shell"><table class="detail-table"><thead><tr><th class="ui-w36"><input type="checkbox" id="dist-all"' +
         (allChecked ? ' checked' : '') + '></th>' + head('devid', '设备') + head('online', '状态') +
         head('owner', '归属') + head('remote_addr', '远端地址') + '</tr></thead><tbody>' +
-        view.map(a => '<tr' + (a.online ? '' : ' style="opacity:.55"') + '><td><input type="checkbox" class="dist-pick" data-dev="' +
+        view.map(a => '<tr' + (a.online ? '' : ' class="offline-row"') + '><td><input type="checkbox" class="dist-pick" data-dev="' +
           UI.esc(a.devid) + '"' + (this.sel.has(a.devid) ? ' checked' : '') +
           (a.online ? '' : ' disabled') + '></td><td>' + UI.esc(a.devid) + '</td><td>' +
           (a.online ? '<span class="pill ok">在线</span>' : '<span class="pill bad">离线</span>') +
@@ -219,10 +219,10 @@ const TasksPage = Object.assign(new Page(), {
       '<div class="panel"><div class="panel-head"><h2>任务</h2><span class="spacer"></span>' +
         tabs.map(([k, n]) => '<button class="tab' + (this.tab === k ? ' active' : '') +
           '" data-tab="' + k + '">' + n + '</button>').join(' ') + '</div>' +
-      '<div class="cfg-body" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
-        '<input type="text" id="task-q" placeholder="搜索设备 / 文件" value="' + UI.esc(this.q) + '" style="width:220px">' +
+      '<div class="cfg-body ui-flex">' +
+        '<input type="text" id="task-q" placeholder="搜索设备 / 文件" value="' + UI.esc(this.q) + '" class="ui-w220">' +
         (this.batch ? '<span class="pill info">本批：' + UI.esc(this.batch) + ' ×</span>' : '') +
-        '<span class="spacer" style="flex:1"></span>' +
+        '<span class="spacer"></span>' +
         '<button id="task-refresh">刷新</button></div>' +
       '<div class="ui-pad-x"><div class="detail-table-shell"><table class="detail-table"><thead><tr>' +
         '<th>ID</th><th>文件</th><th>设备</th><th>目标路径</th><th>进度/大小</th>' +

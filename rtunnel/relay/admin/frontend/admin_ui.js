@@ -57,7 +57,7 @@ const UI = {
         UI.esc(opts.search.placeholder || '搜索') + '">'
       : '';
     return UI.panel(opts.title, UI.detailTable(opts.columns || [], opts.rows || [], opts.tableOpts),
-      { cls: opts.cls || '', left: opts.summary ? '<span class="muted" style="margin-left:10px">' +
+      { cls: opts.cls || '', left: opts.summary ? '<span class="muted ml10">' +
           opts.summary + '</span>' : '', right: search + (opts.actions || '') });
   },
   bindSearch(input, scope) {

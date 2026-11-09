@@ -138,11 +138,11 @@ const AgentDetailPage = Object.assign(new Page(), {
       UI.ago(s.opened_at_ms),
     ]);
 
-    let html = '<div class="panel" style="margin-bottom:16px"><div class="panel-head"><h2>' + UI.esc(d.devid) + '</h2>' +
+    let html = '<div class="panel mb16"><div class="panel-head"><h2>' + UI.esc(d.devid) + '</h2>' +
       '<span class="pill ok">在线</span><span class="spacer"></span>' +
       (si ? '<label class="si-auto"><input type="checkbox" id="si-auto"' + (this.auto ? ' checked' : '') +
             '> 状态刷新</label>' +
-            '<select id="si-period" style="margin-left:4px">' +
+            '<select id="si-period" class="ml4">' +
             [5, 10, 30].map(v => '<option value="' + v + '"' + (this.period === v ? ' selected' : '') + '>' + v + 's</option>').join('') +
             '</select> <button id="si-export">导出 JSON</button>' : '') + '</div><div id="si-head-kv">' + UI.kv({
         '远端地址': UI.esc(d.remote_addr),
@@ -183,7 +183,7 @@ const AgentDetailPage = Object.assign(new Page(), {
 
       const diskPanel = UI.panel('存储', '<div class="si-body"><canvas id="si-disk" height="' +
           Math.max(60, (si.mounts || []).length * 24 + 16) + '"></canvas></div>',
-          { cls: 'si-disk', right: '<span style="color:var(--muted);font-size:12px">条长按最大分区归一</span>' });
+          { cls: 'si-disk', right: '<span class="muted-sm">条长按最大分区归一</span>' });
       html += '<div class="si-two">' + diskPanel + nicPanel + '</div>' +
         '<div id="si-series"></div>' +
         '<div id="si-metric"></div>' +
@@ -192,7 +192,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       const certText = si.mtls
         ? UI.kv({ '证书主体': UI.esc(si.cert_subject || ''), '签发者': UI.esc(si.cert_issuer || ''),
                   '序列号': UI.esc(String(si.cert_serial || '')), '状态': si.cert_valid ? '有效' : '已过期' })
-        : '<div style="padding:12px;color:var(--muted)">未启用 mTLS</div>';
+        : '<div class="ui-pad12 muted">未启用 mTLS</div>';
       const caps = si.caps || {};
       const chips = [];
       (caps.ports || []).forEach(p => chips.push('TCP ' + p));
@@ -207,7 +207,7 @@ const AgentDetailPage = Object.assign(new Page(), {
         '<tr class="ui-row caps-row' + (this.capsOpen ? ' open' : '') + '" data-caps-row="1"><th>能力</th><td>' +
           capHtml + (canManage() ? '<span class="chev">⌄</span>' : '') + '</td></tr>' +
         (capsForm ? '<tr class="caps-expand"><td colspan="2">' + capsForm + '</td></tr>' : '') +
-        '<tr><th>启动参数</th><td><code style="font-size:12px">' + UI.esc(si.args || '') + '</code></td></tr>' +
+        '<tr><th>启动参数</th><td><code class="fs12">' + UI.esc(si.args || '') + '</code></td></tr>' +
         '</tbody></table></div>';
       const sysTable = this.sysGrid(si, siTs);
       html += UI.panel('系统', '<div id="si-sys-wrap">' + sysTable + '</div>', { cls: 'mb16' }) +
@@ -684,9 +684,9 @@ const AgentDetailPage = Object.assign(new Page(), {
     });
     const metricBody = '<div class="detail-table-shell"><table class="detail-table metric-table"><tr><th>指标</th><th>间隔</th><th>保留</th>' +
       '<th>同步</th><th>启用</th><th></th></tr>' +
-      (rows || '<tr><td colspan="6" style="color:var(--muted)">暂无配置</td></tr>') + '</table></div>';
+      (rows || '<tr><td colspan="6" class="muted">暂无配置</td></tr>') + '</table></div>';
     wrap.innerHTML = UI.panel('采样配置', metricBody, { cls: 'mb16',
-      left: '<span class="muted" style="margin-left:10px">' + list.length + ' 项 · ' + syncCount + ' 项未同步</span>',
+      left: '<span class="muted ml10">' + list.length + ' 项 · ' + syncCount + ' 项未同步</span>',
       right: (can ? '<button id="metric-add">+ 添加指标</button>' : '') });
     if (!can) return;
     const save = async (next) => {
@@ -856,7 +856,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       '<button data-tab="unconfig"' + (tab === 'unconfig' ? ' class="active"' : '') + '>未配置 ' + unAll.length + '</button></span>';
     const ttyBody = '<div class="tty-table-wrap detail-table-shell' + (openAny ? ' open' : '') + '"><table class="detail-table tty-table"><tr>' +
       '<th>设备</th><th>状态</th><th>参数</th><th>RX</th><th>TX</th><th>操作</th></tr>' +
-      (rows || '<tr><td colspan="6" style="color:var(--muted)">' +
+      (rows || '<tr><td colspan="6" class="muted">' +
         (tab === 'config' ? '暂无已配置串口' : (q ? '没有匹配的串口' : '没有未配置的串口')) + '</td></tr>') +
       '</table></div>';
     wrap.innerHTML = UI.panel('串口 TTY', ttyBody, { cls: 'mb16', left: tabsHtml,

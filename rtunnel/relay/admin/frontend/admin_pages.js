@@ -109,13 +109,13 @@ const CertsPage = Object.assign(new Page(), {
           { label: '类型', control: '<select data-field="role"><option value="device">设备</option><option value="user">用户</option></select>' },
           { label: '有效期(天)', control: '<input data-field="days" type="number" value="30" min="1" max="3650">' },
         ],
-        left: '<span id="issue-result" style="color:var(--muted)"></span>',
+        left: '<span id="issue-result" class="muted"></span>',
         right: '<button class="primary" id="issue-btn">签发</button>',
       }), { cls: 'mb16', right: '<button id="certs-refresh">刷新列表</button>' }) +
       UI.panel('CSR 签名（私钥不出设备）', '<div class="ui-pad">' +
-        '<textarea id="csr-input" rows="6" style="width:100%;font-family:monospace" placeholder="粘贴 CSR PEM（设备侧生成，SAN 或 CN 为身份）"></textarea>' +
-        '<div style="margin-top:8px;display:flex;gap:10px;align-items:center">有效期(天) <input id="csr-days" type="number" value="30" style="width:80px">' +
-        '<button id="csr-btn">签名</button><span id="csr-result" style="color:var(--muted)"></span></div></div>', { cls: 'mb16' }) +
+        '<textarea id="csr-input" rows="6" class="ui-textarea" placeholder="粘贴 CSR PEM（设备侧生成，SAN 或 CN 为身份）"></textarea>' +
+        '<div class="ui-flex ui-mt8">有效期(天) <input id="csr-days" type="number" value="30" class="ui-w80">' +
+        '<button id="csr-btn">签名</button><span id="csr-result" class="muted"></span></div></div>', { cls: 'mb16' }) +
       UI.listPage({
         title: '证书台账', summary: '共 ' + arr.length + ' 张',
         search: { id: 'cert-q', placeholder: '搜索 SAN' },
@@ -182,9 +182,9 @@ const AclPage = Object.assign(new Page(), {
   refreshInterval() { return 0; },
   async refresh() {
     const d = await Api.get('/api/v1/acl/file');
-    const aclBody = '<div class="ui-pad"><textarea id="acl-content" rows="12" style="width:100%;font-family:monospace" ' +
+    const aclBody = '<div class="ui-pad"><textarea id="acl-content" rows="12" class="ui-textarea" ' +
       'placeholder="user=devid[,devid|*]，每行一条，# 注释">' + UI.esc(d.content) + '</textarea>' +
-      '<div style="color:var(--muted);margin-top:8px">保存 = 写文件 + 热加载，只影响新 OPEN，不动已建立会话；解析失败保留旧表。</div></div>';
+      '<div class="muted ui-mt8">保存 = 写文件 + 热加载，只影响新 OPEN，不动已建立会话；解析失败保留旧表。</div></div>';
     this.el.innerHTML = UI.panel('ACL 文件（' + UI.esc(d.path || '未配置') + '）', aclBody, {
       cls: 'mb16', right: '<button id="acl-reload">重新加载</button> ' +
         '<button class="primary" id="acl-save">保存并热加载</button>',
@@ -240,13 +240,13 @@ const FilesPage = Object.assign(new Page(), {
     if (this.sort === field) order = this.order === 'asc' ? 'desc' : 'asc';
     const cur = this.sort === field ? (this.order === 'asc' ? ' ▲' : ' ▼') : '';
     return '<a href="#/files?sort=' + field + '&order=' + order +
-      '" style="color:inherit;text-decoration:none">' + label + cur + '</a>';
+      '" class="ui-tablink">' + label + cur + '</a>';
   },
   async refresh() {
     const arr = await Api.get('/api/v1/files?sort=' + this.sort + '&order=' + this.order);
     const rows = arr.map(f => [
       '<b>' + UI.esc(f.name) + '</b>',
-      '<span style="display:block;text-align:right">' + UI.bytes(f.size) + '</span>',
+      '<span class="ui-right">' + UI.bytes(f.size) + '</span>',
       '<code title="' + UI.esc(f.sha256 || '') + '">' + UI.esc((f.sha256 || '').slice(0, 8)) + '</code> ' +
         (f.sha256 ? '<button class="cp" data-hash="' + UI.esc(f.sha256) + '">复制</button>' : ''),
       new Date(f.mtime_ms).toLocaleString(),
@@ -254,11 +254,11 @@ const FilesPage = Object.assign(new Page(), {
       (canManage() ? '<button class="push" data-name="' + UI.esc(f.name) + '">分发</button> ' : '') +
       (canManage() ? '<button class="del" data-name="' + UI.esc(f.name) + '">删除</button>' : ''),
     ]);
-    const uploadBody = '<div style="padding:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
+    const uploadBody = '<div class="ui-pad ui-flex">' +
       '<input type="file" id="upload-input"> <button class="primary" id="upload-btn">上传</button>' +
-      '<progress id="upload-progress" max="100" value="0" style="width:220px;display:none"></progress>' +
-      '<span id="upload-status" style="color:var(--muted)"></span>' +
-      '<span style="color:var(--muted)">单文件上限 ' + uploadLimitMb() + ' MiB</span></div>';
+      '<progress id="upload-progress" class="ui-w220" max="100" value="0" style="display:none"></progress>' +
+      '<span id="upload-status" class="muted"></span>' +
+      '<span class="muted">单文件上限 ' + uploadLimitMb() + ' MiB</span></div>';
     this.el.innerHTML = UI.panel('上传文件', uploadBody, {
       cls: 'mb16', right: '<button id="files-refresh">刷新列表</button>',
     }) + UI.listPage({
@@ -458,7 +458,7 @@ const TerminalPage = Object.assign(new Page(), {
     this.el.innerHTML = '<div class="panel"><div class="panel-head"><h2>终端</h2>' +
       '<span class="spacer"></span><span class="term-tabs">' + tabs + '</span> ' +
       '<button id="term-new">新开</button> <button id="term-close">关闭当前</button></div>' +
-      '<div id="term-host" style="height:calc(100vh - 220px);background:#000;padding:8px"></div></div>';
+      '<div id="term-host" class="ui-term"></div></div>';
     const host = document.getElementById('term-host');
     if (!cur.opened) { cur.term.open(cur.box); cur.opened = true; }
     host.appendChild(cur.box);
