@@ -18,6 +18,9 @@ const UI = {
     const info = document.getElementById('userinfo');
     if (info) info.textContent = name + ' · ' + (ROLE_NAMES[me.role] || me.role || '');
   },
+  // 统一 Tab 组件。variant: underline(默认) / segmented / minimal / attached
+  // opts: { items:[{key,label,count,disabled}], value, variant, onChange(key) }
+  // 返回: { el, getValue, setValue, setCount, setItems, destroy }
   tabs(container, opts) {
     if (!container) return null;
     opts = opts || {};
@@ -82,7 +85,7 @@ const UI = {
       updateInk();
     };
     const onResize = () => updateInk();
-    window.addEventListener('resize', onResize);
+    if (variant === 'underline') window.addEventListener('resize', onResize);
     render();
     return {
       el: container,
@@ -102,7 +105,7 @@ const UI = {
         render();
       },
       destroy() {
-        window.removeEventListener('resize', onResize);
+        if (variant === 'underline') window.removeEventListener('resize', onResize);
         container.innerHTML = '';
       },
     };

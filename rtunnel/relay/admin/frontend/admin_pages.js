@@ -1016,17 +1016,17 @@ const PermissionPage = Object.assign(new Page(), {
   },
   async openDictManager(kind) {
     const state = { kind, q: '', sel: new Set(), list: [] };
+    let tabs;
     const m = UI.modal({
       title: '字典管理',
-      body: '<div class="dict-toolbar"><button class="dict-tab" data-kind="ports">端口字典</button>' +
-        '<button class="dict-tab" data-kind="ttys">TTY 字典</button><span class="spacer"></span>' +
+      body: '<div class="dict-toolbar"><span id="dict-tabs"></span><span class="spacer"></span>' +
         '<input id="dict-q" placeholder="搜索"><button id="dict-batch">+ 批量新增</button></div>' +
         '<div id="dict-body"></div>',
       buttons: '<button data-modal-close>关闭</button><button class="danger" id="dict-del">删除选中</button>',
+      onClose: () => { if (tabs) tabs.destroy(); },
     });
     m.el.querySelector('.tty-modal').classList.add('dict-modal');
     const render = () => {
-      m.el.querySelectorAll('.dict-tab').forEach(b => b.classList.toggle('active', b.dataset.kind === state.kind));
       const q = state.q.toLowerCase();
       const rows = state.list.filter(d => !q || d.value.toLowerCase().includes(q) || (d.name || '').toLowerCase().includes(q));
       m.el.querySelector('#dict-body').innerHTML =
@@ -1064,8 +1064,10 @@ const PermissionPage = Object.assign(new Page(), {
       catch (e) { UI.toast('加载失败：' + e.message, true); return; }
       state.sel.clear(); render();
     };
-    m.el.querySelectorAll('.dict-tab').forEach(b => b.onclick = () => {
-      state.kind = b.dataset.kind; state.sel.clear(); load();
+    tabs = UI.tabs(m.el.querySelector('#dict-tabs'), {
+      items: [{ key: 'ports', label: '端口字典' }, { key: 'ttys', label: 'TTY 字典' }],
+      value: state.kind, variant: 'segmented',
+      onChange: key => { state.kind = key; state.sel.clear(); load(); },
     });
     m.el.querySelector('#dict-q').oninput = e => { state.q = e.target.value.trim(); render(); };
     m.el.querySelector('#dict-batch').onclick = () => this.openDictBatch(state, load);
@@ -1336,17 +1338,17 @@ const GroupsPage = Object.assign(new Page(), {
   },
   async openDictManager(kind) {
     const state = { kind, q: '', sel: new Set(), list: [] };
+    let tabs;
     const m = UI.modal({
       title: '字典管理',
-      body: '<div class="dict-toolbar"><button class="dict-tab" data-kind="ports">端口字典</button>' +
-        '<button class="dict-tab" data-kind="ttys">TTY 字典</button><span class="spacer"></span>' +
+      body: '<div class="dict-toolbar"><span id="dict-tabs"></span><span class="spacer"></span>' +
         '<input id="dict-q" placeholder="搜索"><button id="dict-batch">+ 批量新增</button></div>' +
         '<div id="dict-body"></div>',
       buttons: '<button data-modal-close>关闭</button><button class="danger" id="dict-del">删除选中</button>',
+      onClose: () => { if (tabs) tabs.destroy(); },
     });
     m.el.querySelector('.tty-modal').classList.add('dict-modal');
     const render = () => {
-      m.el.querySelectorAll('.dict-tab').forEach(b => b.classList.toggle('active', b.dataset.kind === state.kind));
       const q = state.q.toLowerCase();
       const rows = state.list.filter(d => !q || d.value.toLowerCase().includes(q) || (d.name || '').toLowerCase().includes(q));
       m.el.querySelector('#dict-body').innerHTML =
@@ -1384,8 +1386,10 @@ const GroupsPage = Object.assign(new Page(), {
       catch (e) { UI.toast('加载失败：' + e.message, true); return; }
       state.sel.clear(); render();
     };
-    m.el.querySelectorAll('.dict-tab').forEach(b => b.onclick = () => {
-      state.kind = b.dataset.kind; state.sel.clear(); load();
+    tabs = UI.tabs(m.el.querySelector('#dict-tabs'), {
+      items: [{ key: 'ports', label: '端口字典' }, { key: 'ttys', label: 'TTY 字典' }],
+      value: state.kind, variant: 'segmented',
+      onChange: key => { state.kind = key; state.sel.clear(); load(); },
     });
     m.el.querySelector('#dict-q').oninput = e => { state.q = e.target.value.trim(); render(); };
     m.el.querySelector('#dict-batch').onclick = () => this.openDictBatch(state, load);
@@ -1564,17 +1568,17 @@ const SettingsPage = Object.assign(new Page(), {
   },
   async openDictManager(kind) {
     const state = { kind, q: '', sel: new Set(), list: [] };
+    let tabs;
     const m = UI.modal({
       title: '字典管理',
-      body: '<div class="dict-toolbar"><button class="dict-tab" data-kind="ports">端口字典</button>' +
-        '<button class="dict-tab" data-kind="ttys">TTY 字典</button><span class="spacer"></span>' +
+      body: '<div class="dict-toolbar"><span id="dict-tabs"></span><span class="spacer"></span>' +
         '<input id="dict-q" placeholder="搜索"><button id="dict-batch">+ 批量新增</button></div>' +
         '<div id="dict-body"></div>',
       buttons: '<button data-modal-close>关闭</button><button class="danger" id="dict-del">删除选中</button>',
+      onClose: () => { if (tabs) tabs.destroy(); },
     });
     m.el.querySelector('.tty-modal').classList.add('dict-modal');
     const render = () => {
-      m.el.querySelectorAll('.dict-tab').forEach(b => b.classList.toggle('active', b.dataset.kind === state.kind));
       const q = state.q.toLowerCase();
       const rows = state.list.filter(d => !q || d.value.toLowerCase().includes(q) || (d.name || '').toLowerCase().includes(q));
       m.el.querySelector('#dict-body').innerHTML =
@@ -1612,8 +1616,10 @@ const SettingsPage = Object.assign(new Page(), {
       catch (e) { UI.toast('加载失败：' + e.message, true); return; }
       state.sel.clear(); render();
     };
-    m.el.querySelectorAll('.dict-tab').forEach(b => b.onclick = () => {
-      state.kind = b.dataset.kind; state.sel.clear(); load();
+    tabs = UI.tabs(m.el.querySelector('#dict-tabs'), {
+      items: [{ key: 'ports', label: '端口字典' }, { key: 'ttys', label: 'TTY 字典' }],
+      value: state.kind, variant: 'segmented',
+      onChange: key => { state.kind = key; state.sel.clear(); load(); },
     });
     m.el.querySelector('#dict-q').oninput = e => { state.q = e.target.value.trim(); render(); };
     m.el.querySelector('#dict-batch').onclick = () => this.openDictBatch(state, load);
