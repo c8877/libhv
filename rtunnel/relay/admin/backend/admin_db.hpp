@@ -80,7 +80,9 @@ public:
     bool groupRemoveSubject(long long id, const std::string& type, const std::string& subject);
     bool groupDeviceMap(std::string& json_out);
     bool groupEffective(const std::string& type, const std::string& subject,
-                        std::string& json_out, std::string& err);
+                        std::string& json_out, std::string& err);    bool groupSubjectDevids(const std::string& type, const std::string& subject,
+                            std::vector<std::string>& out, bool& has_groups);
+
 
     bool metricSeriesList(const std::string& devid, std::string& json_out);
     bool metricSeriesPut(const std::string& devid, const std::string& rows_json,

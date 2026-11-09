@@ -391,3 +391,28 @@ bool AdminDb::groupEffective(const std::string& type, const std::string& subject
     json_out = out.dump();
     return true;
 }
+
+bool AdminDb::groupSubjectDevids(const std::string& type, const std::string& subject,
+                                 std::vector<std::string>& out, bool& has_groups) {
+    std::lock_guard<std::mutex> lk(mu_);
+    out.clear();
+    has_groups = false;
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, "SELECT COUNT(*) FROM subject_groups WHERE subject_type=? AND subject_id=?",
+                           -1, &st, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(st, 1, type.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, subject.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) == SQLITE_ROW) has_groups = sqlite3_column_int64(st, 0) > 0;
+    sqlite3_finalize(st);
+    if (!has_groups) return true;
+    st = nullptr;
+    if (sqlite3_prepare_v2(db_, "SELECT DISTINCT m.devid FROM dev_group_members m "
+                               "JOIN subject_groups s ON s.group_id=m.group_id "
+                               "WHERE s.subject_type=? AND s.subject_id=? ORDER BY m.devid",
+                           -1, &st, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(st, 1, type.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, subject.c_str(), -1, SQLITE_TRANSIENT);
+    while (sqlite3_step(st) == SQLITE_ROW) out.push_back((const char*)sqlite3_column_text(st, 0));
+    sqlite3_finalize(st);
+    return true;
+}

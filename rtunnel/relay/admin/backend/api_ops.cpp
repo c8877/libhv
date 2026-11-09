@@ -9,7 +9,7 @@ using nlohmann::json;
 
 void AdminServer::handleKickStream(const HttpContextPtr& ctx, const std::string& role) {
     uint32_t a_sid = (uint32_t)atoi(ctx->param("a_sid").c_str());
-    bool all = (currentActor().role == "admin" || currentActor().role == "manager");
+    bool all = !scopeRestricted();
     std::vector<std::string> mine = myDevids();
     int found = 0;
     callRelay([this, a_sid, &found, all, mine]() {

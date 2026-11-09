@@ -8,7 +8,7 @@
 using nlohmann::json;
 
 void AdminServer::handleStreams(const HttpContextPtr& ctx) {
-    bool all = (currentActor().role == "admin" || currentActor().role == "manager");
+    bool all = !scopeRestricted();
     std::vector<std::string> mine = myDevids();
     std::string body = callRelay([this, all, mine]() {
         json arr = json::array();

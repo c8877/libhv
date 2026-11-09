@@ -1,3 +1,4 @@
+#include <algorithm>
 // 账号/会话/设备归属 API（SQLite）
 #include "common/logging.hpp"
 #include "admin_server.hpp"
@@ -56,16 +57,38 @@ bool canCreateRole(const AdminActor& a, const std::string& r) {
 }
 } // namespace
 
+bool AdminServer::scopeRestricted() {
+    if (tl_actor.role == "admin") return false;
+    if (db_.ok()) {
+        std::vector<std::string> v;
+        bool has_groups = false;
+        if (db_.groupSubjectDevids("admin", tl_actor.username, v, has_groups) && has_groups) return true;
+    }
+    if (tl_actor.role == "manager") return false;
+    return tl_actor.role == "operator" || tl_actor.role == "viewer";
+}
+
 std::vector<std::string> AdminServer::myDevids() {
     std::vector<std::string> v;
-    if ((tl_actor.role == "operator" || tl_actor.role == "viewer") && db_.ok()) {
-        db_.ownedDevids(tl_actor.id, v);
+    if (tl_actor.role == "admin") return v;
+    if (db_.ok()) {
+        bool has_groups = false;
+        if (db_.groupSubjectDevids("admin", tl_actor.username, v, has_groups) && has_groups) return v;
     }
+    if ((tl_actor.role == "operator" || tl_actor.role == "viewer") && db_.ok())
+        db_.ownedDevids(tl_actor.id, v);
     return v;
 }
 
 bool AdminServer::ownsDevid(const std::string& devid) {
-    if (tl_actor.role != "operator" && tl_actor.role != "viewer") return true;
+    if (tl_actor.role == "admin") return true;
+    if (db_.ok()) {
+        std::vector<std::string> v;
+        bool has_groups = false;
+        if (db_.groupSubjectDevids("admin", tl_actor.username, v, has_groups) && has_groups)
+            return std::find(v.begin(), v.end(), devid) != v.end();
+    }
+    if (tl_actor.role == "manager") return true;
     long long owner = 0;
     if (!db_.ok() || !db_.deviceOwner(devid, owner)) return false;
     return owner == tl_actor.id;
