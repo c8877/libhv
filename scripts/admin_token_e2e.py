@@ -172,9 +172,11 @@ def main():
 
         page.locator(".acc-row").first.click()
         page.wait_for_timeout(800)
-        r.check("5 展开 Token 面板", page.locator(".acc-token-panel").count() == 1)
+        account_url = page.url
+        r.check("5 进入账号详情", page.locator(".acc-kv").count() == 1 and "#/access/" in account_url,
+                account_url)
 
-        page.locator("[data-act=new-token]").click()
+        page.locator("[data-act=tok-new]").click()
         page.wait_for_timeout(400)
         page.fill("#at-name", "限速")
         page.select_option("#at-expire", "30")
@@ -189,16 +191,14 @@ def main():
         tokens["limit"] = secret
         page.locator("[data-modal-close]").first.click()
         page.wait_for_timeout(900)
-        r.check("7 列表出现 Token", "限速" in page.evaluate("document.querySelector('#page').innerText"))
+        r.check("7 详情出现 Token", "限速" in page.evaluate("document.querySelector('.acc-token-table').innerText"))
 
         page.reload(wait_until="networkidle")
-        page.wait_for_timeout(800)
-        page.locator(".acc-row").first.click()
         page.wait_for_timeout(800)
         row = page.evaluate("document.querySelector('.acc-token-table tbody tr')?.innerText||''")
         r.check("8 刷新后回读", "限速" in row, row.replace("\n", " | "))
 
-        page.locator("[data-act=effective]").first.click()
+        page.locator("[data-act=acc-effective]").click()
         page.wait_for_timeout(600)
         eff = page.evaluate("document.querySelector('.acc-eff')?.innerText||''")
         r.check("9 有效权限", "所属客户端分组" in eff and "c" in eff, eff[:120])
@@ -207,7 +207,7 @@ def main():
         page.screenshot(path=os.path.join(shots, "access-page.png"), full_page=True)
 
         # 再建一个不限速的 Token 用于运行时用例
-        page.locator("[data-act=new-token]").click()
+        page.locator("[data-act=tok-new]").click()
         page.wait_for_timeout(400)
         page.fill("#at-name", "常规")
         page.select_option("#at-expire", "90")
@@ -218,18 +218,47 @@ def main():
         page.wait_for_timeout(600)
         r.check("10 第二个 Token", tokens["normal"].startswith("rtk_"))
 
+        # 行内展开表单：只读行保留，改完立即回读
+        page.locator("[data-act=tok-edit]").first.click()
+        page.wait_for_timeout(400)
+        r.check("11 行内表单展开", page.locator("tr.tok-edit-row .tok-form").count() == 1 and
+                page.locator("tr.tok-row").count() == 2)
+        page.fill("#te-name", "常规-改")
+        page.fill("#te-quota", "2")
+        page.fill("#te-rate", "5")
+        page.fill("#te-sessions", "3")
+        page.locator("[data-act=tok-save]").click()
+        page.wait_for_timeout(900)
+        edited = page.evaluate("document.querySelector('.acc-token-table tbody tr')?.innerText||''")
+        r.check("12 行内表单保存", "常规-改" in edited and "2.0 GB" in edited and
+                "5/分" in edited and "并发 3" in edited, edited.replace("\n", " | "))
+
+        # 状态筛选
+        page.locator("#tok-tabs .ui-tab[data-key=disabled]").click()
+        page.wait_for_timeout(400)
+        r.check("13 状态筛选", "暂无 Token" in page.evaluate("document.querySelector('.acc-token-table').innerText"))
+        page.locator("#tok-tabs .ui-tab[data-key=all]").click()
+        page.wait_for_timeout(400)
+
         # 轮换「限速」那一行（列表按 id 倒序，第二行）
         page.locator("[data-act=tok-rotate]").nth(1).click()
         page.wait_for_timeout(400)
         page.locator(".tty-btns button").last.click()
         page.wait_for_timeout(800)
         rotated = page.evaluate("document.getElementById('as-value')?.textContent||''")
-        r.check("11 轮换生成新 Token", rotated.startswith("rtk_") and rotated not in tokens.values(), rotated[:16])
+        r.check("14 轮换生成新 Token", rotated.startswith("rtk_") and rotated not in tokens.values(), rotated[:16])
         if rotated.startswith("rtk_"):
             tokens["limit"] = rotated
         page.locator("[data-modal-close]").first.click()
         page.wait_for_timeout(600)
 
+        # 不存在的账号
+        page.goto(base + "/#/access/9999")
+        page.wait_for_timeout(700)
+        r.check("15 详情 404", "账号不存在" in page.evaluate("document.querySelector('#page').innerText"))
+
+        page.goto(account_url)
+        page.wait_for_timeout(700)
         page.screenshot(path=os.path.join(shots, "access-tokens.png"), full_page=True)
         browser.close()
 
@@ -246,9 +275,9 @@ def main():
              "--token", tokens["normal"], "--socks5", "127.0.0.1:%d" % sp, "--verbose"], "client.log")
     time.sleep(1.4)
     log = open(os.path.join(work, "client.log")).read()
-    r.check("12 Token 单独登录", "authenticated as alice" in log, log[-160:])
+    r.check("16 Token 单独登录", "authenticated as alice" in log, log[-160:])
     ok, rep = socks_ping(sp, "dev1", e1)
-    r.check("13 Token 授权可访问设备", ok, "rep=%d" % rep)
+    r.check("17 Token 授权可访问设备", ok, "rep=%d" % rep)
 
     # 请求频率：2 次/分，burst 2
     sp_lim = free_port()
@@ -256,8 +285,8 @@ def main():
              "--token", tokens["limit"], "--socks5", "127.0.0.1:%d" % sp_lim, "--verbose"], "limit.log")
     time.sleep(1.4)
     reps = [try_open(sp_lim) for _ in range(3)]
-    r.check("14 请求频率：前两次放行", reps[0] == 0 and reps[1] == 0, reps)
-    r.check("15 请求频率：第三次被限", reps[2] != 0, reps)
+    r.check("18 请求频率：前两次放行", reps[0] == 0 and reps[1] == 0, reps)
+    r.check("19 请求频率：第三次被限", reps[2] != 0, reps)
 
     # 并发会话：max_sessions=1
     res = api("POST", "/api/v1/client-accounts/%d/tokens" % 1,
@@ -268,8 +297,8 @@ def main():
     time.sleep(1.4)
     s1, p1 = socks5_open(("tcp", "127.0.0.1", sp_ses), "dev1", e1, timeout=5)
     p2 = try_open(sp_ses)
-    r.check("16 并发：第一条放行", s1 is not None and p1 == 0, "rep=%d" % p1)
-    r.check("17 并发：第二条被拒", p2 != 0, "rep=%d" % p2)
+    r.check("20 并发：第一条放行", s1 is not None and p1 == 0, "rep=%d" % p1)
+    r.check("21 并发：第二条被拒", p2 != 0, "rep=%d" % p2)
     if s1:
         s1.close()
 
@@ -279,7 +308,7 @@ def main():
              "--token", "rtk_" + "A" * 43, "--socks5", "127.0.0.1:%d" % sp_bad, "--verbose"], "bad.log")
     time.sleep(1.4)
     bad = open(os.path.join(work, "bad.log")).read()
-    r.check("18 无效 Token 停止重连", "stop reconnecting" in bad, bad[-160:])
+    r.check("22 无效 Token 停止重连", "stop reconnecting" in bad, bad[-160:])
 
     # 用户名与 Token 不符
     sp_mis = free_port()
@@ -288,15 +317,15 @@ def main():
              "--socks5", "127.0.0.1:%d" % sp_mis, "--verbose"], "mismatch.log")
     time.sleep(1.4)
     mis = open(os.path.join(work, "mismatch.log")).read()
-    r.check("19 用户名不符被拒", "user mismatch" in mis, mis[-160:])
+    r.check("23 用户名不符被拒", "user mismatch" in mis, mis[-160:])
 
     # 停用 Token：在线连接被踢、重连被拒
     toks = api("GET", "/api/v1/client-accounts/1/tokens")
-    normal = [t for t in toks if t["name"] == "常规"][0]
+    normal = [t for t in toks if t["name"] == "常规-改"][0]
     api("PUT", "/api/v1/client-tokens/%d" % normal["id"], {"status": "disabled"})
     time.sleep(1.0)
     ok2, rep2 = socks_ping(sp, "dev1", e1)
-    r.check("20 停用 Token 后拒绝", not ok2, "rep=%d" % rep2)
+    r.check("24 停用 Token 后拒绝", not ok2, "rep=%d" % rep2)
 
     # 流量配额：32 字节，cut
     api("POST", "/api/v1/client-accounts", {"username": "carol"})
@@ -320,25 +349,25 @@ def main():
         except OSError:
             pass
         s.close()
-    r.check("21 配额内可收发", inside, "rep=%d" % rep3)
+    r.check("25 配额内可收发", inside, "rep=%d" % rep3)
     time.sleep(1.0)
     p4 = try_open(sp_q)
-    r.check("22 超配额后拒绝", p4 != 0, "rep=%d" % p4)
+    r.check("26 超配额后拒绝", p4 != 0, "rep=%d" % p4)
 
     # 用量落库
     time.sleep(6)
     q = subprocess.check_output(
         ["sqlite3", os.path.join(work, "admin.db"),
          "select used_bytes from client_tokens where name='配额';"], text=True).strip()
-    r.check("23 用量已落库", bool(q) and int(q) >= 32, q)
+    r.check("27 用量已落库", bool(q) and int(q) >= 32, q)
 
-    r.check("24 全程无 JS 报错", not errs, errs[:3])
+    r.check("28 全程无 JS 报错", not errs, errs[:3])
 
     r.stop()
     echo1.close()
     echo2.close()
 
-    total = 24
+    total = 28
     print("=== %d/%d passed === work=%s" % (total - len(r.fails), total, work))
     if args.keep:
         print("保留：", work)

@@ -154,6 +154,7 @@ void AdminServer::registerRoutes() {
     });
     // 接入账号与 Token
     access(ROLE_OPERATOR, "GET", "/api/v1/client-accounts", &AdminServer::handleClientAccounts);
+    access(ROLE_OPERATOR, "GET", "/api/v1/client-accounts/:id", &AdminServer::handleClientAccountGet);
     service_.Handle("POST", "/api/v1/client-accounts", [this](const HttpContextPtr& ctx) {
         std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
         handleClientAccountCreate(ctx, role); return 200;

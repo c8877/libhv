@@ -163,6 +163,7 @@ private:
     void handleUserRole(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleUserDelete(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleClientAccounts(const HttpContextPtr& ctx);
+    void handleClientAccountGet(const HttpContextPtr& ctx);
     void handleClientAccountCreate(const HttpContextPtr& ctx, const std::string& role);
     void handleClientAccountUpdate(const HttpContextPtr& ctx, const std::string& role);
     void handleClientAccountDelete(const HttpContextPtr& ctx, const std::string& role);

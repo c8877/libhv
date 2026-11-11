@@ -100,8 +100,18 @@ bool AdminDb::clientAccountList(const std::string& q, std::string& json_out) {
 bool AdminDb::clientAccountGet(long long id, std::string& json_out, std::string& err) {
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, "SELECT id,username,display_name,status,note,created_by,created_ms,updated_ms "
-                                "FROM client_accounts WHERE id=?", -1, &st, nullptr) != SQLITE_OK) {
+    const char* sql =
+        "SELECT a.id,a.username,a.display_name,a.status,a.note,a.created_by,a.created_ms,a.updated_ms,"
+        "(SELECT COUNT(*) FROM client_tokens t WHERE t.account_id=a.id),"
+        "(SELECT COUNT(*) FROM client_tokens t WHERE t.account_id=a.id AND t.status='active'),"
+        "(SELECT COUNT(*) FROM client_tokens t WHERE t.account_id=a.id AND t.status='disabled'),"
+        "(SELECT COUNT(*) FROM client_tokens t WHERE t.account_id=a.id AND t.status='revoked'),"
+        "(SELECT COALESCE(MAX(t.last_used_ms),0) FROM client_tokens t WHERE t.account_id=a.id),"
+        "(SELECT t.last_used_ip FROM client_tokens t WHERE t.account_id=a.id "
+        " ORDER BY t.last_used_ms DESC LIMIT 1),"
+        "(SELECT COUNT(*) FROM client_group_members m WHERE m.username=a.username) "
+        "FROM client_accounts a WHERE a.id=?";
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
         err = "db error";
         return false;
     }
@@ -120,6 +130,13 @@ bool AdminDb::clientAccountGet(long long id, std::string& json_out, std::string&
     a["created_by"] = colText(st, 5);
     a["created_ms"] = colInt(st, 6);
     a["updated_ms"] = colInt(st, 7);
+    a["token_count"] = colInt(st, 8);
+    a["token_active"] = colInt(st, 9);
+    a["token_disabled"] = colInt(st, 10);
+    a["token_revoked"] = colInt(st, 11);
+    a["last_used_ms"] = colInt(st, 12);
+    a["last_used_ip"] = colText(st, 13);
+    a["group_count"] = colInt(st, 14);
     sqlite3_finalize(st);
     json_out = a.dump();
     return true;

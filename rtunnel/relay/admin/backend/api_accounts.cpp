@@ -57,6 +57,13 @@ void AdminServer::handleClientAccounts(const HttpContextPtr& ctx) {
     ctx->send(out);
 }
 
+void AdminServer::handleClientAccountGet(const HttpContextPtr& ctx) {
+    long long id = atoll(ctx->param("id").c_str());
+    std::string out, err;
+    if (!db_.clientAccountGet(id, out, err)) { notfound(ctx, err); return; }
+    ctx->send(out);
+}
+
 void AdminServer::handleClientAccountCreate(const HttpContextPtr& ctx, const std::string& role) {
     json req = json::parse(ctx->body(), nullptr, false);
     if (req.is_discarded() || !req.is_object()) { bad(ctx, "bad json"); return; }

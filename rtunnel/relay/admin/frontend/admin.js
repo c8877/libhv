@@ -16,7 +16,9 @@ const Api = {
     if (!r.ok) {
       let msg = 'HTTP ' + r.status;
       try { const j = await r.json(); if (j && j.error) msg = j.error; } catch (e) {}
-      throw new Error(msg);
+      const err = new Error(msg);
+      err.status = r.status;
+      throw err;
     }
     return r.json();
   },
