@@ -2,7 +2,9 @@
    1. 先找现有组件（.panel / .detail-table / .pill / .ui-* / .kv-list），不要为单个页面另起一套
    2. 同一选择器只定义一次；要改就改原规则，不要在文末追加覆盖
    3. 颜色优先用 token（--bg / --fg / --border / --surface-* / --divider*），少写字面量
-   4. 改完跑 python3 scripts/css_audit.py */
+   4. 输入框与所在面板要有明暗反差：浅色/浅蓝主题比面板深一档（下沉），深色主题比面板浅一档（浮起）；
+      聚焦由全局 :focus 规则统一加强调色描边与光晕，不要在页面里另写一套
+   5. 改完跑 python3 scripts/css_audit.py */
 :root {
   --side-w: 220px;
   --bg: #f5f6f8;
@@ -17,7 +19,7 @@
   --ok: #16a34a;
   --warn: #d97706;
   --bad: #dc2626;
-  /* 组件 token */
+  /* 组件 token：浅色/浅蓝主题输入框比面板深一档（下沉），深色主题比面板浅一档（浮起） */
   --input-bg: #e4eaf1;
   --input-fg: #1f2937;
   --input-border: #94a3b8;
@@ -48,9 +50,9 @@ html[data-theme="dark"] {
   --ok: #3fb950;
   --warn: #d29922;
   --bad: #f85149;
-  --input-bg: #070a0e;
+  --input-bg: #28313d;
   --input-fg: #e6e9ee;
-  --input-border: #5c6776;
+  --input-border: #6d7989;
   --hover: #1d232b;
   --th-bg: #1a1f26;
   --toast-bg: #e6e9ee;
@@ -123,6 +125,14 @@ input, select, button { font: inherit; }
 input, select, textarea { border: 1px solid var(--input-border); border-radius: 6px; padding: 6px 10px;
   background: var(--input-bg); color: var(--input-fg); }
 input:disabled, select:disabled, textarea:disabled { opacity: .6; cursor: not-allowed; }
+/* 聚焦：边框转强调色，外加 1px 描边与 3px 光晕，任何主题下都能看出焦点 */
+input:not([type=checkbox]):not([type=radio]):not([type=file]):focus,
+select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent),
+              0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+}
 button { border: 1px solid var(--input-border); border-radius: 6px; padding: 6px 14px;
   background: var(--input-bg); color: var(--fg); cursor: pointer; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -222,9 +232,9 @@ html[data-theme="color"] {
   --fg: #1f2937;
   --muted: #5a6472;
   --border: color-mix(in srgb, var(--accent) 24%, #ffffff);
-  --input-bg: color-mix(in srgb, var(--accent) 22%, #ffffff);
+  --input-bg: color-mix(in srgb, var(--accent) 30%, #dde4ec);
   --input-fg: #1f2937;
-  --input-border: color-mix(in srgb, var(--accent) 65%, #ffffff);
+  --input-border: color-mix(in srgb, var(--accent) 55%, #8fa0b3);
   --hover: color-mix(in srgb, var(--accent) 8%, #ffffff);
   --th-bg: color-mix(in srgb, var(--accent) 5%, #ffffff);
   --side-bg: color-mix(in srgb, var(--accent) 30%, #0f141a);
