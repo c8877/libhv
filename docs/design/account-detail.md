@@ -232,7 +232,7 @@ const [account, eff] = await Promise.all([
 ```
 
 ```
-可编辑    状态（select）、展示名（input）、备注（textarea）
+可编辑    状态（switch 开关）、展示名（input）、备注（textarea）
 只读      用户名、账号 ID、创建人/时间、更新时间、最近使用、Token、权限摘要
 表结构    不变；可编辑单元格内放控件，表格列宽不变
 按钮      编辑中隐藏「编辑资料 / 有效权限 / 停用」和底部删除区，避免半途改其它状态
@@ -725,9 +725,10 @@ const editor = UI.editTable(host, {
     cls: 'acc-wrap',          // 值单元格附加类
     view: d => UI.status(d.status, MAP),
     edit: {                   // 没有 edit 即只读字段
-      type: 'select',         // text / number / datetime-local / select / textarea / custom
+      type: 'switch',         // text / number / datetime-local / select / switch / textarea / custom
       id: 'ae-status',
-      options: [{ value: 'active', label: '启用' }],
+      onValue: 'active', offValue: 'disabled',   // 开关映射到的业务值
+      onLabel: '启用', offLabel: '停用',
       value: d => d.status,   // 可选：编辑值不同于 key
       html: (v, d) => '…',    // type=custom 时自定义控件，需带 data-ef
       placeholder, maxlength, rows, step, min, max,
@@ -761,6 +762,8 @@ editor.values()       读取所有 [data-ef] 控件的值
 ```
 同一张表       表格行数、列宽在两种形态下不变，只替换单元格内容
 只读字段       保持文本渲染，编辑时仍能看到账号 ID、创建时间等上下文
+布尔字段       用 type:'switch'，不要用 select 或裸 checkbox；
+               开关文案随勾选即时切换，Enter 只保存、不误切换
 按钮           编辑态的保存/取消由 data-edit-save / data-edit-cancel 绑定，
                视图态按钮继续走 data-act + UI.actions
 Esc / Enter    Esc 取消；输入框内 Enter 保存（textarea 不拦截）

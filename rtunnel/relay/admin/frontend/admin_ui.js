@@ -458,7 +458,8 @@ const UI = {
   // opts: {
   //   data, columns=2,
   //   fields: [{ key, label, span=1, cls, view(data), edit:{type,id,options,value(data),
-  //              html(value,data),placeholder,maxlength,rows,step,min,max} }],
+  //              html(value,data),placeholder,maxlength,rows,step,min,max,
+  //              onValue,offValue,onLabel,offLabel} }],
   //   cls, actions, renderActions(editing, data),
   //   hint(values, data) -> string | {text,warn},
   //   confirmSave(values, data) -> Promise<bool>|bool,
@@ -484,6 +485,16 @@ const UI = {
       const attrs = ' class="ui-inline"' + ' data-ef="' + UI.esc(f.key) + '"' +
         (e.id ? ' id="' + UI.esc(e.id) + '"' : '');
       if (e.type === 'custom') return e.html ? e.html(v, state.data) : '';
+      if (e.type === 'switch') {
+        const on = String(v) === String(e.onValue != null ? e.onValue : '1');
+        const onLabel = e.onLabel != null ? e.onLabel : '开';
+        const offLabel = e.offLabel != null ? e.offLabel : '关';
+        return '<label class="ui-switch"' + (e.id ? ' id="' + UI.esc(e.id) + '"' : '') + '>' +
+          '<input type="checkbox" data-ef="' + UI.esc(f.key) + '"' + (on ? ' checked' : '') + '>' +
+          '<span class="ui-switch-track"><span class="ui-switch-dot"></span></span>' +
+          '<span class="ui-switch-text" data-on="' + UI.esc(onLabel) + '" data-off="' + UI.esc(offLabel) + '">' +
+          UI.esc(on ? onLabel : offLabel) + '</span></label>';
+      }
       if (e.type === 'select') {
         return '<select' + attrs + '>' + (e.options || []).map(op =>
           '<option value="' + UI.esc(op.value) + '"' +
@@ -537,8 +548,18 @@ const UI = {
 
     const values = () => {
       const out = {};
+      const edits = {};
+      fields.forEach(f => { if (f.edit) edits[f.key] = f.edit; });
       host.querySelectorAll('[data-ef]').forEach(el => {
-        out[el.dataset.ef] = el.type === 'checkbox' ? (el.checked ? '1' : '') : el.value;
+        const key = el.dataset.ef;
+        if (el.type === 'checkbox') {
+          const e = edits[key] || {};
+          out[key] = el.checked
+            ? (e.onValue != null ? e.onValue : '1')
+            : (e.offValue != null ? e.offValue : '');
+        } else {
+          out[key] = el.value;
+        }
       });
       return out;
     };
@@ -592,12 +613,17 @@ const UI = {
       if (state.editing && e.target.dataset && e.target.dataset.ef != null) updateHint();
     });
     host.addEventListener('change', e => {
-      if (state.editing && e.target.dataset && e.target.dataset.ef != null) updateHint();
+      if (!state.editing || !e.target.dataset || e.target.dataset.ef == null) return;
+      if (e.target.type === 'checkbox') {
+        const txt = e.target.parentElement.querySelector('.ui-switch-text');
+        if (txt) txt.textContent = e.target.checked ? txt.dataset.on : txt.dataset.off;
+      }
+      updateHint();
     });
     host.addEventListener('keydown', e => {
       if (!state.editing) return;
       if (e.key === 'Escape') { e.preventDefault(); api.cancel(); }
-      else if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
+      else if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') {
         e.preventDefault();
         api.save();
       }

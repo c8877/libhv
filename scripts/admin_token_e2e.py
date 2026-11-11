@@ -187,6 +187,19 @@ def main():
                 page.locator("#ae-display").count() == 1 and page.locator("#ae-status").count() == 1 and
                 rows_edit == rows_view and
                 page.evaluate("document.querySelector('.acc-kv td .mono')?.textContent") == "alice")
+        # 布尔字段用开关，不是下拉
+        r.check("5b2 状态为开关", page.locator("#ae-status input[type=checkbox]").count() == 1 and
+                page.locator("#ae-status select").count() == 0)
+        page.locator("#ae-status .ui-switch-track").click()
+        page.wait_for_timeout(200)
+        hint = page.evaluate("document.querySelector('.ui-edit-hint').textContent")
+        label = page.evaluate("document.querySelector('.ui-switch-text').textContent")
+        r.check("5b3 开关切到停用", label == "停用" and "全部失效" in hint, label + " / " + hint)
+        page.locator("#ae-status .ui-switch-track").click()
+        page.wait_for_timeout(200)
+        hint = page.evaluate("document.querySelector('.ui-edit-hint').textContent")
+        label = page.evaluate("document.querySelector('.ui-switch-text').textContent")
+        r.check("5b4 开关切回启用", label == "启用" and "全部失效" not in hint, label + " / " + hint)
         page.fill("#ae-display", "Alice")
         page.fill("#ae-note", "产线采集机")
         page.locator("[data-edit-save]").click()
@@ -433,7 +446,7 @@ def main():
     echo1.close()
     echo2.close()
 
-    total = 36
+    total = 39
     print("=== %d/%d passed === work=%s" % (total - len(r.fails), total, work))
     if args.keep:
         print("保留：", work)
