@@ -106,7 +106,7 @@ RTUNNEL_UDS=1 make rtunnel_test    # 本地入口走 UDS（需要 -DENABLE_UDS=O
 
 relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，独立 worker 线程）：
 
-- 能力：概览、设备/会话、踢会话/下线、权限（分组 / 有效权限 / 旧 ACL 导入导出）、证书签发/吊销、文件、审计、系统设置
+- 能力：概览、设备/会话、踢会话/下线、权限（分组 / 有效权限 / 旧 ACL 导入导出）、接入账号与 Token（时效 / 流量 / 频率 / 并发）、证书签发/吊销、文件、审计、系统设置
 - API 与权限矩阵：见 `docs/design/rtunnel.md` §13.3
 - 文件分发：文件页「分发」→ 选择设备/时间窗/重试 → 每设备一条任务；
   `POST /api/v1/distributions` 创建，`GET /api/v1/distributions` 查询，

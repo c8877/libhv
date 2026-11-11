@@ -1,6 +1,6 @@
 # 接入账号与 Token（设计稿）
 
-状态：设计评审中，未实现  
+状态：P1–P3 已实现；P4 仅完成审计与文档，旧凭据导入未做（原因见 §10）  
 关联：`docs/permission.md`、`docs/admin/permission.md`、`docs/design/rtunnel.md`
 
 ---
@@ -769,4 +769,72 @@ P4  旧凭据导入、审计完善、文档与运维说明
 协议版本
   rtnp::VERSION 不递增，auth_type=2 与 AUTH_OK 尾部均为向后兼容扩展
   新客户端连接旧 relay 时会因 auth_type=2 被拒，回退到静态 token 即可
+```
+
+# 10. 实现说明
+
+## 10.1 代码位置
+
+```
+rtunnel/common/sha256.*            自带 SHA-256（relay 无 OpenSSL 也能校验）
+rtunnel/common/token_util.*        Token 生成 / base64url / 周期边界
+rtunnel/relay/admin/backend/admin_db_accounts.cpp   账号与 Token 存取
+rtunnel/relay/admin/backend/api_accounts.cpp        管理 API
+rtunnel/relay/admin/frontend/admin_accounts.js      接入账号页
+```
+
+协议扩展在 `rtnp/frame.hpp`（`TOKEN_*` 错误码）与 `common/tunnel_link.cpp`（auth_type=2、
+AUTH_OK 尾部、致命认证错误不再重连）。
+
+## 10.2 客户端用法
+
+```bash
+# 只带 Token，用户名由 relay 从 Token 解析后回填
+rtunnel-client --token rtk_xxx --socks5 127.0.0.1:1080
+
+# 也可以两者都给，但必须一致，否则 AUTH_FAIL
+rtunnel-client --user alice --token rtk_xxx --socks5 127.0.0.1:1080
+```
+
+识别规则：`rtk_` 前缀走 `auth_type=2`，其他按静态凭据（`auth_type=1`）。
+静态凭据仍然可用，但同名账号被停用后同样会被拒绝。
+
+## 10.3 生效与落库
+
+```
+创建 / 修改 / 轮换 / 删除 Token  → 立即推送全量策略到 relay
+relay 侧限流、并发、流量计量      → 全在事件循环线程，无锁
+用量快照                          → 每 token.usage_flush_ms（默认 5s）写回 SQLite
+周期重置                          → relay 5s 扫描 + 写回时 period_start_ms 乐观锁
+```
+
+## 10.4 运维检查
+
+```bash
+# 某个账号当前能用什么
+权限页 →「有效权限」，或
+curl -b cookie 'http://127.0.0.1:9443/api/v1/client-accounts/1/effective'
+
+# Token 用量
+sqlite3 admin.db "select id,name,used_bytes,quota_bytes,last_used_ip from client_tokens;"
+
+# 客户端被拒原因
+relay.log 搜 "token auth rejected" / "client auth rejected"
+客户端日志搜 "auth failed: code="
+  12 过期  13 停用/无效  14 配额用完  15 频率超限  16 并发超限
+```
+
+## 10.5 未做的部分
+
+```
+旧凭据导入
+  旧 --client-users 的 token 是任意字符串，客户端会按 auth_type=1 发送；
+  若导入后仍要可用，需要让 relay 对 type=1 也查 Token 哈希，等于让两套凭据语义混在一起。
+  当前选择：静态凭据与账号 Token 并行存在，新部署直接用 Token，旧凭据保留到迁移完成。
+
+Token 级设备白名单
+  v1 按设计不做；需要多租户共用账号时再加 token_devices 表。
+
+多 relay 实例
+  策略与用量都在进程内，SQLite 单写，仍只支持单实例。
 ```

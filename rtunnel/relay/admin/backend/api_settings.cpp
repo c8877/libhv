@@ -29,6 +29,8 @@ const Def kDefs[] = {
     {"term.max_sessions",    "4",   1, 32,       "单账号最大终端数","个", "终端", "单账号同时打开的终端数量"},
     {"audit.retention_days", "30",  7, 365,      "审计保留",       "天",  "审计", "审计日志保留天数"},
     {"ui.site_title",        "rtunnel", 0, 0,    "站点标题",       "",    "展示", "浏览器标题和页面标题"},
+    {"token.max_per_account","20",   1, 200,      "单账号 Token 上限","个", "接入账号", "每个账号可同时存在的 Token 数"},
+    {"token.usage_flush_ms", "5000", 1000, 60000,"用量落库间隔",   "ms",  "接入账号", "relay 用量写回数据库的间隔"},
 };
 
 const Def* findDef(const std::string& k) {

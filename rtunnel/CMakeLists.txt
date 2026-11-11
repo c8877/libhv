@@ -12,7 +12,8 @@ add_library(rtnp STATIC rtnp/codec.cpp)
 target_include_directories(rtnp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(rtnp PUBLIC ${HV_LIBRARIES})
 
-add_library(rtunnel_common STATIC common/tunnel_link.cpp common/shell_spawn.cpp)
+add_library(rtunnel_common STATIC common/tunnel_link.cpp common/shell_spawn.cpp
+                                 common/sha256.cpp common/token_util.cpp)
 target_link_libraries(rtunnel_common PUBLIC rtnp rtunnel_gzip)
 
 # 嵌入式目标静态链接 C++ 运行时（目标机无 libstdc++ 时使用，如 MP135）
@@ -24,7 +25,7 @@ set(ADMIN_FRONTEND ${CMAKE_CURRENT_SOURCE_DIR}/relay/admin/frontend)
 set(EMBEDDED_CPP ${CMAKE_CURRENT_BINARY_DIR}/embedded_frontend.cpp)
 add_custom_command(OUTPUT ${EMBEDDED_CPP}
     COMMAND ${Python3_EXECUTABLE} ${ADMIN_FRONTEND}/embed.py ${ADMIN_FRONTEND} ${EMBEDDED_CPP}
-    DEPENDS ${ADMIN_FRONTEND}/admin.html ${ADMIN_FRONTEND}/admin.js ${ADMIN_FRONTEND}/admin_agent.js ${ADMIN_FRONTEND}/admin_pages.js ${ADMIN_FRONTEND}/admin_dist.js ${ADMIN_FRONTEND}/admin.css ${ADMIN_FRONTEND}/embed.py
+    DEPENDS ${ADMIN_FRONTEND}/admin.html ${ADMIN_FRONTEND}/admin.js ${ADMIN_FRONTEND}/admin_agent.js ${ADMIN_FRONTEND}/admin_pages.js ${ADMIN_FRONTEND}/admin_accounts.js ${ADMIN_FRONTEND}/admin_dist.js ${ADMIN_FRONTEND}/admin.css ${ADMIN_FRONTEND}/embed.py
             ${ADMIN_FRONTEND}/vendor/xterm.js ${ADMIN_FRONTEND}/vendor/xterm.css ${ADMIN_FRONTEND}/vendor/xterm-addon-fit.js
     COMMENT "embed rtunnel admin frontend")
 
@@ -33,6 +34,7 @@ target_compile_definitions(rtunnel_sqlite PRIVATE SQLITE_THREADSAFE=1 SQLITE_OMI
 set_target_properties(rtunnel_sqlite PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_log.cpp
+               common/sha256.cpp common/token_util.cpp
                relay/admin/backend/admin_server.cpp
                relay/admin/backend/admin_routes.cpp
                relay/admin/backend/api_agents.cpp
@@ -48,6 +50,8 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
                relay/admin/backend/admin_db_groups.cpp
                relay/admin/backend/admin_db_permission.cpp
                relay/admin/backend/admin_db_dict.cpp
+               relay/admin/backend/admin_db_accounts.cpp
+               relay/admin/backend/api_accounts.cpp
                relay/admin/backend/admin_db_dist.cpp
                relay/admin/backend/admin_db_tty.cpp
                relay/admin/backend/admin_db_metric_series.cpp

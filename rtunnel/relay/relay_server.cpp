@@ -1,6 +1,8 @@
 #include "relay_server.hpp"
 #include "cpputil/json.hpp"
 #include "common/logging.hpp"
+#include "common/sha256.hpp"
+#include "common/token_util.hpp"
 #include "relay/admin/backend/admin_server.hpp"
 
 #include <stdio.h>
@@ -72,6 +74,16 @@ void RelayServer::hsTimeoutCb(htimer_t* t) {
 void RelayServer::statsCb(htimer_t* t) {
     auto* self = (RelayServer*)hevent_userdata(t);
     if (self) self->onStats();
+}
+
+void RelayServer::tokenCutCb(htimer_t* t) {
+    auto* self = (RelayServer*)hevent_userdata(t);
+    if (self) self->tokenApplyCuts();
+}
+
+void RelayServer::tokenCb(htimer_t* t) {
+    auto* self = (RelayServer*)hevent_userdata(t);
+    if (self) self->tokenSweep();
 }
 
 void RelayServer::drainCb(htimer_t* t) {
@@ -178,6 +190,222 @@ void RelayServer::setGroupAcl(std::vector<GroupAclRule> rules, std::set<std::str
     acl_grouped_users = std::move(users);
     if (verbose) logf_("[relay] group acl: %zu rules, %zu grouped users",
                        acl_groups.size(), acl_grouped_users.size());
+}
+
+// ---------------------------------------------------------------- Token 运行时
+
+void RelayServer::setAuthPolicies(const std::string& json) {
+    auto doc = nlohmann::json::parse(json, nullptr, false);
+    if (doc.is_discarded() || !doc.is_object() || !doc.contains("tokens")) {
+        logf_("[relay] auth policies: bad payload");
+        return;
+    }
+    account_active.clear();
+    if (doc.contains("accounts") && doc["accounts"].is_object()) {
+        for (auto it = doc["accounts"].begin(); it != doc["accounts"].end(); ++it) {
+            account_active[it.key()] = it.value() == "active" ? 1 : 0;
+        }
+    }
+    std::unordered_map<std::string, TokenPolicy> next;
+    for (auto& item : doc["tokens"]) {
+        if (!item.is_object()) continue;
+        TokenPolicy p;
+        p.id = item.value("id", 0LL);
+        p.account_id = item.value("account_id", 0LL);
+        p.username = item.value("username", std::string());
+        p.hash = item.value("hash", std::string());
+        p.prefix = item.value("prefix", std::string());
+        p.name = item.value("name", std::string());
+        p.status = item.value("status", std::string()) == "active" ? 0 : 1;
+        p.account_active = item.value("account_status", std::string()) == "active" ? 1 : 0;
+        p.expires_at_ms = item.value("expires_at_ms", 0LL);
+        p.quota_bytes = item.value("quota_bytes", 0LL);
+        p.quota_period = (int)rtutil::tokenPeriodFromName(item.value("quota_period", std::string("total")));
+        p.period_start_ms = item.value("period_start_ms", 0LL);
+        p.used_base = item.value("used_bytes", 0LL);
+        p.rate_per_min = item.value("rate_per_min", 0);
+        p.burst = item.value("burst", 0);
+        p.max_sessions = item.value("max_sessions", 0);
+        p.quota_action = item.value("quota_action", std::string()) == "block" ? 1 : 0;
+        if (p.hash.empty()) continue;
+
+        auto it = token_usage.find(p.id);
+        if (it == token_usage.end()) {
+            TokenUsage u;
+            u.used_bytes = p.used_base;
+            u.period_start_ms = p.period_start_ms;
+            token_usage[p.id] = u;
+        } else if (p.period_start_ms > 0 && p.period_start_ms > it->second.period_start_ms) {
+            // 周期已重置（或管理员改了周期），以 DB 为准
+            it->second.used_bytes = p.used_base;
+            it->second.period_start_ms = p.period_start_ms;
+            it->second.bucket = 0;
+        } else if (p.period_start_ms == it->second.period_start_ms && p.used_base > it->second.used_bytes) {
+            // 落库值比本地大（例如重启后），取大者
+            it->second.used_bytes = p.used_base;
+        }
+        next[p.hash] = p;
+    }
+    token_cache = std::move(next);
+
+    // 丢掉已删除 Token 的运行状态
+    for (auto it = token_usage.begin(); it != token_usage.end();) {
+        bool keep = false;
+        for (auto& kv : token_cache) {
+            if (kv.second.id == it->first) { keep = true; break; }
+        }
+        if (keep) ++it; else it = token_usage.erase(it);
+    }
+
+    // 停用/过期/账号停用的 Token：踢掉在线连接（先收集，close 会同步 delete）
+    uint64_t now = (uint64_t)time(NULL) * 1000;
+    std::vector<RelayConn*> dead_conns;
+    for (RelayConn* c = conns; c; c = c->next_all) {
+        if (c->token_id == 0) continue;
+        const TokenPolicy* p = tokenById(c->token_id);
+        bool dead = (p == nullptr) || p->status != 0 || !p->account_active ||
+                    (p->expires_at_ms > 0 && (int64_t)now >= p->expires_at_ms);
+        if (dead) dead_conns.push_back(c);
+    }
+    for (RelayConn* c : dead_conns) {
+        sendErr(c->io, rtnp::ERROR, 0, rtnp::TOKEN_DISABLED, "token disabled");
+        connCloseAllStreams(c, rtnp::TOKEN_DISABLED);
+        hio_close(c->io);
+    }
+    if (verbose) logf_("[relay] auth policies: %zu tokens, %zu accounts",
+                       token_cache.size(), account_active.size());
+}
+
+std::string RelayServer::tokenUsageSnapshot() {
+    nlohmann::json arr = nlohmann::json::array();
+    for (auto& kv : token_usage) {
+        nlohmann::json j;
+        j["id"] = kv.first;
+        j["used_bytes"] = kv.second.used_bytes;
+        j["period_start_ms"] = kv.second.period_start_ms;
+        j["last_used_ms"] = (long long)kv.second.last_used_ms;
+        j["last_used_ip"] = kv.second.last_ip;
+        arr.push_back(j);
+    }
+    return arr.dump();
+}
+
+const TokenPolicy* RelayServer::tokenById(long long id) const {
+    for (auto& kv : token_cache) {
+        if (kv.second.id == id) return &kv.second;
+    }
+    return nullptr;
+}
+
+TokenPolicy* RelayServer::tokenById(long long id) {
+    for (auto& kv : token_cache) {
+        if (kv.second.id == id) return &kv.second;
+    }
+    return nullptr;
+}
+
+void RelayServer::tokenSweep() {
+    uint64_t now = (uint64_t)time(NULL) * 1000;
+    for (auto it = token_cache.begin(); it != token_cache.end();) {
+        TokenPolicy& p = it->second;
+        bool expired = p.status != 0 || !p.account_active ||
+                       (p.expires_at_ms > 0 && (int64_t)now >= p.expires_at_ms);
+        if (expired) {
+            tokenDropConnections(p.id, rtnp::TOKEN_DISABLED, "token disabled");
+            it = token_cache.erase(it);
+            continue;
+        }
+        // 周期重置
+        TokenUsage& u = token_usage[p.id];
+        if (p.quota_period != rtutil::PERIOD_TOTAL && u.period_start_ms > 0) {
+            int64_t next = rtutil::tokenPeriodNextFrom((rtutil::TokenPeriod)p.quota_period, u.period_start_ms);
+            if (next > 0 && (int64_t)now >= next) {
+                u.used_bytes = 0;
+                u.period_start_ms = rtutil::tokenPeriodStart((rtutil::TokenPeriod)p.quota_period, (int64_t)now);
+            }
+        }
+        ++it;
+    }
+}
+
+void RelayServer::tokenDropConnections(long long token_id, uint16_t code, const char* msg) {
+    // 先收集再关闭：hio_close 会同步触发 onClose 并 delete 连接，不能边走链表边关
+    std::vector<RelayConn*> targets;
+    for (RelayConn* c = conns; c; c = c->next_all) {
+        if (c->token_id == token_id) targets.push_back(c);
+    }
+    for (RelayConn* c : targets) {
+        sendErr(c->io, rtnp::ERROR, 0, code, msg);
+        connCloseAllStreams(c, code);
+        hio_close(c->io);
+    }
+}
+
+void RelayServer::tokenApplyCuts() {
+    if (pending_token_cuts.empty()) return;
+    std::set<long long> ids;
+    ids.swap(pending_token_cuts);
+    for (long long id : ids) tokenDropConnections(id, rtnp::QUOTA_EXCEEDED, "token quota exceeded");
+}
+
+void RelayServer::tokenAddBytes(RelayConn* c, uint32_t n) {
+    if (c == NULL || c->token_id == 0 || n == 0) return;
+    auto uit = token_usage.find(c->token_id);
+    if (uit == token_usage.end()) return;
+    TokenUsage& u = uit->second;
+    u.used_bytes += n;
+    u.last_used_ms = (uint64_t)time(NULL) * 1000;
+    snprintf(u.last_ip, sizeof(u.last_ip), "%s", c->remote_addr);
+
+    const TokenPolicy* p = tokenById(c->token_id);
+    if (p == nullptr || p->quota_bytes <= 0) return;
+    if (u.used_bytes < p->quota_bytes) return;
+    if (p->quota_action == 1) return;   // block：已有会话继续，只拒绝新 OPEN
+    // 这里在帧处理路径内，直接 close 会同步 delete 连接并造成悬垂，改为事件循环末尾统一处理
+    logf_("[relay] token %lld quota exceeded (%lld bytes)", (long long)c->token_id,
+          (long long)u.used_bytes);
+    if (pending_token_cuts.insert(c->token_id).second) {
+        htimer_t* t = htimer_add(loop, tokenCutCb, 1, 1);
+        hevent_set_userdata(t, this);
+    }
+}
+
+bool RelayServer::tokenRateAllow(RelayConn* c, uint32_t* retry_after_ms) {
+    if (c == NULL || c->token_id == 0) return true;
+    const TokenPolicy* p = tokenById(c->token_id);
+    if (p == nullptr || p->rate_per_min <= 0) return true;
+    TokenUsage& u = token_usage[c->token_id];
+    int burst = p->burst > 0 ? p->burst : p->rate_per_min;
+    double rate = p->rate_per_min / 60.0;   // 每秒补充
+    uint64_t now = (uint64_t)time(NULL) * 1000;
+    if (u.refill_ms == 0) {
+        u.bucket = burst;
+        u.refill_ms = now;
+    } else if (now > u.refill_ms) {
+        u.bucket += (now - u.refill_ms) * rate / 1000.0;
+        if (u.bucket > burst) u.bucket = burst;
+        u.refill_ms = now;
+    }
+    if (u.bucket >= 1.0) {
+        u.bucket -= 1.0;
+        return true;
+    }
+    if (retry_after_ms) {
+        double need = 1.0 - u.bucket;
+        *retry_after_ms = (uint32_t)(need / rate * 1000.0) + 1;
+    }
+    return false;
+}
+
+void RelayServer::tokenSessionAdd(RelayConn* c) {
+    if (c == NULL || c->token_id == 0) return;
+    token_usage[c->token_id].active_sessions++;
+}
+
+void RelayServer::tokenSessionRemove(RelayConn* c) {
+    if (c == NULL || c->token_id == 0) return;
+    auto it = token_usage.find(c->token_id);
+    if (it != token_usage.end() && it->second.active_sessions > 0) it->second.active_sessions--;
 }
 
 static bool aclPortAllowed(const std::string& ports, uint16_t port) {
@@ -351,6 +579,7 @@ void RelayServer::streamRemove(RelayStream* s) {
             if (prev) prev->next_c = s->next_c; else s->c->streams = s->next_c;
         }
     }
+    tokenSessionRemove(s->a);
     delete s;
 }
 
@@ -943,16 +1172,55 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             completePending(c->devid);
         } else {
             r.str(c->user, sizeof(c->user));
-            if (r.err || c->user[0] == '\0') {
-                sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::UNAUTHORIZED, "bad user");
-                hio_close(c->io);
-                return;
-            }
-            // 可选凭证：u8 auth_type(0=none,1=token) + str token
-            uint8_t auth_type = r.u8();
+            // 凭证：u8 auth_type(0=none,1=静态 token,2=账号 token) + str token
+            uint8_t auth_type = r.err ? 0 : r.u8();
             char tok[256] = {0};
-            if (!r.err && auth_type == 1) r.str(tok, sizeof(tok));
-            if (clientAuthEnabled()) {
+            if (!r.err && (auth_type == 1 || auth_type == 2)) r.str(tok, sizeof(tok));
+
+            const TokenPolicy* pol = NULL;
+            TokenUsage* usage = NULL;
+            uint64_t now = (uint64_t)time(NULL) * 1000;
+
+            if (auth_type == 2) {
+                std::string hash = rtutil::sha256Hex(std::string(tok));
+                auto it = token_cache.find(hash);
+                if (it == token_cache.end()) {
+                    logf_("[relay] token auth rejected: unknown token prefix=%.12s", tok);
+                    sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::TOKEN_DISABLED, "invalid token");
+                    hio_close(c->io);
+                    return;
+                }
+                pol = &it->second;
+                if (pol->status != 0 || !pol->account_active) {
+                    sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::TOKEN_DISABLED, "token disabled");
+                    hio_close(c->io);
+                    return;
+                }
+                if (pol->expires_at_ms > 0 && (int64_t)now >= pol->expires_at_ms) {
+                    sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::TOKEN_EXPIRED, "token expired");
+                    hio_close(c->io);
+                    return;
+                }
+                if (c->user[0] == '\0') {
+                    snprintf(c->user, sizeof(c->user), "%s", pol->username.c_str());
+                } else if (c->user != pol->username) {
+                    sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::UNAUTHORIZED, "user mismatch");
+                    hio_close(c->io);
+                    return;
+                }
+                usage = &token_usage[pol->id];
+                if (pol->quota_bytes > 0 && usage->used_bytes >= pol->quota_bytes) {
+                    sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::QUOTA_EXCEEDED, "token quota exceeded");
+                    hio_close(c->io);
+                    return;
+                }
+                c->token_id = pol->id;
+                snprintf(c->token_prefix, sizeof(c->token_prefix), "%s", pol->prefix.c_str());
+                usage->last_used_ms = now;
+                snprintf(usage->last_ip, sizeof(usage->last_ip), "%s", c->remote_addr);
+            }
+            // 静态凭据：auth_type=2 之外（含未带凭证的 0）都必须通过静态校验
+            if (auth_type != 2 && clientAuthEnabled()) {
                 std::string expect;
                 for (const auto& cc : client_creds) {
                     if (cc.user == c->user) { expect = cc.token; break; }
@@ -965,14 +1233,43 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
                     return;
                 }
             }
+            // 静态凭据也要服从账号状态：账号停用后旧 token 一并失效
+            if (auth_type == 1 && c->user[0] != '\0') {
+                auto ait = account_active.find(c->user);
+                if (ait != account_active.end() && ait->second == 0) {
+                    sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::TOKEN_DISABLED, "account disabled");
+                    hio_close(c->io);
+                    return;
+                }
+            }
+
+            if (r.err || c->user[0] == '\0') {
+                sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::UNAUTHORIZED, "bad user");
+                hio_close(c->io);
+                return;
+            }
             if (!checkPeerSan(c, c->user, "client", "user")) return;
             c->authed = 1;
             if (c->hs_timer) { htimer_del(c->hs_timer); c->hs_timer = NULL; }
             rtnp::Writer w;
             w.str(c->user);
             w.u32(15000);
+            if (pol != NULL) {
+                // 可选尾部：旧客户端读到 username+heartbeat 即停止解析，多出的字节被忽略
+                w.u8(1);
+                w.u64((uint64_t)pol->expires_at_ms);
+                w.u64((uint64_t)pol->quota_bytes);
+                w.u64((uint64_t)usage->used_bytes);
+                w.u32((uint32_t)pol->rate_per_min);
+                w.u32((uint32_t)pol->max_sessions);
+            }
             rtnp::send(c->io, rtnp::AUTH_OK, 0, w.data, (uint16_t)w.len);
-            logf_("[relay] client online: %s (fd=%d)", c->user, hio_fd(c->io));
+            if (pol != NULL) {
+                logf_("[relay] client online: %s token=%s (fd=%d)", c->user,
+                      c->token_prefix, hio_fd(c->io));
+            } else {
+                logf_("[relay] client online: %s (fd=%d)", c->user, hio_fd(c->io));
+            }
         }
         return;
     }
@@ -987,6 +1284,8 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         uint32_t active = 0;
         bool allowed = c->authed && c->role == rtnp::ROLE_CLIENT &&
             (acl_grouped_users.count(c->user) ? groupAclDevice(c->user, devid) : aclCheck(c->user, devid));
+        // 查询限速：超限按离线处理，不返回 ERROR（客户端会把 ERROR 当作认证失败断链）
+        if (!r.err && allowed && !tokenRateAllow(c, NULL)) allowed = false;
         if (!r.err && allowed) {
             RelayConn* agent = findAgent(devid);
             if (agent) {
@@ -1035,6 +1334,27 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
                 sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::PROTOCOL_ERROR, "sid in use");
                 return;
             }
+            if (c->token_id != 0) {
+                uint32_t retry = 0;
+                if (!tokenRateAllow(c, &retry)) {
+                    char msg[64];
+                    snprintf(msg, sizeof(msg), "rate limited, retry after %u ms", retry);
+                    sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::RATE_LIMITED, msg);
+                    return;
+                }
+                const TokenPolicy* tp = tokenById(c->token_id);
+                TokenUsage& tu = token_usage[c->token_id];
+                if (tp != NULL) {
+                    if (tp->max_sessions > 0 && tu.active_sessions >= tp->max_sessions) {
+                        sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::SESSION_LIMIT, "session limit reached");
+                        return;
+                    }
+                    if (tp->quota_action == 1 && tp->quota_bytes > 0 && tu.used_bytes >= tp->quota_bytes) {
+                        sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::QUOTA_EXCEEDED, "token quota exceeded");
+                        return;
+                    }
+                }
+            }
             bool grouped = acl_grouped_users.count(c->user) != 0;
             bool acl_ok = grouped
                 ? groupAclCheck(c->user, devid, port, is_shell ? 1 : 0, tty_path)
@@ -1069,6 +1389,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             s->c = agent; s->c_sid = ++agent->next_c_sid;
             s->next_a = c->streams; c->streams = s;
             s->next_c = agent->streams; agent->streams = s;
+            tokenSessionAdd(c);
 
             if (is_tty) {
                 rtnp::send(agent->io, rtnp::OPEN, s->c_sid, f->payload, f->len, f->flags);
@@ -1091,6 +1412,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
                 return;
             }
             forward(s->c, f->type, s->c_sid, f->payload, f->len, f->flags);
+            if (f->type == rtnp::DATA) tokenAddBytes(c, f->len);
             if (f->type == rtnp::CLOSE) s->a_closed = 1;
             if (f->type == rtnp::RESET) { s->a_closed = s->c_closed = 1; }
             if (s->a_closed && s->c_closed) streamRemove(s);
@@ -1127,6 +1449,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             return;
         }
         forward(s->a, f->type, s->a_sid, f->payload, f->len, f->flags);
+        if (f->type == rtnp::DATA) tokenAddBytes(s->a, f->len);
         if (f->type == rtnp::CLOSE) s->c_closed = 1;
         if (f->type == rtnp::RESET) { s->a_closed = s->c_closed = 1; }
         if (s->a_closed && s->c_closed) streamRemove(s);
@@ -1443,6 +1766,8 @@ int RelayServer::run(int argc, char** argv) {
     if (clientAuthEnabled()) {
         logf_("[relay] client auth: on (%zu users, global token %s)",
               client_creds.size(), client_token.empty() ? "off" : "on");
+    } else if (admin != NULL) {
+        logf_("[relay] client auth: 仅接受管理台签发的账号 Token");
     } else {
         logf_("[relay] WARNING: client auth disabled (--client-users/--client-token off); "
               "anyone who can reach this port can claim any user");
@@ -1459,6 +1784,9 @@ int RelayServer::run(int argc, char** argv) {
     hevent_set_userdata(sweeper, this);
     htimer_t* t = htimer_add(loop, statsCb, 60000, INFINITE);
     hevent_set_userdata(t, this);
+    // 过期 / 配额的兜底扫描（限流与计量本身在收发路径上实时完成）
+    htimer_t* tk = htimer_add(loop, tokenCb, 5000, INFINITE);
+    hevent_set_userdata(tk, this);
     hloop_run(loop);
     if (admin) {
         auto* adm = (AdminServer*)admin;

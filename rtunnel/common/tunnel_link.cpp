@@ -1,5 +1,6 @@
 #include "tunnel_link.hpp"
 #include "logging.hpp"
+#include "token_util.hpp"
 
 #include <stdio.h>
 #include <string.h>
@@ -43,24 +44,50 @@ void TunnelLink::handleFrame(rtnp::Frame* f) {
     case rtnp::HELLO_ACK: {
         rtnp::Writer w;
         w.str(identity());
-        // AUTH：identity + auth_type(0=none,1=token) + token
+        // AUTH：identity + auth_type(0=none,1=静态 token,2=账号 token) + token
         bool has_token = auth_token[0] != '\0';
-        w.u8(has_token ? 1 : 0);
+        uint8_t auth_type = 0;
+        if (has_token) auth_type = rtutil::isClientToken(auth_token) ? 2 : 1;
+        w.u8(auth_type);
         w.str(has_token ? auth_token : "");
         rtnp::send(io, rtnp::AUTH, 0, w.data, (uint16_t)w.len);
         state = 1;
         armHsTimer(10000);   // 认证超时
         return;
     }
-    case rtnp::AUTH_OK:
+    case rtnp::AUTH_OK: {
         state = 2;
         backoff_ms = 1000;
         ping_unacked_ = 0;
         if (hs_timer_) { htimer_del(hs_timer_); hs_timer_ = NULL; }
+        // 可选尾部：账号 Token 会带回来用户名与限额，旧 relay 不发送
+        rtnp::Reader r(f->payload, f->len);
+        char name[128] = {0};
+        r.str(name, sizeof(name));
+        r.u32();   // heartbeat_ms
+        if (!r.err && r.remaining() >= 1) {
+            uint8_t flags = r.u8();
+            if ((flags & 1) && !r.err) {
+                r.u64(); r.u64(); r.u64(); r.u32(); r.u32();
+                if (!r.err) onAuthInfo(name);
+            }
+        }
         logf_("[%s] authenticated as %s", logTag(), identity());
         onReady();
         return;
-    case rtnp::AUTH_FAIL:
+    }
+    case rtnp::AUTH_FAIL: {
+        rtnp::Reader r(f->payload, f->len);
+        uint16_t code = r.u16();
+        std::string msg = r.strBytes();
+        logf_("[%s] auth failed: code=%u %s", logTag(), code, msg.c_str());
+        if (code == rtnp::TOKEN_EXPIRED || code == rtnp::TOKEN_DISABLED ||
+            code == rtnp::QUOTA_EXCEEDED) {
+            auth_fatal_ = 1;
+        }
+        hio_close(io);
+        return;
+    }
     case rtnp::ERROR:
         logf_("[%s] rejected by relay", logTag());
         hio_close(io);
@@ -96,6 +123,14 @@ void TunnelLink::onTunnelRead(void* buf, int readbytes) {
 }
 
 void TunnelLink::onTunnelClose() {
+    if (auth_fatal_) {
+        logf_("[%s] credential rejected, stop reconnecting", logTag());
+        onLinkDown();
+        io = NULL;
+        state = 0;
+        in_.reset();
+        return;
+    }
     if (autoReconnect()) {
         logf_("[%s] tunnel closed, reconnect in %d ms", logTag(), backoff_ms);
     }

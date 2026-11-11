@@ -649,7 +649,8 @@ const PermissionPage = Object.assign(new Page(), {
       '<div class="perm-grid2"><label>名称<input id="pc-name" value="' + UI.esc(d.name || '') + '"></label>' +
       '<label>描述<input id="pc-desc" value="' + UI.esc(d.description || '') + '"></label></div>' +
       '<h3>客户端用户</h3><div class="perm-chips" id="pc-users">' + users + '</div>' +
-      '<div class="ui-flex" style="margin-top:8px"><input id="pc-user" placeholder="alice 或 alice,bob">' +
+      '<div class="ui-flex" style="margin-top:8px"><input id="pc-user" list="pc-user-list" placeholder="alice 或 alice,bob">' +
+      '<datalist id="pc-user-list"></datalist>' +
       '<button id="pc-add-user">添加用户</button></div>' +
       '<h3>ACL 配置</h3>' +
       '<div class="perm-acl-wrap"><table class="detail-table perm-acl"><thead><tr>' +
@@ -800,6 +801,12 @@ const PermissionPage = Object.assign(new Page(), {
       };
     };
     add('pc-users', 'pc-user', 'pc-add-user');
+    // 用户候选来自「接入账号」，避免拼错用户名导致授权落空
+    Api.get('/api/v1/client-accounts').then(list => {
+      const dl = document.getElementById('pc-user-list');
+      if (!dl || !Array.isArray(list)) return;
+      dl.innerHTML = list.map(a => '<option value="' + UI.esc(a.username) + '"></option>').join('');
+    }).catch(() => {});
     add('pa-devices', 'pa-device', 'pa-add-dev');
     document.querySelectorAll('.perm-chip-x').forEach(b => {
       b.onclick = () => b.closest('.perm-chip').remove();

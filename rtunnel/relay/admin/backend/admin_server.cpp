@@ -253,6 +253,7 @@ int AdminServer::start(const AdminConfig& cfg) {
     std::thread([this]() {
         std::this_thread::sleep_for(std::chrono::milliseconds(200));
         refreshGroupAcl();
+        refreshTokenCache();
     }).detach();
 
     db_.purgeExpiredSessions(AdminDb::nowMs());
@@ -261,6 +262,19 @@ int AdminServer::start(const AdminConfig& cfg) {
               cfg_.addr.c_str());
     }
     std::thread([this]() { distLoop(); }).detach();
+    // Token 用量：relay 只保留内存计数，这里按周期拉快照落库
+    std::thread([this]() {
+        for (;;) {
+            int ms = settingInt("token.usage_flush_ms", 5000);
+            if (ms < 1000) ms = 1000;
+            std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+            if (!db_.ok()) continue;
+            std::string snap = callRelay([this]() { return relay_->tokenUsageSnapshot(); });
+            if (snap.empty() || snap[0] != '[') continue;
+            std::string err;
+            db_.clientTokenUsageApply(snap, err);
+        }
+    }).detach();
     std::thread([this]() {
         for (;;) {
             std::this_thread::sleep_for(std::chrono::seconds(10));
@@ -288,12 +302,6 @@ int AdminServer::start(const AdminConfig& cfg) {
         for (;;) {
             std::this_thread::sleep_for(std::chrono::hours(1));
             cleanupAudit(settingInt("audit.retention_days", 30));
-            std::thread([this]() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-        refreshGroupAcl();
-    }).detach();
-
-    db_.purgeExpiredSessions(AdminDb::nowMs());
             cleanupUploads();
             cleanupTtyLogs();
             audit_.rotate(100 * 1024 * 1024);

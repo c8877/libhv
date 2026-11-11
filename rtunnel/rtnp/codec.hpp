@@ -72,6 +72,7 @@ public:
     uint64_t u64();
     void     str(char* out, size_t cap);   // 读到 out（NUL 结尾），超长截断
     std::string strBytes();
+    size_t   remaining() const { return len_; }   // 尚未消费的字节数
 
     int err = 0;
 

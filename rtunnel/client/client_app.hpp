@@ -76,6 +76,7 @@ protected:
     const char* logTag() const override { return "client"; }
     void        onFrame(rtnp::Frame* f) override;
     void        onReady() override;
+    void        onAuthInfo(const char* username) override;
     void        onLinkDown() override;
 
 private:

@@ -26,6 +26,16 @@ void AdminServer::refreshGroupAcl() {
     });
 }
 
+void AdminServer::refreshTokenCache() {
+    if (!db_.ok()) return;
+    std::string policies;
+    if (!db_.clientAuthPolicies(policies)) return;
+    callRelay([this, policies]() {
+        relay_->setAuthPolicies(policies);
+        return std::string();
+    });
+}
+
 void AdminServer::handleGroupDeviceMap(const HttpContextPtr& ctx) {
     std::string out;
     if (!db_.groupDeviceMap(out)) {

@@ -39,6 +39,8 @@ protected:
     virtual const char* identity() const = 0;  // AUTH 载荷：devid / user
     virtual const char* logTag() const = 0;    // 日志前缀："agent" / "client"
     virtual void        onReady() {}           // AUTH_OK 之后
+    // AUTH_OK 携带扩展信息（账号 Token）。默认忽略；带 token 的客户端用它回填用户名
+    virtual void        onAuthInfo(const char* username) { (void)username; }
     virtual void        onFrame(rtnp::Frame* f) = 0;  // READY 后的会话级帧
     virtual void        onLinkDown() = 0;      // 断线：子类清理自己的流表
     virtual bool        autoReconnect() const { return true; }  // shell 等一次性会话返回 false
@@ -57,6 +59,7 @@ private:
     rtnp::Decoder in_;
     htimer_t*     hs_timer_ = nullptr;   // 握手/认证阶段超时
     int           ping_unacked_ = 0;     // 连续未获 PONG 的 PING 数
+    int           auth_fatal_ = 0;       // 认证被永久拒绝：不再重连
 
     // libhv C 回调的薄封装（对象经 hio_context / hevent_userdata 取回）
     static void tunnelReadCb(hio_t* io, void* buf, int n);

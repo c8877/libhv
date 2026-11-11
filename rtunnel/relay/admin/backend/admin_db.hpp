@@ -29,6 +29,18 @@ struct DbGroupAclRule {
     bool shell = false;
 };
 
+// Token 的可配置限额（创建与更新共用）
+struct DbTokenSpec {
+    std::string name;
+    long long   expires_at_ms = 0;      // 0 = 永久
+    long long   quota_bytes = 0;        // 0 = 不限
+    std::string quota_period = "monthly";
+    int         rate_per_min = 0;
+    int         burst = 0;
+    int         max_sessions = 0;
+    std::string quota_action = "cut";
+};
+
 struct DbUser {
     long long   id = 0;
     std::string username;
@@ -117,6 +129,32 @@ public:
     bool dictPorts(const std::string& q, std::string& json_out);
     bool dictPortAdd(const std::string& value, const std::string& name, const std::string& desc,
                      long long& out_id, std::string& err);
+    // 接入账号与 Token
+    bool clientAccountList(const std::string& q, std::string& json_out);
+    bool clientAccountGet(long long id, std::string& json_out, std::string& err);
+    bool clientAccountCreate(const std::string& username, const std::string& display_name,
+                             const std::string& note, const std::string& by,
+                             long long& out_id, std::string& err);
+    bool clientAccountUpdate(long long id, const std::string& display_name, const std::string& note,
+                             const std::string& status, std::string& err);
+    bool clientAccountDelete(long long id, std::string& err);
+    bool clientAccountNames(std::set<std::string>& out);
+    bool clientTokenList(long long account_id, std::string& json_out, std::string& err);
+    bool clientTokenCreate(long long account_id, const DbTokenSpec& spec, const std::string& by,
+                           int max_per_account, std::string& plain_out, std::string& json_out,
+                           std::string& err);
+    bool clientTokenSpec(long long id, DbTokenSpec& spec, long long& account_id,
+                         std::string* status, std::string& err);
+    bool clientTokenUpdate(long long id, const DbTokenSpec& spec, const std::string& status,
+                           std::string& err);
+    bool clientTokenRotate(long long id, std::string& plain_out, std::string& json_out,
+                           std::string& err);
+    bool clientTokenDelete(long long id, std::string& err);
+    // 推给 relay 的认证策略：账号状态 + 全部未吊销 Token
+    bool clientAuthPolicies(std::string& json_out);
+    // relay 用量快照落库，period_start_ms 作为乐观锁
+    bool clientTokenUsageApply(const std::string& json, std::string& err);
+
     bool dictTtys(const std::string& q, std::string& json_out);
     bool dictTtyAdd(const std::string& pattern, const std::string& name, const std::string& desc,
                     long long& out_id, std::string& err);

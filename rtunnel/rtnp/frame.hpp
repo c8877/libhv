@@ -72,6 +72,12 @@ enum Err : uint16_t {
     TARGET_NOT_ALLOWED = 9,
     CLOSE_TIMEOUT      = 10,
     CANCELLED          = 11,
+    // 账号 Token（auth_type=2）
+    TOKEN_EXPIRED      = 12,
+    TOKEN_DISABLED     = 13,
+    QUOTA_EXCEEDED     = 14,
+    RATE_LIMITED       = 15,
+    SESSION_LIMIT      = 16,
 };
 
 enum Role : uint8_t {

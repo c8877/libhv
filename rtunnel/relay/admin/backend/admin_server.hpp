@@ -71,6 +71,7 @@ private:
     bool        wsAuthorize(const HttpRequestPtr& req, AdminActor& actor, std::string& role);
     void        audit(const std::string& role, const std::string& action, const std::string& detail);
     void        refreshGroupAcl();
+    void        refreshTokenCache();
     void        registerRoutes();
     int         serveFrontend(const HttpContextPtr& ctx, const char* name, const char* ctype);
 
@@ -161,6 +162,16 @@ private:
     void handleUserStatus(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleUserRole(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleUserDelete(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleClientAccounts(const HttpContextPtr& ctx);
+    void handleClientAccountCreate(const HttpContextPtr& ctx, const std::string& role);
+    void handleClientAccountUpdate(const HttpContextPtr& ctx, const std::string& role);
+    void handleClientAccountDelete(const HttpContextPtr& ctx, const std::string& role);
+    void handleClientAccountEffective(const HttpContextPtr& ctx);
+    void handleClientTokens(const HttpContextPtr& ctx);
+    void handleClientTokenCreate(const HttpContextPtr& ctx, const std::string& role);
+    void handleClientTokenUpdate(const HttpContextPtr& ctx, const std::string& role);
+    void handleClientTokenRotate(const HttpContextPtr& ctx, const std::string& role);
+    void handleClientTokenDelete(const HttpContextPtr& ctx, const std::string& role);
     void handleUserGroups(const HttpContextPtr& ctx);
     void handleUserGroupsSave(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleDeviceList(const HttpContextPtr& ctx);

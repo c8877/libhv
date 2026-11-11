@@ -299,6 +299,12 @@ void ClientApp::onReady() {
     if (tty_spec[0] && tty_stream == nullptr) openTty();
 }
 
+void ClientApp::onAuthInfo(const char* username) {
+    if (user[0] == '\0' && username != NULL && username[0] != '\0') {
+        snprintf(user, sizeof(user), "%s", username);
+    }
+}
+
 int ClientApp::openTty() {
     // devid:/dev/ttyUSB0@115200,8N1:/tmp/board01-tty
     std::string spec = tty_spec;
@@ -501,7 +507,9 @@ void ClientApp::onFrame(rtnp::Frame* f) {
         uint8_t rep = 0x01;
         if (code == rtnp::DEVICE_OFFLINE || code == rtnp::TIMEOUT) rep = 0x04;
         else if (code == rtnp::TARGET_REFUSED) rep = 0x05;
-        else if (code == rtnp::ACL_DENIED || code == rtnp::TARGET_NOT_ALLOWED) rep = 0x02;
+        else if (code == rtnp::ACL_DENIED || code == rtnp::TARGET_NOT_ALLOWED ||
+                 code == rtnp::QUOTA_EXCEEDED || code == rtnp::SESSION_LIMIT) rep = 0x02;
+        else if (code == rtnp::RATE_LIMITED) rep = 0x01;
         if (!s->is_forward) socksReply(s->local, rep);
         s->state = CS_CLOSED;   // relay 侧已删映射，防止 onLocalClose 再发 RESET
         hio_close(s->local);
@@ -640,7 +648,9 @@ int ClientApp::run(int argc, char** argv) {
             return 1;
         }
     }
-    if (user[0] == '\0') {
+    // 账号 Token 自带身份，允许省略 --user（AUTH_OK 里回填）
+    bool token_identity = auth_token[0] != '\0' && strncmp(auth_token, "rtk_", 4) == 0;
+    if (user[0] == '\0' && !token_identity) {
         fprintf(stderr, "--user is required\n");
         return 1;
     }

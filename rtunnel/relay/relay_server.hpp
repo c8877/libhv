@@ -67,6 +67,8 @@ struct RelayConn {
     uint64_t     connected_at_ms = 0;
     uint64_t     last_seen_ms = 0;
     char         remote_addr[64] = {0};
+    long long    token_id = 0;           // auth_type=2 通过后填
+    char         token_prefix[24] = {0};
 };
 
 // OPEN_SHELL 到 a:<user> 但 agent 尚未注册时挂起，等 A 侧 agent 上线后继续
@@ -78,6 +80,37 @@ struct PendingOpen {
     uint16_t    flags = 0;
     uint64_t    deadline_ms = 0;
     PendingOpen* next = nullptr;
+};
+
+// 接入账号 Token 的运行时策略（admin 推送，relay 线程只读）
+struct TokenPolicy {
+    long long   id = 0;
+    long long   account_id = 0;
+    std::string username;
+    std::string hash;
+    std::string prefix;
+    std::string name;
+    int         status = 0;              // 0 active, 1 disabled, 2 revoked
+    int         account_active = 1;
+    int64_t     expires_at_ms = 0;       // 0 = 永久
+    int64_t     quota_bytes = 0;         // 0 = 不限
+    int         quota_period = 0;        // 0 total, 1 daily, 2 monthly
+    int64_t     period_start_ms = 0;
+    int64_t     used_base = 0;           // DB 中已落库用量
+    int         rate_per_min = 0;
+    int         burst = 0;
+    int         max_sessions = 0;
+    int         quota_action = 0;        // 0 cut, 1 block
+};
+
+struct TokenUsage {
+    int64_t  used_bytes = 0;
+    int64_t  period_start_ms = 0;
+    double   bucket = 0;
+    uint64_t refill_ms = 0;
+    int      active_sessions = 0;
+    uint64_t last_used_ms = 0;
+    char     last_ip[64] = {0};
 };
 
 struct AclEntry {
@@ -100,6 +133,10 @@ class RelayServer {
 public:
     int run(int argc, char** argv);
     void setGroupAcl(std::vector<GroupAclRule> rules, std::set<std::string> users);
+    // 认证策略全量替换（relay 线程）；JSON 由 admin 的 clientAuthPolicies 生成
+    void setAuthPolicies(const std::string& json);
+    // 用量快照（relay 线程），JSON 数组
+    std::string tokenUsageSnapshot();
 
     hloop_t*    loop = nullptr;
     void*       admin = nullptr;      // AdminServer*（--admin 启用时创建）
@@ -135,6 +172,10 @@ public:
     AclEntry*   acl_file = nullptr;   // --acl-file 文件条目（SIGHUP 热加载）
     std::vector<GroupAclRule> acl_groups;       // 管理台分组授权（relay 线程只读）
     std::set<std::string>     acl_grouped_users;
+    std::unordered_map<std::string, TokenPolicy> token_cache;  // sha256 hex -> policy
+    std::unordered_map<std::string, int> account_active;       // username -> 1/0
+    std::unordered_map<long long, TokenUsage>    token_usage;  // token id -> usage
+    std::set<long long> pending_token_cuts;       // 流量到顶待断开（帧处理内不能直接 close）
     char        acl_file_path[256] = {0};
     PendingOpen* pending = nullptr;   // 等待 A 侧 agent 上线的 OPEN_SHELL
     hio_t*      listenio = nullptr;
@@ -205,6 +246,15 @@ private:
     void         onStats();
     void         onDrain(htimer_t* timer);
     void         onShutdown(int signo);
+    void         tokenSweep();
+    const TokenPolicy* tokenById(long long id) const;
+    TokenPolicy* tokenById(long long id);
+    void         tokenAddBytes(RelayConn* c, uint32_t n);
+    bool         tokenRateAllow(RelayConn* c, uint32_t* retry_after_ms);
+    void         tokenDropConnections(long long token_id, uint16_t code, const char* msg);
+    void         tokenApplyCuts();
+    void         tokenSessionAdd(RelayConn* c);
+    void         tokenSessionRemove(RelayConn* c);
 
     // libhv C 回调的薄封装
     static void readCb(hio_t* io, void* buf, int n);
@@ -212,6 +262,8 @@ private:
     static void acceptCb(hio_t* io);
     static void hsTimeoutCb(htimer_t* t);
     static void statsCb(htimer_t* t);
+    static void tokenCb(htimer_t* t);
+    static void tokenCutCb(htimer_t* t);
     static void drainCb(htimer_t* t);
     static void sighupCb(hsignal_t* sig);
     static void shutdownCb(hsignal_t* sig);

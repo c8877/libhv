@@ -18,7 +18,7 @@ import sys
 
 PAGES = [
     ("overview", "在线设备"), ("agents", "设备（C 侧）"), ("permission", "权限管理"),
-    ("clients", "客户端（A 侧）"), ("streams", "会话"), ("certs", "签发新证书"),
+    ("clients", "客户端（A 侧）"), ("access", "暂无接入账号"), ("streams", "会话"), ("certs", "签发新证书"),
     ("accounts", "账号列表"), ("files", "上传文件"), ("tasks", "任务"),
     ("audit", "审计日志"), ("settings", "设置"),
 ]

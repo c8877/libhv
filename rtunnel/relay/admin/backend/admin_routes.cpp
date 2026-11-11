@@ -152,6 +152,38 @@ void AdminServer::registerRoutes() {
         std::string role; int rc = requireRole(ctx, ROLE_ADMIN, role); if (rc) return rc;
         handlePermImportAcl(ctx, role); return 200;
     });
+    // 接入账号与 Token
+    access(ROLE_OPERATOR, "GET", "/api/v1/client-accounts", &AdminServer::handleClientAccounts);
+    service_.Handle("POST", "/api/v1/client-accounts", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handleClientAccountCreate(ctx, role); return 200;
+    });
+    service_.Handle("PUT", "/api/v1/client-accounts/:id", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handleClientAccountUpdate(ctx, role); return 200;
+    });
+    service_.Handle("DELETE", "/api/v1/client-accounts/:id", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_ADMIN, role); if (rc) return rc;
+        handleClientAccountDelete(ctx, role); return 200;
+    });
+    access(ROLE_OPERATOR, "GET", "/api/v1/client-accounts/:id/effective", &AdminServer::handleClientAccountEffective);
+    access(ROLE_OPERATOR, "GET", "/api/v1/client-accounts/:id/tokens", &AdminServer::handleClientTokens);
+    service_.Handle("POST", "/api/v1/client-accounts/:id/tokens", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handleClientTokenCreate(ctx, role); return 200;
+    });
+    service_.Handle("PUT", "/api/v1/client-tokens/:id", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handleClientTokenUpdate(ctx, role); return 200;
+    });
+    service_.Handle("POST", "/api/v1/client-tokens/:id/rotate", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handleClientTokenRotate(ctx, role); return 200;
+    });
+    service_.Handle("DELETE", "/api/v1/client-tokens/:id", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requireRole(ctx, ROLE_MANAGER, role); if (rc) return rc;
+        handleClientTokenDelete(ctx, role); return 200;
+    });
     access(ROLE_OPERATOR, "GET", "/api/v1/permission/dict/ports", &AdminServer::handleDictPorts);
     access(ROLE_OPERATOR, "GET", "/api/v1/permission/dict/ttys", &AdminServer::handleDictTtys);
 
@@ -380,6 +412,9 @@ void AdminServer::registerRoutes() {
     });
     service_.GET("/admin_pages.js", [this](const HttpContextPtr& ctx) {
         return serveFrontend(ctx, "admin_pages.js", "application/javascript");
+    });
+    service_.GET("/admin_accounts.js", [this](const HttpContextPtr& ctx) {
+        return serveFrontend(ctx, "admin_accounts.js", "application/javascript");
     });
     service_.GET("/admin_dist.js", [this](const HttpContextPtr& ctx) {
         return serveFrontend(ctx, "admin_dist.js", "application/javascript");
