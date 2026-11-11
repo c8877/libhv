@@ -176,6 +176,29 @@ def main():
         r.check("5 进入账号详情", page.locator(".acc-kv").count() == 1 and "#/access/" in account_url,
                 account_url)
 
+        # 账号信息表原地转表单
+        page.locator("[data-act=acc-edit]").click()
+        page.wait_for_timeout(400)
+        r.check("5b 表格转表单", page.locator(".acc-kv.is-editing").count() == 1 and
+                page.locator("#ae-display").count() == 1 and page.locator("#ae-status").count() == 1)
+        page.fill("#ae-display", "Alice")
+        page.fill("#ae-note", "产线采集机")
+        page.locator("[data-act=acc-save]").click()
+        page.wait_for_timeout(900)
+        kv = page.evaluate("document.querySelector('.acc-kv').innerText.replace(/\\n/g,' | ')")
+        r.check("5c 表单保存", page.locator(".acc-kv.is-editing").count() == 0 and
+                "Alice" in kv and "产线采集机" in kv, kv)
+        page.locator("[data-act=acc-edit]").click()
+        page.wait_for_timeout(300)
+        page.fill("#ae-display", "zzz")
+        page.locator("[data-act=acc-cancel]").click()
+        page.wait_for_timeout(400)
+        r.check("5d 取消需确认", page.locator(".tty-modal").count() == 1)
+        page.locator(".tty-modal button").last.click()
+        page.wait_for_timeout(600)
+        kv = page.evaluate("document.querySelector('.acc-kv').innerText.replace(/\\n/g,' | ')")
+        r.check("5e 放弃后保持原值", "zzz" not in kv and "Alice" in kv, kv)
+
         page.locator("[data-act=tok-new]").click()
         page.wait_for_timeout(400)
         page.fill("#at-name", "限速")
@@ -387,7 +410,7 @@ def main():
     echo1.close()
     echo2.close()
 
-    total = 30
+    total = 33
     print("=== %d/%d passed === work=%s" % (total - len(r.fails), total, work))
     if args.keep:
         print("保留：", work)

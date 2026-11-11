@@ -1,6 +1,6 @@
 # 接入账号详情页（设计稿）
 
-状态：已实现（1.3.278）；Token 配置编辑为行内展开表单（§7.6，数据行只读）  
+状态：已实现；Token 配置为行内展开表单（§7.6），账号信息为表格原地转表单（§6.4）  
 关联：`docs/design/account-token.md`、`docs/admin/permission.md`
 
 ---
@@ -187,7 +187,7 @@ const [account, eff] = await Promise.all([
 
 | 按钮 | 可见角色 | 行为 |
 |---|---|---|
-| 编辑资料 | manager / admin | 弹窗改展示名、备注；用户名只读 |
+| 编辑资料 | manager / admin | 表格原地转表单：改状态、展示名、备注；用户名/账号 ID/时间等保持只读 |
 | 有效权限 | operator 及以上 | 复用现有有效权限弹窗 |
 | 停用 / 启用 | manager / admin | 二次确认；停用会踢掉在线连接，提示「该账号所有 Token 立即失效」 |
 | 删除账号 | admin | 底部分隔线右侧，危险按钮；要求输入用户名确认 |
@@ -212,6 +212,37 @@ const [account, eff] = await Promise.all([
 ```
 账号已停用，名下 3 个 Token 均无法接入；重新启用后立即恢复。
 ```
+
+## 6.4 账号信息原地转表单
+
+点「编辑资料」不弹窗，同一张 KV 表切换成编辑态：可改字段的单元格换成控件，只读字段仍按文本渲染，
+表尾多一行提示。卡片右上角的按钮同时换成「取消 / 保存」。
+
+```
+┌ 账号信息 ─────────────────────────────── [取消] [保存] ─┐
+│ 用户名    alice              状态       [ 启用        ▾ ] │
+│ 账号 ID   12                 展示名     [ Alice           ] │
+│ 备注      [ 产线采集机                                    ] │
+│ 创建人    root               创建时间   2026-11-11 14:02    │
+│ 更新时间  2026-11-11 14:20   最近使用   2 分钟前 · 10.0.0.21│
+│ Token     3 个（启用 2 / 停用 1 / 已吊销 0）                │
+│ 权限摘要  分组 2 · 设备 3 台 · TCP 22,80 · 文件 ro          │
+│ 用户名不可修改；保存后立即生效。                            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+```
+可编辑    状态（select）、展示名（input）、备注（textarea）
+只读      用户名、账号 ID、创建人/时间、更新时间、最近使用、Token、权限摘要
+表结构    不变；可编辑单元格内放控件，表格列宽不变
+按钮      编辑中隐藏「编辑资料 / 有效权限 / 停用」和底部删除区，避免半途改其它状态
+提示行    表尾一行，停用会用 warn 色提示「名下 N 个 Token 全部失效」
+保存      PUT /client-accounts/:id（display_name / note / status）
+取消/Esc  有改动先确认；确认后回到只读表格
+并发     编辑期间暂停 5s 刷新；切 Token 编辑或筛选时先确认放弃
+```
+
+命名和 Token 行内表单一致：只读数据行不动，编辑控件放在行内，收起即恢复。
 
 # 7. 卡片二：Token
 
@@ -482,7 +513,7 @@ revoked 行      仍保留在列表里，方便查历史用量和吊销时间
 ```
 间隔        5000ms（与 relay 用量回写周期一致）
 刷新内容    账号详情 + Token 列表 + 有效权限摘要
-暂停        行内展开表单展开期间跳过自动刷新，防止输入被覆盖；收起后立即补一次
+暂停        Token 行内表单或账号信息表单展开期间跳过自动刷新，防止输入被覆盖；收起后立即补一次
 不打断      新建 / 轮换 / 吊销弹窗挂在 body，不随页面重绘销毁
 离开页面    Page.leave 清 timer（基类已处理）
 ```
@@ -551,7 +582,7 @@ FROM client_accounts a WHERE a.id=?
 ```
 GET    /api/v1/client-accounts/:id/tokens       Token 列表
 GET    /api/v1/client-accounts/:id/effective    权限摘要
-PUT    /api/v1/client-accounts/:id              编辑资料 / 启停
+PUT    /api/v1/client-accounts/:id              账号表格表单保存 / 启停
 DELETE /api/v1/client-accounts/:id              删除（admin）
 POST   /api/v1/client-accounts/:id/tokens       新建 Token
 PUT    /api/v1/client-tokens/:id                编辑 / 启停
@@ -593,7 +624,7 @@ UI.panel          两张卡片
 UI.dataTable       Token 表格（6 列，render 自定义）
 UI.status         Token / 账号状态
 UI.actions        详情页所有 data-act
-UI.modal          编辑资料、新建 Token、轮换、吊销（Token 编辑改为行内展开表单）
+UI.modal          新建 Token、轮换、吊销（账号与 Token 的编辑都不走弹窗）
 UI.pill           权限摘要里的分组标签
 UI.time           时间统一格式
 ```
@@ -644,11 +675,13 @@ UI.kvList([
 
 ## 10.5 行内展开表单状态机
 
-状态只控制表单行的插入与移除，不改变数据行的渲染。页面实例只保留两个状态：
+状态只控制表单行的插入与移除，不改变数据行的渲染。页面实例保留两组状态：
 
 ```js
-this.editId = 0;        // 当前展开的 Token id，0 表示全部收起
-this.editDirty = false; // 表单是否有改动
+this.editId = 0;          // 当前展开的 Token id，0 表示全部收起
+this.editDirty = false;   // Token 表单是否有改动
+this.editingAccount = false;  // 账号信息表是否处于表单编辑态
+this.accountDirty = false;    // 账号信息表单是否有改动
 ```
 
 ```
@@ -661,9 +694,20 @@ editing ──切换筛选───────────────► dirty
 editing ──自动刷新 timer─────────► 跳过，不重绘
 ```
 
+账号信息表是同样的状态机，差异只在于作用对象是整张 KV 表：
+
+```
+closed ──点「编辑资料」──────────► editingAccount(true), dirty=false
+editing ──输入──────────────────► dirty=true（表尾提示随状态变化）
+editing ──点「保存」────────────► 停用需二次确认 ──► PUT ──► closed（刷新）
+editing ──点「取消」/ Esc────────► dirty ? confirm : closed
+editing ──点 Token 操作/筛选─────► dirty ? confirm : 收起后继续原操作
+editing ──自动刷新 timer─────────► 跳过，不重绘
+```
+
 提交中禁用保存按钮，防止重复 PUT；失败回到 `editing(dirty=true)`，输入不丢。
 
-表单值只在展开时从 Token 行读取一次，之后以 DOM 为准，避免刷新把输入改回去。
+表单值只在展开时从行/账号读取一次，之后以 DOM 为准，避免刷新把输入改回去。
 
 # 11. 权限矩阵
 
@@ -714,7 +758,8 @@ client_token.create / update / rotate / delete
 scripts/admin_token_e2e.py
   列表点击行 → 详情页，不再展开
   Token 操作全部改到详情页
-  新增：状态筛选、行内展开表单、脏数据确认、404、删除账号输入确认
+  新增：状态筛选、Token 行内展开表单、账号表格原地转表单、
+       脏数据确认、404、删除账号输入确认
 ```
 
 ## 14.2 新增用例
@@ -735,6 +780,13 @@ scripts/admin_token_e2e.py
 13 删除账号：输入错误用户名按钮禁用；输入正确后回列表
 14 直接访问 #/access/9999 → 404 态
 15 900px 下无横向溢出，Token 行卡片化，行内展开表单单列
+
+账号表格编辑（现有 admin_token_e2e 已覆盖 5b–5e）
+16 点「编辑资料」→ KV 表原地变表单，行数不变，只读字段仍是文本
+17 改展示名 / 备注 → 保存 → 表格恢复，值已更新
+18 有改动点「取消」→ 确认 → 恢复原值
+19 表单里把状态改为停用 → 提示行转 warn，保存需二次确认，完成后出现停用横幅
+20 账号表单有改动时点 Token「编辑」→ 确认放弃 → 账号表恢复只读，Token 表单展开
 ```
 
 回归：
@@ -777,4 +829,6 @@ Token 级设备白名单       按 account-token.md 的结论，v1 不做
 3. Token 配置编辑使用行内展开表单（§7.6，数据行只读），不再用弹窗；
    新建仍保留弹窗，因为要一次性展示明文。
 4. Token 没有独立详情页；只有接入账号有详情页。
+5. 账号信息编辑把 KV 表原地转成表单（§6.4），不用弹窗；可改字段换控件，
+   只读字段保持文本，避免编辑时看不到账号 ID、创建时间等上下文。
 ```

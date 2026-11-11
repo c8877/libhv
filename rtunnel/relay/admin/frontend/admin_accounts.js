@@ -124,6 +124,8 @@ const AccessDetailPage = Object.assign(new Page(), {
     this.filter = 'all';
     this.editId = 0;
     this.editDirty = false;
+    this.editingAccount = false;   // 账号信息表转为表单编辑
+    this.accountDirty = false;
     this.gone = false;
     this._tabs = null;
     return Page.prototype.enter.call(this, el, params);
@@ -131,12 +133,14 @@ const AccessDetailPage = Object.assign(new Page(), {
 
   leave() {
     if (this._tabs) { this._tabs.destroy(); this._tabs = null; }
+    this.editingAccount = false;
+    this.accountDirty = false;
     Page.prototype.leave.call(this);
   },
 
   async refresh() {
-    // 行内展开表单期间暂停刷新，避免输入被覆盖
-    if (this.editId) return;
+    // 行内表单 / 账号信息编辑期间暂停刷新，避免输入被覆盖
+    if (this.editId || this.editingAccount) return;
     let a;
     try { a = await Api.get('/api/v1/client-accounts/' + this.id); }
     catch (e) {
@@ -168,18 +172,21 @@ const AccessDetailPage = Object.assign(new Page(), {
       ? '<div class="acc-banner">账号已停用，名下 ' + (a.token_count || 0) +
         ' 个 Token 均无法接入；重新启用后立即恢复。</div>'
       : '';
-    const danger = isAdmin
+    const danger = isAdmin && !this.editingAccount
       ? '<div class="acc-danger"><span class="muted-sm">删除会同时移除 Token 与分组成员关系。</span>' +
         '<span class="spacer"></span><button class="danger" data-act="acc-del">删除账号</button></div>'
       : '';
+    const cardRight = this.editingAccount
+      ? '<button data-act="acc-cancel">取消</button> <button class="primary" data-act="acc-save">保存</button>'
+      : (canM ? '<button data-act="acc-edit">编辑资料</button> ' : '') +
+        '<button data-act="acc-effective">有效权限</button>' +
+        (canM ? ' <button data-act="acc-toggle">' + (a.status === 'active' ? '停用' : '启用') + '</button>' : '');
     const card1 = UI.panel('账号信息',
       banner +
-      '<div class="detail-table-shell"><table class="detail-table acc-kv"><tbody>' +
+      '<div class="detail-table-shell"><table class="detail-table acc-kv' +
+        (this.editingAccount ? ' is-editing' : '') + '"><tbody>' +
         this.accountKv() + '</tbody></table></div>' + danger,
-      { cls: 'mb16', right:
-        (canM ? '<button data-act="acc-edit">编辑资料</button> ' : '') +
-        '<button data-act="acc-effective">有效权限</button>' +
-        (canM ? ' <button data-act="acc-toggle">' + (a.status === 'active' ? '停用' : '启用') + '</button>' : '') });
+      { cls: 'mb16', right: cardRight });
 
     const counts = { all: this.tokens.length, active: 0, disabled: 0, revoked: 0 };
     for (const t of this.tokens) if (counts[t.status] != null) counts[t.status]++;
@@ -208,7 +215,9 @@ const AccessDetailPage = Object.assign(new Page(), {
     });
 
     UI.actions(this.el, {
-      'acc-edit': () => this.openAccountEdit(),
+      'acc-edit': () => this.startAccountEdit(),
+      'acc-save': () => this.saveAccountEdit(),
+      'acc-cancel': () => this.cancelAccountEdit(),
       'acc-effective': () => this.openEffective(),
       'acc-toggle': () => this.toggleAccount(),
       'acc-del': () => this.confirmDelete(),
@@ -222,9 +231,11 @@ const AccessDetailPage = Object.assign(new Page(), {
     });
 
     if (this.editId) this.bindEditForm();
+    if (this.editingAccount) this.bindAccountForm();
   },
 
   accountKv() {
+    if (this.editingAccount) return this.accountKvEdit();
     const a = this.account;
     const last = a.last_used_ms ? UI.time(a.last_used_ms) : '—';
     const ip = a.last_used_ip ? ' · <span class="mono">' + UI.esc(a.last_used_ip) + '</span>' : '';
@@ -243,6 +254,129 @@ const AccessDetailPage = Object.assign(new Page(), {
         (a.token_active || 0) + ' / 停用 ' + (a.token_disabled || 0) +
         ' / 已吊销 ' + (a.token_revoked || 0) + '）</td></tr>' +
       '<tr><th>权限摘要</th><td colspan="3" class="acc-wrap">' + this.permSummary() + '</td></tr>';
+  },
+
+  // 编辑态：同一张表，可改字段变成控件，只读字段保持文本
+  accountKvEdit() {
+    const a = this.account;
+    const last = a.last_used_ms ? UI.time(a.last_used_ms) : '—';
+    const ip = a.last_used_ip ? ' · <span class="mono">' + UI.esc(a.last_used_ip) + '</span>' : '';
+    const dash = '<span class="muted">—</span>';
+    return '' +
+      '<tr><th>用户名</th><td class="mono">' + UI.esc(a.username) + '</td>' +
+        '<th>状态</th><td><select id="ae-status" class="acc-inline">' +
+          '<option value="active"' + (a.status === 'active' ? ' selected' : '') + '>启用</option>' +
+          '<option value="disabled"' + (a.status === 'disabled' ? ' selected' : '') + '>停用</option>' +
+        '</select></td></tr>' +
+      '<tr><th>账号 ID</th><td>' + a.id + '</td>' +
+        '<th>展示名</th><td><input id="ae-display" class="acc-inline" maxlength="128" value="' +
+          UI.esc(a.display_name || '') + '" placeholder="可空"></td></tr>' +
+      '<tr><th>备注</th><td colspan="3"><textarea id="ae-note" class="acc-inline" rows="2" ' +
+        'maxlength="256" placeholder="可空">' + UI.esc(a.note || '') + '</textarea></td></tr>' +
+      '<tr><th>创建人</th><td>' + (a.created_by ? UI.esc(a.created_by) : dash) + '</td>' +
+        '<th>创建时间</th><td>' + (a.created_ms ? UI.time(a.created_ms) : dash) + '</td></tr>' +
+      '<tr><th>更新时间</th><td>' + (a.updated_ms ? UI.time(a.updated_ms) : dash) + '</td>' +
+        '<th>最近使用</th><td>' + last + ip + '</td></tr>' +
+      '<tr><th>Token</th><td colspan="3">' + (a.token_count || 0) + ' 个（启用 ' +
+        (a.token_active || 0) + ' / 停用 ' + (a.token_disabled || 0) +
+        ' / 已吊销 ' + (a.token_revoked || 0) + '）</td></tr>' +
+      '<tr><th>权限摘要</th><td colspan="3" class="acc-wrap">' + this.permSummary() + '</td></tr>' +
+      '<tr><td colspan="4" class="acc-edit-cell"><div class="acc-edit-foot">' +
+        '<span id="ae-hint" class="tok-hint"></span></div></td></tr>';
+  },
+
+  startAccountEdit() {
+    if (!this.account) return;
+    this.editId = 0;
+    this.editDirty = false;
+    this.editingAccount = true;
+    this.accountDirty = false;
+    this.render();
+  },
+
+  async cancelAccountEdit() {
+    if (!(await this.leaveAccountEdit())) return;
+    await this.refresh();
+  },
+
+  // 账号编辑期间做其它操作：先收起表单，有改动先确认
+  async leaveAccountEdit() {
+    if (!this.editingAccount) return true;
+    if (this.accountDirty && !await UI.confirm({
+      title: '放弃修改', message: '账号信息表单还未保存，继续操作会放弃修改。',
+    })) return false;
+    this.editingAccount = false;
+    this.accountDirty = false;
+    return true;
+  },
+
+  bindAccountForm() {
+    const form = this.el.querySelector('.acc-kv.is-editing');
+    if (!form) return;
+    const mark = () => { this.accountDirty = true; this.updateAccountHint(); };
+    form.querySelectorAll('input,select,textarea').forEach(el => {
+      el.addEventListener('input', mark);
+      el.addEventListener('change', mark);
+    });
+    form.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { e.preventDefault(); this.cancelAccountEdit(); }
+      else if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
+        e.preventDefault();
+        this.saveAccountEdit();
+      }
+    });
+    setTimeout(() => {
+      const el = form.querySelector('#ae-display');
+      if (el) { el.focus(); el.select(); }
+    }, 0);
+    this.updateAccountHint();
+  },
+
+  updateAccountHint() {
+    const hint = this.el.querySelector('#ae-hint');
+    if (!hint || !this.account) return;
+    const status = this.el.querySelector('#ae-status').value;
+    const msgs = [];
+    let warn = false;
+    if (status !== this.account.status && status === 'disabled') {
+      warn = true;
+      msgs.push('保存后账号立即停用，名下 ' + (this.account.token_count || 0) +
+        ' 个 Token 全部失效，在线连接被断开');
+    }
+    if (!msgs.length) msgs.push('用户名不可修改；保存后立即生效');
+    hint.textContent = msgs.join('；') + '。';
+    hint.classList.toggle('warn', warn);
+  },
+
+  async saveAccountEdit() {
+    const a = this.account;
+    const q = sel => this.el.querySelector(sel);
+    const display = q('#ae-display');
+    const note = q('#ae-note');
+    const status = q('#ae-status');
+    if (!display || !note || !status) return;
+    if (status.value !== a.status && status.value === 'disabled' && !await UI.confirm({
+      title: '停用账号',
+      message: '停用后其全部 Token 立即失效，在线连接会被断开。',
+      danger: true,
+    })) return;
+    const btn = q('[data-act="acc-save"]');
+    if (btn) btn.disabled = true;
+    try {
+      await Api.put('/api/v1/client-accounts/' + a.id, {
+        display_name: display.value.trim(),
+        note: note.value.trim(),
+        status: status.value,
+      });
+      this.editingAccount = false;
+      this.accountDirty = false;
+      UI.toast('已保存');
+      await this.refresh();
+    } catch (e) {
+      if (btn) btn.disabled = false;
+      const hint = q('#ae-hint');
+      if (hint) { hint.textContent = '保存失败：' + e.message; hint.classList.add('warn'); }
+    }
   },
 
   permSummary() {
@@ -387,6 +521,10 @@ const AccessDetailPage = Object.assign(new Page(), {
 
   async setFilter(key) {
     if (key === this.filter) return;
+    if (this.editingAccount && !await this.leaveAccountEdit()) {
+      if (this._tabs) this._tabs.setValue(this.filter, false);
+      return;
+    }
     if (this.editId && this.editDirty &&
         !await UI.confirm({ title: '放弃修改', message: '当前表单还有未保存的修改，切换会放弃。' })) {
       if (this._tabs) this._tabs.setValue(this.filter, false);
@@ -399,6 +537,7 @@ const AccessDetailPage = Object.assign(new Page(), {
   },
 
   async openEdit(id) {
+    if (!await this.leaveAccountEdit()) return;
     if (this.editId === id) { await this.cancelEdit(); return; }
     if (this.editId && this.editDirty &&
         !await UI.confirm({ title: '放弃修改', message: '另一个 Token 的表单还未保存，切换会放弃修改。' })) return;
@@ -445,6 +584,7 @@ const AccessDetailPage = Object.assign(new Page(), {
   },
 
   async toggleToken(btn) {
+    if (!await this.leaveAccountEdit()) return;
     try {
       await Api.put('/api/v1/client-tokens/' + btn.dataset.id, { status: btn.dataset.status });
       UI.toast(btn.dataset.status === 'active' ? '已启用' : '已停用');
@@ -455,6 +595,7 @@ const AccessDetailPage = Object.assign(new Page(), {
   },
 
   async rotateToken(btn) {
+    if (!await this.leaveAccountEdit()) return;
     if (!await UI.confirm({
       title: '轮换 Token',
       message: '将生成新 Token 并立即吊销旧 Token，使用旧 Token 的连接会被断开。',
@@ -470,6 +611,7 @@ const AccessDetailPage = Object.assign(new Page(), {
   },
 
   async revokeToken(btn) {
+    if (!await this.leaveAccountEdit()) return;
     if (!await UI.confirm({ title: '吊销 Token', message: '吊销后不可恢复，用量记录保留。', danger: true })) return;
     try {
       await Api.del('/api/v1/client-tokens/' + btn.dataset.id);
@@ -495,30 +637,6 @@ const AccessDetailPage = Object.assign(new Page(), {
       UI.toast(next === 'active' ? '已启用' : '已停用，在线连接已断开');
       await this.refresh();
     } catch (e) { UI.toast('操作失败：' + e.message, true); }
-  },
-
-  openAccountEdit() {
-    const a = this.account;
-    const m = UI.modal({
-      title: '编辑账号 · ' + UI.esc(a.username),
-      body: '<div class="perm-grid2">' +
-        '<label>展示名<input id="ae-display" maxlength="128" value="' + UI.esc(a.display_name || '') + '"></label>' +
-        '<label class="acc-span2">备注<input id="ae-note" maxlength="256" value="' + UI.esc(a.note || '') + '"></label>' +
-        '</div><div class="muted-sm">用户名不可修改；账号状态用卡片右上角的停用/启用。</div>',
-      buttons: '<button data-modal-close>取消</button><button class="primary" id="ae-ok">保存</button>',
-    });
-    m.el.querySelector('#ae-ok').onclick = async () => {
-      try {
-        await Api.put('/api/v1/client-accounts/' + a.id, {
-          display_name: m.el.querySelector('#ae-display').value.trim(),
-          note: m.el.querySelector('#ae-note').value.trim(),
-          status: a.status,
-        });
-        m.close();
-        UI.toast('已保存');
-        await this.refresh();
-      } catch (e) { UI.toast('保存失败：' + e.message, true); }
-    };
   },
 
   confirmDelete() {
@@ -554,7 +672,8 @@ const AccessDetailPage = Object.assign(new Page(), {
     setTimeout(() => input.focus(), 0);
   },
 
-  openTokenForm() {
+  async openTokenForm() {
+    if (!await this.leaveAccountEdit()) return;
     const accountId = this.id;
     const m = UI.modal({
       title: '新建 Token',
