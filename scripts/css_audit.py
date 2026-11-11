@@ -68,7 +68,7 @@ def main():
 
     print("文件      %s" % css_path)
     print("规模      %d 行 / %d 字节 / %d 条规则 / %d 个类选择器"
-          % (len(css.split("\n")), len(css), len(rules), len(classes)))
+          % (len(css.split("\n")), os.path.getsize(css_path), len(rules), len(classes)))
     print("重复定义  %d" % len(dups))
     for s, lines in sorted(dups.items(), key=lambda kv: kv[1][0]):
         print("          %-40s 行 %s" % (s, lines))
