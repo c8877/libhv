@@ -222,15 +222,6 @@ bool AdminDb::clientAccountDelete(long long id, std::string& err) {
     return ok;
 }
 
-bool AdminDb::clientAccountNames(std::set<std::string>& out) {
-    std::lock_guard<std::mutex> lk(mu_);
-    sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, "SELECT username FROM client_accounts", -1, &st, nullptr) != SQLITE_OK) return false;
-    while (sqlite3_step(st) == SQLITE_ROW) out.insert(colText(st, 0));
-    sqlite3_finalize(st);
-    return true;
-}
-
 bool AdminDb::clientTokenList(long long account_id, std::string& json_out, std::string& err) {
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;

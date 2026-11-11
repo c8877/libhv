@@ -1,12 +1,5 @@
 // 分发任务相关页面（admin.js 之后加载，共享其全局工具）
 // ---------------------------------------------------------------- Pages.分发
-function toLocalInput(ms) {
-  const d = new Date(ms);
-  const pad = n => String(n).padStart(2, '0');
-  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
-    'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
-}
-
 // 任务动作：列表页与详情页共用，第二个参数是刷新回调
 const TaskActions = {
   async retry(id, done) {
@@ -19,7 +12,7 @@ const TaskActions = {
   },
   async extend(id, done) {
     const v = await UI.prompt({ title: '延长截止时间', label: '新的截止时间（本地时间，最多 +24h）',
-      type: 'datetime-local', value: toLocalInput(Date.now() + 24 * 3600 * 1000) });
+      type: 'datetime-local', value: UI.localInput(Date.now() + 24 * 3600 * 1000) });
     if (!v) return;
     const t = new Date(v).getTime();
     if (!t) { UI.toast('时间格式不正确', true); return; }
@@ -121,9 +114,9 @@ const DistributePage = Object.assign(new Page(), {
         '</div>' +
         '<div class="ui-flex ui-mt8">' +
           '<label class="muted-sm">开始时间 <input type="datetime-local" id="dist-start" value="' +
-            toLocalInput(this.startMs) + '"></label>' +
+            UI.localInput(this.startMs) + '"></label>' +
           '<label class="muted-sm">结束时间 <input type="datetime-local" id="dist-end" value="' +
-            toLocalInput(this.endMs) + '"></label>' +
+            UI.localInput(this.endMs) + '"></label>' +
           '<label class="muted-sm">最大重试 <input type="number" id="dist-retry" min="0" max="10" value="' +
             this.maxRetries + '" class="ui-w70"></label>' +
         '</div>' +

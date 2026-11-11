@@ -1,34 +1,11 @@
 // 接入账号（A 侧身份）列表与详情
-const ACC_STATUS = { active: ['启用', 'ok'], disabled: ['停用', 'info'] };
 const TOK_STATUS = { active: ['启用', 'ok'], disabled: ['停用', 'info'], revoked: ['已吊销', 'bad'] };
 const TOK_PERIOD = { total: '总量', daily: '每日', monthly: '每月' };
-
-function accGB(bytes) {
-    const n = Number(bytes) || 0;
-    if (!n) return '不限';
-    const gb = n / (1024 * 1024 * 1024);
-    return (gb >= 10 ? Math.round(gb) : gb.toFixed(1)) + ' GB';
-}
-
-function accGBInput(bytes) {
-    const n = Number(bytes) || 0;
-    if (!n) return 0;
-    return Math.round(n / (1024 * 1024 * 1024) * 10) / 10;
-}
 
 function tokExpiry(ms) {
     if (!ms) return '永久';
     if (Date.now() >= ms) return '已过期';
     return UI.time(ms);
-}
-
-// 仅供 datetime-local 输入框使用
-function tokLocalInput(ms) {
-    if (!ms) return '';
-    const d = new Date(ms);
-    const pad = n => String(n).padStart(2, '0');
-    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
-      'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
 
 // ---------------------------------------------------------------- 列表
@@ -44,26 +21,31 @@ const AccessAccountsPage = Object.assign(new Page(), {
       this.el.innerHTML = UI.panel('接入账号', '<div class="empty">加载失败：' + UI.esc(e.message) + '</div>');
       return;
     }
-    const head = '<tr><th>用户名</th><th>状态</th><th>Token</th><th>最近使用</th><th>操作</th></tr>';
-    const rows = arr.map(a =>
-      '<tr class="acc-row" data-id="' + a.id + '">' +
-        '<td><b>' + UI.esc(a.username) + '</b>' +
-          (a.display_name ? '<div class="muted-sm">' + UI.esc(a.display_name) + '</div>' : '') + '</td>' +
-        '<td>' + UI.status(a.status, ACC_STATUS) + '</td>' +
-        '<td>' + (a.token_count || 0) + '</td>' +
-        '<td class="muted">' + (a.last_used_ms ? UI.time(a.last_used_ms) : '—') + '</td>' +
-        '<td class="acc-ops"><a class="acc-detail" href="#/access/' + a.id + '">详情 ›</a></td>' +
-      '</tr>').join('');
+    const table = UI.dataTable({
+      cls: 'acc-table',
+      plain: true,
+      cols: [
+        { label: '用户名', render: a => '<b>' + UI.esc(a.username) + '</b>' +
+            (a.display_name ? '<div class="muted-sm">' + UI.esc(a.display_name) + '</div>' : '') },
+        { label: '状态', render: a => UI.status(a.status, UI.STATUS_ACTIVE) },
+        { label: 'Token', render: a => a.token_count || 0 },
+        { label: '最近使用', cls: 'muted',
+          render: a => a.last_used_ms ? UI.time(a.last_used_ms) : '—' },
+        { label: '操作', cls: 'acc-ops',
+          render: a => '<a class="acc-detail" href="#/access/' + a.id + '">详情 ›</a>' },
+      ],
+      rows: arr,
+      empty: '暂无接入账号',
+      rowCls: () => 'acc-row',
+      rowAttrs: a => 'data-id="' + a.id + '"',
+    });
 
     this.el.innerHTML = UI.panel('接入账号',
       '<div class="acc-toolbar">' +
         '<input id="acc-q" placeholder="搜索用户名 / 展示名" value="' + UI.esc(q) + '">' +
         '<span class="spacer"></span>' +
         (canManage() ? '<button class="primary" id="acc-new">+ 新建账号</button>' : '') +
-      '</div>' +
-      '<div class="perm-table-wrap"><table class="detail-table acc-table"><thead>' + head +
-      '</thead><tbody>' + (rows || '<tr><td colspan="5" class="empty">暂无接入账号</td></tr>') +
-      '</tbody></table></div>');
+      '</div><div class="perm-table-wrap">' + table + '</div>');
 
     const qel = document.getElementById('acc-q');
     if (qel) {
@@ -84,20 +66,21 @@ const AccessAccountsPage = Object.assign(new Page(), {
     const m = UI.modal({
       title: '新建接入账号',
       body: '<div class="perm-grid2">' +
-        '<label>用户名<input id="aa-user" placeholder="与客户端 --user 一致" maxlength="64"></label>' +
-        '<label>展示名<input id="aa-display" placeholder="可选" maxlength="128"></label>' +
-        '<label class="acc-span2">备注<input id="aa-note" placeholder="可选" maxlength="256"></label>' +
+        '<label>用户名<input id="aa-user" data-field="username" placeholder="与客户端 --user 一致" maxlength="64"></label>' +
+        '<label>展示名<input id="aa-display" data-field="display_name" placeholder="可选" maxlength="128"></label>' +
+        '<label class="acc-span2">备注<input id="aa-note" data-field="note" placeholder="可选" maxlength="256"></label>' +
         '</div><div class="muted-sm">账号创建后在「权限」页加入客户端分组才会获得设备权限。</div>',
       buttons: '<button data-modal-close>取消</button><button class="primary" id="aa-ok">创建</button>',
     });
     m.el.querySelector('#aa-ok').onclick = async () => {
-      const username = m.el.querySelector('#aa-user').value.trim();
+      const v = UI.formValues(m.el);
+      const username = String(v.username || '').trim();
       if (!username) { UI.toast('用户名必填', true); return; }
       try {
         await Api.post('/api/v1/client-accounts', {
           username,
-          display_name: m.el.querySelector('#aa-display').value.trim(),
-          note: m.el.querySelector('#aa-note').value.trim(),
+          display_name: String(v.display_name || '').trim(),
+          note: String(v.note || '').trim(),
         });
         UI.toast('已创建 ' + username);
         m.close();
@@ -182,14 +165,27 @@ const AccessDetailPage = Object.assign(new Page(), {
 
     const counts = { all: this.tokens.length, active: 0, disabled: 0, revoked: 0 };
     for (const t of this.tokens) if (counts[t.status] != null) counts[t.status]++;
-    const rows = this.filteredTokens().map(t => this.tokenRow(t)).join('');
+    const table = UI.dataTable({
+      cls: 'acc-token-table',
+      shellCls: 'acc-token-shell',
+      cols: [
+        { label: '名称 / 前缀', mobile: '名称' },
+        { label: '状态 / 到期', mobile: '状态' },
+        { label: '流量', mobile: '流量' },
+        { label: '频率 · 并发', mobile: '频率' },
+        { label: '最近使用', mobile: '最近', cls: 'muted' },
+        { label: '操作', mobile: '操作', cls: 'acc-ops' },
+      ],
+      rows: this.filteredTokens(),
+      empty: '暂无 Token',
+      rowCls: t => 'tok-row' + (this.editId === t.id ? ' is-editing' : ''),
+      rowAttrs: t => 'data-id="' + t.id + '"',
+      tdAttrs: c => c.mobile ? ' data-label="' + c.mobile + '"' : '',
+      expand: t => this.editId === t.id ? this.editRow(t) : '',
+      cells: t => this.tokenCells(t),
+    });
     const card2 = UI.panel('Token',
-      '<div id="tok-tabs"></div>' +
-      '<div class="detail-table-shell acc-token-shell"><table class="detail-table acc-token-table"><thead><tr>' +
-      '<th>名称 / 前缀</th><th>状态 / 到期</th><th>流量</th><th>频率 · 并发</th>' +
-      '<th>最近使用</th><th>操作</th></tr></thead><tbody>' +
-      (rows || '<tr><td colspan="6" class="empty">暂无 Token</td></tr>') +
-      '</tbody></table></div>',
+      '<div id="tok-tabs"></div>' + table,
       { right: canM ? '<button class="primary" data-act="tok-new">+ 新建 Token</button>' : '' });
 
     this.el.innerHTML = '<div class="acc-back"><a href="#/access">← 接入账号</a></div>' + card1 + card2;
@@ -232,7 +228,7 @@ const AccessDetailPage = Object.assign(new Page(), {
       { key: 'username', label: '用户名',
         view: d => '<span class="mono">' + UI.esc(d.username) + '</span>' },
       { key: 'status', label: '状态',
-        view: d => UI.status(d.status, ACC_STATUS),
+        view: d => UI.status(d.status, UI.STATUS_ACTIVE),
         edit: { type: 'switch', id: 'ae-status', onValue: 'active', offValue: 'disabled',
           onLabel: '启用', offLabel: '停用' } },
       { key: 'id', label: '账号 ID', view: d => d.id },
@@ -341,14 +337,14 @@ const AccessDetailPage = Object.assign(new Page(), {
     return this.tokens.filter(t => t.status === this.filter);
   },
 
-  tokenRow(t) {
+  tokenCells(t) {
     const editing = this.editId === t.id;
     const used = Number(t.used_bytes) || 0;
     const quota = Number(t.quota_bytes) || 0;
     const pct = quota ? Math.min(100, Math.floor(used * 100 / quota)) : 0;
     const barCls = quota && used >= quota ? 'bad' : (pct >= 80 ? 'warn' : '');
     const quotaText = quota
-      ? UI.bytes(used) + ' / ' + accGB(quota) + ' · ' + (TOK_PERIOD[t.quota_period] || '') + ' · ' + pct + '%'
+      ? UI.bytes(used) + ' / ' + UI.gb(quota) + ' · ' + (TOK_PERIOD[t.quota_period] || '') + ' · ' + pct + '%'
       : UI.bytes(used) + ' / 不限';
     const rateText = t.rate_per_min ? t.rate_per_min + '/分' : '频率不限';
     const burstText = t.rate_per_min ? '突发 ' + (t.burst || t.rate_per_min) : '无频率限制';
@@ -363,27 +359,26 @@ const AccessDetailPage = Object.assign(new Page(), {
           '<button data-act="tok-rotate" data-id="' + t.id + '">轮换</button> ' +
           '<button class="danger" data-act="tok-del" data-id="' + t.id + '">吊销</button>'
         : '';
-    let html = '<tr class="tok-row' + (editing ? ' is-editing' : '') + '" data-id="' + t.id + '">' +
-      '<td data-label="名称"><div class="tok-cell"><b>' + UI.esc(t.name || '未命名') + '</b>' +
-        '<div class="mono muted-sm">' + UI.esc(t.token_prefix) + '…</div></div></td>' +
-      '<td data-label="状态"><div class="tok-cell">' + UI.status(t.status, TOK_STATUS) +
-        '<div class="muted-sm">' + UI.esc(tokExpiry(t.expires_at_ms)) + '</div></div></td>' +
-      '<td data-label="流量"><div class="tok-cell">' +
+    return [
+      '<div class="tok-cell"><b>' + UI.esc(t.name || '未命名') + '</b>' +
+        '<div class="mono muted-sm">' + UI.esc(t.token_prefix) + '…</div></div>',
+      '<div class="tok-cell">' + UI.status(t.status, TOK_STATUS) +
+        '<div class="muted-sm">' + UI.esc(tokExpiry(t.expires_at_ms)) + '</div></div>',
+      '<div class="tok-cell">' +
         (quota ? '<progress class="acc-progress ' + barCls + '" max="100" value="' + pct + '"></progress>' : '') +
-        '<div class="muted-sm">' + UI.esc(quotaText) + '</div></div></td>' +
-      '<td data-label="频率"><div class="tok-cell">' + rateText + ' · ' + sessText +
-        '<div class="muted-sm">' + burstText + '</div></div></td>' +
-      '<td data-label="最近" class="muted"><div class="tok-cell">' +
+        '<div class="muted-sm">' + UI.esc(quotaText) + '</div></div>',
+      '<div class="tok-cell">' + rateText + ' · ' + sessText +
+        '<div class="muted-sm">' + burstText + '</div></div>',
+      '<div class="tok-cell">' +
         (t.last_used_ms ? UI.time(t.last_used_ms) : '—') +
         (t.last_used_ip ? '<div class="muted-sm mono">' + UI.esc(t.last_used_ip) + '</div>' : '') +
-        '</div></td>' +
-      '<td data-label="操作" class="acc-ops"><div class="tok-cell">' + ops + '</div></td></tr>';
-    if (editing) html += this.editRow(t);
-    return html;
+        '</div>',
+      '<div class="tok-cell">' + ops + '</div>',
+    ];
   },
 
   editRow(t) {
-    const quotaGb = accGBInput(t.quota_bytes);
+    const quotaGb = UI.gbValue(t.quota_bytes);
     const opts = (map, cur) => Object.keys(map).map(k =>
       '<option value="' + k + '"' + (cur === k ? ' selected' : '') + '>' + map[k] + '</option>').join('');
     return '<tr class="tok-edit-row"><td colspan="6">' +
@@ -391,7 +386,7 @@ const AccessDetailPage = Object.assign(new Page(), {
         '" data-period="' + UI.esc(t.quota_period) + '">' +
       '<label>名称<input id="te-name" maxlength="64" value="' + UI.esc(t.name || '') + '"></label>' +
       '<label>到期<input id="te-expire" type="datetime-local" value="' +
-        UI.esc(tokLocalInput(t.expires_at_ms)) + '"></label>' +
+        UI.esc(UI.localInput(t.expires_at_ms)) + '"></label>' +
       '<label>流量配额<span class="tok-unit"><input id="te-quota" type="number" min="0" step="0.1" value="' +
         quotaGb + '"><span>GB</span></span></label>' +
       '<label>周期<select id="te-period">' + opts(TOK_PERIOD, t.quota_period) + '</select></label>' +
@@ -624,36 +619,36 @@ const AccessDetailPage = Object.assign(new Page(), {
     const m = UI.modal({
       title: '新建 Token',
       body: '<div class="perm-grid2">' +
-        '<label class="acc-span2">名称<input id="at-name" placeholder="例如 构建机 / 巡检" maxlength="64"></label>' +
-        '<label>有效期<select id="at-expire">' +
+        '<label class="acc-span2">名称<input id="at-name" data-field="name" placeholder="例如 构建机 / 巡检" maxlength="64"></label>' +
+        '<label>有效期<select id="at-expire" data-field="expires_in_days">' +
           '<option value="0">永久</option><option value="7">7 天</option>' +
           '<option value="30" selected>30 天</option><option value="90">90 天</option>' +
           '<option value="365">1 年</option></select></label>' +
-        '<label>流量配额<input id="at-quota" type="number" min="0" step="1" value="0" placeholder="GB，0 = 不限"></label>' +
-        '<label>周期<select id="at-period">' +
+        '<label>流量配额<input id="at-quota" data-field="quota_gb" type="number" min="0" step="1" value="0" placeholder="GB，0 = 不限"></label>' +
+        '<label>周期<select id="at-period" data-field="quota_period">' +
           '<option value="monthly" selected>每月</option><option value="daily">每日</option>' +
           '<option value="total">总量</option></select></label>' +
-        '<label>超限动作<select id="at-action">' +
+        '<label>超限动作<select id="at-action" data-field="quota_action">' +
           '<option value="cut" selected>断开连接</option>' +
           '<option value="block">只拒绝新连接</option></select></label>' +
-        '<label>频率（次/分）<input id="at-rate" type="number" min="0" value="0" placeholder="0 = 不限"></label>' +
-        '<label>突发<input id="at-burst" type="number" min="0" value="0" placeholder="0 = 取频率值"></label>' +
-        '<label>并发会话<input id="at-sessions" type="number" min="0" value="0" placeholder="0 = 不限"></label>' +
+        '<label>频率（次/分）<input id="at-rate" data-field="rate_per_min" type="number" min="0" value="0" placeholder="0 = 不限"></label>' +
+        '<label>突发<input id="at-burst" data-field="burst" type="number" min="0" value="0" placeholder="0 = 取频率值"></label>' +
+        '<label>并发会话<input id="at-sessions" data-field="max_sessions" type="number" min="0" value="0" placeholder="0 = 不限"></label>' +
         '</div><div class="muted-sm">Token 权限等于账号的客户端分组权限，这里只能进一步收窄。</div>',
       buttons: '<button data-modal-close>取消</button><button class="primary" id="at-ok">创建</button>',
     });
     m.el.querySelector('#at-ok').onclick = async () => {
-      const days = Number(m.el.querySelector('#at-expire').value) || 0;
+      const v = UI.formValues(m.el);
       try {
         const r = await Api.post('/api/v1/client-accounts/' + accountId + '/tokens', {
-          name: m.el.querySelector('#at-name').value.trim(),
-          expires_in_days: days,
-          quota_gb: Number(m.el.querySelector('#at-quota').value) || 0,
-          quota_period: m.el.querySelector('#at-period').value,
-          quota_action: m.el.querySelector('#at-action').value,
-          rate_per_min: Number(m.el.querySelector('#at-rate').value) || 0,
-          burst: Number(m.el.querySelector('#at-burst').value) || 0,
-          max_sessions: Number(m.el.querySelector('#at-sessions').value) || 0,
+          name: String(v.name || '').trim(),
+          expires_in_days: Number(v.expires_in_days) || 0,
+          quota_gb: Number(v.quota_gb) || 0,
+          quota_period: v.quota_period,
+          quota_action: v.quota_action,
+          rate_per_min: Number(v.rate_per_min) || 0,
+          burst: Number(v.burst) || 0,
+          max_sessions: Number(v.max_sessions) || 0,
         });
         m.close();
         this.showSecret('Token 已创建', r.token);

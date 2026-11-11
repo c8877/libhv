@@ -1,5 +1,6 @@
 // 接入账号与 Token API
 #include "admin_server.hpp"
+#include "api_reply.hpp"
 #include "common/token_util.hpp"
 #include "cpputil/json.hpp"
 
@@ -8,15 +9,6 @@
 using nlohmann::json;
 
 namespace {
-void bad(const HttpContextPtr& ctx, const std::string& msg) {
-    ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
-    json j; j["error"] = msg; ctx->send(j.dump());
-}
-void notfound(const HttpContextPtr& ctx, const std::string& msg) {
-    ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
-    json j; j["error"] = msg; ctx->send(j.dump());
-}
-
 // 从请求体读取 token 限额；缺省字段保留 def
 DbTokenSpec specFromJson(const json& req, DbTokenSpec def) {
     if (!req.is_object()) return def;
@@ -60,19 +52,19 @@ void AdminServer::handleClientAccounts(const HttpContextPtr& ctx) {
 void AdminServer::handleClientAccountGet(const HttpContextPtr& ctx) {
     long long id = atoll(ctx->param("id").c_str());
     std::string out, err;
-    if (!db_.clientAccountGet(id, out, err)) { notfound(ctx, err); return; }
+    if (!db_.clientAccountGet(id, out, err)) { apiNotFound(ctx, err); return; }
     ctx->send(out);
 }
 
 void AdminServer::handleClientAccountCreate(const HttpContextPtr& ctx, const std::string& role) {
     json req = json::parse(ctx->body(), nullptr, false);
-    if (req.is_discarded() || !req.is_object()) { bad(ctx, "bad json"); return; }
+    if (req.is_discarded() || !req.is_object()) { apiBad(ctx, "bad json"); return; }
     std::string username = req.value("username", "");
     long long id = 0;
     std::string err;
     if (!db_.clientAccountCreate(username, req.value("display_name", ""), req.value("note", ""),
                                  role, id, err)) {
-        bad(ctx, err);
+        apiBad(ctx, err);
         return;
     }
     audit(role, "client_account.create", username);
@@ -84,11 +76,11 @@ void AdminServer::handleClientAccountCreate(const HttpContextPtr& ctx, const std
 void AdminServer::handleClientAccountUpdate(const HttpContextPtr& ctx, const std::string& role) {
     long long id = atoll(ctx->param("id").c_str());
     json req = json::parse(ctx->body(), nullptr, false);
-    if (req.is_discarded() || !req.is_object()) { bad(ctx, "bad json"); return; }
+    if (req.is_discarded() || !req.is_object()) { apiBad(ctx, "bad json"); return; }
     std::string status = req.value("status", "active");
     std::string err;
     if (!db_.clientAccountUpdate(id, req.value("display_name", ""), req.value("note", ""), status, err)) {
-        notfound(ctx, err);
+        apiNotFound(ctx, err);
         return;
     }
     audit(role, "client_account.update", std::to_string(id) + " status=" + status);
@@ -99,7 +91,7 @@ void AdminServer::handleClientAccountUpdate(const HttpContextPtr& ctx, const std
 void AdminServer::handleClientAccountDelete(const HttpContextPtr& ctx, const std::string& role) {
     long long id = atoll(ctx->param("id").c_str());
     std::string err;
-    if (!db_.clientAccountDelete(id, err)) { notfound(ctx, err); return; }
+    if (!db_.clientAccountDelete(id, err)) { apiNotFound(ctx, err); return; }
     audit(role, "client_account.delete", std::to_string(id));
     refreshTokenCache();
     refreshGroupAcl();
@@ -109,19 +101,19 @@ void AdminServer::handleClientAccountDelete(const HttpContextPtr& ctx, const std
 void AdminServer::handleClientTokens(const HttpContextPtr& ctx) {
     long long id = atoll(ctx->param("id").c_str());
     std::string out, err;
-    if (!db_.clientTokenList(id, out, err)) { bad(ctx, err); return; }
+    if (!db_.clientTokenList(id, out, err)) { apiBad(ctx, err); return; }
     ctx->send(out);
 }
 
 void AdminServer::handleClientTokenCreate(const HttpContextPtr& ctx, const std::string& role) {
     long long account_id = atoll(ctx->param("id").c_str());
     json req = json::parse(ctx->body(), nullptr, false);
-    if (req.is_discarded() || !req.is_object()) { bad(ctx, "bad json"); return; }
+    if (req.is_discarded() || !req.is_object()) { apiBad(ctx, "bad json"); return; }
     DbTokenSpec spec = specFromJson(req, DbTokenSpec{});
     std::string plain, out, err;
     if (!db_.clientTokenCreate(account_id, spec, role, settingInt("token.max_per_account", 20),
                                plain, out, err)) {
-        bad(ctx, err);
+        apiBad(ctx, err);
         return;
     }
     audit(role, "client_token.create", "account=" + std::to_string(account_id) +
@@ -136,16 +128,16 @@ void AdminServer::handleClientTokenCreate(const HttpContextPtr& ctx, const std::
 void AdminServer::handleClientTokenUpdate(const HttpContextPtr& ctx, const std::string& role) {
     long long id = atoll(ctx->param("id").c_str());
     json req = json::parse(ctx->body(), nullptr, false);
-    if (req.is_discarded() || !req.is_object()) { bad(ctx, "bad json"); return; }
+    if (req.is_discarded() || !req.is_object()) { apiBad(ctx, "bad json"); return; }
     // 更新时未提供的字段保持原值：先读当前值
     DbTokenSpec spec;
     long long account_id = 0;
     std::string status, err;
-    if (!db_.clientTokenSpec(id, spec, account_id, &status, err)) { notfound(ctx, err); return; }
+    if (!db_.clientTokenSpec(id, spec, account_id, &status, err)) { apiNotFound(ctx, err); return; }
     spec = specFromJson(req, spec);
     // 未显式传 status 时保持原状态，避免改限额时把停用的 Token 意外启用
     if (req.contains("status") && req["status"].is_string()) status = req["status"].get<std::string>();
-    if (!db_.clientTokenUpdate(id, spec, status, err)) { notfound(ctx, err); return; }
+    if (!db_.clientTokenUpdate(id, spec, status, err)) { apiNotFound(ctx, err); return; }
     audit(role, "client_token.update", std::to_string(id) + " status=" + status);
     refreshTokenCache();
     ctx->send("{\"ok\":true}");
@@ -154,7 +146,7 @@ void AdminServer::handleClientTokenUpdate(const HttpContextPtr& ctx, const std::
 void AdminServer::handleClientTokenRotate(const HttpContextPtr& ctx, const std::string& role) {
     long long id = atoll(ctx->param("id").c_str());
     std::string plain, out, err;
-    if (!db_.clientTokenRotate(id, plain, out, err)) { notfound(ctx, err); return; }
+    if (!db_.clientTokenRotate(id, plain, out, err)) { apiNotFound(ctx, err); return; }
     audit(role, "client_token.rotate", std::to_string(id));
     refreshTokenCache();
     json j = json::parse(out, nullptr, false);
@@ -166,7 +158,7 @@ void AdminServer::handleClientTokenRotate(const HttpContextPtr& ctx, const std::
 void AdminServer::handleClientTokenDelete(const HttpContextPtr& ctx, const std::string& role) {
     long long id = atoll(ctx->param("id").c_str());
     std::string err;
-    if (!db_.clientTokenDelete(id, err)) { notfound(ctx, err); return; }
+    if (!db_.clientTokenDelete(id, err)) { apiNotFound(ctx, err); return; }
     audit(role, "client_token.delete", std::to_string(id));
     refreshTokenCache();
     ctx->send("{\"ok\":true}");
@@ -175,10 +167,10 @@ void AdminServer::handleClientTokenDelete(const HttpContextPtr& ctx, const std::
 void AdminServer::handleClientAccountEffective(const HttpContextPtr& ctx) {
     long long id = atoll(ctx->param("id").c_str());
     std::string aj, err;
-    if (!db_.clientAccountGet(id, aj, err)) { notfound(ctx, err); return; }
+    if (!db_.clientAccountGet(id, aj, err)) { apiNotFound(ctx, err); return; }
     json a = json::parse(aj, nullptr, false);
     std::string user = a.is_discarded() ? "" : a.value("username", "");
     std::string out;
-    if (!db_.permEffectiveClient(user, out, err)) { bad(ctx, err); return; }
+    if (!db_.permEffectiveClient(user, out, err)) { apiBad(ctx, err); return; }
     ctx->send(out);
 }

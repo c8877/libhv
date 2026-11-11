@@ -271,6 +271,30 @@ const UI = {
     }
     root.__uiActions = map;
   },
+  // datetime-local 输入框的值（本地时间，分钟精度）
+  localInput(ms) {
+    if (!ms) return '';
+    const d = new Date(ms);
+    const pad = n => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+      'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  },
+
+  // 字节 → GB；0 表示不限
+  gb(bytes) {
+    const n = Number(bytes) || 0;
+    if (!n) return '不限';
+    const gb = n / (1024 * 1024 * 1024);
+    return (gb >= 10 ? Math.round(gb) : gb.toFixed(1)) + ' GB';
+  },
+
+  // 字节 → GB 数值，供编辑框回填
+  gbValue(bytes) {
+    const n = Number(bytes) || 0;
+    if (!n) return 0;
+    return Math.round(n / (1024 * 1024 * 1024) * 10) / 10;
+  },
+
   bytes(n) {
     n = Number(n) || 0;
     const u = ['B', 'K', 'M', 'G', 'T'];
@@ -405,7 +429,7 @@ const UI = {
       cols.map(th).join('') + '</tr></thead><tbody>';
     if (!rows.length) h += '<tr><td class="empty" colspan="' + cols.length + '">' + UI.esc(opts.empty || '暂无数据') + '</td></tr>';
     rows.forEach((r, i) => {
-      // 允许直接插入整行，例如表格行下方的展开表单
+      // 允许直接插入整行，例如表格行下方的展开表单（管理台账号页在用）
       if (typeof r === 'string') { h += r; return; }
       h += '<tr' + (opts.rowAttrs ? opts.rowAttrs(i) : '') + '>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>';
     });
@@ -437,23 +461,28 @@ const UI = {
       '<div class="ui-form-foot">' + (opts.left || '') +
       '<span class="spacer"></span>' + (opts.right || '') + '</div></div>';
   },
-  // 列声明的表格：单元格由 render(row) 生成，适合状态徽标、按钮组等复杂列
-  // opts: { cols:[{label,render,cls,thCls,thAttrs}], rows, empty, rowCls(row), shellCls, cls }
+  // 列声明表格：单元格由 render(row) 或 cells(row) 生成，适合状态徽标、按钮组等复杂列。
+  // opts: cols/rows/empty/cls/shellCls/plain/rowCls/rowAttrs/tdAttrs/cells
+  //       head 可整段替换表头（全选框等），expand 在数据行后插入展开表单行。
   dataTable(opts) {
     opts = opts || {};
     const cols = opts.cols || [], rows = opts.rows || [];
-    const head = cols.map(c => '<th' + (c.thCls ? ' class="' + c.thCls + '"' : '') +
+    const head = opts.head || cols.map(c => '<th' + (c.thCls ? ' class="' + c.thCls + '"' : '') +
       (c.thAttrs ? ' ' + c.thAttrs : '') + '>' + c.label + '</th>').join('');
-    let h = '<div class="detail-table-shell ' + (opts.shellCls || '') + '">' +
+    let h = (opts.plain ? '' : '<div class="detail-table-shell ' + (opts.shellCls || '') + '">') +
       '<table class="detail-table ' + (opts.cls || '') + '"><thead><tr>' + head + '</tr></thead><tbody>';
     if (!rows.length) h += '<tr><td class="empty" colspan="' + cols.length + '">' + UI.esc(opts.empty || '暂无数据') + '</td></tr>';
     rows.forEach(r => {
       const rc = opts.rowCls ? opts.rowCls(r) : '';
-      h += '<tr' + (rc ? ' class="' + rc + '"' : '') + '>' +
-        cols.map(c => '<td' + (c.cls ? ' class="' + c.cls + '"' : '') + '>' +
-          (c.render ? c.render(r) : UI.esc(r[c.key])) + '</td>').join('') + '</tr>';
+      const ra = opts.rowAttrs ? opts.rowAttrs(r) : '';
+      const cells = opts.cells ? opts.cells(r) : cols.map(c => c.render ? c.render(r) : UI.esc(r[c.key]));
+      h += '<tr' + (rc ? ' class="' + rc + '"' : '') + (ra ? ' ' + ra : '') + '>' +
+        cells.map((cell, i) => '<td' + (cols[i] && cols[i].cls ? ' class="' + cols[i].cls + '"' : '') +
+          (opts.tdAttrs && cols[i] ? opts.tdAttrs(cols[i], r) : '') + '>' + cell + '</td>').join('') + '</tr>';
+      if (opts.expand) h += opts.expand(r);
     });
-    return h + '</tbody></table></div>';
+    h += '</tbody></table>';
+    return opts.plain ? h : h + '</div>';
   },
   // 单条记录的表格：同一张表在只读与编辑表单之间原地切换。
   // host 承载 <table>，外层 .detail-table-shell 由页面提供。
@@ -766,3 +795,6 @@ const UI = {
     setTimeout(() => el.remove(), 4000);
   },
 };
+
+// 通用「启用 / 停用」状态：账号、接入账号等共用，避免各页重复定义
+UI.STATUS_ACTIVE = { active: ['启用', 'ok'], disabled: ['停用', 'info'] };

@@ -510,7 +510,7 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 | `--admin-ca-cert/--admin-ca-key/--admin-cert-dir` | 签发 CA 与台账目录 |
 | `--admin-file-dir D` | 文件管理根目录 |
 | `--admin-shell-user/--admin-shell-token` | Web 终端连本机 relay 的身份与凭证 |
-| `--admin-db PATH` | SQLite 账号库（users/sessions/devices），需 OpenSSL 构建（PBKDF2） |
+| `--admin-db PATH` | SQLite 库：管理台账号、设备、权限分组、接入账号与 Token；需 OpenSSL 构建（PBKDF2） |
 
 账号体系：首次用 `--admin-token` 初始化 admin，之后用户名+密码登录（HttpOnly Cookie 会话）。
 角色：admin（唯一，全部）/ manager（绑定设备、建 operator/viewer、设备与文件全部操作）/
@@ -532,11 +532,26 @@ operator（Shell、Web、文件上传下载）/ viewer（仅概览与设备列�
 |---|---|---|
 | GET | `/api/v1/overview` | 汇总（agents/clients/streams/bytes/version） |
 | GET | `/api/v1/agents`、`/api/v1/agents/{devid}` | 设备列表/详情 |
+| GET | `/api/v1/agents/{devid}/{sysinfo,ttys,metrics/series}` | 设备运行信息、串口、指标 |
+| PUT | `/api/v1/agents/{devid}/caps` | 在线改端口与 Shell（Shell 仅 admin） |
+| POST | `/api/v1/agents/{devid}/kick` | 强制设备下线（agent 自动重连） |
 | GET | `/api/v1/clients`、`/api/v1/streams` | 客户端与流列表 |
 | DELETE | `/api/v1/streams/{a_sid}` | 踢单个会话（双侧 RESET） |
-| POST | `/api/v1/agents/{devid}/kick` | 强制设备下线（agent 自动重连） |
-| GET/PUT | `/api/v1/acl/file`、`POST /api/v1/acl/reload` | ACL 读写与热加载 |
-| GET | `/api/v1/audit` | 审计（登录、OPEN、踢、证书、文件、终端） |
+| GET | `/api/v1/devices`、`PUT /api/v1/devices/{devid}/owner` | 设备归属 |
+| GET/POST/PUT/DELETE | `/api/v1/permission/client-groups[/{id}]` | 客户端分组（成员与 ACL 一起保存） |
+| GET/POST/PUT/DELETE | `/api/v1/permission/agent-groups[/{id}]` | 设备分组（设备与能力上限） |
+| GET | `/api/v1/permission/agent-groups/{id}/candidates` | 可添加设备候选 |
+| POST | `/api/v1/permission/agent-groups/{id}/devices` | 批量添加设备 |
+| GET/POST/PUT/DELETE | `/api/v1/permission/dict/{ports,ttys}[/{id}]` | 端口/TTY 字典、批量新增与删除 |
+| GET | `/api/v1/permission/overview`、`/effective?client=` | 分组概览与有效权限预览 |
+| POST/GET | `/api/v1/permission/import-acl`、`/export-acl` | 旧 ACL 导入导出（导入仅 admin） |
+| GET/POST/PUT/DELETE | `/api/v1/client-accounts[/{id}]` | 接入账号；含 `/effective`、`/{id}/tokens` |
+| PUT/POST/DELETE | `/api/v1/client-tokens/{id}`、`/rotate` | Token 限额、启停、轮换、吊销 |
+| GET/PUT | `/api/v1/acl/file`、`POST /api/v1/acl/reload` | ACL 文件读写与热加载（兜底授权） |
+| GET/POST/PUT/DELETE | `/api/v1/users[/{id}]` | 管理台账号、角色、状态、密码、设备范围 |
+| GET/PUT | `/api/v1/settings` | 运行参数（上传上限、会话、锁定时长等） |
+| GET/POST | `/api/v1/distributions[/{id}]` | 文件分发任务与重试/取消/延长/校验 |
+| GET | `/api/v1/audit` | 审计（登录、OPEN、踢、证书、文件、终端、权限变更） |
 | GET/POST | `/api/v1/certs`、`/api/v1/certs/issue`、`/sign`、`/revoke` | 证书台账/签发/CSR 签名/吊销（admin） |
 | GET/POST/DELETE | `/api/v1/files[/{name}]` | 文件列表/上传/下载/删除（上限可配置，默认 32 MiB；文件名白名单） |
 | GET | `/metrics` | Prometheus 文本指标 |

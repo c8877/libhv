@@ -4,16 +4,17 @@
 
 ## 1. 入口
 
-侧边栏新增：
+侧边栏（当前）：
 
 ```
 概览
-设备
-权限          ← 新增
-客户端
+设备 C
+权限
+客户端 A
+接入账号
 会话
-账号
 证书
+账号
 文件
 任务
 审计
@@ -911,48 +912,55 @@ viewer 只能看，不显示写操作按钮。
 | 页面动作 | API |
 |---|---|
 | 加载客户端分组 | `GET /api/v1/permission/client-groups` |
-| 保存客户端分组 | `PUT /api/v1/permission/client-groups/:id` |
 | 新建客户端分组 | `POST /api/v1/permission/client-groups` |
+| 保存客户端分组（成员与 ACL） | `PUT /api/v1/permission/client-groups/:id` |
 | 删除客户端分组 | `DELETE /api/v1/permission/client-groups/:id` |
 | 加载设备分组 | `GET /api/v1/permission/agent-groups` |
-| 保存设备分组 | `PUT /api/v1/permission/agent-groups/:id` |
+| 新建 / 删除设备分组 | `POST` / `DELETE /api/v1/permission/agent-groups[/:id]` |
+| 保存设备分组（设备与上限） | `PUT /api/v1/permission/agent-groups/:id` |
 | 添加设备 | `POST /api/v1/permission/agent-groups/:id/devices` |
-| 添加用户 | `POST /api/v1/permission/client-groups/:id/users` |
-| 保存 ACL | `PUT /api/v1/permission/client-groups/:id/acl` |
+| 设备候选 | `GET /api/v1/permission/agent-groups/:id/candidates` |
+| 端口 / TTY 字典 | `GET/POST/PUT/DELETE /api/v1/permission/dict/:kind[/:id]` |
+| 字典批量新增 / 删除 | `POST /api/v1/permission/dict/:kind/batch`、`/batch-delete` |
 | 有效权限预览 | `GET /api/v1/permission/effective?client=alice` |
-| 导入旧 ACL | `POST /api/v1/permission/import-acl` |
+| 导入旧 ACL | `POST /api/v1/permission/import-acl`（admin） |
 | 导出为旧 ACL | `GET /api/v1/permission/export-acl` |
+| 接入账号与 Token | `GET/POST/PUT/DELETE /api/v1/client-accounts[/:id]`、`/api/v1/client-tokens/:id` |
 | 账号设备范围 | `GET` / `PUT /api/v1/users/:id/groups` |
 
 ---
 
-# 11. 实现建议
+# 11. 实现结构
 
-页面组件拆分：
+当前实现（`rtunnel/relay/admin/frontend/admin_pages.js`）：
 
 ```
 PermissionPage
-├─ PermissionTabs
-├─ ClientGroupTable
-│   └─ ClientGroupRow
-│       └─ ClientGroupForm
-│           ├─ ClientMembers
-│           └─ AclEditor
-├─ AgentGroupTable
-│   └─ AgentGroupRow
-│       └─ AgentGroupForm
-│           ├─ AgentMembers
-│           └─ AgentCapabilityForm
-└─ EffectivePreview
+├─ UI.tabs                客户端分组 / 设备分组
+├─ 分组表格                固定列宽，点行展开一个表单
+│   ├─ clientForm          名称、用户 chips、ACL 矩阵
+│   └─ agentForm           名称、设备 chips、能力上限
+├─ UI.transfer             加设备、选端口 / TTY
+├─ DictManager             端口 / TTY 字典（弹窗 + 行内编辑）
+└─ 有效权限 / 旧 ACL 导入导出
 ```
 
-行内展开不能每行一个独立 DOM 副本，使用：
+共用组件（`admin_ui.js`）：
 
 ```
-expandedKey = "client:1" | "agent:3"
+UI.tabs       分组切换、Token 状态筛选、字典类型切换
+UI.transfer   设备穿梭与端口 / TTY 选择
+UI.dataTable  列声明表格，支持 head / cells / rowAttrs / expand
+UI.editTable  单条记录 KV 表原地转表单
+UI.formGrid   行内展开表单的字段网格
+UI.actions    data-act 事件委托
 ```
 
-同一时间只渲染一个展开表单。
+行内展开只保留一个 key：
+
+```
+expandedKey = "client:1" | "agent:3" | "client:new"
+```
 
 ---
 

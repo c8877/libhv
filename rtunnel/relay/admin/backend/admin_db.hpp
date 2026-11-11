@@ -138,7 +138,6 @@ public:
     bool clientAccountUpdate(long long id, const std::string& display_name, const std::string& note,
                              const std::string& status, std::string& err);
     bool clientAccountDelete(long long id, std::string& err);
-    bool clientAccountNames(std::set<std::string>& out);
     bool clientTokenList(long long account_id, std::string& json_out, std::string& err);
     bool clientTokenCreate(long long account_id, const DbTokenSpec& spec, const std::string& by,
                            int max_per_account, std::string& plain_out, std::string& json_out,

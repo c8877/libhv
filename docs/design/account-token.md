@@ -555,7 +555,8 @@ relay 在 hloop_run 返回后、admin stop 前刷一次
 
 | 方法 | 路径 | 说明 | 角色 |
 |---|---|---|---|
-| GET | `/api/v1/client-accounts` | 列表，支持 `q`、分页 | operator |
+| GET | `/api/v1/client-accounts` | 列表，支持 `q` 搜索 | operator |
+| GET | `/api/v1/client-accounts/:id` | 详情，含 Token 统计与分组成员数 | operator |
 | POST | `/api/v1/client-accounts` | 新建 `{username,display_name,note}` | manager |
 | PUT | `/api/v1/client-accounts/:id` | 改展示名/备注/状态 | manager |
 | DELETE | `/api/v1/client-accounts/:id` | 级联删除 | admin |
@@ -565,7 +566,8 @@ relay 在 hloop_run 返回后、admin stop 前刷一次
 | POST | `/api/v1/client-tokens/:id/rotate` | 轮换，返回一次明文 | manager |
 | DELETE | `/api/v1/client-tokens/:id` | 吊销 | manager |
 | GET | `/api/v1/client-accounts/:id/effective` | 有效权限，复用预览逻辑 | operator |
-| POST | `/api/v1/client-accounts/import` | 导入旧 `user:token` 文本 | admin |
+
+旧凭据导入接口未实现，见 §10.5。
 
 新建请求示例：
 

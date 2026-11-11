@@ -228,6 +228,8 @@ async function saveTheme(patch, mode, color) {
 }
 
 const ROLE_NAMES = { admin: '超级管理员', manager: '管理员', operator: '操作员', viewer: '浏览者' };
+const ROLE_CHOICES = [['viewer', '浏览者'], ['operator', '操作员'], ['manager', '管理员']];
+const ROLE_CHOICES_MANAGER = ROLE_CHOICES.slice(0, 2);
 
 function avatarColor(name) {
     const palette = ['#4a9eff', '#57ab5a', '#f5a623', '#e5534b', '#b083f0', '#39c5cf', '#d4a72c', '#8b949e'];
@@ -543,14 +545,13 @@ const AccountsPage = Object.assign(new Page(), {
     }
     const canM = (u) => u.role !== 'admin' && u.username !== me.username &&
       (me.role === 'admin' || (me.role === 'manager' && (u.role === 'operator' || u.role === 'viewer')));
-    const roleOpts = me.role === 'admin'
-      ? '<option value="viewer">浏览者</option><option value="operator">操作员</option><option value="manager">管理员</option>'
-      : '<option value="viewer">浏览者</option><option value="operator">操作员</option>';
+    const roles = me.role === 'admin' ? ROLE_CHOICES : ROLE_CHOICES_MANAGER;
+    const roleOpts = roles.map(([value, label]) =>
+      '<option value="' + value + '">' + label + '</option>').join('');
     const ROLE_STATUS = {
       admin: ['超级管理员', 'warn'], manager: ['管理员', 'info'],
       operator: ['操作员', ''], viewer: ['浏览者', ''],
     };
-    const USER_STATUS = { active: ['启用', 'ok'], default: ['禁用', 'bad'] };
 
     const rows = [];
     arr.forEach(u => {
@@ -563,13 +564,13 @@ const AccountsPage = Object.assign(new Page(), {
       if (canM(u)) {
         ops += '<button data-act="status" data-id="' + u.id + '" data-st="' +
           (u.status === 'active' ? 'disabled' : 'active') + '">' +
-          (u.status === 'active' ? '禁用' : '启用') + '</button> ';
+          (u.status === 'active' ? '停用' : '启用') + '</button> ';
         ops += '<button data-act="del" data-id="' + u.id + '" data-name="' +
           UI.esc(u.username) + '">删除</button>';
       }
       rows.push([
         '<b>' + UI.esc(u.username) + '</b>', UI.status(u.role, ROLE_STATUS),
-        UI.status(u.status, USER_STATUS), UI.time(u.created_ms), ops,
+        UI.status(u.status, UI.STATUS_ACTIVE), UI.time(u.created_ms), ops,
       ]);
       if (this.editUid === u.id) rows.push(this.editRow(u, me, canM));
     });
@@ -606,9 +607,7 @@ const AccountsPage = Object.assign(new Page(), {
     const canRoles = canM(u);
     const fields = [];
     if (canRoles) {
-      const choices = me.role === 'admin'
-        ? [['viewer', '浏览者'], ['operator', '操作员'], ['manager', '管理员']]
-        : [['viewer', '浏览者'], ['operator', '操作员']];
+      const choices = me.role === 'admin' ? ROLE_CHOICES : ROLE_CHOICES_MANAGER;
       fields.push({ key: 'role', label: '角色', edit: { type: 'select', id: 'ue-role',
         options: choices.map(([value, label]) => ({ value, label })) } });
       fields.push({ key: 'status', label: '状态', edit: { type: 'switch', id: 'ue-status',

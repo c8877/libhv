@@ -244,14 +244,8 @@ dev_groups / dev_group_members / dev_group_caps / subject_groups
 GET    /api/v1/permission/client-groups
 POST   /api/v1/permission/client-groups
 GET    /api/v1/permission/client-groups/:id
-PUT    /api/v1/permission/client-groups/:id
+PUT    /api/v1/permission/client-groups/:id   保存名称、成员与 ACL（整体替换）
 DELETE /api/v1/permission/client-groups/:id
-
-POST   /api/v1/permission/client-groups/:id/users
-DELETE /api/v1/permission/client-groups/:id/users/:username
-
-GET    /api/v1/permission/client-groups/:id/acl
-PUT    /api/v1/permission/client-groups/:id/acl
 ```
 
 ### 设备分组
@@ -260,14 +254,10 @@ PUT    /api/v1/permission/client-groups/:id/acl
 GET    /api/v1/permission/agent-groups
 POST   /api/v1/permission/agent-groups
 GET    /api/v1/permission/agent-groups/:id
-PUT    /api/v1/permission/agent-groups/:id
+PUT    /api/v1/permission/agent-groups/:id   保存名称、设备与能力上限（整体替换）
 DELETE /api/v1/permission/agent-groups/:id
 
 POST   /api/v1/permission/agent-groups/:id/devices
-DELETE /api/v1/permission/agent-groups/:id/devices/:devid
-
-PUT    /api/v1/permission/agent-groups/:id/caps
-
 GET    /api/v1/permission/agent-groups/:id/candidates?q=&online=1
 ```
 
@@ -318,15 +308,18 @@ GET /api/v1/permission/effective?client=alice
   "devices": ["dev1", "dev2"],
   "caps": {
     "tcp_ports": "22,80,8000-8100",
-    "shell": 1,
+    "shell": "1",
     "tty": "ttyS*",
-    "file": "ro"
-  },
-  "clipped": [
-    "dev1: 设备组不允许 8000-8100"
-  ]
+    "file": "ro",
+    "sysinfo": "0",
+    "metrics": "0",
+    "config": "0",
+    "web": "0"
+  }
 }
 ```
+
+结果已按设备分组能力上限与字典停用过滤，与运行期 OPEN 判定一致。
 
 ## 8. 权限执行
 
@@ -345,12 +338,11 @@ GET /api/v1/permission/effective?client=alice
 
 记录：
 
-- 客户端分组创建/修改/删除
-- 客户端成员加入/移出
-- 设备分组创建/修改/删除
-- devid 加入/移出
-- ACL 条目新增/修改/删除
-- 设备分组能力上限修改
+- 客户端分组创建/修改/删除（含成员与 ACL）
+- 设备分组创建/修改/删除（含设备与能力上限）
+- 端口 / TTY 字典新增、修改、删除、批量操作
+- 接入账号创建/修改/删除，Token 创建/修改/轮换/吊销
+- 旧 ACL 导入（`permission.import_acl`）与导出
 
 ## 10. 约束
 

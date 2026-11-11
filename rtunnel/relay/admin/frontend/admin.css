@@ -281,7 +281,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 
 .metric-table td:first-child{padding-left:24px}
 .metric-group td{padding-top:14px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--border);background:rgba(255,255,255,.018)}
-.metric-name{padding-left:24px!important}
+.metric-name{padding-left:24px}
 .metric-table td{vertical-align:middle;font-size:14px}
 .switch{position:relative;display:inline-block;width:34px;height:18px}
 .switch input{opacity:0;width:0;height:0}
@@ -324,14 +324,14 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 @media (max-width:900px){.task-cols{grid-template-columns:1fr}.task-head{flex-wrap:wrap}.task-actions{width:100%;justify-content:flex-end}}
 .metric-name b{font-size:14px;font-weight:600}
 .metric-table .chev{width:28px;text-align:right}
-.metric-expand td{padding:0 16px 12px 24px!important;background:var(--surface-2)}
+.detail-table .metric-expand td{padding:0 16px 12px 24px;background:var(--surface-2)}
 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:middle}
 .dot.ok{background:#57ab5a}.dot.warn{background:#f5a623}.dot.off{background:#6b7280}
 .tty-row .chev{display:inline-block;margin-left:10px}
-.tty-expand td{padding:0 16px 16px 24px!important;background:var(--surface-2)}
+.detail-table .tty-expand td{padding:0 16px 16px 24px;background:var(--surface-2)}
 .metric-table .num{text-align:left;font-variant-numeric:tabular-nums;white-space:nowrap}
 .metric-table .center{text-align:left}
-.metric-table .metric-name,.metric-table .metric-group td{padding-left:24px!important}
+.metric-table .metric-name,.metric-table .metric-group td{padding-left:24px}
 .metric-sync{margin-top:12px;font-size:12px;color:var(--muted)}
 .metric-table{table-layout:fixed;width:100%}
 .metric-table th:nth-child(1){width:28%}
@@ -352,7 +352,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .metric-readonly{display:flex;flex-direction:column;gap:6px;font-size:11px;color:var(--muted)}
 .metric-readonly b{font-size:13px;color:var(--fg);font-weight:500;padding:7px 0}
 .tty-table-wrap{border:1px solid var(--border);border-radius:8px;overflow:auto;background:var(--surface-1);max-height:340px}
-.metric-expand td,.tty-expand td{background:transparent!important;border-bottom:0!important}
+.detail-table .metric-expand td,.detail-table .tty-expand td{background:transparent;border-bottom:0}
   background:color-mix(in srgb,var(--th-bg) 60%,var(--border));
   font-weight:600;
   color:var(--fg);
@@ -377,7 +377,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .tty-table th:nth-child(4){width:12%}
 .tty-table th:nth-child(5){width:12%}
 .tty-table th:nth-child(6){width:16%}
-.caps-expand td{padding:0 16px 14px 24px!important;border-bottom:0!important}
+.caps-expand td{padding:0 16px 14px 24px;border-bottom:0}
 .tty-table-wrap.open{max-height:none;overflow:visible}
 .caps-row .chev{float:right}
 .panel.mb16{margin-bottom:16px}
@@ -476,7 +476,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .perm-row:hover{background:var(--surface-4)}
 .perm-row.open{background:var(--surface-3)}
 .perm-chev{display:inline-block;width:16px;color:var(--muted)}
-.perm-expand>td{padding:0 16px 18px!important;background:rgba(255,255,255,.015)}
+.perm-expand>td{padding:0 16px 18px;background:rgba(255,255,255,.015)}
 .perm-form{padding:16px;border:1px solid var(--border);border-radius:8px;background:var(--card)}
 .perm-form h3{margin:16px 0 8px;font-size:13px}
 .perm-grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
@@ -666,7 +666,7 @@ label.ui-switch{display:inline-flex;flex-direction:row;align-items:center;gap:8p
 .acc-progress.bad::-moz-progress-bar{background:var(--bad)}
 
 /* 行内展开表单 */
-.tok-edit-row>td{padding:0!important;background:var(--surface-2);white-space:normal}
+.tok-edit-row>td{padding:0;background:var(--surface-2);white-space:normal}
 .tok-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px 16px;padding:16px}
 .tok-form label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted);min-width:0}
 .tok-form input,.tok-form select{width:100%;box-sizing:border-box}

@@ -107,7 +107,7 @@ Token 表 9 列        在 1100px 下必须横向滚动，操作列容易被挤�
 ```
 卡片间距        16px，与现有 .panel 一致
 卡片一          高度自适应，KV 两列配对；备注、Token、权限摘要跨两列
-卡片二          手写表格（需承载展开行），超宽在卡片内横向滚动；≤1100px 转卡片
+卡片二          UI.dataTable（cells + expand），超宽在卡片内横向滚动；≤1100px 转卡片
 不引入第三张卡   删除放在卡片一底部分隔线内，避免动线过长
 ```
 
@@ -624,7 +624,10 @@ admin_accounts.js
 ```
 UI.panel          两张卡片
 UI.editTable      账号信息表：原地切换只读与编辑（见 §10.6）
-UI.status         Token / 账号状态
+UI.dataTable      Token 表格：列声明 + cells + expand 行内表单
+UI.status         Token / 账号状态（启用/停用共用 UI.STATUS_ACTIVE）
+UI.localInput     datetime-local 输入值
+UI.gb / gbValue   配额显示与编辑回填
 UI.actions        详情页除账号编辑外的 data-act
 UI.modal          新建 Token、轮换、吊销（账号与 Token 的编辑都不走弹窗）
 UI.pill           权限摘要里的分组标签
@@ -787,9 +790,13 @@ UI.fieldControl(field, value, data);   // text / number / password / select / sw
 UI.fieldValues(root, fields);          // 读回业务值，checkbox 按 onValue/offValue 映射
 UI.bindFields(root);                   // 开关文案随勾选更新
 
-// 3. UI.detailTable 支持直接插入整行
-rows.push(cells);
-if (editing) rows.push(formRowHtml);
+// 3. 列表表格用 UI.dataTable，expand 返回表单行
+UI.dataTable({
+  cols: [...],
+  rows,
+  cells: row => [ ... ],          // 或逐列 render
+  expand: row => editing ? formRowHtml : '',
+});
 ```
 
 已使用：管理台「账号」行内编辑（角色 / 状态 / 密码 / 设备范围）、字典管理行内编辑。

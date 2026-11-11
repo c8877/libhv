@@ -444,21 +444,31 @@ const DictManager = {
     const render = () => {
       const q = state.q.toLowerCase();
       const rows = state.list.filter(d => !q || d.value.toLowerCase().includes(q) || (d.name || '').toLowerCase().includes(q));
-      m.el.querySelector('#dict-body').innerHTML =
-        '<table class="detail-table dict-table"><thead><tr><th><input type="checkbox" id="dict-all"></th>' +
-        '<th>' + (state.kind === 'ports' ? '端口/范围' : 'TTY 路径/模式') + '</th><th>名称</th><th>引用</th><th>状态</th><th>操作</th></tr></thead><tbody>' +
-        (rows.length ? rows.map(d => {
+      m.el.querySelector('#dict-body').innerHTML = UI.dataTable({
+        cls: 'dict-table',
+        plain: true,
+        head: '<th><input type="checkbox" id="dict-all"></th>' +
+          '<th>' + (state.kind === 'ports' ? '端口/范围' : 'TTY 路径/模式') + '</th>' +
+          '<th>名称</th><th>引用</th><th>状态</th><th>操作</th>',
+        cols: Array(6).fill({}),
+        rows: rows,
+        empty: '暂无字典项',
+        rowCls: d => state.editId === d.id ? 'is-editing' : '',
+        cells: d => {
           const editing = state.editId === d.id;
-          return '<tr' + (editing ? ' class="is-editing"' : '') + '><td><input type="checkbox" class="dict-pick" value="' + d.id + '"' +
-          (state.sel.has(d.id) ? ' checked' : '') + '></td><td><code>' + UI.esc(d.value) + '</code></td>' +
-          '<td>' + UI.esc(d.name || '') + '</td><td>' + (d.refs || 0) + '</td>' +
-          '<td>' + (d.enabled ? UI.pill('启用', 'ok') : UI.pill('停用', 'info')) + '</td>' +
-          '<td><button class="dict-edit" data-id="' + d.id + '">' + (editing ? '收起' : '编辑') + '</button> ' +
-          '<button class="dict-del" data-id="' + d.id + '">删除</button></td></tr>' +
-          (editing ? DictManager.dictEditRow(state, d) : '');
-        }).join('')
-          : '<tr><td colspan="6" class="empty">暂无字典项</td></tr>') +
-        '</tbody></table>';
+          return [
+            '<input type="checkbox" class="dict-pick" value="' + d.id + '"' +
+              (state.sel.has(d.id) ? ' checked' : '') + '>',
+            '<code>' + UI.esc(d.value) + '</code>',
+            UI.esc(d.name || ''),
+            String(d.refs || 0),
+            d.enabled ? UI.pill('启用', 'ok') : UI.pill('停用', 'info'),
+            '<button class="dict-edit" data-id="' + d.id + '">' + (editing ? '收起' : '编辑') + '</button> ' +
+              '<button class="dict-del" data-id="' + d.id + '">删除</button>',
+          ];
+        },
+        expand: d => state.editId === d.id ? DictManager.dictEditRow(state, d) : '',
+      });
       m.el.querySelector('#dict-all').checked = rows.length > 0 && rows.every(d => state.sel.has(d.id));
       m.el.querySelector('#dict-all').onchange = e => {
         rows.forEach(d => e.target.checked ? state.sel.add(d.id) : state.sel.delete(d.id));

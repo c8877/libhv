@@ -123,7 +123,7 @@ def main():
             row.locator("[data-act=status]").click()
             page.wait_for_timeout(700)
             row = page.locator("#page tbody tr").filter(has_text="op1").first
-            check("账号：禁用", "禁用" in row.inner_text())
+            check("账号：停用", "停用" in row.inner_text())
             row.locator("[data-act=status]").click()
             page.wait_for_timeout(700)
             row = page.locator("#page tbody tr").filter(has_text="op1").first
