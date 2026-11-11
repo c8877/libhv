@@ -243,6 +243,7 @@ function avatarColor(name) {
 const Router = {
   routes: [],
   current: null,
+  seq: 0,
   nav: [
     { hash: '#/overview', title: '概览', icon: '▣' },
     { hash: '#/agents', title: '设备 C', icon: '▤' },
@@ -257,7 +258,24 @@ const Router = {
     { hash: '#/audit', title: '审计', icon: '≣' },
     { hash: '#/settings', title: '设置', icon: '⚙' },
   ],
+  // 按页面域懒加载：首屏只加载 admin_ui.js + admin.js，其余模块进页面时再取。
+  // 顺序无关，命中哪条就加载哪个文件；模块自己调用 Router.register 注册路由。
+  lazy: [
+    { src: '/admin_agent.js', test: /^#\/(agents\/[^/]+|tty\/)/ },
+    { src: '/admin_permission.js', test: /^#\/permission\b/ },
+    { src: '/admin_terminal.js', test: /^#\/terminal\// },
+    { src: '/admin_pages.js', test: /^#\/(clients|streams|certs|files|audit|settings)\b/ },
+    { src: '/admin_accounts.js', test: /^#\/access\b/ },
+    { src: '/admin_dist.js', test: /^#\/(tasks|distribute)\b/ },
+  ],
   register(re, page, title) { this.routes.push({ re, page, title }); },
+  match(h) {
+    for (const r of this.routes) {
+      const m = h.match(r.re);
+      if (m) return { r, m };
+    }
+    return null;
+  },
   go(h) { location.hash = h; },
   renderNav(activeHash) {
     const role = (Auth.me && Auth.me.role) || 'viewer';
@@ -276,27 +294,51 @@ const Router = {
   },
   async dispatch() {
     const h = location.hash || '#/overview';
+    const seq = ++this.seq;
+    const crumb = document.getElementById('crumb');
+    const page = document.getElementById('page');
     if (this.current && this.current.page.leave) this.current.page.leave();
     this.current = null;
-    for (const r of this.routes) {
-      const m = h.match(r.re);
-      if (!m) continue;
-      this.current = r;
-      this.renderNav(h);
-      document.getElementById('crumb').textContent = r.title;
-      const el = document.getElementById('page');
-      el.innerHTML = '<div class="empty">加载中…</div>';
-      try {
-        await r.page.enter(el, m.slice(1), h);
-      } catch (e) {
-        el.innerHTML = '<div class="empty">加载失败：' + UI.esc(e.message) + '</div>';
+
+    let found = this.match(h);
+    if (!found) {
+      const mod = this.lazy.find(x => x.test.test(h));
+      if (mod) {
+        this.renderNav(h);
+        crumb.textContent = '加载中';
+        page.innerHTML = '<div class="empty">加载中…</div>';
+        try {
+          await loadScriptOnce(mod.src);
+        } catch (e) {
+          if (seq !== this.seq) return;
+          crumb.textContent = '加载失败';
+          page.innerHTML = '<div class="empty">模块加载失败：' + UI.esc(e.message) +
+            ' <a href="javascript:location.reload()">刷新重试</a></div>';
+          return;
+        }
+        if (seq !== this.seq) return;   // 期间又切了页面，丢弃本次结果
+        found = this.match(h);
       }
+    }
+
+    if (!found) {
+      this.renderNav(h);
+      crumb.textContent = '404';
+      page.innerHTML = '<div class="empty">页面不存在 <a href="#/overview">返回概览</a></div>';
       return;
     }
+
+    const r = found.r, m = found.m;
+    this.current = r;
     this.renderNav(h);
-    document.getElementById('crumb').textContent = '404';
-    document.getElementById('page').innerHTML =
-      '<div class="empty">页面不存在 <a href="#/overview">返回概览</a></div>';
+    crumb.textContent = r.title;
+    page.innerHTML = '<div class="empty">加载中…</div>';
+    try {
+      await r.page.enter(page, m.slice(1), h);
+    } catch (e) {
+      if (seq !== this.seq) return;
+      page.innerHTML = '<div class="empty">加载失败：' + UI.esc(e.message) + '</div>';
+    }
   },
   start() {
     window.addEventListener('hashchange', () => this.dispatch());
@@ -868,4 +910,6 @@ async function boot() {
 
 Router.register(/^#\/accounts$/, AccountsPage, '账号');
 Router.register(/^#\/profile$/, ProfilePage, '个人设置');
+Router.register(/^#\/acl$/, { enter() { location.replace('#/permission'); } }, '权限');
+Router.register(/^#\/groups$/, { enter() { location.replace('#/permission'); } }, '权限');
 window.addEventListener('load', boot);

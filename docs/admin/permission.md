@@ -932,7 +932,7 @@ viewer 只能看，不显示写操作按钮。
 
 # 11. 实现结构
 
-当前实现（`rtunnel/relay/admin/frontend/admin_pages.js`）：
+当前实现（`rtunnel/relay/admin/frontend/admin_permission.js`，进入权限页时按需加载）：
 
 ```
 PermissionPage

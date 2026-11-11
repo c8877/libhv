@@ -414,6 +414,12 @@ void AdminServer::registerRoutes() {
     service_.GET("/admin_pages.js", [this](const HttpContextPtr& ctx) {
         return serveFrontend(ctx, "admin_pages.js", "application/javascript");
     });
+    service_.GET("/admin_permission.js", [this](const HttpContextPtr& ctx) {
+        return serveFrontend(ctx, "admin_permission.js", "application/javascript");
+    });
+    service_.GET("/admin_terminal.js", [this](const HttpContextPtr& ctx) {
+        return serveFrontend(ctx, "admin_terminal.js", "application/javascript");
+    });
     service_.GET("/admin_accounts.js", [this](const HttpContextPtr& ctx) {
         return serveFrontend(ctx, "admin_accounts.js", "application/javascript");
     });

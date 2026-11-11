@@ -621,6 +621,34 @@ queued/scheduled → canceled
 - 文件大小/哈希在创建时写入任务；执行前文件被替换会校验失败
 - 上传完成计算并缓存 sha256，文件列表显示前 8 位
 
+### 13.4 前端模块与按需加载
+
+管理台前端全部编译期内嵌，浏览器侧只常驻两个文件：
+
+```
+admin_ui.js    UI 组件与助手（表格、表单、弹窗、状态、时间、容量）
+admin.js       Auth / Router / Page、概览、设备列表、管理台账号、个人设置
+```
+
+其余按页面域拆成独立模块，由 `Router.lazy` 在首次进入对应路由时加载：
+
+| 模块 | 覆盖路由 |
+|---|---|
+| `admin_agent.js` | `#/agents/:devid`、`#/tty/:devid/:alias` |
+| `admin_permission.js` | `#/permission` |
+| `admin_terminal.js` | `#/terminal/:devid` |
+| `admin_pages.js` | `#/clients`、`#/streams`、`#/certs`、`#/files`、`#/audit`、`#/settings` |
+| `admin_accounts.js` | `#/access`、`#/access/:id` |
+| `admin_dist.js` | `#/tasks`、`#/tasks/:id`、`#/distribute` |
+
+```
+模块自己调用 Router.register；dispatch 未匹配到路由时按前缀加载一次
+loadScriptOnce 去重，同一模块只请求一次；Cache-Control: no-store
+模块加载失败显示错误与刷新入口，不静默 404
+dispatch 带序号，快速切换页面时丢弃过期的加载结果
+```
+
+xterm 与 Chart 仍由各自页面二次懒加载，只有终端/设备详情会请求。首屏 JS 从约 240 KB 降到 76 KB。
 
 ## 14. 备选方案与取舍
 

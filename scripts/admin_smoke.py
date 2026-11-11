@@ -66,9 +66,16 @@ def main():
         page.wait_for_timeout(800)
         check("登录", page.locator("#nav a").count() > 0)
 
+        def wait_ready(timeout=8000):
+            # 页面模块按需加载，等 crumb 离开「加载中」再断言
+            page.wait_for_function(
+                "() => document.getElementById('crumb')?.textContent !== '加载中'",
+                timeout=timeout)
+
         for name, title in PAGES:
             page.goto(args.base + "/#/" + name)
-            page.wait_for_timeout(500)
+            wait_ready()
+            page.wait_for_timeout(200)
             text = page.evaluate("document.querySelector('#page')?.innerText || ''")
             check("页面 " + name, title in text, text[:40].replace("\n", " "))
 
