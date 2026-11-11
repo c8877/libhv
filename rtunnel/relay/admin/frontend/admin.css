@@ -1,3 +1,8 @@
+/* 管理台样式。改动约定：
+   1. 先找现有组件（.panel / .detail-table / .pill / .ui-* / .kv-list），不要为单个页面另起一套
+   2. 同一选择器只定义一次；要改就改原规则，不要在文末追加覆盖
+   3. 颜色优先用 token（--bg / --fg / --border / --surface-* / --divider*），少写字面量
+   4. 改完跑 python3 scripts/css_audit.py */
 :root {
   --side-w: 220px;
   --bg: #f5f6f8;
@@ -24,6 +29,13 @@
   --code-bg: #f3f4f6;
   --chart-grid: rgba(0,0,0,.08);
   --chart-axis: #6b7280;
+  /* 表面叠加：深色面提亮，浅色面近似不可见 */
+  --surface-1: rgba(255,255,255,.012);
+  --surface-2: rgba(255,255,255,.02);
+  --surface-3: rgba(255,255,255,.025);
+  --surface-4: rgba(255,255,255,.03);
+  --divider: rgba(255,255,255,.08);
+  --divider-strong: rgba(255,255,255,.14);
 }
 
 html[data-theme="dark"] {
@@ -70,7 +82,7 @@ body { font: 14px/1.5 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei
   border-left-color: var(--accent); }
 #nav a .badge { margin-left: auto; background: var(--accent); color: #fff; border-radius: 9px;
                 font-size: 11px; padding: 0 7px; line-height: 18px; }
-.side-foot { padding: 14px 18px; font-size: 12px; border-top: 1px solid rgba(255,255,255,.08); }
+.side-foot { padding: 14px 18px; font-size: 12px; border-top: 1px solid var(--divider); }
 .side-foot .dot { margin-right: 6px; }
 
 /* 主区 */
@@ -141,17 +153,17 @@ button:hover { filter: brightness(.96); }
   padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
 #userbtn:hover { border-color: rgba(255,255,255,.35); }
 #usermenu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 170px; z-index: 50;
-  background: var(--card, #23262d); border: 1px solid rgba(255,255,255,.14); border-radius: 8px;
+  background: var(--card, #23262d); border: 1px solid var(--divider-strong); border-radius: 8px;
   padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
 #userinfo { padding: 6px 10px 8px; font-size: 12px; color: var(--muted, #9aa0aa);
-  border-bottom: 1px solid rgba(255,255,255,.08); margin-bottom: 4px; }
+  border-bottom: 1px solid var(--divider); margin-bottom: 4px; }
 #usermenu #logout { display: block; width: 100%; text-align: left; background: transparent;
   border: 0; color: inherit; padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
-#usermenu #logout:hover { background: rgba(255,255,255,.08); }
+#usermenu #logout:hover { background: var(--divider); }
 
 /* 终端会话标签：与黑色终端区连通 */
 .term-tabbar.ui-tabs-attached{background:#000;border-bottom:1px solid rgba(255,255,255,.12);padding:8px 8px 0}
-.term-tabbar.ui-tabs-attached .ui-tab{background:#12161c;border-color:rgba(255,255,255,.14);color:#9aa4b2;font-size:12px;padding:7px 12px}
+.term-tabbar.ui-tabs-attached .ui-tab{background:#12161c;border-color:var(--divider-strong);color:#9aa4b2;font-size:12px;padding:7px 12px}
 .term-tabbar.ui-tabs-attached .ui-tab:not(.is-active):hover{background:#171d25;border-color:rgba(255,255,255,.28);color:#e6edf3}
 .term-tabbar.ui-tabs-attached .ui-tab.is-active{background:#000;border-color:var(--accent);border-bottom-color:#000;color:var(--accent);margin-bottom:-1px}
 
@@ -180,7 +192,7 @@ button:hover { filter: brightness(.96); }
 #userbtn .caret { color: var(--muted); font-size: 11px; }
 #usermenu a { display: block; padding: 8px 10px; border-radius: 6px; color: inherit;
   text-decoration: none; font-size: 13px; }
-#usermenu a:hover { background: rgba(255,255,255,.08); }
+#usermenu a:hover { background: var(--divider); }
 
 /* 配置页 */
 .cfg-body { padding: 12px 16px; }
@@ -294,7 +306,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .task-file-name{font-size:22px;font-weight:600;margin-bottom:8px;word-break:break-all}
 .task-overview .task-sub{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:13px}
 .task-overview .task-sub code{font-size:12px;word-break:break-all}
-.task-bar{height:10px;border-radius:5px;background:rgba(255,255,255,.08);margin:22px 0 10px;overflow:hidden}
+.task-bar{height:10px;border-radius:5px;background:var(--divider);margin:22px 0 10px;overflow:hidden}
 .task-bar>span{display:block;height:100%;background:var(--accent);border-radius:5px}
 .task-stats{display:flex;justify-content:space-between;color:var(--muted);font-size:13px}
 .task-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
@@ -309,11 +321,11 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 @media (max-width:900px){.task-cols{grid-template-columns:1fr}.task-head{flex-wrap:wrap}.task-actions{width:100%;justify-content:flex-end}}
 .metric-name b{font-size:14px;font-weight:600}
 .metric-table .chev{width:28px;text-align:right}
-.metric-expand td{padding:0 16px 12px 24px!important;background:rgba(255,255,255,.02)}
+.metric-expand td{padding:0 16px 12px 24px!important;background:var(--surface-2)}
 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:middle}
 .dot.ok{background:#57ab5a}.dot.warn{background:#f5a623}.dot.off{background:#6b7280}
 .tty-row .chev{display:inline-block;margin-left:10px}
-.tty-expand td{padding:0 16px 16px 24px!important;background:rgba(255,255,255,.02)}
+.tty-expand td{padding:0 16px 16px 24px!important;background:var(--surface-2)}
 .metric-table .num{text-align:left;font-variant-numeric:tabular-nums;white-space:nowrap}
 .metric-table .center{text-align:left}
 .metric-table .metric-name,.metric-table .metric-group td{padding-left:24px!important}
@@ -336,7 +348,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .sys-item .k{width:76px;flex:none;color:var(--muted);font-size:12px}
 .metric-readonly{display:flex;flex-direction:column;gap:6px;font-size:11px;color:var(--muted)}
 .metric-readonly b{font-size:13px;color:var(--fg);font-weight:500;padding:7px 0}
-.tty-table-wrap{border:1px solid var(--border);border-radius:8px;overflow:auto;background:rgba(255,255,255,.012);max-height:340px}
+.tty-table-wrap{border:1px solid var(--border);border-radius:8px;overflow:auto;background:var(--surface-1);max-height:340px}
 .metric-expand td,.tty-expand td{background:transparent!important;border-bottom:0!important}
   background:color-mix(in srgb,var(--th-bg) 60%,var(--border));
   font-weight:600;
@@ -347,7 +359,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
   background:color-mix(in srgb, var(--fg) 7%, var(--card));
   font-weight:600;color:var(--fg)
 }
-.detail-table-shell{border:1px solid var(--border);border-radius:8px;overflow:auto;background:rgba(255,255,255,.012)}
+.detail-table-shell{border:1px solid var(--border);border-radius:8px;overflow:auto;background:var(--surface-1)}
 .detail-table{width:100%;border-collapse:collapse;font-size:14px}
 .detail-table th{text-align:left;font-size:12px;font-weight:600;color:var(--fg);background:color-mix(in srgb, var(--fg) 7%, var(--card));padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
 .detail-table td{text-align:left;padding:9px 12px;border-bottom:1px solid color-mix(in srgb, var(--border) 55%, transparent);vertical-align:middle}
@@ -418,8 +430,8 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-pager .spacer{flex:1}
 .ui-confirm-text{font-size:13px;line-height:1.6;color:var(--fg);margin-bottom:14px}
 .ui-row{cursor:pointer}
-.ui-row:hover{background:rgba(255,255,255,.03)}
-.ui-row.open{background:rgba(255,255,255,.025)}
+.ui-row:hover{background:var(--surface-4)}
+.ui-row.open{background:var(--surface-3)}
 .ui-row .chev{color:var(--muted);transition:.15s}
 .ui-row.open .chev{transform:rotate(180deg)}
 .ui-pad{padding:16px}
@@ -458,8 +470,8 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .perm-table td:last-child,.perm-table th:last-child{white-space:nowrap}
 .perm-sum{white-space:normal;overflow-wrap:anywhere;line-height:1.45}
 .perm-row{cursor:pointer}
-.perm-row:hover{background:rgba(255,255,255,.03)}
-.perm-row.open{background:rgba(255,255,255,.025)}
+.perm-row:hover{background:var(--surface-4)}
+.perm-row.open{background:var(--surface-3)}
 .perm-chev{display:inline-block;width:16px;color:var(--muted)}
 .perm-expand td{padding:0 16px 18px!important;background:rgba(255,255,255,.015)}
 .perm-form{padding:16px;border:1px solid var(--border);border-radius:8px;background:var(--card)}
