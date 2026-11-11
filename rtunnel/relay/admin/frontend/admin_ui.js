@@ -5,6 +5,52 @@ const UI = {
     return String(s == null ? '' : s).replace(/[&<>"']/g,
       c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   },
+  pill(text, kind) {
+    return '<span class="pill' + (kind ? ' ' + kind : '') + '">' + UI.esc(text) + '</span>';
+  },
+  // map: { value: [label, kind], default: [label, kind] }
+  status(value, map, attrs) {
+    const m = (map && map[value]) || (map && map.default) || [value, ''];
+    return '<span class="pill' + (m[1] ? ' ' + m[1] : '') + '"' + (attrs || '') + '>' +
+      UI.esc(m[0]) + '</span>';
+  },
+  time(ms) {
+    if (ms == null || ms === 0 || ms === '') return '—';
+    const p = (typeof Auth !== 'undefined' && Auth.profile) || {};
+    return p.time_format === 'relative' ? UI.ago(ms) : new Date(ms).toLocaleString();
+  },
+  download(name, data, mime) {
+    const blob = data instanceof Blob ? data
+      : new Blob([data], { type: mime || 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  },
+  async copy(text, okMsg) {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        ta.remove();
+        if (!ok) throw new Error('copy failed');
+      }
+      UI.toast(okMsg || '已复制');
+      return true;
+    } catch (e) {
+      UI.toast('复制失败', true);
+      return false;
+    }
+  },
   renderUser() {
     const me = (typeof Auth !== 'undefined' && Auth.me) || {};
     const name = me.display_name || me.username || '?';

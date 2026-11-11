@@ -36,13 +36,14 @@ const ClientsPage = Object.assign(new Page(), {
 const StreamsPage = Object.assign(new Page(), {
   async refresh() {
     const arr = await Api.get('/api/v1/streams');
-    const pill = s => s === 'OPEN' ? '<span class="pill ok">OPEN</span>'
-      : s === 'OPENING' ? '<span class="pill info">OPENING</span>'
-      : '<span class="pill warn">HALF_CLOSED</span>';
+    const STREAM_STATUS = {
+      OPEN: ['OPEN', 'ok'], OPENING: ['OPENING', 'info'],
+      HALF_CLOSED: ['HALF_CLOSED', 'warn'], default: ['HALF_CLOSED', 'warn'],
+    };
     const rows = arr.map(s => [
       UI.esc(s.a_user) + ':' + s.a_sid,
       UI.esc(s.c_devid) + ':' + s.c_sid,
-      pill(s.state), UI.ago(s.opened_at_ms),
+      UI.status(s.state, STREAM_STATUS), UI.ago(s.opened_at_ms),
       '<button class="kick" data-sid="' + s.a_sid + '">踢掉</button>',
     ]);
     this.el.innerHTML = UI.listPage({
@@ -81,10 +82,10 @@ const CertsPage = Object.assign(new Page(), {
   refreshInterval() { return 0; },
   async refresh() {
     const arr = await Api.get('/api/v1/certs');
-    const pill = s => s === 'valid' ? '<span class="pill ok">有效</span>'
-      : s === 'expiring' ? '<span class="pill warn">即将到期</span>'
-      : s === 'expired' ? '<span class="pill bad">已过期</span>'
-      : '<span class="pill bad">已吊销</span>';
+    const CERT_STATUS = {
+      valid: ['有效', 'ok'], expiring: ['即将到期', 'warn'],
+      expired: ['已过期', 'bad'], revoked: ['已吊销', 'bad'], default: ['已吊销', 'bad'],
+    };
     const roleName = r => r === 'device' ? '设备' : r === 'user' ? '用户' : UI.esc(r || '');
     const rows = arr.map(c => {
       const days = c.expire_ms ? Math.ceil((c.expire_ms - Date.now()) / 86400000) : null;
@@ -97,7 +98,7 @@ const CertsPage = Object.assign(new Page(), {
         '<b title="' + UI.esc(c.san) + '">' + UI.esc(c.san.length > 28 ? c.san.slice(0, 27) + '…' : c.san) + '</b>',
         roleName(c.role),
         '<code title="' + UI.esc(serial) + '">' + UI.esc(serial.length > 14 ? serial.slice(0, 13) + '…' : serial) + '</code>',
-        exp, pill(c.status),
+        exp, UI.status(c.status, CERT_STATUS),
         c.status === 'revoked' ? '' : '<button class="revoke" data-san="' + UI.esc(c.san) + '">吊销</button>',
       ];
     });
@@ -221,7 +222,7 @@ const FilesPage = Object.assign(new Page(), {
       '<span class="ui-right">' + UI.bytes(f.size) + '</span>',
       '<code title="' + UI.esc(f.sha256 || '') + '">' + UI.esc((f.sha256 || '').slice(0, 8)) + '</code> ' +
         (f.sha256 ? '<button class="cp" data-hash="' + UI.esc(f.sha256) + '">复制</button>' : ''),
-      new Date(f.mtime_ms).toLocaleString(),
+      UI.time(f.mtime_ms),
       '<button class="dl" data-name="' + UI.esc(f.name) + '">下载</button> ' +
       (canManage() ? '<button class="push" data-name="' + UI.esc(f.name) + '">分发</button> ' : '') +
       (canManage() ? '<button class="del" data-name="' + UI.esc(f.name) + '">删除</button>' : ''),
@@ -244,10 +245,7 @@ const FilesPage = Object.assign(new Page(), {
     document.getElementById('files-refresh').onclick = () => this.refresh();
     UI.bindSearch(document.getElementById('fl-q'));
     document.querySelectorAll('#page button.cp').forEach(btn => {
-      btn.onclick = async () => {
-        try { await navigator.clipboard.writeText(btn.dataset.hash); UI.toast('哈希已复制'); }
-        catch (e) { UI.toast('复制失败', true); }
-      };
+      btn.onclick = () => UI.copy(btn.dataset.hash, '哈希已复制');
     });
     const MAX_UPLOAD = uploadLimitMb() * 1024 * 1024;
     const CHUNK = 8 * 1024 * 1024;
@@ -328,12 +326,7 @@ const FilesPage = Object.assign(new Page(), {
           const r = await fetch('/api/v1/files/' + encodeURIComponent(btn.dataset.name), { headers, cache: 'no-store' });
           if (!r.ok) throw new Error('HTTP ' + r.status);
           const blob = await r.blob();
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = btn.dataset.name;
-          a.click();
-          URL.revokeObjectURL(url);
+          UI.download(btn.dataset.name, blob);
         } catch (e) { UI.toast('下载失败：' + e.message, true); }
       };
     });
@@ -486,7 +479,7 @@ const DictManager = {
         (rows.length ? rows.map(d => '<tr><td><input type="checkbox" class="dict-pick" value="' + d.id + '"' +
           (state.sel.has(d.id) ? ' checked' : '') + '></td><td><code>' + UI.esc(d.value) + '</code></td>' +
           '<td>' + UI.esc(d.name || '') + '</td><td>' + (d.refs || 0) + '</td>' +
-          '<td>' + (d.enabled ? '<span class="pill ok">启用</span>' : '<span class="pill info">停用</span>') + '</td>' +
+          '<td>' + (d.enabled ? UI.pill('启用', 'ok') : UI.pill('停用', 'info')) + '</td>' +
           '<td><button class="dict-edit" data-id="' + d.id + '">编辑</button> ' +
           '<button class="dict-del" data-id="' + d.id + '">删除</button></td></tr>').join('')
           : '<tr><td colspan="6" class="empty">暂无字典项</td></tr>') +
@@ -858,7 +851,7 @@ const PermissionPage = Object.assign(new Page(), {
       items: data.devices || [],
       key: d => d.devid,
       renderItem: d => '<span class="transfer-dev">' + esc(d.devid) + '</span>' +
-        '<span class="pill ' + (d.online ? 'ok' : 'info') + '">' + (d.online ? '在线' : '登记') + '</span>' +
+        UI.pill(d.online ? '在线' : '登记', d.online ? 'ok' : 'info') +
         ((d.groups || []).length ? '<span class="muted-sm">' + esc(d.groups.join(',')) + '</span>' : ''),
       text: d => d.devid,
       filters: [{ id: 'online', label: '仅在线', test: d => d.online }],
@@ -1171,13 +1164,7 @@ const PermissionPage = Object.assign(new Page(), {
     };
     eaCopy.onclick = async () => {
       if (!exp.value) { eaRes.textContent = '先点「生成导出」'; return; }
-      try {
-        await navigator.clipboard.writeText(exp.value);
-      } catch (e) {
-        exp.select();
-        document.execCommand('copy');
-      }
-      eaRes.textContent = '已复制到剪贴板';
+      if (await UI.copy(exp.value, '已复制到剪贴板')) eaRes.textContent = '已复制到剪贴板';
     };
   },
   enter(el) { this.el = el; return Page.prototype.enter.call(this, el, []); },
@@ -1405,12 +1392,8 @@ const TtyPage = Object.assign(new Page(), {
       if (e.dir === 'sys') return '[' + new Date(e.ts).toISOString() + '] SYS ' + (e.text || '');
       return '[' + new Date(e.ts).toISOString() + '] ' + e.dir.toUpperCase() + ' ' + this.fmtHex(e.bytes);
     });
-    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = this.devid + '-' + this.alias.replace(/[^A-Za-z0-9_.-]/g, '_') + '-tty.log';
-    a.click();
-    URL.revokeObjectURL(a.href);
+    UI.download(this.devid + '-' + this.alias.replace(/[^A-Za-z0-9_.-]/g, '_') + '-tty.log',
+      lines.join('\n'), 'text/plain');
   },
 });
 

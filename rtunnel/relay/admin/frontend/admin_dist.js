@@ -156,9 +156,10 @@ const DistributePage = Object.assign(new Page(), {
 });
 
 // ---------------------------------------------------------------- Pages.任务
-const STATUS_LABEL = {
-  scheduled: '等待开始', queued: '排队中', running: '传输中',
-  success: '成功', failed: '失败', timeout: '超时', canceled: '已取消', conflict: '冲突',
+const TASK_STATUS = {
+  scheduled: ['等待开始', 'warn'], queued: ['排队中', 'warn'], running: ['传输中', 'warn'],
+  success: ['成功', 'ok'], failed: ['失败', 'bad'], timeout: ['超时', 'bad'],
+  canceled: ['已取消', 'info'], conflict: ['冲突', 'warn'], default: ['未知', 'warn'],
 };
 
 const TasksPage = Object.assign(new Page(), {
@@ -196,9 +197,6 @@ const TasksPage = Object.assign(new Page(), {
       const size = Number(t.file_size) || 0;
       const sent = Number(t.sent) || 0;
       const pct = size ? Math.min(100, Math.floor(sent * 100 / size)) : 0;
-      const st = STATUS_LABEL[t.status] || t.status;
-      const cls = t.status === 'success' ? 'ok' : (t.status === 'failed' || t.status === 'timeout') ? 'bad'
-        : (t.status === 'canceled' ? 'info' : 'warn');
       let ops = '<a href="#/tasks/' + t.id + '">详情</a> ';
       if (t.status === 'failed') ops += '<button class="tr" data-id="' + t.id + '">重试</button> ';
       if (t.status === 'scheduled' || t.status === 'queued') ops += '<button class="tc" data-id="' + t.id + '">取消</button> ';
@@ -208,10 +206,10 @@ const TasksPage = Object.assign(new Page(), {
       return '<tr><td>' + t.id + '</td><td>' + UI.esc(t.file_name) + '</td><td>' + UI.esc(t.devid) +
         '</td><td>' + UI.esc(t.target_path || '') + '</td>' +
         '<td>' + (t.status === 'running' ? UI.bytes(sent) + ' / ' + UI.bytes(size) + ' ' + pct + '%' : UI.bytes(size)) + '</td>' +
-        '<td><span class="pill ' + cls + '" title="' + UI.esc(t.error || '') + '">' + st + '</span></td>' +
+        '<td>' + UI.status(t.status, TASK_STATUS, ' title="' + UI.esc(t.error || '') + '"') + '</td>' +
         '<td>' + t.retry_count + ' / ' + t.max_retries + '</td>' +
-        '<td>' + new Date(t.start_at_ms).toLocaleString() + '</td>' +
-        '<td>' + new Date(t.deadline_at_ms).toLocaleString() + '</td>' +
+        '<td>' + UI.time(t.start_at_ms) + '</td>' +
+        '<td>' + UI.time(t.deadline_at_ms) + '</td>' +
         '<td>' + ops + '</td></tr>';
     }).join('');
 
@@ -292,12 +290,9 @@ const TaskDetailPage = Object.assign(new Page(), {
   },
   async refresh() {
     const t = await Api.get('/api/v1/distributions/' + this.id);
-    const st = STATUS_LABEL[t.status] || t.status;
     const size = Number(t.file_size) || 0;
     const sent = Number(t.sent) || 0;
     const pct = size ? Math.min(100, Math.floor(sent * 100 / size)) : 0;
-    const cls = t.status === 'success' ? 'ok' : (t.status === 'failed' || t.status === 'timeout') ? 'bad'
-      : (t.status === 'canceled' ? 'info' : 'warn');
     const trans = [
       ['设备', UI.esc(t.devid)],
       ['目标路径', UI.esc(t.target_path || '—')],
@@ -305,9 +300,9 @@ const TaskDetailPage = Object.assign(new Page(), {
       ['批次', UI.esc(t.batch_id || '—')],
     ];
     const times = [
-      ['创建时间', new Date(t.created_ms).toLocaleString()],
-      ['开始时间', new Date(t.start_at_ms).toLocaleString()],
-      ['截止时间', new Date(t.deadline_at_ms).toLocaleString()],
+      ['创建时间', UI.time(t.created_ms)],
+      ['开始时间', UI.time(t.start_at_ms)],
+      ['截止时间', UI.time(t.deadline_at_ms)],
       ['操作人', UI.esc(t.actor || '—')],
     ];
     const kv = list => '<div class="kv-list">' + list.map(m =>
@@ -316,7 +311,7 @@ const TaskDetailPage = Object.assign(new Page(), {
     this.el.innerHTML =
       '<div class="task-page">' +
         '<div class="panel task-head"><div class="task-title-wrap">' +
-          '<h2>任务 #' + t.id + '</h2><span class="pill ' + cls + '">' + UI.esc(st) + '</span></div>' +
+          '<h2>任务 #' + t.id + '</h2>' + UI.status(t.status, TASK_STATUS) + '</div>' +
           '<span class="spacer"></span><div class="task-actions">' +
           (t.status === 'failed' ? '<button class="primary" id="td-retry">重试</button>' : '') +
           (t.status === 'scheduled' || t.status === 'queued' ? '<button id="td-cancel">取消</button>' : '') +
@@ -340,10 +335,7 @@ const TaskDetailPage = Object.assign(new Page(), {
         (t.error ? '<div class="panel task-error"><b>错误</b><div>' + UI.esc(t.error) + '</div></div>' : '') +
       '</div>';
     const cp = document.getElementById('td-copy');
-    if (cp) cp.onclick = async () => {
-      try { await navigator.clipboard.writeText(cp.dataset.hash); UI.toast('哈希已复制'); }
-      catch (e) { UI.toast('复制失败', true); }
-    };
+    if (cp) cp.onclick = () => UI.copy(cp.dataset.hash, '哈希已复制');
     const rt = document.getElementById('td-retry');
     if (rt) rt.onclick = async () => {
       try { await Api.post('/api/v1/distributions/' + this.id + '/retry', {}); this.refresh(); }

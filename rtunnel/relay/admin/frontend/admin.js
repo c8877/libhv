@@ -538,12 +538,15 @@ const AccountsPage = Object.assign(new Page(), {
     const roleOpts = me.role === 'admin'
       ? '<option value="viewer">浏览者</option><option value="operator">操作员</option><option value="manager">管理员</option>'
       : '<option value="viewer">浏览者</option><option value="operator">操作员</option>';
-    const roleBadge = r => '<span class="pill ' + (r === 'admin' ? 'warn' : r === 'manager' ? 'info' : '') + '">' +
-      ({admin:'管理员',manager:'管理员',operator:'操作员',viewer:'浏览者'}[r] || r) + '</span>';
+    const ROLE_STATUS = {
+      admin: ['超级管理员', 'warn'], manager: ['管理员', 'info'],
+      operator: ['操作员', ''], viewer: ['浏览者', ''],
+    };
+    const USER_STATUS = { active: ['启用', 'ok'], default: ['禁用', 'bad'] };
     const rows2 = arr.map(u => [
-      '<b>' + UI.esc(u.username) + '</b>', roleBadge(u.role),
-      u.status === 'active' ? '<span class="pill ok">启用</span>' : '<span class="pill bad">禁用</span>',
-      new Date(u.created_ms).toLocaleString(),
+      '<b>' + UI.esc(u.username) + '</b>', UI.status(u.role, ROLE_STATUS),
+      UI.status(u.status, USER_STATUS),
+      UI.time(u.created_ms),
       (() => {
         let ops = '<button class="pw" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">改密</button> ';
         if (me.role === 'admin' && u.role !== 'admin') {

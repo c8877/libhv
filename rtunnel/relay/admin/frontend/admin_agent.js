@@ -54,7 +54,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       ['CPU 型号', si.cpu_model || '—'],
       ['核心数', (si.cpu_count || 0) + ' 核'],
       ['板卡型号', si.board || '—'],
-      ['采集时间', ts ? new Date(ts).toLocaleString() : '—'],
+      ['采集时间', UI.time(ts)],
     ];
     return UI.grid(rows.map(r => [UI.esc(r[0]), UI.esc(r[1])]));
   },
@@ -63,7 +63,7 @@ const AgentDetailPage = Object.assign(new Page(), {
     const head = document.getElementById('si-head-kv');
     if (head) head.innerHTML = UI.kv({
       '远端地址': UI.esc(d.remote_addr),
-      '接入时间': new Date(d.connected_at_ms).toLocaleString(),
+      '接入时间': UI.time(d.connected_at_ms),
       '最近活跃': UI.ago(d.last_seen_ms) + ' 前',
       '流量 ↓/↑': UI.bytes(d.bytes_in) + ' / ' + UI.bytes(d.bytes_out),
     });
@@ -146,7 +146,7 @@ const AgentDetailPage = Object.assign(new Page(), {
             [5, 10, 30].map(v => '<option value="' + v + '"' + (this.period === v ? ' selected' : '') + '>' + v + 's</option>').join('') +
             '</select> <button id="si-export">导出 JSON</button>' : '') + '</div><div id="si-head-kv">' + UI.kv({
         '远端地址': UI.esc(d.remote_addr),
-        '接入时间': new Date(d.connected_at_ms).toLocaleString(),
+        '接入时间': UI.time(d.connected_at_ms),
         '最近活跃': UI.ago(d.last_seen_ms) + ' 前',
         '流量 ↓/↑': UI.bytes(d.bytes_in) + ' / ' + UI.bytes(d.bytes_out),
       }) + '</div></div>';
@@ -377,12 +377,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       }
       const btn = document.getElementById('si-export');
       if (btn) btn.onclick = () => {
-        const blob = new Blob([JSON.stringify(si, null, 2)], { type: 'application/json' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = self.devid + '-sysinfo.json';
-        a.click();
-        URL.revokeObjectURL(a.href);
+        UI.download(self.devid + '-sysinfo.json', JSON.stringify(si, null, 2), 'application/json');
       };
     }
   },
@@ -913,10 +908,7 @@ const AgentDetailPage = Object.assign(new Page(), {
       };
     });
     wrap.querySelectorAll('[data-tf-copy]').forEach(b => {
-      b.onclick = async () => {
-        try { await navigator.clipboard.writeText(b.dataset.tfCopy); UI.toast('路径已复制'); }
-        catch (e) { UI.toast('复制失败', true); }
-      };
+      b.onclick = () => UI.copy(b.dataset.tfCopy, '路径已复制');
     });
     wrap.querySelectorAll('[data-tf-take]').forEach(b => {
       b.onclick = async () => {
