@@ -59,6 +59,21 @@ const AgentDetailPage = Object.assign(new Page(), {
     return UI.grid(rows.map(r => [UI.esc(r[0]), UI.esc(r[1])]));
   },
   diskColor(p) { return p >= 85 ? cssVar('--bad', '#e5534b') : p >= 70 ? cssVar('--warn', '#f5a623') : cssVar('--accent', '#4a9eff'); },
+  diskListHtml(rows) {
+    rows = rows || this.diskRows || [];
+    if (!rows.length) return '<div class="disk-list"><div class="ui-pad12 muted">无挂载点</div></div>';
+    return '<div class="disk-list">' + rows.map(r => {
+      const pct = Math.max(0, Math.min(100, r.pct));
+      const tone = pct >= 90 ? ' bad' : pct >= 75 ? ' warn' : '';
+      const pair = fmtKbPair(r.used, r.total);
+      return '<div class="disk-item">' +
+        '<div class="disk-top"><span class="disk-mount">' + UI.esc(r.mount) + '</span>' +
+        (r.fstype ? '<span class="disk-fs">' + UI.esc(r.fstype) + '</span>' : '') +
+        '<span class="disk-pct' + tone + '">' + pct + '%</span></div>' +
+        '<div class="disk-bar"><i class="' + tone.trim() + '" style="width:' + pct + '%"></i></div>' +
+        '<div class="disk-size">' + pair.used + ' / ' + pair.total + ' ' + pair.unit + '</div></div>';
+    }).join('') + '</div>';
+  },
   updateSnapshot(d, si, rows) {
     const head = document.getElementById('si-head-kv');
     if (head) head.innerHTML = UI.kv({
@@ -81,6 +96,8 @@ const AgentDetailPage = Object.assign(new Page(), {
                pct: t > 0 ? Math.round((t - f) * 100 / t) : 0 };
     });
     const ch = this.charts && this.charts['disk'];
+    const dl = document.querySelector('.disk-list');
+    if (dl) dl.outerHTML = this.diskListHtml();
     if (ch && ch.data && ch.data.datasets.length >= 2) {
       const labels = (si.mounts || []).map(m => m.mount.length > 16 ? m.mount.slice(0, 15) + '…' : m.mount);
       if (labels.length === ch.data.labels.length) {
@@ -152,8 +169,12 @@ const AgentDetailPage = Object.assign(new Page(), {
       }) + '</div></div>';
 
     if (this._rendered && si && document.getElementById('si-head-kv')) {
-      this.updateSnapshot(d, si, rows);
-      return;
+      // 宽度跨过 600px 时需要切换 canvas / DOM 存储图，走整页重绘
+      if ((window.innerWidth < 600) === !!document.querySelector('.disk-list')) {
+        this.updateSnapshot(d, si, rows);
+        return;
+      }
+      this._rendered = false;
     }
 
     if (si) {
@@ -172,9 +193,12 @@ const AgentDetailPage = Object.assign(new Page(), {
       const nicPanel = UI.panel('网卡', '<div id="si-nic-wrap">' +
         UI.detailTable(['接口', 'IP', '掩码', '状态'], nics) + '</div>');
 
-      const diskPanel = UI.panel('存储', '<div class="si-body"><canvas id="si-disk" height="' +
-          Math.max(60, (si.mounts || []).length * 24 + 16) + '"></canvas></div>',
-          { right: '<span class="muted-sm">条长按最大分区归一</span>' });
+      const diskDom = window.innerWidth < 600
+        ? this.diskListHtml(diskRows)
+        : '<div class="si-body"><canvas id="si-disk" height="' +
+          Math.max(60, (si.mounts || []).length * 24 + 16) + '"></canvas></div>';
+      const diskPanel = UI.panel('存储', diskDom,
+          { right: '<span class="muted-sm">条形按最大分区归一</span>' });
       html += '<div class="si-two">' + diskPanel + nicPanel + '</div>' +
         '<div id="si-series"></div>' +
         '<div id="si-metric"></div>' +
@@ -268,7 +292,6 @@ const AgentDetailPage = Object.assign(new Page(), {
               ctx2.fillStyle = cssVar('--muted', '#8b929c');
               const x = xScale.getPixelForValue(row.total);
               const y = bar.y;
-              ctx2.fillText(row.pct + '%', x + 6, y);
               const pair = fmtKbPair(row.used, row.total);
               ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
               const usedW = ctx2.measureText(pair.used).width;
@@ -278,6 +301,16 @@ const AgentDetailPage = Object.assign(new Page(), {
               const gap = 4;
               const groupW = usedW + gap + slashW + gap + totalW + gap + unitW;
               let gx = chart.width - 8 - groupW;
+              // 窄屏时条形末端与右侧“已用/总量”会重叠：把百分比画进条形内部
+              const pctText = row.pct + '%';
+              const pctW = ctx2.measureText(pctText).width;
+              if (x + 6 + pctW > gx - 6) {
+                ctx2.textAlign = 'right';
+                ctx2.fillText(pctText, Math.max(6, x - 6), y);
+                ctx2.textAlign = 'left';
+              } else {
+                ctx2.fillText(pctText, x + 6, y);
+              }
               ctx2.font = '11px -apple-system, "Segoe UI", sans-serif';
               ctx2.fillStyle = cssVar('--muted', '#8b929c');
               ctx2.fillText(pair.used, gx, y);
@@ -668,9 +701,9 @@ const AgentDetailPage = Object.assign(new Page(), {
         }
       });
     });
-    const metricBody = '<div class="detail-table-shell"><table class="detail-table metric-table"><tr><th>指标</th><th>间隔</th><th>保留</th>' +
-      '<th>同步</th><th>启用</th><th></th></tr>' +
-      (rows || '<tr><td colspan="6" class="muted">暂无配置</td></tr>') + '</table></div>';
+    const metricBody = '<div class="detail-table-shell"><table class="detail-table metric-table"><thead><tr><th>指标</th><th>间隔</th><th>保留</th>' +
+      '<th>同步</th><th>启用</th><th></th></tr></thead><tbody>' +
+      (rows || '<tr><td colspan="6" class="muted">暂无配置</td></tr>') + '</tbody></table></div>';
     wrap.innerHTML = UI.panel('采样配置', metricBody, { cls: 'mb16',
       left: '<span class="muted ml10">' + list.length + ' 项 · ' + syncCount + ' 项未同步</span>',
       right: (can ? '<button id="metric-add">+ 添加指标</button>' : '') });
@@ -838,11 +871,11 @@ const AgentDetailPage = Object.assign(new Page(), {
     }
     const openAny = (tab === 'config') ? !!this.expandTty : (this.addTtyPath !== null && this.addTtyPath !== undefined);
     const search = '<input id="tty-q" class="tty-search" placeholder="搜索别名 / 路径" value="' + UI.esc(this.ttyQuery || '') + '">';
-    const ttyBody = '<div class="tty-table-wrap detail-table-shell' + (openAny ? ' open' : '') + '"><table class="detail-table tty-table"><tr>' +
-      '<th>设备</th><th>状态</th><th>参数</th><th>RX</th><th>TX</th><th>操作</th></tr>' +
+    const ttyBody = '<div class="tty-table-wrap detail-table-shell' + (openAny ? ' open' : '') + '"><table class="detail-table tty-table"><thead><tr>' +
+      '<th>设备</th><th>状态</th><th>参数</th><th>RX</th><th>TX</th><th>操作</th></tr></thead><tbody>' +
       (rows || '<tr><td colspan="6" class="muted">' +
         (tab === 'config' ? '暂无已配置串口' : (q ? '没有匹配的串口' : '没有未配置的串口')) + '</td></tr>') +
-      '</table></div>';
+      '</tbody></table></div>';
     if (this._ttyTabs) { this._ttyTabs.destroy(); this._ttyTabs = null; }
     wrap.innerHTML = UI.panel('串口 TTY',
       '<div id="tty-tabs"></div><div class="ui-tabpanel">' + ttyBody + '</div>',

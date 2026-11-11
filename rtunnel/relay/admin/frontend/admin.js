@@ -269,6 +269,11 @@ const Router = {
     { src: '/admin_dist.js', test: /^#\/(tasks|distribute)\b/ },
   ],
   register(re, page, title) { this.routes.push({ re, page, title }); },
+  closeNav() {
+    document.body.classList.remove('nav-open');
+    const t = document.getElementById('nav-toggle');
+    if (t) t.setAttribute('aria-expanded', 'false');
+  },
   match(h) {
     for (const r of this.routes) {
       const m = h.match(r.re);
@@ -295,6 +300,7 @@ const Router = {
   async dispatch() {
     const h = location.hash || '#/overview';
     const seq = ++this.seq;
+    this.closeNav();
     const crumb = document.getElementById('crumb');
     const page = document.getElementById('page');
     if (this.current && this.current.page.leave) this.current.page.leave();
@@ -413,6 +419,7 @@ const AgentsPage = Object.assign(new Page(), {
       summary: '共 ' + arr.length + ' 台 · 5s 自动刷新',
       search: { id: 'ag-q', placeholder: '搜索 devid / 地址' },
       columns: ['devid', '状态', '分组', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'],
+      tableOpts: { mobile: ['title', 'pair', 'pair', 'full', 'pair', 'pair', 'full', 'ops'] },
       rows,
     });
     UI.bindSearch(document.getElementById('ag-q'));
@@ -623,6 +630,7 @@ const AccountsPage = Object.assign(new Page(), {
       search: { id: 'au-q', placeholder: '搜索用户名' },
       actions: '<button class="primary" id="nu-open">+ 新建账号</button>',
       columns: ['用户名', '角色', '状态', '创建时间', '操作'],
+      tableOpts: { mobile: ['title', 'pair', 'pair', 'full', 'ops'] },
       rows: rows,
     });
     UI.bindSearch(document.getElementById('au-q'));
@@ -815,6 +823,7 @@ const AccountsPage = Object.assign(new Page(), {
 const Auth = { me: null };
 
 function authForm(kind) {
+  document.body.classList.add('auth');
   const nav = document.getElementById('nav');
   if (nav) nav.innerHTML = '';
   const el = document.getElementById('page');
@@ -905,7 +914,28 @@ async function boot() {
     const want = (Auth.profile && Auth.profile.default_page) === 'agents' ? '#/agents' : '#/overview';
     location.hash = want;
   }
+  bindNavDrawer();
+  UI.bindTableLabels(document.getElementById('page'));
   Router.start();
+}
+
+// 抽屉导航：汉堡按钮、遮罩、Esc、点击菜单项都收起
+function bindNavDrawer() {
+  const toggle = document.getElementById('nav-toggle');
+  const mask = document.getElementById('nav-mask');
+  const nav = document.getElementById('nav');
+  if (toggle) toggle.onclick = (e) => {
+    e.stopPropagation();
+    const open = document.body.classList.toggle('nav-open');
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+  if (mask) mask.onclick = () => Router.closeNav();
+  if (nav) nav.addEventListener('click', (e) => {
+    if (e.target.closest('a')) Router.closeNav();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') Router.closeNav();
+  });
 }
 
 Router.register(/^#\/accounts$/, AccountsPage, '账号');

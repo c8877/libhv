@@ -319,7 +319,8 @@ const UI = {
     opts = opts || {};
     return '<div class="panel ' + (opts.cls || '') + '">' +
       '<div class="panel-head"><h2>' + title + '</h2>' +
-      (opts.left || '') + '<span class="spacer"></span>' + (opts.right || '') +
+      (opts.left || '') + '<span class="spacer"></span>' +
+      '<span class="ph-right">' + (opts.right || '') + '</span>' +
       '</div>' + body + '</div>';
   },
   grid(rows) {
@@ -367,6 +368,7 @@ const UI = {
     mask.innerHTML = '<div class="tty-modal"><h2>' + (opts.title || '') + '</h2>' + (opts.body || '') +
       '<div class="tty-btns">' + (opts.buttons || '') + '</div></div>';
     document.body.appendChild(mask);
+    UI.bindTableLabels(mask);
     let closed = false;
     const close = () => {
       if (closed) return;
@@ -422,6 +424,7 @@ const UI = {
     });
     return out;
   },
+  // opts.mobile：窄屏列角色（title|pair|full|ops|hide），缺省时仍按字段逐行展示
   detailTable(cols, rows, opts) {
     opts = opts || {};
     const th = c => '<th>' + (String(c).charAt(0) === '<' ? c : UI.esc(c)) + '</th>';
@@ -431,7 +434,9 @@ const UI = {
     rows.forEach((r, i) => {
       // 允许直接插入整行，例如表格行下方的展开表单（管理台账号页在用）
       if (typeof r === 'string') { h += r; return; }
-      h += '<tr' + (opts.rowAttrs ? opts.rowAttrs(i) : '') + '>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>';
+      const mob = opts.mobile || [];
+      h += '<tr' + (opts.rowAttrs ? opts.rowAttrs(i) : '') + '>' + r.map((c, j) =>
+        '<td' + (mob[j] ? ' data-m="' + mob[j] + '"' : '') + '>' + c + '</td>').join('') + '</tr>';
     });
     return h + '</tbody></table></div>';
   },
@@ -447,7 +452,8 @@ const UI = {
     opts = opts || {};
     const rows = opts.rows || [];
     let body;
-    const cell = r => r.raw ? r.raw : '<label>' + r.label + r.control + '</label>';
+    const cell = r => r.raw ? r.raw : '<label' + (r.wide ? ' class="f-wide"' : '') + '>' +
+      r.label + r.control + '</label>';
     if (opts.layout === 'grid') {
       body = '<div class="ui-form-grid ' + (opts.cols ? 'cols-' + opts.cols : '') + '">' +
         rows.map(cell).join('') + '</div>';
@@ -461,8 +467,51 @@ const UI = {
       '<div class="ui-form-foot">' + (opts.left || '') +
       '<span class="spacer"></span>' + (opts.right || '') + '</div></div>';
   },
+  // 窄屏卡片化：把表头文字写进每个单元格的 data-label，CSS 用 ::before 显示字段名。
+  // 只处理列数与表头一致的常规行，展开行、空态行（colspan）跳过。
+  bindTableLabels(root) {
+    if (!root) return;
+    const annotate = () => {
+      root.querySelectorAll('table').forEach(t => {
+        // 只看本表的 thead/tbody，避免展开行里的嵌套表格污染列数
+        const head = t.tHead && t.tHead.rows.length ? t.tHead.rows[t.tHead.rows.length - 1] : null;
+        if (!head) return;
+        const ths = head.cells;
+        for (const tb of t.tBodies) {
+          for (const tr of tb.rows) {
+            if (tr.cells.length !== ths.length) continue;
+            for (let i = 0; i < ths.length; i++) {
+              const td = tr.cells[i];
+              if (td.dataset.label) continue;
+              const label = (ths[i].textContent || '').trim();
+              if (label) td.dataset.label = label;
+            }
+          }
+        }
+      });
+    };
+    let queued = false;
+    const schedule = () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => { queued = false; annotate(); });
+    };
+    annotate();
+    // 只在新增节点可能含表格时重扫，避免终端输出等高频 DOM 变动带来无谓遍历
+    new MutationObserver((records) => {
+      for (const r of records) {
+        for (const n of r.addedNodes) {
+          if (n.nodeType !== 1) continue;
+          if (n.tagName === 'TABLE' || n.tagName === 'TBODY' || n.tagName === 'TR' ||
+              (n.querySelector && n.querySelector('table'))) { schedule(); return; }
+        }
+      }
+    }).observe(root, { childList: true, subtree: true });
+  },
+
   // 列声明表格：单元格由 render(row) 或 cells(row) 生成，适合状态徽标、按钮组等复杂列。
   // opts: cols/rows/empty/cls/shellCls/plain/rowCls/rowAttrs/tdAttrs/cells
+  //       mobile: 窄屏列角色数组（title|pair|full|ops|hide），决定卡片标题/两列属性/整行/操作
   //       head 可整段替换表头（全选框等），expand 在数据行后插入展开表单行。
   dataTable(opts) {
     opts = opts || {};
@@ -476,8 +525,11 @@ const UI = {
       const rc = opts.rowCls ? opts.rowCls(r) : '';
       const ra = opts.rowAttrs ? opts.rowAttrs(r) : '';
       const cells = opts.cells ? opts.cells(r) : cols.map(c => c.render ? c.render(r) : UI.esc(r[c.key]));
+      const mob = opts.mobile || [];
       h += '<tr' + (rc ? ' class="' + rc + '"' : '') + (ra ? ' ' + ra : '') + '>' +
         cells.map((cell, i) => '<td' + (cols[i] && cols[i].cls ? ' class="' + cols[i].cls + '"' : '') +
+          ((cols[i] && cols[i].mobile) || mob[i]
+            ? ' data-m="' + ((cols[i] && cols[i].mobile) || mob[i]) + '"' : '') +
           (opts.tdAttrs && cols[i] ? opts.tdAttrs(cols[i], r) : '') + '>' + cell + '</td>').join('') + '</tr>';
       if (opts.expand) h += opts.expand(r);
     });

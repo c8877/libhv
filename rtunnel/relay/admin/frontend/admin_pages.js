@@ -12,6 +12,7 @@ const ClientsPage = Object.assign(new Page(), {
     this.el.innerHTML = UI.listPage({
       title: '客户端（A 侧）', summary: '共 ' + arr.length + ' 个',
       columns: ['用户', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'], rows,
+      tableOpts: { mobile: ['title', 'full', 'pair', 'pair', 'full', 'ops'] },
     });
     UI.actions(this.el, {
       shell: (btn) => {
@@ -40,6 +41,7 @@ const StreamsPage = Object.assign(new Page(), {
       title: '会话', summary: '共 ' + arr.length + ' 条',
       search: { id: 'st-q', placeholder: '搜索用户 / 设备' },
       columns: ['A 用户:a_sid', 'C 设备:c_sid', '状态', '开启于', '操作'], rows,
+      tableOpts: { mobile: ['title', 'full', 'pair', 'pair', 'ops'] },
     });
     UI.bindSearch(document.getElementById('st-q'));
     UI.actions(this.el, {
@@ -85,7 +87,7 @@ const CertsPage = Object.assign(new Page(), {
       UI.panel('签发新证书', UI.form({
         id: 'issue-form', layout: 'grid', cols: 3,
         rows: [
-          { label: 'SAN', control: '<input data-field="san" placeholder="PILE-000200">' },
+          { label: 'SAN', wide: true, control: '<input data-field="san" placeholder="PILE-000200">' },
           { label: '类型', control: '<select data-field="role"><option value="device">设备</option><option value="user">用户</option></select>' },
           { label: '有效期(天)', control: '<input data-field="days" type="number" value="30" min="1" max="3650">' },
         ],
@@ -100,6 +102,7 @@ const CertsPage = Object.assign(new Page(), {
         title: '证书台账', summary: '共 ' + arr.length + ' 张',
         search: { id: 'cert-q', placeholder: '搜索 SAN' },
         columns: ['SAN(身份)', '类型', '序列号', '到期日', '状态', '操作'], rows,
+        tableOpts: { mobile: ['title', 'pair', 'pair', 'pair', 'pair', 'ops'] },
       });
 
     const cr = document.getElementById('certs-refresh');
@@ -171,6 +174,7 @@ const AuditPage = Object.assign(new Page(), {
       title: '审计日志', summary: '最近 ' + arr.length + ' 条（新到旧）',
       search: { id: 'au-q', placeholder: '搜索操作 / 详情' },
       columns: ['时间', '角色', '操作', '详情'], rows,
+      tableOpts: { mobile: ['title', 'pair', 'pair', 'full'] },
     });
     UI.bindSearch(document.getElementById('au-q'));
   },
@@ -219,6 +223,7 @@ const FilesPage = Object.assign(new Page(), {
       columns: [this.sortLink('name', '名称'), this.sortLink('size', '大小'), '哈希',
                 this.sortLink('mtime', '修改时间'), '操作'],
       rows,
+      tableOpts: { mobile: ['title', 'pair', 'full', 'pair', 'ops'] },
     });
 
     document.getElementById('files-refresh').onclick = () => this.refresh();

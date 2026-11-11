@@ -247,6 +247,7 @@ const TasksPage = Object.assign(new Page(), {
         { label: '操作', cls: 'nowrap', render: opButtons },
       ],
       rows: items, empty: '暂无任务',
+      mobile: ['hide', 'title', 'pair', 'full', 'pair', 'pair', 'pair', 'pair', 'pair', 'ops'],
     });
 
     if (this._tabs) { this._tabs.destroy(); this._tabs = null; }

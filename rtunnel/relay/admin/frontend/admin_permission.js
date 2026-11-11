@@ -306,6 +306,7 @@ const PermissionPage = Object.assign(new Page(), {
       '<th>设备分组</th><th>TCP 端口</th><th>Shell</th><th>TTY</th><th>文件</th>' +
       '<th>SYSINFO</th><th>指标</th><th>配置</th><th>Web</th><th></th></tr></thead>' +
       '<tbody id="pc-acl">' + (acl || '') + '</tbody></table></div>' +
+      '<div class="perm-acl-hint">左右滑动查看 ACL 全部列</div>' +
       '<div class="ui-flex" style="margin-top:8px"><select id="pc-agent">' + groups.map(g =>
         '<option value="' + g.id + '">' + UI.esc(g.name) + '</option>').join('') + '</select>' +
       '<button id="pc-add-acl">添加 ACL</button></div>' +
@@ -347,21 +348,21 @@ const PermissionPage = Object.assign(new Page(), {
     const rows = isClient ? cgs.map(g => {
       const open = this.expandKey === 'client:' + g.id;
       return '<tr class="perm-row' + (open ? ' open' : '') + '" data-key="client:' + g.id + '">' +
-        '<td><span class="perm-chev">' + (open ? '▾' : '▸') + '</span> <b>' + UI.esc(g.name) + '</b></td>' +
-        '<td>' + (g.user_count || 0) + '</td><td>' + (g.acl_count || 0) + '</td>' +
-        '<td class="muted"><div class="perm-sum">' + UI.esc(this.capText(g.caps)) + '</div></td>' +
-        '<td class="muted">' + UI.ago(g.updated_ms) + '</td>' +
-        '<td><button class="danger perm-del" data-kind="client" data-id="' + g.id + '">删除</button></td></tr>' +
+        '<td data-m="title"><span class="perm-chev">' + (open ? '▾' : '▸') + '</span> <b>' + UI.esc(g.name) + '</b></td>' +
+        '<td data-m="pair">' + (g.user_count || 0) + '</td><td data-m="pair">' + (g.acl_count || 0) + '</td>' +
+        '<td class="muted" data-m="full"><div class="perm-sum">' + UI.esc(this.capText(g.caps)) + '</div></td>' +
+        '<td class="muted" data-m="pair">' + UI.ago(g.updated_ms) + '</td>' +
+        '<td data-m="ops"><button class="danger perm-del" data-kind="client" data-id="' + g.id + '">删除</button></td></tr>' +
         (open ? '<tr class="perm-expand"><td colspan="6">' +
           this.clientForm(this.detail || g, ags) + '</td></tr>' : '');
     }).join('') : ags.map(g => {
       const open = this.expandKey === 'agent:' + g.id;
       return '<tr class="perm-row' + (open ? ' open' : '') + '" data-key="agent:' + g.id + '">' +
-        '<td><span class="perm-chev">' + (open ? '▾' : '▸') + '</span> <b>' + UI.esc(g.name) + '</b></td>' +
-        '<td>' + (g.device_count || 0) + '</td><td>' + (g.ref_count || 0) + '</td>' +
-        '<td class="muted"><div class="perm-sum">' + UI.esc(this.capText(g.caps)) + '</div></td>' +
-        '<td class="muted">' + UI.ago(g.updated_ms) + '</td>' +
-        '<td><button class="danger perm-del" data-kind="agent" data-id="' + g.id + '">删除</button></td></tr>' +
+        '<td data-m="title"><span class="perm-chev">' + (open ? '▾' : '▸') + '</span> <b>' + UI.esc(g.name) + '</b></td>' +
+        '<td data-m="pair">' + (g.device_count || 0) + '</td><td data-m="pair">' + (g.ref_count || 0) + '</td>' +
+        '<td class="muted" data-m="full"><div class="perm-sum">' + UI.esc(this.capText(g.caps)) + '</div></td>' +
+        '<td class="muted" data-m="pair">' + UI.ago(g.updated_ms) + '</td>' +
+        '<td data-m="ops"><button class="danger perm-del" data-kind="agent" data-id="' + g.id + '">删除</button></td></tr>' +
         (open ? '<tr class="perm-expand"><td colspan="6">' +
           this.agentForm(this.detail || g) + '</td></tr>' : '');
     }).join('');
@@ -489,7 +490,7 @@ const PermissionPage = Object.assign(new Page(), {
         return '已选 ' + n + ' 台' + (off ? '，其中 ' + off + ' 台离线' : '');
       },
       emptyLeft: '没有可添加的设备',
-      emptyRight: '从左侧勾选设备后点 >',
+      emptyRight: '勾选设备后点 >',
       emptyMsg: '请先选择设备',
       okText: '确定添加',
       onOk: async (devids, close) => {

@@ -96,9 +96,11 @@ body { font: 14px/1.5 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei
 .card .num { font-size: 28px; font-weight: 700; }
 .card .label { color: var(--muted); font-size: 12px; margin-top: 4px; }
 .panel { background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-.panel .panel-head { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
-.panel .panel-head h2 { font-size: 15px; }
+.panel .panel-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; row-gap: 8px;
+  padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.panel .panel-head h2 { font-size: 15px; min-width: 0; }
 .panel .panel-head .spacer { flex: 1; }
+.panel .panel-head .ph-right { display: contents; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 10px 16px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 th { color: var(--muted); font-weight: 500; font-size: 12px; background: var(--th-bg); }
@@ -134,7 +136,7 @@ select:focus, textarea:focus {
               0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 button { border: 1px solid var(--input-border); border-radius: 6px; padding: 6px 14px;
-  background: var(--input-bg); color: var(--fg); cursor: pointer; }
+  background: var(--input-bg); color: var(--fg); cursor: pointer; white-space: nowrap; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button:hover { filter: brightness(.96); }
 
@@ -144,11 +146,25 @@ button:hover { filter: brightness(.96); }
                box-shadow: 0 4px 12px rgba(0,0,0,.25); }
 #toast .item.err { background: var(--bad); }
 
-@media (max-width: 960px) {
-  #sidebar { width: 64px; }
-  #sidebar .logo { font-size: 13px; padding: 16px 10px; }
-  #sidebar .logo span, #nav a .txt, #nav a .badge, .side-foot { display: none; }
-  #nav a { justify-content: center; padding: 12px 0; }
+/* 抽屉导航：<960px 侧栏收起，顶栏汉堡按钮唤出 */
+#nav-toggle { display: none; align-items: center; justify-content: center; width: 34px; height: 34px;
+  padding: 0; flex: none; font-size: 17px; line-height: 1; }
+#nav-mask { display: none; position: fixed; inset: 0; z-index: 55; background: rgba(0,0,0,.45); }
+body.auth #nav-toggle { display: none; }
+body.auth #sidebar, body.auth #topbar, body.auth #nav-mask { display: none; }
+body.auth .main-wrap { min-height: 100vh; }
+body.auth #page { flex: 1; display: flex; align-items: center; justify-content: center; }
+body.auth .ui-login { width: min(360px, 100%); max-width: 360px; margin: 0; }
+
+@media (max-width: 959px) {
+  #app { display: block; }
+  #sidebar { position: fixed; left: 0; top: 0; z-index: 60; height: 100vh;
+             width: min(272px, 82vw); transform: translateX(-100%);
+             transition: transform .22s ease; box-shadow: 12px 0 32px rgba(0,0,0,.28); }
+  body.nav-open #sidebar { transform: none; }
+  body.nav-open #nav-mask { display: block; }
+  body.nav-open { overflow: hidden; }
+  #nav-toggle { display: inline-flex; width: 38px; height: 38px; }
 }
 
 /* 当前账号与登出菜单 */
@@ -278,6 +294,23 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .si-two{display:grid;grid-template-columns:55fr 45fr;gap:16px;margin-bottom:16px;align-items:stretch}
 .si-two > .panel{margin-bottom:0}
 @media (max-width:1100px){.si-two{grid-template-columns:1fr}}
+/* 手机：存储改为 DOM 条列，避免 canvas 固定左右留白把条形压没 */
+.disk-list{padding:4px 12px 8px}
+.disk-item{padding:9px 0;border-bottom:1px solid color-mix(in srgb,var(--border) 55%,transparent)}
+.disk-item:last-child{border-bottom:0}
+.disk-top{display:flex;align-items:center;gap:8px;min-width:0}
+.disk-mount{font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.disk-fs{flex:none;padding:0 6px;border-radius:4px;font-size:11px;color:var(--muted);
+  background:color-mix(in srgb,var(--fg) 8%,transparent)}
+.disk-pct{margin-left:auto;flex:none;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.disk-pct.warn{color:#c98a12}
+.disk-pct.bad{color:#d9534f}
+.disk-bar{height:6px;margin:6px 0 4px;border-radius:3px;overflow:hidden;
+  background:color-mix(in srgb,var(--fg) 10%,transparent)}
+.disk-bar>i{display:block;height:100%;background:#4a9eff;border-radius:3px}
+.disk-bar>i.warn{background:#f5a623}
+.disk-bar>i.bad{background:#d9534f}
+.disk-size{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
 
 .metric-table td:first-child{padding-left:24px}
 .metric-group td{padding-top:14px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--border);background:rgba(255,255,255,.018)}
@@ -386,9 +419,10 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-form-grid.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}
 .ui-form-grid label{display:flex;flex-direction:column;gap:6px;font-size:11px;color:var(--muted)}
 .ui-form-grid input,.ui-form-grid select{padding:7px 9px;border:1px solid var(--input-border);border-radius:6px;background:var(--input-bg);color:var(--input-fg);font-size:13px;width:100%}
+.ui-form-grid input[type=checkbox],.ui-form-grid input[type=radio]{width:16px;height:16px;padding:0;flex:none}
 .ui-form-foot{display:flex;align-items:center;gap:8px;margin-top:14px}
 /* 全局表单控件统一 */
-#page input:not([type=checkbox]):not([type=radio]):not([type=file]),
+#page input:not([type=checkbox]):not([type=radio]),
 #page select,
 #page textarea,
 #page input:focus,#page select:focus,#page textarea:focus,
@@ -452,6 +486,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-w36{width:36px}
 .ui-login{max-width:420px;margin:60px auto}
 .ui-login-body{padding:20px;display:flex;flex-direction:column;gap:10px}
+#page input[type=color]{width:64px;height:40px;padding:2px;border-radius:8px;cursor:pointer}
 .ui-textarea{width:100%;font-family:monospace}
 .ui-right{display:block;text-align:right}
 .ui-term{height:calc(100vh - 260px);background:#000;padding:8px}
@@ -491,7 +526,13 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .perm-caps{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px}
 .perm-caps label{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted)}
 .perm-form-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
-@media (max-width:900px){.perm-grid2{grid-template-columns:1fr}}
+@media (max-width:340px){.perm-grid2{grid-template-columns:1fr}}
+/* 手机：ACL 是密集可编辑表格，保持表格形态并横向滚动，比逐格卡片更易对照 */
+.perm-acl-hint{display:none}
+@media (max-width:599px){
+  .perm-acl{min-width:820px}
+  .perm-acl-hint{display:block;margin-top:6px;font-size:12px;color:var(--muted)}
+}
 .transfer-toolbar{display:flex;align-items:center;gap:12px;margin-bottom:10px;font-size:12px;color:var(--muted)}
 .transfer-toolbar input[type=text],.transfer-toolbar input:not([type]){width:220px}
 .transfer{display:grid;grid-template-columns:1fr 46px 1fr;gap:10px}
@@ -556,9 +597,10 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .dict-token{display:inline-block;margin:3px 4px;padding:3px 8px;border-radius:10px;background:var(--bg);border:1px solid var(--border);font-family:monospace}
 .dict-token.bad{border-color:var(--bad);color:var(--bad)}
 .dict-token.ok{border-color:var(--ok);color:var(--ok)}
-.ui-tabs{position:relative;display:flex;align-items:center;gap:0;min-width:0}
+.ui-tabs{position:relative;display:flex;flex:0 0 auto;align-items:center;gap:0;min-width:0;
+  overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
 .ui-tabs::-webkit-scrollbar{display:none}
-.ui-tab{position:relative;display:inline-flex;align-items:center;gap:7px;padding:9px 2px 10px;border:0;background:none;color:var(--muted);font-size:14px;white-space:nowrap;cursor:pointer;border-radius:0}
+.ui-tab{position:relative;display:inline-flex;flex:0 0 auto;align-items:center;gap:7px;padding:9px 2px 10px;border:0;background:none;color:var(--muted);font-size:14px;white-space:nowrap;cursor:pointer;border-radius:0}
 .ui-tab:hover{color:var(--fg)}
 .ui-tab.is-active{color:var(--accent)}
 .ui-tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
@@ -566,7 +608,8 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-tab-count{min-width:18px;height:18px;padding:0 6px;border-radius:9px;background:color-mix(in srgb,var(--fg) 9%,transparent);color:var(--muted);font-size:11px;line-height:18px;text-align:center;font-weight:600}
 .ui-tab.is-active .ui-tab-count{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
 /* attached：页面级平底标签，相邻共享一条边框，选中项底边与内容区连通 */
-.ui-tabs-attached{position:relative;gap:0;padding:0;background:var(--bg);border:0;border-bottom:1px solid var(--border);overflow:visible}
+.ui-tabs-attached{position:relative;gap:0;padding:0;background:var(--bg);border:0;border-bottom:1px solid var(--border);
+  overflow-x:auto;overflow-y:hidden}
 .ui-tabs-attached .ui-tab{padding:9px 15px;border:1px solid var(--border);border-radius:6px 6px 0 0;background:color-mix(in srgb,#000 4%,var(--card));color:var(--muted);font-size:13px}
 .ui-tabs-attached .ui-tab + .ui-tab{margin-left:-1px}
 .ui-tabs-attached .ui-tab:hover{background:color-mix(in srgb,#000 2%,var(--card));border-color:color-mix(in srgb,var(--fg) 28%,var(--border));color:var(--fg)}
@@ -696,6 +739,9 @@ label.ui-switch{display:inline-flex;flex-direction:row;align-items:center;gap:8p
   .tok-form{grid-template-columns:1fr 1fr}
 }
 @media (max-width:760px){
+  .tok-form > label:has(#te-name), .tok-form > label:has(#te-expire) { grid-column: 1 / -1; }
+}
+@media (max-width:340px){
   .tok-form{grid-template-columns:1fr}
 }
 
@@ -711,3 +757,254 @@ label.ui-switch{display:inline-flex;flex-direction:row;align-items:center;gap:8p
 .acc-span2{grid-column:1/-1}
 .acc-del-list{margin:10px 0;padding-left:20px;font-size:13px}
 .acc-del-input{width:100%;box-sizing:border-box}
+
+/* ---------------------------------------------------------------- 响应式布局
+   断点：1200 桌面 / 960 小笔电 / 600 手机。侧栏在 <960 变抽屉，表格在 <600 卡片化。 */
+@media (max-width: 1199px) {
+  #page { padding: 20px; }
+}
+@media (max-width: 959px) {
+  #topbar { padding: 10px 16px; }
+  #page { padding: 16px; }
+}
+@media (max-width: 599px) {
+  #topbar { padding: 8px 12px; gap: 8px; min-height: 56px; }
+  #page { padding: 12px; }
+  #crumb { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden;
+           text-overflow: ellipsis; max-width: 42vw; }
+  #relay-info { display: none; }
+  #userbtn { border: 0; padding: 3px 4px; gap: 4px; min-height: 40px; }
+  #userbtn .uname { display: none; }
+  #themebtn { width: 36px; height: 36px; }
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .cards > .card:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .card { padding: 12px 14px; }
+  .card .num { font-size: 24px; }
+}
+/* 手机横屏：高度紧张，压缩纵向留白 */
+@media (max-height: 500px) and (orientation: landscape) {
+  #topbar { padding-top: 6px; padding-bottom: 6px; }
+  #page { padding-top: 10px; padding-bottom: 10px; }
+}
+
+@media (max-width: 599px) {
+  .panel .panel-head { padding: 10px 12px; gap: 8px; justify-content: flex-end; }
+  .panel .panel-head h2 { flex: 1 1 auto; font-size: 14px; }
+  /* 主操作在窄屏吃掉本行剩余宽度，换行后不会缩成孤零零的小按钮 */
+  .panel .panel-head > .primary { flex: 1 1 auto; }
+  .panel .panel-head .spacer { display: none; }
+  .panel .panel-head .ui-search { flex: 1 1 160px; width: auto; min-width: 0; margin: 0; }
+  .panel .panel-head .ph-right { display: flex; flex-wrap: wrap; align-items: center;
+    justify-content: flex-end; gap: 8px; min-width: 0; }
+  .panel .panel-head .ph-right .ui-search, .panel .panel-head .ph-right .tty-search,
+  .panel .panel-head .ph-right .ui-w220 { flex: 1 1 130px; width: auto; min-width: 0; }
+}
+
+/* 窄屏或触屏：可点区域不小于 40px */
+@media (max-width: 599px), (hover: none) and (pointer: coarse) {
+  #page button, #page input:not([type=checkbox]):not([type=radio]),
+  #page select, .tty-modal button, .tty-modal input:not([type=checkbox]),
+  .tty-modal select, #page .ui-tab { min-height: 40px; }
+}
+
+/* 手机：长值换行、提示气泡收进视口、权限卡片操作区布局 */
+@media (max-width: 599px) {
+  /* 长 ID/哈希在窄屏换行，避免省略号后无法查看完整值 */
+  .kv-row .v { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
+  /* 设置项提示气泡限制在视口内 */
+  .tip::after { max-width: calc(100vw - 64px); }
+  /* 展开箭头移到卡片右上角，删除按钮靠右并加分隔线 */
+  #page .perm-table tbody tr.perm-row { position: relative; }
+  #page .perm-table .perm-chev { position: absolute; right: 12px; top: 9px; }
+  #page .perm-table tbody tr.perm-row > td:first-child { padding-right: 24px; }
+  #page .perm-table tbody tr.perm-row > td:last-child { text-align: right; padding-top: 8px;
+    border-top: 1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
+  #page .perm-table tbody tr.perm-row > td:last-child .perm-del { min-width: 88px; }
+}
+
+/* 手机：分页器与右侧操作换行，避免按钮被挤出屏幕 */
+@media (max-width: 599px) {
+  .ui-pager { flex-wrap: wrap; row-gap: 8px; }
+  .ui-pager > span:not(.spacer) { white-space: nowrap; }
+  .ui-pager:has(> .spacer + *) .spacer { flex: 1 0 100%; height: 0; }
+}
+
+/* TTY 表单里的“启用”是一行内联复选框，不套用字段的纵向布局 */
+.ui-form-grid > label.tty-check { flex-direction: row; align-items: center; gap: 8px;
+  align-self: end; min-height: 40px; font-size: 13px; color: var(--fg); }
+
+/* 手机：指标编辑表单的左侧提示单独一行，按钮留在下一行右侧 */
+@media (max-width: 599px) {
+  .metric-expand .ui-form-foot { flex-wrap: wrap; row-gap: 8px; }
+  .metric-expand .ui-form-foot .metric-sync { flex: 1 0 100%; }
+  .metric-expand .ui-form-foot .spacer { flex: 1; height: 0; }
+}
+
+/* 手机：设置/个人资料等 form-row 表单保持标签在左，单位只占窄列 */
+@media (max-width: 599px) {
+  .form-row { display: grid; grid-template-columns: 104px minmax(0, 1fr) 34px;
+    gap: 2px 10px; align-items: center; padding: 6px 0; }
+  .form-row .k { width: auto; flex: none; font-size: 12px; line-height: 1.5; }
+  .form-row .c { flex: none; min-width: 0; }
+  .form-row .u { width: auto; font-size: 12px; }
+}
+
+/* 手机：栅格表单保持两列，长文本框由页面用 f-wide 跨两列 */
+@media (max-width: 599px) {
+  .ui-form-grid, .ui-form-grid.cols-2, .ui-form-grid.cols-3, .ui-form-grid.cols-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .ui-form-grid > .f-wide, .ui-form-grid > .tty-check, .ui-form-grid > .metric-readonly { grid-column: 1 / -1; }
+  .ui-form-grid label { font-size: 12px; }
+}
+
+/* 手机：窄屏下把勾选框放大到 18px，便于点按 */
+@media (max-width: 599px) {
+  #page .perm-caps label { min-height: 32px; }
+  #page .perm-caps input[type=checkbox],
+  #page .perm-acl input[type=checkbox],
+  #page .detail-table input[type=checkbox]:not(.switch input),
+  .dict-modal input[type=checkbox] { width: 18px; height: 18px; }
+}
+
+/* 手机：双列表转移改为上下布局后，把中间按钮做成整行大按钮 */
+@media (max-width: 599px) {
+  .transfer-modal .transfer-toolbar { flex-wrap: wrap; row-gap: 8px; }
+  .transfer-modal .transfer-toolbar input:not([type=checkbox]) { flex: 1 1 100%; width: auto; }
+  .transfer-modal .transfer-toolbar #tp-count { white-space: nowrap; }
+  .transfer-ops button { flex: 1; height: 40px; }
+}
+
+/* 手机弹窗：底部弹出，占满宽度 */
+@media (max-width: 599px) {
+  .tty-mask { align-items: flex-end; }
+  .tty-modal, .transfer-modal, .dict-modal, .acl-modal {
+    width: 100%; max-width: 100%; max-height: 92vh;
+    border-radius: 14px 14px 0 0; padding: 16px 16px 0; overflow-y: auto;
+  }
+  /* 底部留白交给吸底按钮，避免滚动内容从按钮下方的内边距里露出来 */
+  .tty-btns { position: sticky; bottom: 0; background: var(--card); padding: 8px 0 16px; }
+  .tty-btns button { flex: 1; }
+  /* 选择框移到卡片右上角，避免卡片顶部出现一个无标签的空行 */
+  .dict-modal #dict-body tbody tr:has(> td > input.dict-pick),
+  #page .detail-table tbody tr:has(> td > input.dist-pick) { position: relative; }
+  .dict-modal #dict-body tbody td:has(> input.dict-pick),
+  #page .detail-table tbody td:has(> input.dist-pick) {
+    position: absolute; top: 8px; right: 10px; display: block;
+    width: auto; min-height: 0; padding: 0;
+  }
+  .dict-modal #dict-body tbody td:has(> input.dict-pick)::before,
+  #page .detail-table tbody td:has(> input.dist-pick)::before { display: none; }
+  .dict-modal #dict-body td:has(> input.dict-pick) input,
+  #page .detail-table tbody td:has(> input.dist-pick) input { width: 20px; height: 20px; margin: 0; }
+  /* 分发页两个文本输入在窄屏占满一行 */
+  #page .cfg-body .ui-w220 { flex: 1 1 100%; width: auto; }
+}
+
+/* 手机表格：卡片化。表头文字由 UI.bindTableLabels 写进 data-label */
+@media (max-width: 599px) {
+  .detail-table-shell { border: 0; background: transparent; overflow: visible; }
+  .perm-table-wrap { padding: 10px; }
+  .detail-table:not(.acc-token-table):not(.acc-kv):not(.settings-kv):not(.detail-kv):not(.perm-acl) { display: block; width: 100%; font-size: 13px; }
+  .detail-table:not(.acc-token-table):not(.acc-kv):not(.settings-kv):not(.detail-kv):not(.perm-acl) > thead { display: none; }
+  .detail-table:not(.acc-token-table):not(.acc-kv):not(.settings-kv):not(.detail-kv):not(.perm-acl) > tbody { display: block; }
+  .detail-table:not(.acc-token-table):not(.acc-kv):not(.settings-kv):not(.detail-kv):not(.perm-acl) > tbody > tr {
+    display: block; margin-bottom: 8px; padding: 5px 12px; border: 1px solid var(--border);
+    border-radius: 8px; background: var(--card); }
+  .detail-table:not(.acc-token-table):not(.acc-kv):not(.settings-kv):not(.detail-kv):not(.perm-acl) > tbody > tr:hover { background: var(--card); }
+  .detail-table:not(.acc-token-table):not(.acc-kv):not(.settings-kv):not(.detail-kv):not(.perm-acl) > tbody > tr > td {
+    position: relative; display: block; width: auto; min-height: 24px;
+    padding: 3px 0 3px 84px; border: 0; white-space: normal; overflow-wrap: anywhere;
+    text-align: left; vertical-align: top; }
+  .detail-table:not(.acc-token-table):not(.acc-kv):not(.settings-kv):not(.detail-kv):not(.perm-acl) > tbody > tr > td::before {
+    content: attr(data-label); position: absolute; left: 0; top: 3px; width: 76px;
+    color: var(--muted); font-size: 12px; line-height: 1.7; }
+  .detail-table:not(.acc-token-table):not(.acc-kv):not(.settings-kv):not(.detail-kv):not(.perm-acl) > tbody > tr > td:not([data-label]) {
+    padding-left: 0; }
+  .detail-table:not(.acc-token-table):not(.acc-kv):not(.settings-kv):not(.detail-kv):not(.perm-acl) > tbody > tr > td:not([data-label])::before { display: none; }
+  .detail-table:not(.acc-token-table):not(.acc-kv):not(.settings-kv):not(.detail-kv):not(.perm-acl) > tbody > tr > td[colspan] { display: block; padding: 0; }
+  .detail-table:not(.acc-token-table):not(.acc-kv):not(.settings-kv):not(.detail-kv):not(.perm-acl) > tbody > tr > td[colspan]::before { display: none; }
+  .detail-table:not(.acc-token-table):not(.acc-kv):not(.settings-kv):not(.detail-kv):not(.perm-acl) > tbody > tr > td.empty { display: block; text-align: center; }
+  #page .detail-table > tbody > tr > td .ui-right { text-align: left; }
+  /* 卡片首字段当标题，便于快速扫读 */
+  #page .detail-table > tbody > tr > td:first-child { font-weight: 600; }
+  /* 有列语义的表格：标题 + 两列属性网格，比逐字段堆叠更紧凑 */
+  #page .detail-table > tbody > tr:has(> td[data-m]) {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 14px; padding: 10px 12px 8px; }
+  #page .detail-table > tbody > tr:has(> td[data-m]) > td { display: block; min-height: 0; padding: 3px 0; }
+  #page .detail-table > tbody > tr:has(> td[data-m]) > td::before {
+    position: static; display: block; width: auto; margin-bottom: 2px;
+    font-size: 11px; line-height: 1.5; }
+  #page .detail-table > tbody > tr:has(> td[data-m]) > td[data-m="title"] {
+    grid-column: 1 / -1; padding: 0 0 3px; font-size: 15px; font-weight: 600; }
+  #page .detail-table > tbody > tr:has(> td[data-m]) > td[data-m="title"]::before { display: none; }
+  #page .detail-table > tbody > tr:has(> td[data-m]) > td[data-m="full"] { grid-column: 1 / -1; }
+  #page .detail-table > tbody > tr:has(> td[data-m]) > td[data-m="hide"] { display: none; }
+  #page .detail-table > tbody > tr:has(> td[data-m]) > td[data-m="ops"] {
+    grid-column: 1 / -1; text-align: right; padding-top: 8px; margin-top: 5px;
+    border-top: 1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
+  #page .detail-table > tbody > tr:has(> td[data-m]) > td[data-m="ops"]::before { display: none; }
+  .ui-tabs-attached .ui-tab { padding: 9px; font-size: 12px; gap: 5px; }
+  #page .ui-tabs-attached { flex-wrap: wrap; overflow: visible; }
+  /* 空态行不套卡片边框 */
+  #page .detail-table > tbody > tr:has(> td.empty) { border: 0; background: transparent; margin: 0; padding: 0; }
+  #page .detail-table > tbody > tr > td.empty { padding: 24px 12px; }
+  /* 展开表单行不套卡片边框 */
+  .detail-table > tbody > tr.perm-expand, .detail-table > tbody > tr.ui-row-edit, .detail-table > tbody > tr.dict-edit-row {
+    border: 0; background: var(--surface-2); margin-bottom: 10px; padding: 0; }
+  /* 分组标题行只作分隔，不画成空卡片 */
+  #page .detail-table > tbody > tr.metric-group { border: 0; background: transparent; margin: 0; padding: 10px 4px 2px; }
+  #page .detail-table > tbody > tr.metric-group > td { padding: 0; min-height: 0; }
+  #page .detail-table > tbody > tr.metric-group > td::before { display: none; }
+  /* 开关视觉尺寸不变，但扩大可点范围 */
+  #page .detail-table .switch::before { content: ""; position: absolute; inset: -8px -4px; }
+  /* 行尾展开箭头放到卡片右上角 */
+  #page .detail-table > tbody > tr { position: relative; }
+  #page .detail-table > tbody > tr > td.chev { position: absolute; right: 10px; top: 8px; min-height: 0; padding: 0; }
+  #page .detail-table > tbody > tr > td.chev::before { display: none; }
+  /* 个人设置：只有箭头的一列也收到右上角，不单独占一行“操作” */
+  #page .profile-table > tbody > tr > td:has(> .chev:only-child) {
+    position: absolute; right: 10px; top: 8px; min-height: 0; padding: 0; }
+  #page .profile-table > tbody > tr > td:has(> .chev:only-child)::before { display: none; }
+}
+
+/* 手机：通用 KV 表标签与值同行，压缩纵向高度 */
+@media (max-width: 599px) {
+  .detail-table.detail-kv thead { display: none; }
+  .detail-table.detail-kv, .detail-table.detail-kv tbody { display: block; }
+  .detail-table.detail-kv tr { display: grid; grid-template-columns: 92px minmax(0, 1fr);
+    gap: 2px 10px; margin: 0; padding: 8px 12px; border: 0; border-radius: 0;
+    border-bottom: 1px solid var(--border); background: transparent; }
+  .detail-table.detail-kv tr:last-child { border-bottom: 0; }
+  .detail-table.detail-kv th { display: block; width: auto; padding: 0; border: 0; background: none;
+    color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.6; white-space: normal; }
+  .detail-table.detail-kv td { display: block; width: auto; padding: 0; border: 0; font-size: 13px;
+    white-space: normal; overflow-wrap: anywhere; }
+  .detail-table.detail-kv td[colspan] { grid-column: 1 / -1; }
+  .detail-table.detail-kv td code { white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+
+/* 手机：账号信息 KV 与设置 KV 标签左、值右 */
+@media (max-width: 599px) {
+  .detail-table.acc-kv, .detail-table.acc-kv tbody { display: block; }
+  .detail-table.acc-kv tr { display: grid; grid-template-columns: 84px minmax(0, 1fr);
+    gap: 2px 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .acc-kv tr:last-child { border-bottom: 0; }
+  .acc-kv th { display: block; width: auto; background: none; border: 0; padding: 0;
+    font-size: 12px; line-height: 1.6; color: var(--muted); font-weight: 400; white-space: normal; }
+  .acc-kv td { display: block; width: auto; border: 0; padding: 0; font-size: 13px;
+    white-space: normal; overflow-wrap: anywhere; }
+  .acc-kv tr.ui-edit-hint-row { display: block; padding: 8px 12px; }
+  .acc-kv .ui-edit-hint-cell { padding: 0; }
+  .acc-toolbar { padding: 12px 12px 0; gap: 8px; }
+  .acc-toolbar input { flex: 1; width: auto; min-width: 0; }
+  .detail-table.settings-kv, .detail-table.settings-kv tbody { display: block; }
+  .settings-kv thead { display: none; }
+  .detail-table.settings-kv tr { display: grid; grid-template-columns: 124px minmax(0, 1fr);
+    gap: 2px 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .settings-kv tr:last-child { border-bottom: 0; }
+  .settings-kv th { display: block; width: auto; min-width: 0; background: none; border: 0; padding: 0;
+    color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.6; }
+  .settings-kv tr:first-child th:first-child { padding-left: 0; }
+  .settings-kv td { display: block; width: auto; border: 0; padding: 0; font-size: 13px; }
+}
