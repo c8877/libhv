@@ -179,9 +179,45 @@ def main():
             page.wait_for_timeout(800)
             check("文件：删除", page.locator("#page tbody tr").filter(has_text=fname).count() == 0)
 
+            # ---------------- 任务：分发 / 列表 / 详情 ----------------
+            dfname = "dist-%d.txt" % os.getpid()
+            dsrc = os.path.join(work, dfname)
+            open(dsrc, "w").write("hello task\n")
+            page.goto(base + "/#/files")
+            page.wait_for_selector("#upload-input")
+            page.set_input_files("#upload-input", dsrc)
+            page.click("#upload-btn")
+            page.wait_for_selector("#page tbody tr [data-act=push]", timeout=10000)
+            page.wait_for_timeout(400)
+            page.locator("#page tbody tr").filter(has_text=dfname).first.locator("[data-act=push]").click()
+            page.wait_for_selector("#dist-submit", timeout=8000)
+            page.locator("#page .dist-pick").first.check()
+            page.wait_for_timeout(300)
+            page.click("#dist-submit")
+            page.wait_for_timeout(1500)
+
+            page.goto(base + "/#/tasks")
+            page.wait_for_selector("#page .detail-table tbody a", timeout=8000)
+            head = page.eval_on_selector_all("#page .detail-table thead th", "els => els.map(e => e.textContent.trim())")
+            check("任务：列表 10 列", len(head) == 10 and head[-1] == "操作", head)
+            check("任务：列表有行", page.eval_on_selector_all("#page .detail-table tbody tr", "els => els.length") >= 1)
+
+            page.locator("#page .detail-table tbody a").first.click()
+            page.wait_for_selector(".kv-row", timeout=8000)
+            kv = page.eval_on_selector_all(".kv-row", "els => els.map(e => e.innerText.replace(/\\s+/g, ' '))")
+            check("任务：详情 8 项", len(kv) == 8 and "设备" in kv[0] and "操作人" in kv[7], kv)
+            page.go_back()
+            page.wait_for_timeout(600)
+
             # ---------------- 设备：强制下线 ----------------
             page.goto(base + "/#/agents")
             page.wait_for_selector("#page tbody tr [data-act=kick]", timeout=10000)
+            arow = page.locator("#page tbody tr").filter(has_text="dev1").first
+            arow.locator("td").nth(1).click()
+            page.wait_for_timeout(600)
+            check("设备：整行点击进详情", "/#/agents/dev1" in page.url, page.url)
+            page.go_back()
+            page.wait_for_selector("#page tbody tr [data-act=kick]", timeout=8000)
             arow = page.locator("#page tbody tr").filter(has_text="dev1").first
             arow.locator("[data-act=kick]").click()
             page.wait_for_selector("[data-ok]")

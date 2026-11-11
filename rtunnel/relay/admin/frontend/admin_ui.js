@@ -435,16 +435,30 @@ const UI = {
       '<div class="ui-form-foot">' + (opts.left || '') +
       '<span class="spacer"></span>' + (opts.right || '') + '</div></div>';
   },
-  table(cols, rows, onrow) {
-    const html = UI.detailTable(cols, rows, { rowAttrs: i => ' data-i="' + i + '"' });
-    if (onrow) {
-      setTimeout(() => {
-        document.querySelectorAll('#page tbody tr').forEach(tr => {
-          tr.onclick = () => onrow(rows[tr.dataset.i]);
-        });
-      });
-    }
-    return html;
+  // 列声明的表格：单元格由 render(row) 生成，适合状态徽标、按钮组等复杂列
+  // opts: { cols:[{label,render,cls,thCls,thAttrs}], rows, empty, rowCls(row), shellCls, cls }
+  dataTable(opts) {
+    opts = opts || {};
+    const cols = opts.cols || [], rows = opts.rows || [];
+    const head = cols.map(c => '<th' + (c.thCls ? ' class="' + c.thCls + '"' : '') +
+      (c.thAttrs ? ' ' + c.thAttrs : '') + '>' + c.label + '</th>').join('');
+    let h = '<div class="detail-table-shell ' + (opts.shellCls || '') + '">' +
+      '<table class="detail-table ' + (opts.cls || '') + '"><thead><tr>' + head + '</tr></thead><tbody>';
+    if (!rows.length) h += '<tr><td class="empty" colspan="' + cols.length + '">' + UI.esc(opts.empty || '暂无数据') + '</td></tr>';
+    rows.forEach(r => {
+      const rc = opts.rowCls ? opts.rowCls(r) : '';
+      h += '<tr' + (rc ? ' class="' + rc + '"' : '') + '>' +
+        cols.map(c => '<td' + (c.cls ? ' class="' + c.cls + '"' : '') + '>' +
+          (c.render ? c.render(r) : UI.esc(r[c.key])) + '</td>').join('') + '</tr>';
+    });
+    return h + '</tbody></table></div>';
+  },
+  // 竖排两列明细，用于详情页信息块
+  kvList(rows, opts) {
+    opts = opts || {};
+    return '<div class="kv-list ' + (opts.cls || '') + '">' + rows.map(r =>
+      '<div class="kv-row"><span class="k">' + r[0] + '</span>' +
+      '<span class="v" title="' + String(r[1]).replace(/<[^>]*>/g, '') + '">' + r[1] + '</span></div>').join('') + '</div>';
   },
   kv(obj) {
     let h = '<dl class="kv">';

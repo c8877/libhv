@@ -7,6 +7,34 @@ function toLocalInput(ms) {
     'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
 
+// 任务动作：列表页与详情页共用，第二个参数是刷新回调
+const TaskActions = {
+  async retry(id, done) {
+    try { await Api.post('/api/v1/distributions/' + id + '/retry', {}); done(); }
+    catch (e) { UI.toast('重试失败：' + e.message, true); }
+  },
+  async cancel(id, done) {
+    try { await Api.post('/api/v1/distributions/' + id + '/cancel', {}); done(); }
+    catch (e) { UI.toast('取消失败：' + e.message, true); }
+  },
+  async extend(id, done) {
+    const v = await UI.prompt({ title: '延长截止时间', label: '新的截止时间（本地时间，最多 +24h）',
+      type: 'datetime-local', value: toLocalInput(Date.now() + 24 * 3600 * 1000) });
+    if (!v) return;
+    const t = new Date(v).getTime();
+    if (!t) { UI.toast('时间格式不正确', true); return; }
+    try { await Api.post('/api/v1/distributions/' + id + '/extend', { deadline_at_ms: t }); done(); }
+    catch (e) { UI.toast('延长失败：' + e.message, true); }
+  },
+  async check(id, api, done) {
+    try {
+      const r = await Api.post('/api/v1/distributions/' + id + '/' + api, {});
+      UI.toast(r.same ? '设备文件一致，已标记成功' : '设备文件不一致，已重新排队');
+      done();
+    } catch (e) { UI.toast('操作失败：' + e.message, true); }
+  },
+};
+
 const DistributePage = Object.assign(new Page(), {
   refreshInterval() { return 0; },
   enter(el, params, hash) {
@@ -64,8 +92,22 @@ const DistributePage = Object.assign(new Page(), {
     const onlineIds = rows.filter(a => a.online).map(a => a.devid);
     const allChecked = onlineIds.length > 0 && onlineIds.every(d => this.sel.has(d));
 
-    const head = (k, label) => '<th class="sortable" data-k="' + k + '">' + label +
-      (this.sortKey === k ? (this.sortAsc ? ' ▲' : ' ▼') : '') + '</th>';
+    const head = (k, label) => label + (this.sortKey === k ? (this.sortAsc ? ' ▲' : ' ▼') : '');
+    const sortCol = (k, label, render) => ({ label: head(k, label), thCls: 'sortable',
+      thAttrs: 'data-k="' + k + '"', render });
+    const table = UI.dataTable({
+      cols: [
+        { label: '<input type="checkbox" id="dist-all"' + (allChecked ? ' checked' : '') + '>', thCls: 'ui-w36',
+          render: a => '<input type="checkbox" class="dist-pick" data-dev="' + UI.esc(a.devid) + '"' +
+            (this.sel.has(a.devid) ? ' checked' : '') + (a.online ? '' : ' disabled') + '>' },
+        sortCol('devid', '设备', a => UI.esc(a.devid)),
+        sortCol('online', '状态', a => UI.pill(a.online ? '在线' : '离线', a.online ? 'ok' : 'bad')),
+        sortCol('owner', '归属', a => UI.esc(a.owner || '—')),
+        sortCol('remote_addr', '远端地址', a => UI.esc(a.remote_addr || '—')),
+      ],
+      rows: view, empty: '没有匹配的设备',
+      rowCls: a => a.online ? '' : 'offline-row',
+    });
 
     this.el.innerHTML =
       '<div class="panel mb16"><div class="panel-head"><h2>分发文件：' +
@@ -86,16 +128,7 @@ const DistributePage = Object.assign(new Page(), {
             this.maxRetries + '" class="ui-w70"></label>' +
         '</div>' +
       '</div>' +
-      '<div class="ui-pad-x"><div class="detail-table-shell"><table class="detail-table"><thead><tr><th class="ui-w36"><input type="checkbox" id="dist-all"' +
-        (allChecked ? ' checked' : '') + '></th>' + head('devid', '设备') + head('online', '状态') +
-        head('owner', '归属') + head('remote_addr', '远端地址') + '</tr></thead><tbody>' +
-        view.map(a => '<tr' + (a.online ? '' : ' class="offline-row"') + '><td><input type="checkbox" class="dist-pick" data-dev="' +
-          UI.esc(a.devid) + '"' + (this.sel.has(a.devid) ? ' checked' : '') +
-          (a.online ? '' : ' disabled') + '></td><td>' + UI.esc(a.devid) + '</td><td>' +
-          (a.online ? '<span class="pill ok">在线</span>' : '<span class="pill bad">离线</span>') +
-          '</td><td>' + UI.esc(a.owner || '—') + '</td><td>' + UI.esc(a.remote_addr || '—') + '</td></tr>').join('') +
-        (view.length ? '' : '<tr><td colspan="5" class="empty">没有匹配的设备</td></tr>') +
-      '</tbody></table></div>' +
+      '<div class="ui-pad-x">' + table +
       UI.pager(this.page, pages, null,
         '<a href="#/files"><button>取消</button></a> ' +
         '<button class="primary" id="dist-submit">创建分发任务（' + this.sel.size + '）</button>') +
@@ -193,25 +226,35 @@ const TasksPage = Object.assign(new Page(), {
                       ['failed_group', '失败'], ['conflict', '冲突']]
       .map(([k, n]) => ({ key: k, label: n, count: tabCount[k] || 0 }));
 
-    const rows = items.map(t => {
-      const size = Number(t.file_size) || 0;
-      const sent = Number(t.sent) || 0;
-      const pct = size ? Math.min(100, Math.floor(sent * 100 / size)) : 0;
+    const opButtons = t => {
       let ops = '<a href="#/tasks/' + t.id + '">详情</a> ';
-      if (t.status === 'failed') ops += '<button class="tr" data-act="retry" data-id="' + t.id + '">重试</button> ';
-      if (t.status === 'scheduled' || t.status === 'queued') ops += '<button class="tc" data-act="cancel" data-id="' + t.id + '">取消</button> ';
-      if (t.status === 'timeout' && t.extend_count === 0) ops += '<button class="te" data-act="extend" data-id="' + t.id + '">延长</button> ';
-      if (t.status === 'conflict') ops += '<button class="tv" data-act="check" data-api="verify" data-id="' + t.id + '">校验</button> ' +
-        '<button class="tf" data-act="check" data-api="force" data-id="' + t.id + '">强制重发</button> ';
-      return '<tr><td>' + t.id + '</td><td>' + UI.esc(t.file_name) + '</td><td>' + UI.esc(t.devid) +
-        '</td><td>' + UI.esc(t.target_path || '') + '</td>' +
-        '<td>' + (t.status === 'running' ? UI.bytes(sent) + ' / ' + UI.bytes(size) + ' ' + pct + '%' : UI.bytes(size)) + '</td>' +
-        '<td>' + UI.status(t.status, TASK_STATUS, ' title="' + UI.esc(t.error || '') + '"') + '</td>' +
-        '<td>' + t.retry_count + ' / ' + t.max_retries + '</td>' +
-        '<td>' + UI.time(t.start_at_ms) + '</td>' +
-        '<td>' + UI.time(t.deadline_at_ms) + '</td>' +
-        '<td>' + ops + '</td></tr>';
-    }).join('');
+      if (t.status === 'failed') ops += '<button data-act="retry" data-id="' + t.id + '">重试</button> ';
+      if (t.status === 'scheduled' || t.status === 'queued') ops += '<button data-act="cancel" data-id="' + t.id + '">取消</button> ';
+      if (t.status === 'timeout' && t.extend_count === 0) ops += '<button data-act="extend" data-id="' + t.id + '">延长</button> ';
+      if (t.status === 'conflict') ops += '<button data-act="check" data-api="verify" data-id="' + t.id + '">校验</button> ' +
+        '<button data-act="check" data-api="force" data-id="' + t.id + '">强制重发</button> ';
+      return ops;
+    };
+    const table = UI.dataTable({
+      cols: [
+        { label: 'ID', render: t => t.id },
+        { label: '文件', render: t => UI.esc(t.file_name) },
+        { label: '设备', render: t => UI.esc(t.devid) },
+        { label: '目标路径', render: t => UI.esc(t.target_path || '') },
+        { label: '进度/大小', render: t => {
+            const size = Number(t.file_size) || 0, sent = Number(t.sent) || 0;
+            if (t.status !== 'running') return UI.bytes(size);
+            const pct = size ? Math.min(100, Math.floor(sent * 100 / size)) : 0;
+            return UI.bytes(sent) + ' / ' + UI.bytes(size) + ' ' + pct + '%';
+          } },
+        { label: '状态', render: t => UI.status(t.status, TASK_STATUS, ' title="' + UI.esc(t.error || '') + '"') },
+        { label: '重试', render: t => t.retry_count + ' / ' + t.max_retries },
+        { label: '开始', render: t => UI.time(t.start_at_ms) },
+        { label: '截止', render: t => UI.time(t.deadline_at_ms) },
+        { label: '操作', cls: 'nowrap', render: opButtons },
+      ],
+      rows: items, empty: '暂无任务',
+    });
 
     if (this._tabs) { this._tabs.destroy(); this._tabs = null; }
     this.el.innerHTML =
@@ -220,11 +263,7 @@ const TasksPage = Object.assign(new Page(), {
         (this.batch ? '<span class="pill info">本批：' + UI.esc(this.batch) + ' ×</span>' : '') +
         '<button id="task-refresh">刷新</button></div>' +
       '<div id="task-tabs"></div>' +
-      '<div class="ui-tabpanel"><div class="detail-table-shell"><table class="detail-table"><thead><tr>' +
-        '<th>ID</th><th>文件</th><th>设备</th><th>目标路径</th><th>进度/大小</th>' +
-        '<th>状态</th><th>重试</th><th>开始</th><th>截止</th><th>操作</th></tr></thead><tbody>' +
-        (rows || '<tr><td colspan="10" class="empty">暂无任务</td></tr>') +
-      '</tbody></table></div>' +
+      '<div class="ui-tabpanel">' + table +
       UI.pager(this.page, pages, r.total) + '</div></div>';
 
     this._tabs = UI.tabs(document.getElementById('task-tabs'), {
@@ -243,31 +282,10 @@ const TasksPage = Object.assign(new Page(), {
       if (chip) chip.onclick = () => { this.batch = ''; this.page = 1; this.refresh(); };
     }
     UI.actions(this.el, {
-      retry: async (btn) => {
-        try { await Api.post('/api/v1/distributions/' + btn.dataset.id + '/retry', {}); this.refresh(); }
-        catch (e) { UI.toast('重试失败：' + e.message, true); }
-      },
-      cancel: async (btn) => {
-        try { await Api.post('/api/v1/distributions/' + btn.dataset.id + '/cancel', {}); this.refresh(); }
-        catch (e) { UI.toast('取消失败：' + e.message, true); }
-      },
-      extend: async (btn) => {
-        const cur = new Date().getTime() + 24 * 3600 * 1000;
-        const v = await UI.prompt({ title: '延长截止时间', label: '新的截止时间（本地时间，最多 +24h）',
-          type: 'datetime-local', value: toLocalInput(cur) });
-        if (!v) return;
-        const t = new Date(v).getTime();
-        if (!t) { UI.toast('时间格式不正确', true); return; }
-        try { await Api.post('/api/v1/distributions/' + btn.dataset.id + '/extend', { deadline_at_ms: t }); this.refresh(); }
-        catch (e) { UI.toast('延长失败：' + e.message, true); }
-      },
-      check: async (btn) => {
-        try {
-          const r = await Api.post('/api/v1/distributions/' + btn.dataset.id + '/' + btn.dataset.api, {});
-          UI.toast(r.same ? '设备文件一致，已标记成功' : '设备文件不一致，已重新排队');
-          this.refresh();
-        } catch (e) { UI.toast('操作失败：' + e.message, true); }
-      },
+      retry: btn => TaskActions.retry(btn.dataset.id, () => this.refresh()),
+      cancel: btn => TaskActions.cancel(btn.dataset.id, () => this.refresh()),
+      extend: btn => TaskActions.extend(btn.dataset.id, () => this.refresh()),
+      check: btn => TaskActions.check(btn.dataset.id, btn.dataset.api, () => this.refresh()),
     });
   },
 });
@@ -298,67 +316,39 @@ const TaskDetailPage = Object.assign(new Page(), {
       ['截止时间', UI.time(t.deadline_at_ms)],
       ['操作人', UI.esc(t.actor || '—')],
     ];
-    const kv = list => '<div class="kv-list">' + list.map(m =>
-      '<div class="kv-row"><span class="k">' + m[0] + '</span>' +
-      '<span class="v" title="' + m[1] + '">' + m[1] + '</span></div>').join('') + '</div>';
     this.el.innerHTML =
       '<div class="task-page">' +
         '<div class="panel task-head"><div class="task-title-wrap">' +
           '<h2>任务 #' + t.id + '</h2>' + UI.status(t.status, TASK_STATUS) + '</div>' +
           '<span class="spacer"></span><div class="task-actions">' +
-          (t.status === 'failed' ? '<button class="primary" id="td-retry">重试</button>' : '') +
-          (t.status === 'scheduled' || t.status === 'queued' ? '<button id="td-cancel">取消</button>' : '') +
-          (t.status === 'timeout' && t.extend_count === 0 ? '<button id="td-extend">延长截止</button>' : '') +
-          (t.status === 'conflict' ? '<button id="td-verify">校验设备</button>' +
-            '<button id="td-force">强制重发</button>' : '') +
+          (t.status === 'failed' ? '<button class="primary" data-act="retry">重试</button>' : '') +
+          (t.status === 'scheduled' || t.status === 'queued' ? '<button data-act="cancel">取消</button>' : '') +
+          (t.status === 'timeout' && t.extend_count === 0 ? '<button data-act="extend">延长截止</button>' : '') +
+          (t.status === 'conflict' ? '<button data-act="check" data-api="verify">校验设备</button>' +
+            '<button data-act="check" data-api="force">强制重发</button>' : '') +
           '<a href="#/tasks"><button>返回列表</button></a></div></div>' +
         '<div class="panel task-overview">' +
           '<div class="task-file-name">' + UI.esc(t.file_name) + '</div>' +
           '<div class="task-sub">' + UI.bytes(size) +
             (t.file_sha ? ' · <code title="' + UI.esc(t.file_sha) + '">' + UI.esc(t.file_sha) + '</code> ' +
-              '<button id="td-copy" data-hash="' + UI.esc(t.file_sha) + '">复制哈希</button>' : '') +
+              '<button data-act="copy" data-hash="' + UI.esc(t.file_sha) + '">复制哈希</button>' : '') +
           '</div>' +
           '<div class="task-bar"><span style="width:' + pct + '%"></span></div>' +
           '<div class="task-stats"><span>' + pct + '%</span><span>' +
             UI.bytes(sent) + ' / ' + UI.bytes(size) + '</span></div>' +
         '</div>' +
         '<div class="task-cols">' +
-          UI.panel('传输', kv(trans)) + UI.panel('时间与操作', kv(times)) +
+          UI.panel('传输', UI.kvList(trans)) + UI.panel('时间与操作', UI.kvList(times)) +
         '</div>' +
         (t.error ? '<div class="panel task-error"><b>错误</b><div>' + UI.esc(t.error) + '</div></div>' : '') +
       '</div>';
-    const cp = document.getElementById('td-copy');
-    if (cp) cp.onclick = () => UI.copy(cp.dataset.hash, '哈希已复制');
-    const rt = document.getElementById('td-retry');
-    if (rt) rt.onclick = async () => {
-      try { await Api.post('/api/v1/distributions/' + this.id + '/retry', {}); this.refresh(); }
-      catch (e) { UI.toast('重试失败：' + e.message, true); }
-    };
-    const cc = document.getElementById('td-cancel');
-    if (cc) cc.onclick = async () => {
-      try { await Api.post('/api/v1/distributions/' + this.id + '/cancel', {}); this.refresh(); }
-      catch (e) { UI.toast('取消失败：' + e.message, true); }
-    };
-    const tv = document.getElementById('td-verify');
-    const tf = document.getElementById('td-force');
-    const doCheck = async (api) => {
-      try {
-        const r = await Api.post('/api/v1/distributions/' + this.id + '/' + api, {});
-        UI.toast(r.same ? '设备文件一致，已标记成功' : '设备文件不一致，已重新排队');
-        this.refresh();
-      } catch (e) { UI.toast('操作失败：' + e.message, true); }
-    };
-    if (tv) tv.onclick = () => doCheck('verify');
-    if (tf) tf.onclick = () => doCheck('force');
-    const ex = document.getElementById('td-extend');
-    if (ex) ex.onclick = async () => {
-      const v = await UI.prompt({ title: '延长截止时间', label: '新的截止时间（本地时间，最多 +24h）',
-        type: 'datetime-local', value: toLocalInput(Date.now() + 24 * 3600 * 1000) });
-      if (!v) return;
-      try { await Api.post('/api/v1/distributions/' + this.id + '/extend',
-        { deadline_at_ms: new Date(v).getTime() }); this.refresh(); }
-      catch (e) { UI.toast('延长失败：' + e.message, true); }
-    };
+    UI.actions(this.el, {
+      copy: btn => UI.copy(btn.dataset.hash, '哈希已复制'),
+      retry: btn => TaskActions.retry(this.id, () => this.refresh()),
+      cancel: btn => TaskActions.cancel(this.id, () => this.refresh()),
+      extend: btn => TaskActions.extend(this.id, () => this.refresh()),
+      check: btn => TaskActions.check(this.id, btn.dataset.api, () => this.refresh()),
+    });
   },
 });
 
