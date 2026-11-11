@@ -18,9 +18,9 @@
   --warn: #d97706;
   --bad: #dc2626;
   /* 组件 token */
-  --input-bg: #eef2f7;
+  --input-bg: #e4eaf1;
   --input-fg: #1f2937;
-  --input-border: #c3ccd8;
+  --input-border: #94a3b8;
   --hover: #f0f6ff;
   --th-bg: #fafbfc;
   --toast-bg: #111827;
@@ -48,9 +48,9 @@ html[data-theme="dark"] {
   --ok: #3fb950;
   --warn: #d29922;
   --bad: #f85149;
-  --input-bg: #0b0f14;
+  --input-bg: #070a0e;
   --input-fg: #e6e9ee;
-  --input-border: #46505e;
+  --input-border: #5c6776;
   --hover: #1d232b;
   --th-bg: #1a1f26;
   --toast-bg: #e6e9ee;
@@ -120,8 +120,9 @@ tbody tr:last-child td { border-bottom: none; }
 
 /* 控件 */
 input, select, button { font: inherit; }
-input, select { border: 1px solid var(--input-border); border-radius: 6px; padding: 6px 10px;
+input, select, textarea { border: 1px solid var(--input-border); border-radius: 6px; padding: 6px 10px;
   background: var(--input-bg); color: var(--input-fg); }
+input:disabled, select:disabled, textarea:disabled { opacity: .6; cursor: not-allowed; }
 button { border: 1px solid var(--input-border); border-radius: 6px; padding: 6px 14px;
   background: var(--input-bg); color: var(--fg); cursor: pointer; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -221,9 +222,9 @@ html[data-theme="color"] {
   --fg: #1f2937;
   --muted: #5a6472;
   --border: color-mix(in srgb, var(--accent) 24%, #ffffff);
-  --input-bg: color-mix(in srgb, var(--accent) 9%, #ffffff);
+  --input-bg: color-mix(in srgb, var(--accent) 22%, #ffffff);
   --input-fg: #1f2937;
-  --input-border: color-mix(in srgb, var(--accent) 38%, #ffffff);
+  --input-border: color-mix(in srgb, var(--accent) 65%, #ffffff);
   --hover: color-mix(in srgb, var(--accent) 8%, #ffffff);
   --th-bg: color-mix(in srgb, var(--accent) 5%, #ffffff);
   --side-bg: color-mix(in srgb, var(--accent) 30%, #0f141a);
@@ -245,7 +246,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .tty-modal{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px;width:360px;display:flex;flex-direction:column;gap:10px}
 .tty-modal label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
 .tty-modal label.row{flex-direction:row;align-items:center;gap:6px}
-.tty-modal input[type=text],.tty-modal input:not([type]),.tty-modal select{padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg)}
+.tty-modal input[type=text],.tty-modal input:not([type]),.tty-modal select{padding:6px 8px;border:1px solid var(--input-border);border-radius:6px;background:var(--input-bg);color:var(--input-fg)}
 .tty-btns{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}
 .tty-ops button{padding:2px 8px}
 .tty-console{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.6;height:360px;overflow:auto;background:var(--bg);border-top:1px solid var(--border);border-bottom:1px solid var(--border);padding:8px 12px}
@@ -253,7 +254,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .tty-ts{color:var(--muted)}
 .tty-hex{color:var(--fg)} .tty-text{color:var(--muted)}
 .tty-send{display:flex;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border)}
-.tty-send input{flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg)}
+.tty-send input{flex:1;padding:6px 8px;border:1px solid var(--input-border);border-radius:6px;background:var(--input-bg);color:var(--input-fg)}
 .tty-tools{display:flex;align-items:center;gap:14px;padding:8px 12px;font-size:12px;color:var(--muted)}
 .tty-tools label{display:flex;align-items:center;gap:4px}
 .tty-ro{padding:6px 12px;color:var(--warn);font-size:12px;border-bottom:1px solid var(--border)}
@@ -278,7 +279,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .switch span:before{content:"";position:absolute;width:14px;height:14px;left:2px;top:2px;background:#fff;border-radius:50%;transition:.15s}
 .switch input:checked + span{background:var(--accent)}
 .switch input:checked + span:before{transform:translateX(16px)}
-.tty-search{padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);width:180px;margin-right:8px}
+.tty-search{padding:5px 8px;border:1px solid var(--input-border);border-radius:6px;background:var(--input-bg);color:var(--input-fg);width:180px;margin-right:8px}
 .tty-table-wrap thead{position:sticky;top:0;background:var(--card);z-index:1}
 .tty-table td{padding-top:6px;padding-bottom:6px}
 .sys-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 28px;padding:14px 16px}
@@ -374,7 +375,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-form-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px 18px;align-items:end}
 .ui-form-grid.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}
 .ui-form-grid label{display:flex;flex-direction:column;gap:6px;font-size:11px;color:var(--muted)}
-.ui-form-grid input,.ui-form-grid select{padding:7px 9px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--fg);font-size:13px;width:100%}
+.ui-form-grid input,.ui-form-grid select{padding:7px 9px;border:1px solid var(--input-border);border-radius:6px;background:var(--input-bg);color:var(--input-fg);font-size:13px;width:100%}
 .ui-form-foot{display:flex;align-items:center;gap:8px;margin-top:14px}
 /* 全局表单控件统一 */
 #page input:not([type=checkbox]):not([type=radio]):not([type=file]),
@@ -417,7 +418,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .settings-kv th:first-child{width:220px}
 .settings-kv th:last-child{width:auto}
 .ui-form-left{display:flex;gap:8px}
-.ui-search{padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--fg);font-size:13px;margin-right:8px;width:180px}
+.ui-search{padding:5px 8px;border:1px solid var(--input-border);border-radius:6px;background:var(--input-bg);color:var(--input-fg);font-size:13px;margin-right:8px;width:180px}
 .ui-pager{display:flex;align-items:center;gap:8px;margin-top:12px;color:var(--muted);font-size:12px}
 .ui-pager .spacer{flex:1}
 .ui-confirm-text{font-size:13px;line-height:1.6;color:var(--fg);margin-bottom:14px}
@@ -468,9 +469,9 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .perm-expand>td{padding:0 16px 18px!important;background:rgba(255,255,255,.015)}
 .perm-form{padding:16px;border:1px solid var(--border);border-radius:8px;background:var(--card)}
 .perm-form h3{margin:16px 0 8px;font-size:13px}
-.perm-grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.perm-grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .perm-grid2 label,.perm-field{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted)}
-.perm-grid2 input,.perm-field input,.perm-field select{padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:13px}
+.perm-grid2 input,.perm-field input,.perm-field select{padding:6px 8px;border:1px solid var(--input-border);border-radius:6px;background:var(--input-bg);color:var(--input-fg);font-size:13px}
 .perm-chips{display:flex;gap:6px;flex-wrap:wrap;min-height:26px}
 .perm-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border:1px solid var(--border);border-radius:12px;font-size:12px;background:var(--bg)}
 .perm-chip button{padding:0 2px;border:0;background:none;color:var(--muted);cursor:pointer}
@@ -565,7 +566,7 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .ui-tabs-attached + .dict-toolbar{margin-top:12px}
 /* 接入账号 */
 .acc-toolbar{display:flex;align-items:center;gap:10px;padding:14px 16px 0}
-.acc-toolbar input{width:260px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:13px}
+.acc-toolbar input{width:260px;padding:6px 10px;border:1px solid var(--input-border);border-radius:6px;background:var(--input-bg);color:var(--input-fg);font-size:13px}
 .acc-table{table-layout:fixed}
 .acc-table td{overflow-wrap:anywhere}
 .acc-table th:nth-child(1){width:30%}
@@ -584,8 +585,8 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 
 /* 可编辑表格：只读与编辑表单原地切换（UI.editTable） */
 .ui-edit-table.is-editing td{padding-top:6px;padding-bottom:6px;vertical-align:middle}
-.ui-edit-table .ui-inline{width:100%;box-sizing:border-box;padding:5px 8px;border:1px solid var(--border);
-  border-radius:6px;background:var(--bg);color:var(--fg);font-size:13px;white-space:normal}
+.ui-edit-table .ui-inline{width:100%;box-sizing:border-box;padding:5px 8px;border:1px solid var(--input-border);
+  border-radius:6px;background:var(--input-bg);color:var(--input-fg);font-size:13px;white-space:normal}
 .ui-edit-table textarea.ui-inline{resize:vertical;min-height:48px;line-height:1.5;font-family:inherit}
 .ui-edit-table .ui-edit-hint-cell{padding:10px 12px;background:var(--surface-2);white-space:normal}
 /* 布尔字段开关 */
