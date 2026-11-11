@@ -23,11 +23,8 @@
   --input-border: #c3ccd8;
   --hover: #f0f6ff;
   --th-bg: #fafbfc;
-  --modal-bg: #ffffff;
   --toast-bg: #111827;
   --toast-fg: #ffffff;
-  --code-bg: #f3f4f6;
-  --chart-grid: rgba(0,0,0,.08);
   --chart-axis: #6b7280;
   /* 表面叠加：深色面提亮，浅色面近似不可见 */
   --surface-1: rgba(255,255,255,.012);
@@ -56,11 +53,8 @@ html[data-theme="dark"] {
   --input-border: #46505e;
   --hover: #1d232b;
   --th-bg: #1a1f26;
-  --modal-bg: #1b1f26;
   --toast-bg: #e6e9ee;
   --toast-fg: #11161d;
-  --code-bg: #1b1f26;
-  --chart-grid: rgba(255,255,255,.08);
   --chart-axis: #8b929c;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -232,10 +226,8 @@ html[data-theme="color"] {
   --input-border: color-mix(in srgb, var(--accent) 38%, #ffffff);
   --hover: color-mix(in srgb, var(--accent) 8%, #ffffff);
   --th-bg: color-mix(in srgb, var(--accent) 5%, #ffffff);
-  --modal-bg: #ffffff;
   --side-bg: color-mix(in srgb, var(--accent) 30%, #0f141a);
   --side-fg: #c9d4e2;
-  --chart-grid: color-mix(in srgb, var(--accent) 15%, transparent);
   --chart-axis: #5a6472;
 }
 

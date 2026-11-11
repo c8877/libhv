@@ -2,7 +2,6 @@
 
 #include <pty.h>
 #include <fcntl.h>
-#include <sys/wait.h>
 #include <stdlib.h>
 
 hio_t* shellSpawnPty(hloop_t* loop, void* ctx, hread_cb read_cb, hclose_cb close_cb,
@@ -33,11 +32,4 @@ hio_t* shellSpawnPty(hloop_t* loop, void* ctx, hread_cb read_cb, hclose_cb close
     hio_set_max_write_bufsize(io, rtnp::CONN_INFLIGHT + rtnp::MAX_PAYLOAD);
     hio_read(io);
     return io;
-}
-
-void shellKillChild(pid_t pid) {
-    if (pid > 0) {
-        kill(pid, SIGHUP);
-        waitpid(pid, NULL, WNOHANG);
-    }
 }

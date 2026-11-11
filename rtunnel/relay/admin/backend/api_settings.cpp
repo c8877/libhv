@@ -29,7 +29,6 @@ const Def kDefs[] = {
     {"term.max_sessions",    "4",   1, 32,       "单账号最大终端数","个", "终端", "单账号同时打开的终端数量"},
     {"audit.retention_days", "30",  7, 365,      "审计保留",       "天",  "审计", "审计日志保留天数"},
     {"ui.site_title",        "rtunnel", 0, 0,    "站点标题",       "",    "展示", "浏览器标题和页面标题"},
-    {"ui.refresh_seconds",   "0",   0, 300,      "详情默认刷新",   "秒（0=关闭）","展示", "详情页默认刷新间隔，0 表示关闭"},
 };
 
 const Def* findDef(const std::string& k) {
