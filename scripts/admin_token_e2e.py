@@ -257,6 +257,26 @@ def main():
         page.wait_for_timeout(700)
         r.check("15 详情 404", "账号不存在" in page.evaluate("document.querySelector('#page').innerText"))
 
+        # 删除账号需输入用户名确认
+        page.goto(base + "/#/access")
+        page.wait_for_timeout(600)
+        page.locator("#acc-new").click()
+        page.wait_for_timeout(300)
+        page.fill("#aa-user", "temp")
+        page.locator("#aa-ok").click()
+        page.wait_for_timeout(800)
+        page.locator(".acc-row").filter(has_text="temp").first.click()
+        page.wait_for_timeout(700)
+        page.locator("[data-act=acc-del]").click()
+        page.wait_for_timeout(300)
+        r.check("15b 删除需输入用户名", page.locator("#ad-ok").is_disabled())
+        page.fill("#ad-name", "temp")
+        page.wait_for_timeout(150)
+        page.locator("#ad-ok").click()
+        page.wait_for_timeout(900)
+        r.check("15c 删除后回列表", page.url.endswith("#/access") and
+                "temp" not in page.evaluate("document.querySelector('#page').innerText"))
+
         page.goto(account_url)
         page.wait_for_timeout(700)
         page.screenshot(path=os.path.join(shots, "access-tokens.png"), full_page=True)
@@ -367,7 +387,7 @@ def main():
     echo1.close()
     echo2.close()
 
-    total = 28
+    total = 30
     print("=== %d/%d passed === work=%s" % (total - len(r.fails), total, work))
     if args.keep:
         print("保留：", work)
