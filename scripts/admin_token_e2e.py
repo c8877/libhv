@@ -175,15 +175,21 @@ def main():
         account_url = page.url
         r.check("5 进入账号详情", page.locator(".acc-kv").count() == 1 and "#/access/" in account_url,
                 account_url)
+        rows_view = page.evaluate(
+            "document.querySelectorAll('.acc-kv tbody tr:not(.ui-edit-hint-row)').length")
 
         # 账号信息表原地转表单
         page.locator("[data-act=acc-edit]").click()
         page.wait_for_timeout(400)
+        rows_edit = page.evaluate(
+            "document.querySelectorAll('.acc-kv tbody tr:not(.ui-edit-hint-row)').length")
         r.check("5b 表格转表单", page.locator(".acc-kv.is-editing").count() == 1 and
-                page.locator("#ae-display").count() == 1 and page.locator("#ae-status").count() == 1)
+                page.locator("#ae-display").count() == 1 and page.locator("#ae-status").count() == 1 and
+                rows_edit == rows_view and
+                page.evaluate("document.querySelector('.acc-kv td .mono')?.textContent") == "alice")
         page.fill("#ae-display", "Alice")
         page.fill("#ae-note", "产线采集机")
-        page.locator("[data-act=acc-save]").click()
+        page.locator("[data-edit-save]").click()
         page.wait_for_timeout(900)
         kv = page.evaluate("document.querySelector('.acc-kv').innerText.replace(/\\n/g,' | ')")
         r.check("5c 表单保存", page.locator(".acc-kv.is-editing").count() == 0 and
@@ -191,7 +197,7 @@ def main():
         page.locator("[data-act=acc-edit]").click()
         page.wait_for_timeout(300)
         page.fill("#ae-display", "zzz")
-        page.locator("[data-act=acc-cancel]").click()
+        page.locator("[data-edit-cancel]").click()
         page.wait_for_timeout(400)
         r.check("5d 取消需确认", page.locator(".tty-modal").count() == 1)
         page.locator(".tty-modal button").last.click()
@@ -274,6 +280,23 @@ def main():
             tokens["limit"] = rotated
         page.locator("[data-modal-close]").first.click()
         page.wait_for_timeout(600)
+
+        # 账号表单与 Token 表单互斥
+        page.locator("[data-act=tok-edit]").first.click()
+        page.wait_for_timeout(400)
+        page.fill("#te-name", "脏值")
+        page.wait_for_timeout(150)
+        page.locator("[data-act=acc-edit]").click()
+        page.wait_for_timeout(400)
+        r.check("14b 切账号编辑需确认", page.locator(".tty-modal").count() == 1)
+        page.locator(".tty-modal button").last.click()
+        page.wait_for_timeout(900)
+        r.check("14c 账号表单打开且 Token 表单收起",
+                page.locator(".acc-kv.is-editing").count() == 1 and
+                page.locator(".tok-edit-row").count() == 0)
+        page.locator("[data-edit-cancel]").click()
+        page.wait_for_timeout(500)
+        r.check("14d 取消账号表单", page.locator(".acc-kv.is-editing").count() == 0)
 
         # 不存在的账号
         page.goto(base + "/#/access/9999")
@@ -410,7 +433,7 @@ def main():
     echo1.close()
     echo2.close()
 
-    total = 33
+    total = 36
     print("=== %d/%d passed === work=%s" % (total - len(r.fails), total, work))
     if args.keep:
         print("保留：", work)

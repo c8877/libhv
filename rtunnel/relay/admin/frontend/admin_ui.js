@@ -453,6 +453,231 @@ const UI = {
     });
     return h + '</tbody></table></div>';
   },
+  // 单条记录的表格：同一张表在只读与编辑表单之间原地切换。
+  // host 承载 <table>，外层 .detail-table-shell 由页面提供。
+  // opts: {
+  //   data, columns=2,
+  //   fields: [{ key, label, span=1, cls, view(data), edit:{type,id,options,value(data),
+  //              html(value,data),placeholder,maxlength,rows,step,min,max} }],
+  //   cls, actions, renderActions(editing, data),
+  //   hint(values, data) -> string | {text,warn},
+  //   confirmSave(values, data) -> Promise<bool>|bool,
+  //   save(values, data) -> Promise,
+  //   onSaved(values, data), onStateChange(editing, data), dirtyMessage, focus
+  //   editing（初始态）
+  // }
+  // 返回: { el, host, start, save, cancel, leave, update, isEditing, isDirty, values, destroy }
+  editTable(host, opts) {
+    if (!host) return null;
+    const o = opts || {};
+    const fields = o.fields || [];
+    const columns = Math.max(1, Number(o.columns) || 2);
+    const state = { data: o.data || {}, editing: !!o.editing, saving: false, initial: null };
+    const editable = fields.some(f => f.edit);
+
+    const valueOf = f => (f.edit && f.edit.value) ? f.edit.value(state.data) : state.data[f.key];
+    const esc = v => UI.esc(v == null ? '' : v);
+
+    const control = f => {
+      const e = f.edit;
+      const v = valueOf(f);
+      const attrs = ' class="ui-inline"' + ' data-ef="' + UI.esc(f.key) + '"' +
+        (e.id ? ' id="' + UI.esc(e.id) + '"' : '');
+      if (e.type === 'custom') return e.html ? e.html(v, state.data) : '';
+      if (e.type === 'select') {
+        return '<select' + attrs + '>' + (e.options || []).map(op =>
+          '<option value="' + UI.esc(op.value) + '"' +
+          (String(op.value) === String(v == null ? '' : v) ? ' selected' : '') + '>' +
+          UI.esc(op.label != null ? op.label : op.value) + '</option>').join('') + '</select>';
+      }
+      if (e.type === 'textarea') {
+        return '<textarea' + attrs + ' rows="' + (e.rows || 2) + '"' +
+          (e.placeholder ? ' placeholder="' + UI.esc(e.placeholder) + '"' : '') +
+          (e.maxlength ? ' maxlength="' + e.maxlength + '"' : '') + '>' + esc(v) + '</textarea>';
+      }
+      return '<input type="' + UI.esc(e.type || 'text') + '"' + attrs +
+        ' value="' + esc(v) + '"' +
+        (e.placeholder ? ' placeholder="' + UI.esc(e.placeholder) + '"' : '') +
+        (e.maxlength ? ' maxlength="' + e.maxlength + '"' : '') +
+        (e.step != null ? ' step="' + e.step + '"' : '') +
+        (e.min != null ? ' min="' + e.min + '"' : '') +
+        (e.max != null ? ' max="' + e.max + '"' : '') + '>';
+    };
+
+    const cell = f => {
+      const span = Math.min(columns, Math.max(1, Number(f.span) || 1));
+      const v = state.editing && f.edit ? control(f)
+        : (f.view ? f.view(state.data) : esc(state.data[f.key] === '' || state.data[f.key] == null
+          ? '—' : state.data[f.key]));
+      return '<th>' + UI.esc(f.label) + '</th><td' +
+        (span > 1 ? ' colspan="' + (span * 2 - 1) + '"' : '') +
+        (f.cls ? ' class="' + f.cls + '"' : '') + '>' + v + '</td>';
+    };
+
+    const body = () => {
+      let html = '', used = 0, row = [];
+      const flush = () => {
+        if (!row.length) return;
+        html += '<tr>' + row.map(cell).join('') + '</tr>';
+        row = []; used = 0;
+      };
+      fields.forEach(f => {
+        const span = Math.min(columns, Math.max(1, Number(f.span) || 1));
+        if (used + span > columns) flush();
+        row.push(f); used += span;
+        if (used >= columns) flush();
+      });
+      flush();
+      if (state.editing && typeof o.hint === 'function') {
+        html += '<tr class="ui-edit-hint-row"><td colspan="' + (columns * 2) +
+          '" class="ui-edit-hint-cell"><span class="ui-edit-hint"></span></td></tr>';
+      }
+      return html;
+    };
+
+    const values = () => {
+      const out = {};
+      host.querySelectorAll('[data-ef]').forEach(el => {
+        out[el.dataset.ef] = el.type === 'checkbox' ? (el.checked ? '1' : '') : el.value;
+      });
+      return out;
+    };
+
+    const isDirty = () => state.editing && state.initial !== null &&
+      JSON.stringify(values()) !== state.initial;
+
+    const updateHint = () => {
+      if (!state.editing || typeof o.hint !== 'function') return;
+      const el = host.querySelector('.ui-edit-hint');
+      if (!el) return;
+      const r = o.hint(values(), state.data);
+      let text = '', warn = false;
+      if (r && typeof r === 'object') { text = r.text || ''; warn = !!r.warn; }
+      else text = r || '';
+      el.textContent = text;
+      el.classList.toggle('warn', warn);
+    };
+
+    let renderActions = () => {};
+    if (o.actions) {
+      renderActions = () => {
+        o.actions.innerHTML = typeof o.renderActions === 'function'
+          ? o.renderActions(state.editing, state.data) : '';
+        const start = o.actions.querySelector('[data-edit-start]');
+        if (start) start.onclick = () => api.start();
+        const save = o.actions.querySelector('[data-edit-save]');
+        if (save) save.onclick = () => api.save();
+        const cancel = o.actions.querySelector('[data-edit-cancel]');
+        if (cancel) cancel.onclick = () => api.cancel();
+      };
+    }
+
+    const render = () => {
+      host.innerHTML = '<table class="detail-table ui-edit-table' +
+        (o.cls ? ' ' + o.cls : '') + (state.editing ? ' is-editing' : '') +
+        '"><tbody>' + body() + '</tbody></table>';
+      renderActions();
+      if (state.editing) {
+        updateHint();
+        setTimeout(() => {
+          const el = (o.focus && host.querySelector(o.focus)) ||
+            host.querySelector('input[data-ef],select[data-ef],textarea[data-ef]');
+          if (el) { el.focus(); if (el.select) el.select(); }
+        }, 0);
+      }
+      if (typeof o.onStateChange === 'function') o.onStateChange(state.editing, state.data);
+    };
+
+    host.addEventListener('input', e => {
+      if (state.editing && e.target.dataset && e.target.dataset.ef != null) updateHint();
+    });
+    host.addEventListener('change', e => {
+      if (state.editing && e.target.dataset && e.target.dataset.ef != null) updateHint();
+    });
+    host.addEventListener('keydown', e => {
+      if (!state.editing) return;
+      if (e.key === 'Escape') { e.preventDefault(); api.cancel(); }
+      else if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
+        e.preventDefault();
+        api.save();
+      }
+    });
+
+    const api = {
+      host,
+      get el() { return host.querySelector('table'); },
+      isEditing: () => state.editing,
+      isDirty,
+      values,
+      start() {
+        if (state.editing || state.saving || !editable) return;
+        state.editing = true;
+        render();
+        state.initial = JSON.stringify(values());
+      },
+      async save() {
+        if (!state.editing || state.saving) return;
+        state.saving = true;
+        const v = values();
+        const btn = o.actions && o.actions.querySelector('[data-edit-save]');
+        if (typeof o.confirmSave === 'function' && !await o.confirmSave(v, state.data)) {
+          state.saving = false;
+          return;
+        }
+        if (btn) btn.disabled = true;
+        try {
+          if (typeof o.save === 'function') await o.save(v, state.data);
+          Object.assign(state.data, v);
+          state.editing = false;
+          state.initial = null;
+          render();
+          if (typeof o.onSaved === 'function') o.onSaved(v, state.data);
+        } catch (e) {
+          if (btn) btn.disabled = false;
+          const hint = host.querySelector('.ui-edit-hint');
+          if (hint) {
+            hint.textContent = '保存失败：' + e.message;
+            hint.classList.add('warn');
+          } else {
+            UI.toast('保存失败：' + e.message, true);
+          }
+        } finally {
+          state.saving = false;
+        }
+      },
+      async cancel() {
+        if (!state.editing || state.saving) return;
+        if (isDirty() && !await UI.confirm({
+          title: '放弃修改',
+          message: o.dirtyMessage || '当前表单还有未保存的修改，确定放弃？',
+        })) return;
+        state.editing = false;
+        state.initial = null;
+        render();
+      },
+      // 页面要执行其它操作时调用：有改动先确认，返回是否已退出编辑
+      async leave() {
+        if (!state.editing) return true;
+        if (state.saving) return false;
+        if (isDirty() && !await UI.confirm({
+          title: '放弃修改',
+          message: o.dirtyMessage || '当前表单还有未保存的修改，继续操作会放弃修改。',
+        })) return false;
+        state.editing = false;
+        state.initial = null;
+        render();
+        return true;
+      },
+      update(data) {
+        state.data = data || {};
+        if (!state.editing) render();
+      },
+      destroy() { host.innerHTML = ''; },
+    };
+
+    render();
+    return api;
+  },
   // 竖排两列明细，用于详情页信息块
   kvList(rows, opts) {
     opts = opts || {};

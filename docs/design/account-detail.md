@@ -609,57 +609,59 @@ if (!r.ok) {
 ## 10.1 文件
 
 ```
+admin_ui.js
+  UI.editTable                单条记录的表格，只读与编辑表单原地切换
 admin_accounts.js
   AccessAccountsPage          列表：去掉 expandId / tokens / loadTokens / tokenPanel
-  AccessAccountDetailPage     新增：详情页
+  AccessAccountDetailPage     详情页：账号字段只声明一次，两种形态由组件生成
   Router.register(/^#\/access\/(\d+)$/, ...)
 ```
 
-列表页净减约 90 行；详情页约 340 行（行内展开表单约 80 行）。
+列表页净减约 90 行；详情页里账号信息表的读/写两套模板合并为一份字段声明。
 
 ## 10.2 复用
 
 ```
 UI.panel          两张卡片
-UI.dataTable       Token 表格（6 列，render 自定义）
+UI.editTable      账号信息表：原地切换只读与编辑（见 §10.6）
 UI.status         Token / 账号状态
-UI.actions        详情页所有 data-act
+UI.actions        详情页除账号编辑外的 data-act
 UI.modal          新建 Token、轮换、吊销（账号与 Token 的编辑都不走弹窗）
 UI.pill           权限摘要里的分组标签
 UI.time           时间统一格式
 ```
 
-KV 表格复用 `UI.kvList` 并加一个 `cls: 'acc-kv'`：
+账号信息表不再手写两套 HTML，字段只声明一次：
 
 ```js
-UI.kvList([
-  ['用户名', '<span class="mono">' + UI.esc(a.username) + '</span>'],
-  ['状态', UI.status(a.status, ACC_STATUS)],
-  ['账号 ID', a.id],
-  ['展示名', UI.esc(a.display_name || '—')],
-  ['备注', UI.esc(a.note || '—'), 'wide'],
-  ...
-], { cls: 'acc-kv' })
+UI.editTable(document.getElementById('acc-kv-host'), {
+  data: this.account,
+  cls: 'acc-kv',
+  fields: this.accountFields(),     // 每项 { key, label, view, edit, span }
+  actions: document.getElementById('acc-info-actions'),
+  renderActions: (editing, a) => editing
+    ? '<button data-edit-cancel>取消</button> <button data-edit-save>保存</button>'
+    : '<button data-edit-start>编辑资料</button> …',
+  hint: (v, d) => ({ text: '…', warn: false }),
+  save: v => Api.put('/api/v1/client-accounts/' + this.account.id, v),
+  onSaved: () => this.refresh(),
+});
 ```
-
-`UI.kvList` 增加对第三项 `'wide'` 的支持：给 `.kv-row` 加 `wide` 类，跨满两列。改动只有一行。
 
 ## 10.3 样式
 
 ```
-.acc-kv                两列配对 grid；≤900px 单列
-.acc-kv .kv-row.wide   跨两列
-.acc-note-bar          账号停用提示条
-.acc-token-tabs        状态筛选（复用 .ui-tabs 或轻量按钮组）
-.acc-bar               流量进度条（外层槽 + 内层 span）
-.acc-progress.ok/warn/bad 三档颜色（进度用原生 progress）
-.acc-token-table       单行不换行；≤1100px 隐藏表头，行转卡片（data-label 作字段名）
-.acc-ops               操作列 nowrap
-.tok-edit-row > td     展开表单行容器，colspan=6，背景 --surface-2
-.tok-form              字段网格 4 列；≤1100px 2 列，≤760px 1 列
-.tok-form-foot         左侧提示 + 右侧按钮，窄屏换行
-.tok-hint              副作用警示，--warn 色
-.tok-form input        与全局表单控件一致，宽度 100%
+.ui-edit-table           可编辑表格基础：编辑态单元格内边距、.ui-inline 控件
+.ui-edit-hint-cell       编辑态表尾提示行（colspan 整行，--surface-2）
+.ui-edit-hint            提示文本；.warn 转 warn 色
+.acc-kv                  账号信息表列宽；≤900px 标签列收窄
+.acc-token-table         单行不换行；≤1100px 隐藏表头，行转卡片（data-label 作字段名）
+.acc-ops                 操作列 nowrap
+.acc-progress            流量进度条（原生 progress）；.ok/.warn/.bad 三档
+.tok-edit-row > td       展开表单行容器，colspan=6，背景 --surface-2
+.tok-form                字段网格 4 列；≤1100px 2 列，≤760px 1 列
+.tok-form-foot           左侧提示 + 右侧按钮，窄屏换行
+.tok-hint                副作用警示，--warn 色（与 .ui-edit-hint 共用规则）
 ```
 
 不新增第三套 chip 样式，分组标签继续用 `UI.pill`。
@@ -675,13 +677,12 @@ UI.kvList([
 
 ## 10.5 行内展开表单状态机
 
-状态只控制表单行的插入与移除，不改变数据行的渲染。页面实例保留两组状态：
+Token 表单行的状态在页面实例上；账号信息表的状态由 `UI.editTable` 内部持有：
 
 ```js
 this.editId = 0;          // 当前展开的 Token id，0 表示全部收起
 this.editDirty = false;   // Token 表单是否有改动
-this.editingAccount = false;  // 账号信息表是否处于表单编辑态
-this.accountDirty = false;    // 账号信息表单是否有改动
+this.kvEditor = null;     // UI.editTable 实例，isEditing()/leave()/save()
 ```
 
 ```
@@ -694,20 +695,79 @@ editing ──切换筛选───────────────► dirty
 editing ──自动刷新 timer─────────► 跳过，不重绘
 ```
 
-账号信息表是同样的状态机，差异只在于作用对象是整张 KV 表：
+账号信息表由 `UI.editTable` 走同一套状态机，页面只判断 `kvEditor.isEditing()`：
 
 ```
-closed ──点「编辑资料」──────────► editingAccount(true), dirty=false
-editing ──输入──────────────────► dirty=true（表尾提示随状态变化）
-editing ──点「保存」────────────► 停用需二次确认 ──► PUT ──► closed（刷新）
+closed ──点「编辑资料」──────────► editing, dirty=false
+editing ──输入──────────────────► dirty 变化（表尾提示随字段变化）
+editing ──点「保存」────────────► confirmSave ──► PUT ──► closed（onSaved 刷新）
 editing ──点「取消」/ Esc────────► dirty ? confirm : closed
-editing ──点 Token 操作/筛选─────► dirty ? confirm : 收起后继续原操作
+editing ──点 Token 操作/筛选─────► kvEditor.leave()：dirty ? confirm : 收起后继续
 editing ──自动刷新 timer─────────► 跳过，不重绘
 ```
 
 提交中禁用保存按钮，防止重复 PUT；失败回到 `editing(dirty=true)`，输入不丢。
 
 表单值只在展开时从行/账号读取一次，之后以 DOM 为准，避免刷新把输入改回去。
+
+## 10.6 UI.editTable 标准组件
+
+`admin_ui.js` 里的单条记录可编辑表格。只读与编辑形态由同一份字段声明生成，页面不再写两套模板。
+
+```js
+const editor = UI.editTable(host, {
+  data,                       // 当前记录
+  columns: 2,                 // 每行几组「标签 + 值」，默认 2
+  fields: [{
+    key: 'status',
+    label: '状态',
+    span: 1,                  // 占几组；2 表示整行
+    cls: 'acc-wrap',          // 值单元格附加类
+    view: d => UI.status(d.status, MAP),
+    edit: {                   // 没有 edit 即只读字段
+      type: 'select',         // text / number / datetime-local / select / textarea / custom
+      id: 'ae-status',
+      options: [{ value: 'active', label: '启用' }],
+      value: d => d.status,   // 可选：编辑值不同于 key
+      html: (v, d) => '…',    // type=custom 时自定义控件，需带 data-ef
+      placeholder, maxlength, rows, step, min, max,
+    },
+  }],
+  actions: headerEl,          // 可选：组件负责渲染视图/编辑两套按钮
+  renderActions: (editing, data) => html,
+  hint: (values, data) => ({ text, warn }),
+  confirmSave: (values, data) => Promise<bool>,
+  save: (values, data) => Promise,
+  onSaved: (values, data),
+  onStateChange: (editing, data),
+  dirtyMessage, focus,
+  editing: false,             // 初始是否编辑
+});
+```
+
+```
+editor.start()        进入编辑；首个控件自动聚焦
+editor.save()         收集 values → confirmSave → save → 退出编辑 → onSaved
+editor.cancel()       有改动先确认，再恢复只读
+editor.leave()        页面执行其它操作前调用，返回是否已退出
+editor.update(data)   只读态换数据；编辑态不覆盖输入
+editor.isEditing()    页面据此暂停自动刷新
+editor.isDirty()      当前值与进入编辑时是否不同
+editor.values()       读取所有 [data-ef] 控件的值
+```
+
+约定：
+
+```
+同一张表       表格行数、列宽在两种形态下不变，只替换单元格内容
+只读字段       保持文本渲染，编辑时仍能看到账号 ID、创建时间等上下文
+按钮           编辑态的保存/取消由 data-edit-save / data-edit-cancel 绑定，
+               视图态按钮继续走 data-act + UI.actions
+Esc / Enter    Esc 取消；输入框内 Enter 保存（textarea 不拦截）
+保存失败       留在编辑态，表尾提示错误，按钮恢复可点
+```
+
+后续任何「单条记录表格 → 表单」的页面都可直接复用，不需要再写一遍脏检查与确认逻辑。
 
 # 11. 权限矩阵
 
