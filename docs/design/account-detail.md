@@ -772,6 +772,45 @@ Esc / Enter    Esc 取消；输入框内 Enter 保存（textarea 不拦截）
 
 后续任何「单条记录表格 → 表单」的页面都可直接复用，不需要再写一遍脏检查与确认逻辑。
 
+## 10.7 表格行内展开表单
+
+`UI.editTable` 用于「单条记录的 KV 表」，列表里的行用它不合适。列表行用一组更小的公共方法：
+
+```js
+// 1. 生成表单行，插到目标数据行之后
+const html = '<tr class="ui-row-edit"><td colspan="5"><div class="ui-row-edit-inner">' +
+  UI.formGrid(fields, data) +
+  '<div class="ui-row-edit-foot">…[取消][保存]</div></div></td></tr>';
+
+// 2. 控件渲染与取值和 editTable 同一套
+UI.fieldControl(field, value, data);   // text / number / password / select / switch / textarea
+UI.fieldValues(root, fields);          // 读回业务值，checkbox 按 onValue/offValue 映射
+UI.bindFields(root);                   // 开关文案随勾选更新
+
+// 3. UI.detailTable 支持直接插入整行
+rows.push(cells);
+if (editing) rows.push(formRowHtml);
+```
+
+已使用：管理台「账号」行内编辑（角色 / 状态 / 密码 / 设备范围）、字典管理行内编辑。
+
+### 什么时候用展开表单，什么时候用弹窗
+
+```
+展开表单   表格里已有这一行，修改多个字段，且需要保留上下文
+           账号、Token、字典项、权限分组
+
+弹窗       新建记录（还没有行可挂）
+           一次性产物（Token 明文只显示一次）
+           确认类（删除、停用、放弃修改）
+           独立工作台（字典管理、有效权限预览、旧 ACL 导入导出）
+
+prompt     只剩单字段、可逆、无需上下文的快捷动作
+           绑定设备归属、延长截止时间、输入设备 Web 端口
+```
+
+判断标准是「有没有一行可以承载表单」，不是「字段多少」。新建没有行，弹窗合理；编辑已有行就展开在行下方，用户的视线和滚动位置都不丢。
+
 # 11. 权限矩阵
 
 | 能力 | viewer | operator | manager | admin |

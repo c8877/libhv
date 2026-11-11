@@ -129,19 +129,21 @@ def main():
             row = page.locator("#page tbody tr").filter(has_text="op1").first
             check("账号：启用", "启用" in row.inner_text())
 
-            row.locator("[data-act=role]").click()
-            page.wait_for_selector("#ui-prompt-input")
-            page.fill("#ui-prompt-input", "operator")
-            page.locator(".tty-mask [data-ok]").last.click()
+            row.locator("[data-act=edit]").click()
+            page.wait_for_selector("#ue-role")
+            page.select_option("#ue-role", "operator")
+            page.locator("[data-act=ue-save]").click()
             page.wait_for_timeout(800)
             row = page.locator("#page tbody tr").filter(has_text="op1").first
-            check("账号：改角色为操作员", "操作员" in row.inner_text())
+            check("账号：行内改角色为操作员", "操作员" in row.inner_text())
 
-            row.locator("[data-act=scope]").click()
-            page.wait_for_selector("#scope-ok")
-            check("账号：范围弹窗", page.locator("#scope-ok").count() == 1)
-            page.locator(".tty-mask [data-modal-close]").last.click()
-            page.wait_for_timeout(300)
+            row.locator("[data-act=edit]").click()
+            page.wait_for_selector(".ui-row-edit")
+            check("账号：行内编辑含设备范围",
+                  "设备范围" in page.locator(".ui-row-edit").inner_text()
+                  and page.locator("#ue-pass").count() == 1)
+            page.locator("[data-act=ue-cancel]").click()
+            page.wait_for_timeout(400)
 
             row.locator("[data-act=del]").click()
             page.wait_for_selector("[data-ok]")

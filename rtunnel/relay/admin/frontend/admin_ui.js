@@ -405,6 +405,8 @@ const UI = {
       cols.map(th).join('') + '</tr></thead><tbody>';
     if (!rows.length) h += '<tr><td class="empty" colspan="' + cols.length + '">' + UI.esc(opts.empty || '暂无数据') + '</td></tr>';
     rows.forEach((r, i) => {
+      // 允许直接插入整行，例如表格行下方的展开表单
+      if (typeof r === 'string') { h += r; return; }
       h += '<tr' + (opts.rowAttrs ? opts.rowAttrs(i) : '') + '>' + r.map(c => '<td>' + c + '</td>').join('') + '</tr>';
     });
     return h + '</tbody></table></div>';
@@ -468,6 +470,95 @@ const UI = {
   //   editing（初始态）
   // }
   // 返回: { el, host, start, save, cancel, leave, update, isEditing, isDirty, values, destroy }
+  // 渲染单个字段的编辑控件，editTable 与行内展开表单共用
+  fieldControl(field, value, data) {
+    const e = field.edit || {};
+    const v = value;
+    const attrs = ' class="ui-inline" data-ef="' + UI.esc(field.key) + '"' +
+      (e.id ? ' id="' + UI.esc(e.id) + '"' : '');
+    if (e.type === 'custom') return e.html ? e.html(v, data) : '';
+    if (e.type === 'switch') {
+      const on = String(v) === String(e.onValue != null ? e.onValue : '1');
+      const onLabel = e.onLabel != null ? e.onLabel : '开';
+      const offLabel = e.offLabel != null ? e.offLabel : '关';
+      return '<label class="ui-switch"' + (e.id ? ' id="' + UI.esc(e.id) + '"' : '') + '>' +
+        '<input type="checkbox" data-ef="' + UI.esc(field.key) + '"' + (on ? ' checked' : '') + '>' +
+        '<span class="ui-switch-track"><span class="ui-switch-dot"></span></span>' +
+        '<span class="ui-switch-text" data-on="' + UI.esc(onLabel) + '" data-off="' + UI.esc(offLabel) + '">' +
+        UI.esc(on ? onLabel : offLabel) + '</span></label>';
+    }
+    if (e.type === 'select') {
+      return '<select' + attrs + '>' + (e.options || []).map(op =>
+        '<option value="' + UI.esc(op.value) + '"' +
+        (String(op.value) === String(v == null ? '' : v) ? ' selected' : '') + '>' +
+        UI.esc(op.label != null ? op.label : op.value) + '</option>').join('') + '</select>';
+    }
+    if (e.type === 'textarea') {
+      return '<textarea' + attrs + ' rows="' + (e.rows || 2) + '"' +
+        (e.placeholder ? ' placeholder="' + UI.esc(e.placeholder) + '"' : '') +
+        (e.maxlength ? ' maxlength="' + e.maxlength + '"' : '') + '>' +
+        UI.esc(v == null ? '' : v) + '</textarea>';
+    }
+    return '<input type="' + UI.esc(e.type || 'text') + '"' + attrs +
+      ' value="' + UI.esc(v == null ? '' : v) + '"' +
+      (e.placeholder ? ' placeholder="' + UI.esc(e.placeholder) + '"' : '') +
+      (e.maxlength ? ' maxlength="' + e.maxlength + '"' : '') +
+      (e.step != null ? ' step="' + e.step + '"' : '') +
+      (e.min != null ? ' min="' + e.min + '"' : '') +
+      (e.max != null ? ' max="' + e.max + '"' : '') + '>';
+  },
+
+  // 收集 [data-ef] 控件的值；checkbox 按 onValue/offValue 映射回业务值
+  fieldValues(root, fields) {
+    const out = {};
+    const edits = {};
+    (fields || []).forEach(f => { if (f.edit) edits[f.key] = f.edit; });
+    root.querySelectorAll('[data-ef]').forEach(el => {
+      const key = el.dataset.ef;
+      if (el.type === 'checkbox') {
+        const e = edits[key] || {};
+        out[key] = el.checked
+          ? (e.onValue != null ? e.onValue : '1')
+          : (e.offValue != null ? e.offValue : '');
+      } else {
+        out[key] = el.value;
+      }
+    });
+    return out;
+  },
+
+  // 开关文案随勾选即时更新；行内表单与 editTable 共用
+  bindFields(root, onChange) {
+    if (!root) return;
+    const fire = e => { if (typeof onChange === 'function') onChange(e); };
+    root.addEventListener('input', fire);
+    root.addEventListener('change', e => {
+      const el = e.target;
+      if (el && el.type === 'checkbox' && el.parentElement) {
+        const txt = el.parentElement.querySelector('.ui-switch-text');
+        if (txt) txt.textContent = el.checked ? txt.dataset.on : txt.dataset.off;
+      }
+      fire(e);
+    });
+  },
+
+  // 字段网格：标签在上、控件在下，用于表格行下方的展开表单
+  formGrid(fields, data) {
+    const d = data || {};
+    return '<div class="ui-form-fields">' + (fields || []).map(f => {
+      let ctrl;
+      if (typeof f.html === 'function') ctrl = f.html(d);
+      else if (f.edit) {
+        const v = f.edit.value ? f.edit.value(d) : d[f.key];
+        ctrl = UI.fieldControl(f, v, d);
+      } else {
+        ctrl = UI.esc(d[f.key] == null ? '' : d[f.key]);
+      }
+      return '<div class="ui-form-field' + (Number(f.span) > 1 ? ' ui-form-span2' : '') + '">' +
+        '<span class="ui-form-label">' + UI.esc(f.label) + '</span>' + ctrl + '</div>';
+    }).join('') + '</div>';
+  },
+
   editTable(host, opts) {
     if (!host) return null;
     const o = opts || {};
@@ -479,41 +570,7 @@ const UI = {
     const valueOf = f => (f.edit && f.edit.value) ? f.edit.value(state.data) : state.data[f.key];
     const esc = v => UI.esc(v == null ? '' : v);
 
-    const control = f => {
-      const e = f.edit;
-      const v = valueOf(f);
-      const attrs = ' class="ui-inline"' + ' data-ef="' + UI.esc(f.key) + '"' +
-        (e.id ? ' id="' + UI.esc(e.id) + '"' : '');
-      if (e.type === 'custom') return e.html ? e.html(v, state.data) : '';
-      if (e.type === 'switch') {
-        const on = String(v) === String(e.onValue != null ? e.onValue : '1');
-        const onLabel = e.onLabel != null ? e.onLabel : '开';
-        const offLabel = e.offLabel != null ? e.offLabel : '关';
-        return '<label class="ui-switch"' + (e.id ? ' id="' + UI.esc(e.id) + '"' : '') + '>' +
-          '<input type="checkbox" data-ef="' + UI.esc(f.key) + '"' + (on ? ' checked' : '') + '>' +
-          '<span class="ui-switch-track"><span class="ui-switch-dot"></span></span>' +
-          '<span class="ui-switch-text" data-on="' + UI.esc(onLabel) + '" data-off="' + UI.esc(offLabel) + '">' +
-          UI.esc(on ? onLabel : offLabel) + '</span></label>';
-      }
-      if (e.type === 'select') {
-        return '<select' + attrs + '>' + (e.options || []).map(op =>
-          '<option value="' + UI.esc(op.value) + '"' +
-          (String(op.value) === String(v == null ? '' : v) ? ' selected' : '') + '>' +
-          UI.esc(op.label != null ? op.label : op.value) + '</option>').join('') + '</select>';
-      }
-      if (e.type === 'textarea') {
-        return '<textarea' + attrs + ' rows="' + (e.rows || 2) + '"' +
-          (e.placeholder ? ' placeholder="' + UI.esc(e.placeholder) + '"' : '') +
-          (e.maxlength ? ' maxlength="' + e.maxlength + '"' : '') + '>' + esc(v) + '</textarea>';
-      }
-      return '<input type="' + UI.esc(e.type || 'text') + '"' + attrs +
-        ' value="' + esc(v) + '"' +
-        (e.placeholder ? ' placeholder="' + UI.esc(e.placeholder) + '"' : '') +
-        (e.maxlength ? ' maxlength="' + e.maxlength + '"' : '') +
-        (e.step != null ? ' step="' + e.step + '"' : '') +
-        (e.min != null ? ' min="' + e.min + '"' : '') +
-        (e.max != null ? ' max="' + e.max + '"' : '') + '>';
-    };
+    const control = f => UI.fieldControl(f, valueOf(f), state.data);
 
     const cell = f => {
       const span = Math.min(columns, Math.max(1, Number(f.span) || 1));
@@ -546,23 +603,7 @@ const UI = {
       return html;
     };
 
-    const values = () => {
-      const out = {};
-      const edits = {};
-      fields.forEach(f => { if (f.edit) edits[f.key] = f.edit; });
-      host.querySelectorAll('[data-ef]').forEach(el => {
-        const key = el.dataset.ef;
-        if (el.type === 'checkbox') {
-          const e = edits[key] || {};
-          out[key] = el.checked
-            ? (e.onValue != null ? e.onValue : '1')
-            : (e.offValue != null ? e.offValue : '');
-        } else {
-          out[key] = el.value;
-        }
-      });
-      return out;
-    };
+    const values = () => UI.fieldValues(host, fields);
 
     const isDirty = () => state.editing && state.initial !== null &&
       JSON.stringify(values()) !== state.initial;

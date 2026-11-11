@@ -429,7 +429,7 @@ const TerminalPage = Object.assign(new Page(), {
 // ---------------------------------------------------------------- Pages.权限
 const DictManager = {
   async open(kind) {
-    const state = { kind, q: '', sel: new Set(), list: [] };
+    const state = { kind, q: '', sel: new Set(), list: [], editId: 0, editInitial: null };
     let tabs;
     const m = UI.modal({
       title: '字典管理',
@@ -447,12 +447,16 @@ const DictManager = {
       m.el.querySelector('#dict-body').innerHTML =
         '<table class="detail-table dict-table"><thead><tr><th><input type="checkbox" id="dict-all"></th>' +
         '<th>' + (state.kind === 'ports' ? '端口/范围' : 'TTY 路径/模式') + '</th><th>名称</th><th>引用</th><th>状态</th><th>操作</th></tr></thead><tbody>' +
-        (rows.length ? rows.map(d => '<tr><td><input type="checkbox" class="dict-pick" value="' + d.id + '"' +
+        (rows.length ? rows.map(d => {
+          const editing = state.editId === d.id;
+          return '<tr' + (editing ? ' class="is-editing"' : '') + '><td><input type="checkbox" class="dict-pick" value="' + d.id + '"' +
           (state.sel.has(d.id) ? ' checked' : '') + '></td><td><code>' + UI.esc(d.value) + '</code></td>' +
           '<td>' + UI.esc(d.name || '') + '</td><td>' + (d.refs || 0) + '</td>' +
           '<td>' + (d.enabled ? UI.pill('启用', 'ok') : UI.pill('停用', 'info')) + '</td>' +
-          '<td><button class="dict-edit" data-id="' + d.id + '">编辑</button> ' +
-          '<button class="dict-del" data-id="' + d.id + '">删除</button></td></tr>').join('')
+          '<td><button class="dict-edit" data-id="' + d.id + '">' + (editing ? '收起' : '编辑') + '</button> ' +
+          '<button class="dict-del" data-id="' + d.id + '">删除</button></td></tr>' +
+          (editing ? DictManager.dictEditRow(state, d) : '');
+        }).join('')
           : '<tr><td colspan="6" class="empty">暂无字典项</td></tr>') +
         '</tbody></table>';
       m.el.querySelector('#dict-all').checked = rows.length > 0 && rows.every(d => state.sel.has(d.id));
@@ -464,25 +468,81 @@ const DictManager = {
         const id = Number(c.value); c.checked ? state.sel.add(id) : state.sel.delete(id);
         m.el.querySelector('#dict-del').disabled = state.sel.size === 0;
       });
-      m.el.querySelectorAll('.dict-edit').forEach(b => b.onclick = () => {
-        const d = state.list.find(x => x.id === Number(b.dataset.id));
-        if (d) DictManager.editDictItem(state, d, load);
+      m.el.querySelectorAll('.dict-edit').forEach(b => b.onclick = async () => {
+        const id = Number(b.dataset.id);
+        if (state.editId === id) { await closeEdit(); return; }
+        if (!await closeEdit()) return;
+        state.editId = id;
+        state.editInitial = null;
+        render();
       });
       m.el.querySelectorAll('.dict-del').forEach(b => b.onclick = () => {
         const d = state.list.find(x => x.id === Number(b.dataset.id));
         if (d) DictManager.deleteDictItems(state, [d.id], load);
       });
       m.el.querySelector('#dict-del').disabled = state.sel.size === 0;
+
+      const form = m.el.querySelector('.dict-edit-row');
+      if (!form) return;
+      state.editInitial = JSON.stringify(DictManager.dictValues(form));
+      UI.bindFields(form);
+      const nameInput = form.querySelector('#de-name');
+      setTimeout(() => { if (nameInput) { nameInput.focus(); nameInput.select(); } }, 0);
+      form.addEventListener('keydown', e => {
+        if (e.key === 'Escape') { e.preventDefault(); closeEdit(); }
+        else if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.preventDefault(); saveEdit(); }
+      });
+      form.querySelector('[data-act="dict-save"]').onclick = () => saveEdit();
+      form.querySelector('[data-act="dict-cancel"]').onclick = () => closeEdit();
+    };
+
+    // 收起行内表单；有改动先确认，返回是否已收起
+    const closeEdit = async (silent) => {
+      const form = m.el.querySelector('.dict-edit-row');
+      if (!form) { state.editId = 0; return true; }
+      const dirty = JSON.stringify(DictManager.dictValues(form)) !== state.editInitial;
+      if (!silent && dirty && !await UI.confirm({
+        title: '放弃修改', message: '字典项还有未保存的修改，确定放弃？',
+      })) return false;
+      state.editId = 0;
+      state.editInitial = null;
+      render();
+      return true;
+    };
+
+    const saveEdit = async () => {
+      const form = m.el.querySelector('.dict-edit-row');
+      if (!form) return;
+      const v = DictManager.dictValues(form);
+      const btn = form.querySelector('[data-act="dict-save"]');
+      const hint = form.querySelector('#de-hint');
+      if (btn) btn.disabled = true;
+      try {
+        await Api.put('/api/v1/permission/dict/' + state.kind + '/' + state.editId, {
+          name: String(v.name || '').trim(),
+          description: String(v.description || '').trim(),
+          enabled: !!v.enabled,
+        });
+        state.editId = 0;
+        state.editInitial = null;
+        UI.toast('已保存');
+        await load();
+      } catch (e) {
+        if (btn) btn.disabled = false;
+        if (hint) { hint.textContent = '保存失败：' + e.message; hint.classList.add('warn'); }
+      }
     };
     const load = async () => {
       try { state.list = await Api.get('/api/v1/permission/dict/' + state.kind); }
       catch (e) { UI.toast('加载失败：' + e.message, true); return; }
-      state.sel.clear(); render();
+      state.sel.clear();
+      if (state.editId && !state.list.some(d => d.id === state.editId)) state.editId = 0;
+      render();
     };
     tabs = UI.tabs(m.el.querySelector('#dict-tabs'), {
       items: [{ key: 'ports', label: '端口字典' }, { key: 'ttys', label: 'TTY 字典' }],
       value: state.kind,
-      onChange: key => { state.kind = key; state.sel.clear(); load(); },
+      onChange: key => { state.kind = key; state.sel.clear(); state.editId = 0; state.editInitial = null; load(); },
     });
     m.el.querySelector('#dict-q').oninput = e => { state.q = e.target.value.trim(); render(); };
     m.el.querySelector('#dict-batch').onclick = () => DictManager.openDictBatch(state, load);
@@ -542,25 +602,31 @@ const DictManager = {
     };
     parse();
   },
-  editDictItem(state, d, onDone) {
-    const m = UI.modal({
-      title: state.kind === 'ports' ? '编辑端口字典' : '编辑 TTY 字典',
-      body: '<label>值<input value="' + UI.esc(d.value) + '" disabled></label>' +
-        '<label>名称<input id="de-name" value="' + UI.esc(d.name || '') + '"></label>' +
-        '<label>描述<input id="de-desc" value="' + UI.esc(d.description || '') + '"></label>' +
-        '<label class="row"><input type="checkbox" id="de-enabled"' + (d.enabled ? ' checked' : '') + '> 启用</label>',
-      buttons: '<button data-modal-close>取消</button><button class="primary" id="de-ok">保存</button>',
-    });
-    m.el.querySelector('#de-ok').onclick = async () => {
-      try {
-        await Api.put('/api/v1/permission/dict/' + state.kind + '/' + d.id, {
-          name: m.el.querySelector('#de-name').value.trim(),
-          description: m.el.querySelector('#de-desc').value.trim(),
-          enabled: m.el.querySelector('#de-enabled').checked,
-        });
-        m.close(); onDone();
-      } catch (e) { UI.toast('保存失败：' + e.message, true); }
-    };
+  dictFields() {
+    return [
+      { key: 'name', label: '名称', edit: { type: 'text', id: 'de-name', maxlength: 64, placeholder: '可选' } },
+      { key: 'description', label: '描述', edit: { type: 'text', id: 'de-desc', maxlength: 128, placeholder: '可选' } },
+      { key: 'enabled', label: '状态', edit: { type: 'switch', id: 'de-enabled',
+        onValue: true, offValue: false, onLabel: '启用', offLabel: '停用' } },
+    ];
+  },
+  // 表格行下方的编辑表单：值只读，名称/描述/状态可改
+  dictEditRow(state, d) {
+    const fields = [{
+      key: 'value', label: state.kind === 'ports' ? '端口/范围' : 'TTY',
+      html: () => '<input class="ui-inline" value="' + UI.esc(d.value) + '" disabled>',
+    }].concat(DictManager.dictFields());
+    return '<tr class="ui-row-edit dict-edit-row"><td colspan="6"><div class="ui-row-edit-inner">' +
+      UI.formGrid(fields, d) +
+      '<div class="ui-row-edit-foot">' +
+        '<span class="tok-hint" id="de-hint">停用后，已授权的端口/TTY 立即失效。</span>' +
+        '<span class="spacer"></span>' +
+        '<button data-act="dict-cancel">取消</button>' +
+        '<button class="primary" data-act="dict-save">保存</button>' +
+      '</div></div></td></tr>';
+  },
+  dictValues(root) {
+    return UI.fieldValues(root, DictManager.dictFields());
   },
   async deleteDictItems(state, ids, onDone) {
     if (!ids.length) return;

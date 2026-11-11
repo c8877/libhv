@@ -211,7 +211,7 @@ CREATE TABLE client_acl_ttys (
 
 - `agent_group_caps` 是设备分组的**能力上限**，不是最终授权。
 - `client_group_acl` 是具体授权，可以在上限内进一步收窄。
-- 管理台账号范围继续使用 `agent_groups`，在账号页维护，不在权限页 Tab 内。
+- 管理台账号范围继续使用 `agent_groups`，在账号页的账号行内编辑表单里维护，不在权限页 Tab 内。
 
 ## 6. 迁移
 

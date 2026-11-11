@@ -521,9 +521,26 @@ Router.register(/^#\/agents$/, AgentsPage, '设备 C');
 // ---------------------------------------------------------------- Pages.账号
 const AccountsPage = Object.assign(new Page(), {
   refreshInterval() { return 0; },
+  editUid: 0,
+  editUser: null,
+  editScope: null,
+  editInitial: null,
+
+  leave() {
+    this.editUid = 0;
+    this.editUser = null;
+    this.editScope = null;
+    this.editInitial = null;
+    Page.prototype.leave.call(this);
+  },
+
   async refresh() {
     const me = Auth.me || {};
     const arr = await Api.get('/api/v1/users');
+    this.users = arr;
+    if (this.editUid && !arr.some(u => u.id === this.editUid)) {
+      this.editUid = 0; this.editUser = null; this.editScope = null; this.editInitial = null;
+    }
     const canM = (u) => u.role !== 'admin' && u.username !== me.username &&
       (me.role === 'admin' || (me.role === 'manager' && (u.role === 'operator' || u.role === 'viewer')));
     const roleOpts = me.role === 'admin'
@@ -534,69 +551,43 @@ const AccountsPage = Object.assign(new Page(), {
       operator: ['操作员', ''], viewer: ['浏览者', ''],
     };
     const USER_STATUS = { active: ['启用', 'ok'], default: ['禁用', 'bad'] };
-    const rows2 = arr.map(u => [
-      '<b>' + UI.esc(u.username) + '</b>', UI.status(u.role, ROLE_STATUS),
-      UI.status(u.status, USER_STATUS),
-      UI.time(u.created_ms),
-      (() => {
-        let ops = '<button class="pw" data-act="pw" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">改密</button> ';
-        if (me.role === 'admin' && u.role !== 'admin') {
-          ops += '<button class="scope" data-act="scope" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">范围</button> ';
-        }
-        if (canM(u)) {
-          ops += '<button class="role" data-act="role" data-id="' + u.id + '">改角色</button> ';
-          ops += '<button class="st" data-act="status" data-id="' + u.id + '" data-st="' + (u.status === 'active' ? 'disabled' : 'active') + '">' +
-                 (u.status === 'active' ? '禁用' : '启用') + '</button> ';
-          ops += '<button class="del" data-act="del" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">删除</button>';
-        }
-        return ops;
-      })(),
-    ]);
+
+    const rows = [];
+    arr.forEach(u => {
+      const canEdit = canM(u) || u.username === me.username;
+      let ops = '';
+      if (canEdit) {
+        ops += '<button data-act="edit" data-id="' + u.id + '">' +
+          (this.editUid === u.id ? '收起' : '编辑') + '</button> ';
+      }
+      if (canM(u)) {
+        ops += '<button data-act="status" data-id="' + u.id + '" data-st="' +
+          (u.status === 'active' ? 'disabled' : 'active') + '">' +
+          (u.status === 'active' ? '禁用' : '启用') + '</button> ';
+        ops += '<button data-act="del" data-id="' + u.id + '" data-name="' +
+          UI.esc(u.username) + '">删除</button>';
+      }
+      rows.push([
+        '<b>' + UI.esc(u.username) + '</b>', UI.status(u.role, ROLE_STATUS),
+        UI.status(u.status, USER_STATUS), UI.time(u.created_ms), ops,
+      ]);
+      if (this.editUid === u.id) rows.push(this.editRow(u, me, canM));
+    });
+
     this.el.innerHTML = UI.listPage({
       title: '账号列表',
       summary: '共 ' + arr.length + ' 个',
       search: { id: 'au-q', placeholder: '搜索用户名' },
       actions: '<button class="primary" id="nu-open">+ 新建账号</button>',
       columns: ['用户名', '角色', '状态', '创建时间', '操作'],
-      rows: rows2,
+      rows: rows,
     });
     UI.bindSearch(document.getElementById('au-q'));
-    document.getElementById('nu-open').onclick = () => {
-      const m = UI.modal({
-        title: '新建账号',
-        body: '<label>用户名<input data-field="username" placeholder="用户名"></label>' +
-          '<label>密码<input data-field="password" type="password" placeholder="至少 8 位"></label>' +
-          '<label>角色<select data-field="role">' + roleOpts + '</select></label>',
-        buttons: '<button data-modal-close>取消</button><button class="primary" id="nu-btn">创建</button>',
-      });
-      m.el.querySelector('#nu-btn').onclick = async () => {
-        const v = UI.formValues(m.el);
-        const username = (v.username || '').trim();
-        const password = v.password || '';
-        const role = v.role;
-        if (!username) { UI.toast('用户名不能为空', true); return; }
-        if (password.length < 8) { UI.toast('密码至少 8 位', true); return; }
-        try {
-          await Api.post('/api/v1/users', { username, password, role });
-          UI.toast('已创建 ' + username);
-          m.close();
-          this.refresh();
-        } catch (e) { UI.toast('创建失败：' + e.message, true); }
-      };
-    };
+    document.getElementById('nu-open').onclick = () => this.openCreate(roleOpts);
     UI.actions(this.el, {
-      pw: async (btn) => {
-        const p = await UI.prompt({ title: '修改密码', label: btn.dataset.name + ' 的新密码（≥8 位）', type: 'password' });
-        if (!p) return;
-        try { await Api.put('/api/v1/users/' + btn.dataset.id + '/password', { new_password: p }); UI.toast('已修改'); }
-        catch (e) { UI.toast('失败：' + e.message, true); }
-      },
-      role: async (btn) => {
-        const r = await UI.prompt({ title: '修改角色', label: '新角色（viewer / operator / manager）' });
-        if (!r) return;
-        try { await Api.put('/api/v1/users/' + btn.dataset.id + '/role', { role: r }); this.refresh(); }
-        catch (e) { UI.toast('失败：' + e.message, true); }
-      },
+      edit: (btn) => this.openEdit(btn.dataset.id),
+      'ue-save': () => this.saveEdit(),
+      'ue-cancel': () => this.cancelEdit(),
       status: async (btn) => {
         try { await Api.put('/api/v1/users/' + btn.dataset.id + '/status', { status: btn.dataset.st }); this.refresh(); }
         catch (e) { UI.toast('失败：' + e.message, true); }
@@ -606,36 +597,175 @@ const AccountsPage = Object.assign(new Page(), {
         try { await Api.del('/api/v1/users/' + btn.dataset.id); this.refresh(); }
         catch (e) { UI.toast('失败：' + e.message, true); }
       },
-      scope: (btn) => this.openScope(btn.dataset.id, btn.dataset.name),
+    });
+    if (this.editUid) this.bindEdit();
+  },
+
+  // 表格行下方的编辑表单：角色/状态/密码/设备范围
+  editRow(u, me, canM) {
+    const canRoles = canM(u);
+    const fields = [];
+    if (canRoles) {
+      const choices = me.role === 'admin'
+        ? [['viewer', '浏览者'], ['operator', '操作员'], ['manager', '管理员']]
+        : [['viewer', '浏览者'], ['operator', '操作员']];
+      fields.push({ key: 'role', label: '角色', edit: { type: 'select', id: 'ue-role',
+        options: choices.map(([value, label]) => ({ value, label })) } });
+      fields.push({ key: 'status', label: '状态', edit: { type: 'switch', id: 'ue-status',
+        onValue: 'active', offValue: 'disabled', onLabel: '启用', offLabel: '停用' } });
+    }
+    if (u.username === me.username) {
+      fields.push({ key: 'old_password', label: '当前密码',
+        edit: { type: 'password', id: 'ue-old', placeholder: '修改自己的密码需先验证' } });
+    }
+    fields.push({ key: 'password', label: '新密码', span: u.username === me.username ? 1 : 2,
+      edit: { type: 'password', id: 'ue-pass', placeholder: '留空表示不修改，至少 8 位' } });
+    if (me.role === 'admin' && u.role !== 'admin') {
+      fields.push({ key: 'scope', label: '设备范围', span: 2, html: () => this.scopeHtml() });
+    }
+    return '<tr class="ui-row-edit" data-uid="' + u.id + '"><td colspan="5"><div class="ui-row-edit-inner">' +
+      UI.formGrid(fields, u) +
+      '<div class="ui-row-edit-foot"><span class="tok-hint" id="ue-hint">' +
+        (canRoles ? '角色/状态立即生效；' : '') + '新密码至少 8 位，留空不改。' +
+      '</span><span class="spacer"></span>' +
+      '<button data-act="ue-cancel">取消</button>' +
+      '<button class="primary" data-act="ue-save">保存</button></div></div></td></tr>';
+  },
+
+  scopeHtml() {
+    if (this.editScope === null) return '<span class="muted-sm">加载中…</span>';
+    if (!this.editScope.length) return '<span class="muted-sm">还没有设备分组，先到权限页创建。</span>';
+    return '<div class="scope-list">' + this.editScope.map(g =>
+      '<label class="scope-item"><input type="checkbox" class="ue-scope" value="' + g.id + '"' +
+      (g.selected ? ' checked' : '') + '><span>' + UI.esc(g.name) + '</span>' +
+      '<span class="muted-sm">' + g.device_count + ' 台</span></label>').join('') + '</div>';
+  },
+
+  bindEdit() {
+    const tr = this.el.querySelector('.ui-row-edit');
+    if (!tr) return;
+    UI.bindFields(tr);
+    this.editInitial = JSON.stringify(this.readEdit(tr));
+    const first = tr.querySelector('#ue-role') || tr.querySelector('#ue-old') || tr.querySelector('#ue-pass');
+    setTimeout(() => { if (first) first.focus(); }, 0);
+    tr.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { e.preventDefault(); this.cancelEdit(); }
+      else if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.preventDefault(); this.saveEdit(); }
     });
   },
-  async openScope(id, name) {
-    let d;
-    try { d = await Api.get('/api/v1/users/' + id + '/groups'); }
-    catch (e) { UI.toast('加载范围失败：' + e.message, true); return; }
-    const groups = d.groups || [];
-    const body = '<p class="muted-sm">勾选后该账号只能访问所选分组的设备；不选则按角色默认：' +
-      '管理员/负责人不限，操作员/浏览者仅自己绑定的设备。</p>' +
-      (groups.length
-        ? '<div class="scope-list">' + groups.map(g =>
-          '<label class="scope-item"><input type="checkbox" value="' + g.id + '"' +
-          (g.selected ? ' checked' : '') + '><span>' + UI.esc(g.name) + '</span>' +
-          '<span class="muted-sm">' + g.device_count + ' 台</span></label>').join('') + '</div>'
-        : '<p class="muted-sm">还没有设备分组，先到权限页创建。</p>');
-    const m = UI.modal({
-      title: '设备范围：' + name,
-      body,
-      buttons: '<button data-modal-close>取消</button><button class="primary" id="scope-ok">保存</button>',
-    });
-    m.el.querySelector('.tty-modal').classList.add('scope-modal');
-    m.el.querySelector('#scope-ok').onclick = async () => {
-      const ids = [...m.el.querySelectorAll('.scope-item input:checked')].map(x => Number(x.value));
+
+  readEdit(tr) {
+    const role = tr.querySelector('#ue-role');
+    const status = tr.querySelector('#ue-status input[type=checkbox]');
+    const oldp = tr.querySelector('#ue-old');
+    const pass = tr.querySelector('#ue-pass');
+    return {
+      role: role ? role.value : null,
+      status: status ? (status.checked ? 'active' : 'disabled') : null,
+      old_password: oldp ? oldp.value : null,
+      password: pass ? pass.value : '',
+      scope: tr.querySelectorAll('.ue-scope').length
+        ? [...tr.querySelectorAll('.ue-scope:checked')].map(x => Number(x.value)) : null,
+    };
+  },
+
+  async openEdit(id) {
+    id = Number(id);
+    if (this.editUid === id) { await this.cancelEdit(); return; }
+    if (!await this.confirmLeaveEdit()) return;
+    const me = Auth.me || {};
+    const u = (this.users || []).find(x => x.id === id);
+    if (!u) return;
+    this.editUid = id;
+    this.editUser = u;
+    this.editScope = null;
+    this.editInitial = null;
+    if (me.role === 'admin' && u.role !== 'admin') {
       try {
-        await Api.put('/api/v1/users/' + id + '/groups', { groups: ids });
-        UI.toast('已保存');
+        const d = await Api.get('/api/v1/users/' + id + '/groups');
+        this.editScope = d.groups || [];
+      } catch (e) { this.editScope = []; }
+    }
+    this.refresh();
+  },
+
+  async confirmLeaveEdit() {
+    if (!this.editUid) return true;
+    const tr = this.el.querySelector('.ui-row-edit');
+    if (!tr) return true;
+    if (JSON.stringify(this.readEdit(tr)) === this.editInitial) return true;
+    return UI.confirm({ title: '放弃修改', message: '账号编辑表单还有未保存的修改，继续会放弃。' });
+  },
+
+  async cancelEdit() {
+    if (!await this.confirmLeaveEdit()) return;
+    this.editUid = 0; this.editUser = null; this.editScope = null; this.editInitial = null;
+    this.refresh();
+  },
+
+  async saveEdit() {
+    const tr = this.el.querySelector('.ui-row-edit');
+    const u = this.editUser;
+    if (!tr || !u) return;
+    const v = this.readEdit(tr);
+    const hint = tr.querySelector('#ue-hint');
+    const fail = msg => { if (hint) { hint.textContent = msg; hint.classList.add('warn'); } };
+    if (v.password && v.password.length < 8) { fail('新密码至少 8 位'); return; }
+    if (v.password && v.old_password !== null && !v.old_password) { fail('修改自己的密码需先输入当前密码'); return; }
+    if (v.status && v.status !== u.status && v.status === 'disabled' &&
+        !await UI.confirm({ title: '停用账号', message: '停用后该账号立即无法登录管理台。', danger: true })) return;
+    const btn = tr.querySelector('[data-act="ue-save"]');
+    if (btn) btn.disabled = true;
+    try {
+      if (v.role && v.role !== u.role) await Api.put('/api/v1/users/' + u.id + '/role', { role: v.role });
+      if (v.status && v.status !== u.status) await Api.put('/api/v1/users/' + u.id + '/status', { status: v.status });
+      if (v.password) {
+        const body = { new_password: v.password };
+        if (v.old_password !== null) body.old_password = v.old_password;
+        await Api.put('/api/v1/users/' + u.id + '/password', body);
+        if (u.username === (Auth.me || {}).username) {
+          // 改自己的密码会吊销当前会话，直接回登录页，避免刷新接口报 401
+          UI.toast('密码已修改，请重新登录');
+          setTimeout(() => location.reload(), 700);
+          return;
+        }
+      }
+      if (v.scope) {
+        const init = (JSON.parse(this.editInitial) || {}).scope || [];
+        if (JSON.stringify(v.scope) !== JSON.stringify(init)) {
+          await Api.put('/api/v1/users/' + u.id + '/groups', { groups: v.scope });
+        }
+      }
+      UI.toast('已保存');
+      this.editUid = 0; this.editUser = null; this.editScope = null; this.editInitial = null;
+      this.refresh();
+    } catch (e) {
+      if (btn) btn.disabled = false;
+      fail('保存失败：' + e.message);
+    }
+  },
+
+  openCreate(roleOpts) {
+    const m = UI.modal({
+      title: '新建账号',
+      body: '<label>用户名<input data-field="username" placeholder="用户名"></label>' +
+        '<label>密码<input data-field="password" type="password" placeholder="至少 8 位"></label>' +
+        '<label>角色<select data-field="role">' + roleOpts + '</select></label>',
+      buttons: '<button data-modal-close>取消</button><button class="primary" id="nu-btn">创建</button>',
+    });
+    m.el.querySelector('#nu-btn').onclick = async () => {
+      const v = UI.formValues(m.el);
+      const username = (v.username || '').trim();
+      const password = v.password || '';
+      const role = v.role;
+      if (!username) { UI.toast('用户名不能为空', true); return; }
+      if (password.length < 8) { UI.toast('密码至少 8 位', true); return; }
+      try {
+        await Api.post('/api/v1/users', { username, password, role });
+        UI.toast('已创建 ' + username);
         m.close();
         this.refresh();
-      } catch (e) { UI.toast('保存失败：' + e.message, true); }
+      } catch (e) { UI.toast('创建失败：' + e.message, true); }
     };
   },
 });

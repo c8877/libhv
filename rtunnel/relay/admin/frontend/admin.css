@@ -536,10 +536,12 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
 .dict-modal{width:min(860px,92vw);max-width:860px;padding:22px;max-height:88vh}
 .effective-modal{width:min(640px,92vw)}
 .acl-modal{width:min(720px,92vw)}
-.scope-modal{width:min(520px,92vw)}
-.scope-list{display:flex;flex-direction:column;gap:2px;max-height:50vh;overflow:auto;margin-top:8px}
-.scope-modal .scope-item{flex-direction:row;align-items:center;gap:8px;padding:7px 8px;border-radius:6px;font-size:13px;color:var(--fg);cursor:pointer}
-.scope-modal .scope-item:hover{background:var(--hover)}
+.scope-list{display:flex;flex-direction:column;gap:2px;max-height:240px;overflow:auto;
+  margin-top:6px;padding:4px;border:1px solid var(--border);border-radius:6px;background:var(--input-bg)}
+.scope-item{display:flex;flex-direction:row;align-items:center;gap:8px;padding:6px 8px;border-radius:5px;
+  font-size:13px;color:var(--fg);cursor:pointer}
+.scope-item:hover{background:var(--hover)}
+.scope-item input{flex:none}
 .scope-item span:first-of-type{flex:1}
 .pe-body h3{margin:14px 0 6px;font-size:13px}
 .pe-body h3:first-child{margin-top:2px}
@@ -599,8 +601,24 @@ input[type=color]::-webkit-color-swatch { border: none; border-radius: 50%; }
   border-radius:6px;background:var(--input-bg);color:var(--input-fg);font-size:13px;white-space:normal}
 .ui-edit-table textarea.ui-inline{resize:vertical;min-height:48px;line-height:1.5;font-family:inherit}
 .ui-edit-table .ui-edit-hint-cell{padding:10px 12px;background:var(--surface-2);white-space:normal}
+/* 表格行下方的展开表单 */
+.ui-form-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px}
+.ui-form-field{display:flex;flex-direction:column;gap:5px;font-size:12px;min-width:0;text-align:left}
+.ui-form-label{color:var(--muted)}
+.ui-form-fields .ui-form-span2{grid-column:1/-1}
+.ui-form-fields .ui-inline{width:100%;box-sizing:border-box}
+.ui-row-edit>td{padding:0;background:var(--surface-2);white-space:normal}
+.ui-row-edit-inner{padding:14px 16px}
+.ui-row-edit-foot{display:flex;align-items:center;gap:10px;margin-top:12px;padding-top:12px;
+  border-top:1px solid var(--border)}
+.ui-row-edit-foot .spacer{flex:1}
+@media (max-width:900px){
+  .ui-form-fields{grid-template-columns:1fr}
+}
+
 /* 布尔字段开关 */
-.ui-switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+label.ui-switch{display:inline-flex;flex-direction:row;align-items:center;gap:8px;margin:0;
+  font-size:13px;color:var(--fg);cursor:pointer;user-select:none}
 .ui-switch input{position:absolute;opacity:0;width:0;height:0}
 .ui-switch-track{position:relative;flex:none;width:34px;height:18px;border-radius:9px;
   background:var(--surface-4);border:1px solid var(--border);transition:background .15s,border-color .15s}
