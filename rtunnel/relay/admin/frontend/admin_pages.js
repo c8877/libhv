@@ -6,28 +6,17 @@ const ClientsPage = Object.assign(new Page(), {
       '<b>' + UI.esc(c.user) + '</b>', UI.esc(c.remote_addr),
       UI.ago(c.last_seen_ms) + ' 前活跃', c.streams,
       UI.bytes(c.bytes_in) + ' / ' + UI.bytes(c.bytes_out),
-      '<button class="shell" data-user="' + UI.esc(c.user) + '">Shell</button>',
+      '<button class="shell" data-act="shell" data-user="' + UI.esc(c.user) + '">Shell</button>',
     ]);
     this.el.innerHTML = UI.listPage({
       title: '客户端（A 侧）', summary: '共 ' + arr.length + ' 个',
       columns: ['用户', '远端地址', '最近活跃', '会话数', '流量 ↓/↑', '操作'], rows,
     });
-    document.querySelectorAll('#page button.web').forEach(btn => {
-      btn.onclick = async (e) => {
-        e.stopPropagation();
-        const port = await UI.prompt({ title: '设备 Web 端口', label: '端口（需在 agent --allow 列表）', value: '80' });
-        if (!port) return;
-        window.open('/device/' + encodeURIComponent(btn.dataset.devid) + '/' + encodeURIComponent(port) + '/', '_blank');
-      };
-    });
-    document.querySelectorAll('#page button.shell').forEach(btn => {
-      btn.onclick = async () => {
-        const user = btn.dataset.user;
-        try {
-          // A 侧按需 agent：devid = a:<user>，relay 会通知该 client 在本机拉起 agent
-          Router.go('#/terminal/' + encodeURIComponent('a:' + user));
-        } catch (e) { UI.toast('打开失败：' + e.message, true); }
-      };
+    UI.actions(this.el, {
+      shell: (btn) => {
+        // A 侧按需 agent：devid = a:<user>，relay 会通知该 client 在本机拉起 agent
+        Router.go('#/terminal/' + encodeURIComponent('a:' + btn.dataset.user));
+      },
     });
   },
 });
@@ -44,7 +33,7 @@ const StreamsPage = Object.assign(new Page(), {
       UI.esc(s.a_user) + ':' + s.a_sid,
       UI.esc(s.c_devid) + ':' + s.c_sid,
       UI.status(s.state, STREAM_STATUS), UI.ago(s.opened_at_ms),
-      '<button class="kick" data-sid="' + s.a_sid + '">踢掉</button>',
+      '<button class="kick" data-act="kick" data-sid="' + s.a_sid + '">踢掉</button>',
     ]);
     this.el.innerHTML = UI.listPage({
       title: '会话', summary: '共 ' + arr.length + ' 条',
@@ -52,26 +41,15 @@ const StreamsPage = Object.assign(new Page(), {
       columns: ['A 用户:a_sid', 'C 设备:c_sid', '状态', '开启于', '操作'], rows,
     });
     UI.bindSearch(document.getElementById('st-q'));
-    document.querySelectorAll('#page button.bind').forEach(btn => {
-      btn.onclick = async (e) => {
-        e.stopPropagation();
-        const owner = await UI.prompt({ title: '绑定设备', label: '账号（留空 = 解绑）' });
-        if (owner === null) return;
-        try {
-          await Api.put('/api/v1/devices/' + encodeURIComponent(btn.dataset.devid) + '/owner', { username: owner });
-          UI.toast(owner ? ('已绑定到 ' + owner) : '已解绑');
-        } catch (err) { UI.toast('绑定失败：' + err.message, true); }
-      };
-    });
-    document.querySelectorAll('#page button.kick').forEach(btn => {
-      btn.onclick = async () => {
+    UI.actions(this.el, {
+      kick: async (btn) => {
         if (!await UI.confirm({ title: '踢掉会话', message: 'a_sid=' + btn.dataset.sid + ' 将被双侧 RESET。', danger: true })) return;
         try {
           await Api.del('/api/v1/streams/' + btn.dataset.sid);
           UI.toast('已踢掉 ' + btn.dataset.sid);
           this.refresh();
         } catch (err) { UI.toast('操作失败：' + err.message, true); }
-      };
+      },
     });
   },
 });
@@ -99,7 +77,7 @@ const CertsPage = Object.assign(new Page(), {
         roleName(c.role),
         '<code title="' + UI.esc(serial) + '">' + UI.esc(serial.length > 14 ? serial.slice(0, 13) + '…' : serial) + '</code>',
         exp, UI.status(c.status, CERT_STATUS),
-        c.status === 'revoked' ? '' : '<button class="revoke" data-san="' + UI.esc(c.san) + '">吊销</button>',
+        c.status === 'revoked' ? '' : '<button class="revoke" data-act="revoke" data-san="' + UI.esc(c.san) + '">吊销</button>',
       ];
     });
     this.el.innerHTML =
@@ -148,15 +126,15 @@ const CertsPage = Object.assign(new Page(), {
         this.refresh();
       } catch (e) { UI.toast('签发失败：' + e.message, true); }
     };
-    document.querySelectorAll('#page button.revoke').forEach(btn => {
-      btn.onclick = async () => {
+    UI.actions(this.el, {
+      revoke: async (btn) => {
         if (!await UI.confirm({ title: '吊销证书', message: '吊销 ' + btn.dataset.san + '？在线连接会被踢，后续 AUTH 被拒。', danger: true })) return;
         try {
           await Api.post('/api/v1/certs/revoke', { san: btn.dataset.san });
           UI.toast('已吊销 ' + btn.dataset.san);
           this.refresh();
         } catch (e) { UI.toast('吊销失败：' + e.message, true); }
-      };
+      },
     });
     document.getElementById('csr-btn').onclick = async () => {
       const csr = document.getElementById('csr-input').value;
@@ -221,11 +199,11 @@ const FilesPage = Object.assign(new Page(), {
       '<b>' + UI.esc(f.name) + '</b>',
       '<span class="ui-right">' + UI.bytes(f.size) + '</span>',
       '<code title="' + UI.esc(f.sha256 || '') + '">' + UI.esc((f.sha256 || '').slice(0, 8)) + '</code> ' +
-        (f.sha256 ? '<button class="cp" data-hash="' + UI.esc(f.sha256) + '">复制</button>' : ''),
+        (f.sha256 ? '<button class="cp" data-act="copy" data-hash="' + UI.esc(f.sha256) + '">复制</button>' : ''),
       UI.time(f.mtime_ms),
-      '<button class="dl" data-name="' + UI.esc(f.name) + '">下载</button> ' +
-      (canManage() ? '<button class="push" data-name="' + UI.esc(f.name) + '">分发</button> ' : '') +
-      (canManage() ? '<button class="del" data-name="' + UI.esc(f.name) + '">删除</button>' : ''),
+      '<button class="dl" data-act="download" data-name="' + UI.esc(f.name) + '">下载</button> ' +
+      (canManage() ? '<button class="push" data-act="push" data-name="' + UI.esc(f.name) + '">分发</button> ' : '') +
+      (canManage() ? '<button class="del" data-act="del" data-name="' + UI.esc(f.name) + '">删除</button>' : ''),
     ]);
     const uploadBody = '<div class="ui-pad ui-flex">' +
       '<input type="file" id="upload-input"> <button class="primary" id="upload-btn">上传</button>' +
@@ -244,9 +222,7 @@ const FilesPage = Object.assign(new Page(), {
 
     document.getElementById('files-refresh').onclick = () => this.refresh();
     UI.bindSearch(document.getElementById('fl-q'));
-    document.querySelectorAll('#page button.cp').forEach(btn => {
-      btn.onclick = () => UI.copy(btn.dataset.hash, '哈希已复制');
-    });
+
     const MAX_UPLOAD = uploadLimitMb() * 1024 * 1024;
     const CHUNK = 8 * 1024 * 1024;
     document.getElementById('upload-btn').onclick = async () => {
@@ -316,29 +292,24 @@ const FilesPage = Object.assign(new Page(), {
         bar.style.display = 'none';
       }
     };
-    document.querySelectorAll('#page button.push').forEach(btn => {
-      btn.onclick = () => Router.go('#/distribute?file=' + encodeURIComponent(btn.dataset.name));
-    });
-    document.querySelectorAll('#page button.dl').forEach(btn => {
-      btn.onclick = async () => {
+    UI.actions(this.el, {
+      copy: (btn) => UI.copy(btn.dataset.hash, '哈希已复制'),
+      push: (btn) => Router.go('#/distribute?file=' + encodeURIComponent(btn.dataset.name)),
+      download: async (btn) => {
         try {
-          const headers = {};
-          const r = await fetch('/api/v1/files/' + encodeURIComponent(btn.dataset.name), { headers, cache: 'no-store' });
+          const r = await fetch('/api/v1/files/' + encodeURIComponent(btn.dataset.name), { cache: 'no-store' });
           if (!r.ok) throw new Error('HTTP ' + r.status);
-          const blob = await r.blob();
-          UI.download(btn.dataset.name, blob);
+          UI.download(btn.dataset.name, await r.blob());
         } catch (e) { UI.toast('下载失败：' + e.message, true); }
-      };
-    });
-    document.querySelectorAll('#page button.del').forEach(btn => {
-      btn.onclick = async () => {
+      },
+      del: async (btn) => {
         if (!await UI.confirm({ title: '删除文件', message: '删除 ' + btn.dataset.name + '？', danger: true })) return;
         try {
           await Api.del('/api/v1/files/' + encodeURIComponent(btn.dataset.name));
           UI.toast('已删除 ' + btn.dataset.name);
           this.refresh();
         } catch (e) { UI.toast('删除失败：' + e.message, true); }
-      };
+      },
     });
   },
 });

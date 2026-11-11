@@ -198,11 +198,11 @@ const TasksPage = Object.assign(new Page(), {
       const sent = Number(t.sent) || 0;
       const pct = size ? Math.min(100, Math.floor(sent * 100 / size)) : 0;
       let ops = '<a href="#/tasks/' + t.id + '">详情</a> ';
-      if (t.status === 'failed') ops += '<button class="tr" data-id="' + t.id + '">重试</button> ';
-      if (t.status === 'scheduled' || t.status === 'queued') ops += '<button class="tc" data-id="' + t.id + '">取消</button> ';
-      if (t.status === 'timeout' && t.extend_count === 0) ops += '<button class="te" data-id="' + t.id + '">延长</button> ';
-      if (t.status === 'conflict') ops += '<button class="tv" data-id="' + t.id + '">校验</button> ' +
-        '<button class="tf" data-id="' + t.id + '">强制重发</button> ';
+      if (t.status === 'failed') ops += '<button class="tr" data-act="retry" data-id="' + t.id + '">重试</button> ';
+      if (t.status === 'scheduled' || t.status === 'queued') ops += '<button class="tc" data-act="cancel" data-id="' + t.id + '">取消</button> ';
+      if (t.status === 'timeout' && t.extend_count === 0) ops += '<button class="te" data-act="extend" data-id="' + t.id + '">延长</button> ';
+      if (t.status === 'conflict') ops += '<button class="tv" data-act="check" data-api="verify" data-id="' + t.id + '">校验</button> ' +
+        '<button class="tf" data-act="check" data-api="force" data-id="' + t.id + '">强制重发</button> ';
       return '<tr><td>' + t.id + '</td><td>' + UI.esc(t.file_name) + '</td><td>' + UI.esc(t.devid) +
         '</td><td>' + UI.esc(t.target_path || '') + '</td>' +
         '<td>' + (t.status === 'running' ? UI.bytes(sent) + ' / ' + UI.bytes(size) + ' ' + pct + '%' : UI.bytes(size)) + '</td>' +
@@ -242,39 +242,32 @@ const TasksPage = Object.assign(new Page(), {
       const chip = this.el.querySelector('.pill.info');
       if (chip) chip.onclick = () => { this.batch = ''; this.page = 1; this.refresh(); };
     }
-    document.querySelectorAll('#page .tr').forEach(b => {
-      b.onclick = async () => {
-        try { await Api.post('/api/v1/distributions/' + b.dataset.id + '/retry', {}); this.refresh(); }
+    UI.actions(this.el, {
+      retry: async (btn) => {
+        try { await Api.post('/api/v1/distributions/' + btn.dataset.id + '/retry', {}); this.refresh(); }
         catch (e) { UI.toast('重试失败：' + e.message, true); }
-      };
-    });
-    document.querySelectorAll('#page .tc').forEach(b => {
-      b.onclick = async () => {
-        try { await Api.post('/api/v1/distributions/' + b.dataset.id + '/cancel', {}); this.refresh(); }
+      },
+      cancel: async (btn) => {
+        try { await Api.post('/api/v1/distributions/' + btn.dataset.id + '/cancel', {}); this.refresh(); }
         catch (e) { UI.toast('取消失败：' + e.message, true); }
-      };
-    });
-    document.querySelectorAll('#page .tv, #page .tf').forEach(b => {
-      b.onclick = async () => {
-        const api = b.classList.contains('tv') ? 'verify' : 'force';
-        try {
-          const r = await Api.post('/api/v1/distributions/' + b.dataset.id + '/' + api, {});
-          UI.toast(r.same ? '设备文件一致，已标记成功' : '设备文件不一致，已重新排队');
-          this.refresh();
-        } catch (e) { UI.toast('操作失败：' + e.message, true); }
-      };
-    });
-    document.querySelectorAll('#page .te').forEach(b => {
-      b.onclick = async () => {
+      },
+      extend: async (btn) => {
         const cur = new Date().getTime() + 24 * 3600 * 1000;
         const v = await UI.prompt({ title: '延长截止时间', label: '新的截止时间（本地时间，最多 +24h）',
           type: 'datetime-local', value: toLocalInput(cur) });
         if (!v) return;
         const t = new Date(v).getTime();
         if (!t) { UI.toast('时间格式不正确', true); return; }
-        try { await Api.post('/api/v1/distributions/' + b.dataset.id + '/extend', { deadline_at_ms: t }); this.refresh(); }
+        try { await Api.post('/api/v1/distributions/' + btn.dataset.id + '/extend', { deadline_at_ms: t }); this.refresh(); }
         catch (e) { UI.toast('延长失败：' + e.message, true); }
-      };
+      },
+      check: async (btn) => {
+        try {
+          const r = await Api.post('/api/v1/distributions/' + btn.dataset.id + '/' + btn.dataset.api, {});
+          UI.toast(r.same ? '设备文件一致，已标记成功' : '设备文件不一致，已重新排队');
+          this.refresh();
+        } catch (e) { UI.toast('操作失败：' + e.message, true); }
+      },
     });
   },
 });

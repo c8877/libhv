@@ -255,6 +255,22 @@ const UI = {
     draw();
     return m;
   },
+  // 列表行动作：模板写 data-act，页面只注册一次；冒泡到此统一拦截
+  actions(root, map) {
+    if (!root || !map) return;
+    if (!root.__uiActions) {
+      root.__uiActions = {};
+      root.addEventListener('click', e => {
+        const el = e.target.closest('[data-act]');
+        if (!el || !root.contains(el)) return;
+        const fn = root.__uiActions[el.dataset.act];
+        if (!fn) return;
+        e.stopPropagation();
+        fn(el, e);
+      }, true);
+    }
+    root.__uiActions = map;
+  },
   bytes(n) {
     n = Number(n) || 0;
     const u = ['B', 'K', 'M', 'G', 'T'];

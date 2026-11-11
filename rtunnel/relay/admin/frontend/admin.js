@@ -354,12 +354,12 @@ const AgentsPage = Object.assign(new Page(), {
       a.streams,
       UI.bytes(a.bytes_in) + ' / ' + UI.bytes(a.bytes_out),
       (canOperate()
-        ? '<button class="web" data-devid="' + UI.esc(a.devid) + '">Web</button> ' +
+        ? '<button class="web" data-act="web" data-devid="' + UI.esc(a.devid) + '">Web</button> ' +
           (a.caps_shell !== 0
-            ? '<button class="shell" data-devid="' + UI.esc(a.devid) + '">Shell</button> ' : '') : '') +
+            ? '<button class="shell" data-act="shell" data-devid="' + UI.esc(a.devid) + '">Shell</button> ' : '') : '') +
       (canManage()
-        ? '<button class="bind" data-devid="' + UI.esc(a.devid) + '">绑定</button> ' +
-          '<button class="kick" data-devid="' + UI.esc(a.devid) + '">下线</button>' : ''),
+        ? '<button class="bind" data-act="bind" data-devid="' + UI.esc(a.devid) + '">绑定</button> ' +
+          '<button class="kick" data-act="kick" data-devid="' + UI.esc(a.devid) + '">下线</button>' : ''),
     ]);
     this.el.innerHTML = UI.listPage({
       title: '设备（C 侧）',
@@ -369,44 +369,32 @@ const AgentsPage = Object.assign(new Page(), {
       rows,
     });
     UI.bindSearch(document.getElementById('ag-q'));
-    document.querySelectorAll('#page button.web').forEach(btn => {
-      btn.onclick = async (e) => {
-        e.stopPropagation();
+    UI.actions(this.el, {
+      web: async (btn) => {
         const port = await UI.prompt({ title: '设备 Web 端口', label: '端口（需在 agent --allow 列表）', value: '80' });
         if (!port) return;
         window.open('/device/' + encodeURIComponent(btn.dataset.devid) + '/' + encodeURIComponent(port) + '/', '_blank');
-      };
-    });
-    document.querySelectorAll('#page button.shell').forEach(btn => {
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        Router.go('#/terminal/' + encodeURIComponent(btn.dataset.devid));
-      };
-    });
-    document.querySelectorAll('#page tbody tr').forEach((tr, i) => {
-      tr.onclick = () => Router.go('#/agents/' + encodeURIComponent(arr[i].devid));
-    });
-    document.querySelectorAll('#page button.bind').forEach(btn => {
-      btn.onclick = async (e) => {
-        e.stopPropagation();
+      },
+      shell: (btn) => Router.go('#/terminal/' + encodeURIComponent(btn.dataset.devid)),
+      bind: async (btn) => {
         const owner = await UI.prompt({ title: '绑定设备', label: '账号（留空 = 解绑）' });
         if (owner === null) return;
         try {
           await Api.put('/api/v1/devices/' + encodeURIComponent(btn.dataset.devid) + '/owner', { username: owner });
           UI.toast(owner ? ('已绑定到 ' + owner) : '已解绑');
         } catch (err) { UI.toast('绑定失败：' + err.message, true); }
-      };
-    });
-    document.querySelectorAll('#page button.kick').forEach(btn => {
-      btn.onclick = async (e) => {
-        e.stopPropagation();
+      },
+      kick: async (btn) => {
         if (!await UI.confirm({ title: '强制下线', message: btn.dataset.devid + ' 将下线并由 agent 退避重连。', danger: true })) return;
         try {
           await Api.post('/api/v1/agents/' + encodeURIComponent(btn.dataset.devid) + '/kick');
           UI.toast('已下线 ' + btn.dataset.devid);
           this.refresh();
         } catch (err) { UI.toast('操作失败：' + err.message, true); }
-      };
+      },
+    });
+    document.querySelectorAll('#page tbody tr').forEach((tr, i) => {
+      tr.onclick = () => Router.go('#/agents/' + encodeURIComponent(arr[i].devid));
     });
   },
 });
@@ -548,15 +536,15 @@ const AccountsPage = Object.assign(new Page(), {
       UI.status(u.status, USER_STATUS),
       UI.time(u.created_ms),
       (() => {
-        let ops = '<button class="pw" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">改密</button> ';
+        let ops = '<button class="pw" data-act="pw" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">改密</button> ';
         if (me.role === 'admin' && u.role !== 'admin') {
-          ops += '<button class="scope" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">范围</button> ';
+          ops += '<button class="scope" data-act="scope" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">范围</button> ';
         }
         if (canM(u)) {
-          ops += '<button class="role" data-id="' + u.id + '">改角色</button> ';
-          ops += '<button class="st" data-id="' + u.id + '" data-st="' + (u.status === 'active' ? 'disabled' : 'active') + '">' +
+          ops += '<button class="role" data-act="role" data-id="' + u.id + '">改角色</button> ';
+          ops += '<button class="st" data-act="status" data-id="' + u.id + '" data-st="' + (u.status === 'active' ? 'disabled' : 'active') + '">' +
                  (u.status === 'active' ? '禁用' : '启用') + '</button> ';
-          ops += '<button class="del" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">删除</button>';
+          ops += '<button class="del" data-act="del" data-id="' + u.id + '" data-name="' + UI.esc(u.username) + '">删除</button>';
         }
         return ops;
       })(),
@@ -593,37 +581,29 @@ const AccountsPage = Object.assign(new Page(), {
         } catch (e) { UI.toast('创建失败：' + e.message, true); }
       };
     };
-    document.querySelectorAll('#page button.pw').forEach(btn => {
-      btn.onclick = async () => {
+    UI.actions(this.el, {
+      pw: async (btn) => {
         const p = await UI.prompt({ title: '修改密码', label: btn.dataset.name + ' 的新密码（≥8 位）', type: 'password' });
         if (!p) return;
         try { await Api.put('/api/v1/users/' + btn.dataset.id + '/password', { new_password: p }); UI.toast('已修改'); }
         catch (e) { UI.toast('失败：' + e.message, true); }
-      };
-    });
-    document.querySelectorAll('#page button.role').forEach(btn => {
-      btn.onclick = async () => {
+      },
+      role: async (btn) => {
         const r = await UI.prompt({ title: '修改角色', label: '新角色（viewer / operator / manager）' });
         if (!r) return;
         try { await Api.put('/api/v1/users/' + btn.dataset.id + '/role', { role: r }); this.refresh(); }
         catch (e) { UI.toast('失败：' + e.message, true); }
-      };
-    });
-    document.querySelectorAll('#page button.st').forEach(btn => {
-      btn.onclick = async () => {
+      },
+      status: async (btn) => {
         try { await Api.put('/api/v1/users/' + btn.dataset.id + '/status', { status: btn.dataset.st }); this.refresh(); }
         catch (e) { UI.toast('失败：' + e.message, true); }
-      };
-    });
-    document.querySelectorAll('#page button.del').forEach(btn => {
-      btn.onclick = async () => {
+      },
+      del: async (btn) => {
         if (!await UI.confirm({ title: '删除账号', message: '删除 ' + btn.dataset.name + '？设备会自动解绑。', danger: true })) return;
         try { await Api.del('/api/v1/users/' + btn.dataset.id); this.refresh(); }
         catch (e) { UI.toast('失败：' + e.message, true); }
-      };
-    });
-    document.querySelectorAll('#page button.scope').forEach(btn => {
-      btn.onclick = () => this.openScope(btn.dataset.id, btn.dataset.name);
+      },
+      scope: (btn) => this.openScope(btn.dataset.id, btn.dataset.name),
     });
   },
   async openScope(id, name) {
