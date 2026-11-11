@@ -93,6 +93,122 @@ const UI = {
       },
     };
   },
+  // 左右穿梭选择器。opts:
+  // { title, items, selected:[key], key(x), renderItem(x), renderMissing(key), text(x),
+  //   filters:[{id,label,checked,test(x)}], leftTitle, rightTitle,
+  //   countText(leftN, selN, total), summary(selN, picked), emptyLeft, emptyRight,
+  //   addon:{label,onClick(addItem)}, allowEmpty, emptyMsg, okText, onOk(pickedKeys, close) }
+  transfer(opts) {
+    opts = opts || {};
+    const items = (opts.items || []).slice();
+    const keyOf = opts.key || (x => x);
+    const renderItem = opts.renderItem || (x => UI.esc(String(x)));
+    const renderMissing = opts.renderMissing || (k => UI.esc(String(k)));
+    const textOf = opts.text || (x => String(x));
+    const filters = opts.filters || [];
+    const on = {};
+    filters.forEach(f => { on[f.id] = f.checked === true; });
+    const selected = new Map();
+    (opts.selected || []).forEach(k => {
+      const it = items.find(x => keyOf(x) === k);
+      selected.set(k, it || { __missing: k });
+    });
+    const m = UI.modal({
+      title: opts.title || '选择',
+      body: '<div class="transfer-toolbar"><input id="tp-q" placeholder="' +
+        UI.esc(opts.searchPlaceholder || '搜索') + '">' +
+        filters.map(f => '<label><input type="checkbox" id="tp-f-' + UI.esc(f.id) + '"' +
+          (on[f.id] ? ' checked' : '') + '> ' + UI.esc(f.label) + '</label>').join('') +
+        '<span id="tp-count"></span><span class="spacer"></span>' +
+        (opts.addon ? '<button id="tp-addon">' + UI.esc(opts.addon.label) + '</button>' : '') + '</div>' +
+        '<div class="transfer"><div class="transfer-list"><h4 id="tp-left-title"></h4><div id="tp-left"></div></div>' +
+        '<div class="transfer-ops"><button id="tp-add">&gt;</button><button id="tp-addall">&gt;&gt;</button>' +
+        '<button id="tp-rem">&lt;</button><button id="tp-clear">&lt;&lt;</button></div>' +
+        '<div class="transfer-list"><h4 id="tp-right-title"></h4><div id="tp-right"></div></div></div>' +
+        '<div class="transfer-foot"><span id="tp-summary"></span></div>',
+      buttons: '<button data-modal-close>取消</button><button class="primary" id="tp-ok">' +
+        UI.esc(opts.okText || '确定') + '</button>',
+    });
+    const modalEl = m.el.querySelector('.tty-modal');
+    if (modalEl) modalEl.classList.add('transfer-modal');
+    const $ = s => m.el.querySelector(s);
+    const row = (it, cls) => {
+      const k = it.__missing != null ? it.__missing : keyOf(it);
+      return '<label class="transfer-item"><input type="checkbox" class="' + cls +
+        '" value="' + UI.esc(k) + '">' +
+        (it.__missing != null ? renderMissing(k) : renderItem(it)) + '</label>';
+    };
+    const leftItems = () => {
+      const q = $('#tp-q').value.trim().toLowerCase();
+      return items.filter(x => {
+        if (selected.has(keyOf(x))) return false;
+        if (q && textOf(x).toLowerCase().indexOf(q) < 0) return false;
+        return filters.every(f => !on[f.id] || f.test(x));
+      });
+    };
+    const draw = () => {
+      const left = leftItems();
+      const right = [...selected.values()];
+      $('#tp-left').innerHTML = left.length ? left.map(x => row(x, 'tp-pick')).join('')
+        : '<div class="empty">' + UI.esc(opts.emptyLeft || '没有可添加的项') + '</div>';
+      $('#tp-right').innerHTML = right.length ? right.map(x => row(x, 'tp-rpick')).join('')
+        : '<div class="empty">' + UI.esc(opts.emptyRight || '从左侧勾选后点 >') + '</div>';
+      $('#tp-count').textContent = opts.countText ? opts.countText(left.length, right.length, items.length)
+        : '共 ' + left.length + ' 项';
+      $('#tp-left-title').textContent = (opts.leftTitle || '备选') + ' · ' + left.length;
+      $('#tp-right-title').textContent = (opts.rightTitle || '已选') + ' · ' + right.length;
+      $('#tp-summary').textContent = opts.summary ? opts.summary(right.length, right)
+        : '已选 ' + right.length + ' 项';
+      $('#tp-add').disabled = left.length === 0;
+      $('#tp-addall').disabled = left.length === 0;
+      $('#tp-rem').disabled = right.length === 0;
+      $('#tp-clear').disabled = right.length === 0;
+    };
+    const picked = cls => [...m.el.querySelectorAll('.' + cls + ':checked')].map(x => x.value);
+    const moveRight = values => {
+      const set = new Set(values);
+      items.filter(x => set.has(keyOf(x)) && !selected.has(keyOf(x)))
+        .forEach(x => selected.set(keyOf(x), x));
+      draw();
+    };
+    const moveLeft = values => { values.forEach(k => selected.delete(k)); draw(); };
+    const addItem = it => {
+      const k = keyOf(it);
+      if (selected.has(k)) return;
+      if (!items.some(x => keyOf(x) === k)) items.push(it);
+      selected.set(k, it);
+      draw();
+    };
+    $('#tp-add').onclick = () => moveRight(picked('tp-pick'));
+    $('#tp-addall').onclick = () => moveRight(leftItems().map(keyOf));
+    $('#tp-rem').onclick = () => moveLeft(picked('tp-rpick'));
+    $('#tp-clear').onclick = () => { selected.clear(); draw(); };
+    $('#tp-q').oninput = draw;
+    filters.forEach(f => {
+      const el = $('#tp-f-' + f.id);
+      if (el) el.onchange = () => { on[f.id] = el.checked; draw(); };
+    });
+    if (opts.addon) $('#tp-addon').onclick = () => opts.addon.onClick(addItem);
+    $('#tp-left').onclick = e => {
+      const it = e.target.closest('.transfer-item');
+      if (it && e.detail === 2) moveRight([it.querySelector('input').value]);
+    };
+    $('#tp-right').onclick = e => {
+      const it = e.target.closest('.transfer-item');
+      if (it && e.detail === 2) moveLeft([it.querySelector('input').value]);
+    };
+    $('#tp-ok').onclick = () => {
+      if (!selected.size && !opts.allowEmpty) {
+        UI.toast(opts.emptyMsg || '请先选择', true);
+        return;
+      }
+      const pickedKeys = [...selected.keys()];
+      if (opts.onOk) opts.onOk(pickedKeys, m.close);
+      else m.close();
+    };
+    draw();
+    return m;
+  },
   bytes(n) {
     n = Number(n) || 0;
     const u = ['B', 'K', 'M', 'G', 'T'];

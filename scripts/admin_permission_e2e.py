@@ -182,15 +182,15 @@ def main():
             page.fill("#pa-name", "产线设备")
             page.fill("#pa-desc", "产线相关设备")
             page.click("#pa-transfer")
-            page.wait_for_selector("#tr-left .transfer-item", timeout=8000)
+            page.wait_for_selector("#tp-left .transfer-item", timeout=8000)
             page.wait_for_function(
-                "document.querySelectorAll('#tr-left .transfer-item').length >= 3", timeout=8000)
-            page.click('#tr-left input.tr-pick[value="dev1"]')
-            page.click('#tr-left input.tr-pick[value="dev2"]')
-            page.click("#tr-add")
+                "document.querySelectorAll('#tp-left .transfer-item').length >= 3", timeout=8000)
+            page.click('#tp-left input.tp-pick[value="dev1"]')
+            page.click('#tp-left input.tp-pick[value="dev2"]')
+            page.click("#tp-add")
             right = page.eval_on_selector_all(
-                "#tr-right .transfer-dev", "els=>els.map(e=>e.textContent)")
-            page.click("#tr-ok")
+                "#tp-right .transfer-dev", "els=>els.map(e=>e.textContent)")
+            page.click("#tp-ok")
             page.wait_for_timeout(400)
             chips = page.eval_on_selector_all(
                 "#pa-devices .perm-chip", "els=>els.map(e=>e.dataset.v)")
@@ -204,17 +204,17 @@ def main():
             if page.locator("#pa-ports-edit").count() == 0:
                 r.expand("产线设备")
             page.click("#pa-ports-edit")
-            page.wait_for_selector("#cap-add")
+            page.wait_for_selector("#tp-addon")
             for val, name in (("22", "SSH"), ("80", "HTTP")):
-                page.click("#cap-add")
+                page.click("#tp-addon")
                 page.wait_for_selector("#dict-val")
                 page.fill("#dict-val", val)
                 page.fill("#dict-name", name)
                 page.click("#dict-ok")
                 page.wait_for_function(
-                    "() => [...document.querySelectorAll('#cap-right .transfer-dev')]"
+                    "() => [...document.querySelectorAll('#tp-right .transfer-dev')]"
                     ".some(e => e.textContent === %r)" % val, timeout=5000)
-            page.click("#cap-ok")
+            page.click("#tp-ok")
             page.wait_for_timeout(350)
             ports_view = page.locator("#pa-ports-view").inner_text()
             page.check("#pa-shell")
@@ -249,11 +249,11 @@ def main():
             page.click("#pc-add-acl")
             page.wait_for_selector("#pc-acl .perm-acl-row")
             page.locator("#pc-acl .perm-acl-row").first.locator(".pa-ports-edit").click()
-            page.wait_for_selector("#cap-left .transfer-item", timeout=5000)
+            page.wait_for_selector("#tp-left .transfer-item", timeout=5000)
             for val in ("22", "80"):
-                page.click('#cap-left input.cap-pick[value="%s"]' % val)
-            page.click("#cap-add-sel")
-            page.click("#cap-ok")
+                page.click('#tp-left input.tp-pick[value="%s"]' % val)
+            page.click("#tp-add")
+            page.click("#tp-ok")
             page.wait_for_timeout(350)
             page.locator("#pc-acl .pa-shell").first.check()
             page.locator("#pc-acl .pa-file").first.select_option("ro")

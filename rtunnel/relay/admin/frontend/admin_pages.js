@@ -463,6 +463,165 @@ const TerminalPage = Object.assign(new Page(), {
 
 // ---------------------------------------------------------------- Pages.系统配置
 // ---------------------------------------------------------------- Pages.权限
+const DictManager = {
+  async open(kind) {
+    const state = { kind, q: '', sel: new Set(), list: [] };
+    let tabs;
+    const m = UI.modal({
+      title: '字典管理',
+      body: '<div id="dict-tabs"></div>' +
+        '<div class="dict-toolbar"><input id="dict-q" placeholder="搜索">' +
+        '<span class="spacer"></span><button id="dict-batch">+ 批量新增</button></div>' +
+        '<div id="dict-body"></div>',
+      buttons: '<button data-modal-close>关闭</button><button class="danger" id="dict-del">删除选中</button>',
+      onClose: () => { if (tabs) tabs.destroy(); },
+    });
+    m.el.querySelector('.tty-modal').classList.add('dict-modal');
+    const render = () => {
+      const q = state.q.toLowerCase();
+      const rows = state.list.filter(d => !q || d.value.toLowerCase().includes(q) || (d.name || '').toLowerCase().includes(q));
+      m.el.querySelector('#dict-body').innerHTML =
+        '<table class="detail-table dict-table"><thead><tr><th><input type="checkbox" id="dict-all"></th>' +
+        '<th>' + (state.kind === 'ports' ? '端口/范围' : 'TTY 路径/模式') + '</th><th>名称</th><th>引用</th><th>状态</th><th>操作</th></tr></thead><tbody>' +
+        (rows.length ? rows.map(d => '<tr><td><input type="checkbox" class="dict-pick" value="' + d.id + '"' +
+          (state.sel.has(d.id) ? ' checked' : '') + '></td><td><code>' + UI.esc(d.value) + '</code></td>' +
+          '<td>' + UI.esc(d.name || '') + '</td><td>' + (d.refs || 0) + '</td>' +
+          '<td>' + (d.enabled ? '<span class="pill ok">启用</span>' : '<span class="pill info">停用</span>') + '</td>' +
+          '<td><button class="dict-edit" data-id="' + d.id + '">编辑</button> ' +
+          '<button class="dict-del" data-id="' + d.id + '">删除</button></td></tr>').join('')
+          : '<tr><td colspan="6" class="empty">暂无字典项</td></tr>') +
+        '</tbody></table>';
+      m.el.querySelector('#dict-all').checked = rows.length > 0 && rows.every(d => state.sel.has(d.id));
+      m.el.querySelector('#dict-all').onchange = e => {
+        rows.forEach(d => e.target.checked ? state.sel.add(d.id) : state.sel.delete(d.id));
+        render();
+      };
+      m.el.querySelectorAll('.dict-pick').forEach(c => c.onchange = () => {
+        const id = Number(c.value); c.checked ? state.sel.add(id) : state.sel.delete(id);
+        m.el.querySelector('#dict-del').disabled = state.sel.size === 0;
+      });
+      m.el.querySelectorAll('.dict-edit').forEach(b => b.onclick = () => {
+        const d = state.list.find(x => x.id === Number(b.dataset.id));
+        if (d) DictManager.editDictItem(state, d, load);
+      });
+      m.el.querySelectorAll('.dict-del').forEach(b => b.onclick = () => {
+        const d = state.list.find(x => x.id === Number(b.dataset.id));
+        if (d) DictManager.deleteDictItems(state, [d.id], load);
+      });
+      m.el.querySelector('#dict-del').disabled = state.sel.size === 0;
+    };
+    const load = async () => {
+      try { state.list = await Api.get('/api/v1/permission/dict/' + state.kind); }
+      catch (e) { UI.toast('加载失败：' + e.message, true); return; }
+      state.sel.clear(); render();
+    };
+    tabs = UI.tabs(m.el.querySelector('#dict-tabs'), {
+      items: [{ key: 'ports', label: '端口字典' }, { key: 'ttys', label: 'TTY 字典' }],
+      value: state.kind,
+      onChange: key => { state.kind = key; state.sel.clear(); load(); },
+    });
+    m.el.querySelector('#dict-q').oninput = e => { state.q = e.target.value.trim(); render(); };
+    m.el.querySelector('#dict-batch').onclick = () => DictManager.openDictBatch(state, load);
+    m.el.querySelector('#dict-del').onclick = () => DictManager.deleteDictItems(state, [...state.sel], load);
+    await load();
+  },
+  async openDictBatch(state, onDone) {
+    const isPort = state.kind === 'ports';
+    const m = UI.modal({
+      title: isPort ? '批量新增端口字典' : '批量新增 TTY 字典',
+      body: '<label>' + (isPort ? '端口/范围，逗号或换行分隔' : 'TTY 路径/模式，逗号或换行分隔') +
+        '<textarea id="db-values" rows="4" style="width:100%;font-family:monospace" placeholder="' +
+        (isPort ? '22,80,443,8000-8100' : 'ttyS0,ttyS1,ttyUSB*,ttyACM*') + '"></textarea></label>' +
+        '<label>名称前缀（可选）<input id="db-prefix" placeholder="例如 产线"></label>' +
+        '<div class="dict-parse" id="db-parse"></div>',
+      buttons: '<button data-modal-close>取消</button><button class="primary" id="db-ok">批量添加</button>',
+    });
+    const parse = () => {
+      const raw = m.el.querySelector('#db-values').value;
+      const seen = new Set();
+      const items = raw.split(/[,，\s\n]+/).map(x => x.trim()).filter(Boolean).filter(x => {
+        if (seen.has(x)) return false; seen.add(x); return true;
+      });
+      const bad = [];
+      const preview = items.map(v => {
+        let ok = true;
+        if (isPort) {
+          const mm = /^(\d+)(?:-(\d+))?$/.exec(v);
+          if (!mm) ok = false;
+          else {
+            const a = Number(mm[1]), b = mm[2] ? Number(mm[2]) : a;
+            if (a < 1 || b > 65535 || a > b) ok = false;
+          }
+        } else if (!/^[A-Za-z0-9_./?*-]+$/.test(v)) ok = false;
+        if (!ok) bad.push(v);
+        return '<span class="dict-token ' + (ok ? 'ok' : 'bad') + '">' + UI.esc(v) + (ok ? ' ✓' : ' ✗') + '</span>';
+      }).join(' ');
+      m.el.querySelector('#db-parse').innerHTML = preview || '<span class="muted">输入后显示解析结果</span>';
+      m.el.querySelector('#db-ok').disabled = items.length === 0 || bad.length > 0;
+      return items;
+    };
+    m.el.querySelector('#db-values').oninput = parse;
+    m.el.querySelector('#db-values').focus();
+    m.el.querySelector('#db-ok').onclick = async () => {
+      const values = parse();
+      try {
+        const r = await Api.post('/api/v1/permission/dict/' + state.kind + '/batch', {
+          values, name_prefix: m.el.querySelector('#db-prefix').value.trim(),
+        });
+        m.close();
+        UI.toast('已添加 ' + (r.added || []).length + ' 项' +
+          ((r.existing || []).length ? '，跳过已存在 ' + r.existing.length + ' 项' : ''));
+        onDone();
+      } catch (e) {
+        UI.toast('添加失败：' + e.message, true);
+      }
+    };
+    parse();
+  },
+  editDictItem(state, d, onDone) {
+    const m = UI.modal({
+      title: state.kind === 'ports' ? '编辑端口字典' : '编辑 TTY 字典',
+      body: '<label>值<input value="' + UI.esc(d.value) + '" disabled></label>' +
+        '<label>名称<input id="de-name" value="' + UI.esc(d.name || '') + '"></label>' +
+        '<label>描述<input id="de-desc" value="' + UI.esc(d.description || '') + '"></label>' +
+        '<label class="row"><input type="checkbox" id="de-enabled"' + (d.enabled ? ' checked' : '') + '> 启用</label>',
+      buttons: '<button data-modal-close>取消</button><button class="primary" id="de-ok">保存</button>',
+    });
+    m.el.querySelector('#de-ok').onclick = async () => {
+      try {
+        await Api.put('/api/v1/permission/dict/' + state.kind + '/' + d.id, {
+          name: m.el.querySelector('#de-name').value.trim(),
+          description: m.el.querySelector('#de-desc').value.trim(),
+          enabled: m.el.querySelector('#de-enabled').checked,
+        });
+        m.close(); onDone();
+      } catch (e) { UI.toast('保存失败：' + e.message, true); }
+    };
+  },
+  async deleteDictItems(state, ids, onDone) {
+    if (!ids.length) return;
+    if (ids.length === 1) {
+      const d = state.list.find(x => x.id === ids[0]);
+      if (d && d.refs > 0) {
+        if (await UI.confirm({ title: '无法删除', message: '该项被 ' + d.refs + ' 处权限引用，只能停用。', danger: true })) {
+          try {
+            await Api.put('/api/v1/permission/dict/' + state.kind + '/' + d.id, { name: d.name, description: d.description, enabled: false });
+            onDone();
+          } catch (e) { UI.toast('停用失败：' + e.message, true); }
+        }
+        return;
+      }
+    }
+    if (!await UI.confirm({ title: '删除字典项', message: '删除选中的 ' + ids.length + ' 项？被引用项会自动跳过。', danger: true })) return;
+    try {
+      const r = await Api.post('/api/v1/permission/dict/' + state.kind + '/batch-delete', { ids });
+      UI.toast('已删除 ' + (r.deleted || []).length + ' 项' +
+        ((r.skipped || []).length ? '，跳过 ' + r.skipped.length + ' 项' : ''));
+      onDone();
+    } catch (e) { UI.toast('删除失败：' + e.message, true); }
+  },
+};
+
 const PermissionPage = Object.assign(new Page(), {
   refreshInterval() { return 0; },
   tab: 'client',
@@ -620,7 +779,7 @@ const PermissionPage = Object.assign(new Page(), {
   },
   bind() {
     const db = document.getElementById('perm-dict');
-    if (db) db.onclick = () => this.openDictManager('ports');
+    if (db) db.onclick = () => DictManager.open('ports');
     const eb = document.getElementById('perm-effective');
     if (eb) eb.onclick = () => this.openEffective();
     const lb = document.getElementById('perm-legacy');
@@ -693,103 +852,47 @@ const PermissionPage = Object.assign(new Page(), {
     let data;
     try { data = await Api.get('/api/v1/permission/agent-groups/' + id + '/candidates'); }
     catch (e) { UI.toast('加载设备失败：' + e.message, true); return; }
-    const all = data.devices || [];
-    const right = new Map();
-    const m = UI.modal({
-      title: '添加设备到「' + UI.esc((this.detail && this.detail.name) || '当前分组') + '」',
-      body: '<div class="transfer-toolbar"><input id="tr-q" placeholder="搜索 devid">' +
-        '<label><input type="checkbox" id="tr-online"> 仅在线</label><span id="tr-count"></span></div>' +
-        '<div class="transfer"><div class="transfer-list"><h4 id="tr-left-title">可选设备</h4><div id="tr-left"></div></div>' +
-        '<div class="transfer-ops"><button id="tr-add">&gt;</button><button id="tr-addall">&gt;&gt;</button>' +
-        '<button id="tr-rem">&lt;</button><button id="tr-clear">&lt;&lt;</button></div>' +
-        '<div class="transfer-list"><h4 id="tr-right-title">已选设备</h4><div id="tr-right"></div></div></div>' +
-        '<div class="transfer-foot"><span id="tr-summary"></span></div>',
-      buttons: '<button data-modal-close>取消</button><button class="primary" id="tr-ok">确定添加</button>',
-    });
-    const modalEl = m.el.querySelector('.tty-modal');
-    if (modalEl) modalEl.classList.add('transfer-modal');
     const esc = UI.esc;
-    const render = () => {
-      const q = m.el.querySelector('#tr-q').value.trim().toLowerCase();
-      const only = m.el.querySelector('#tr-online').checked;
-      const left = all.filter(d => !right.has(d.devid) && (!only || d.online) &&
-        (!q || d.devid.toLowerCase().includes(q)));
-      m.el.querySelector('#tr-left').innerHTML = left.length ? left.map(d =>
-        '<label class="transfer-item"><input type="checkbox" class="tr-pick" value="' + esc(d.devid) + '">' +
-        '<span class="transfer-dev">' + esc(d.devid) + '</span>' +
+    UI.transfer({
+      title: '添加设备到「' + esc((this.detail && this.detail.name) || '当前分组') + '」',
+      items: data.devices || [],
+      key: d => d.devid,
+      renderItem: d => '<span class="transfer-dev">' + esc(d.devid) + '</span>' +
         '<span class="pill ' + (d.online ? 'ok' : 'info') + '">' + (d.online ? '在线' : '登记') + '</span>' +
-        ((d.groups || []).length ? '<span class="muted-sm">' + esc(d.groups.join(',')) + '</span>' : '') +
-        '</label>').join('') : '<div class="empty">没有可添加的设备</div>';
-      m.el.querySelector('#tr-right').innerHTML = right.size ? [...right.values()].map(d =>
-        '<label class="transfer-item"><input type="checkbox" class="tr-rpick" value="' + esc(d.devid) + '">' +
-        '<span class="transfer-dev">' + esc(d.devid) + '</span>' +
-        '<span class="pill ' + (d.online ? 'ok' : 'info') + '">' + (d.online ? '在线' : '登记') + '</span></label>').join('')
-        : '<div class="empty">从左侧勾选设备后点 &gt;</div>';
-      m.el.querySelector('#tr-count').textContent = '共 ' + left.length + ' 台';
-      m.el.querySelector('#tr-left-title').textContent = '可选设备 · ' + left.length;
-      m.el.querySelector('#tr-right-title').textContent = '已选设备 · ' + right.size;
-      const off = [...right.values()].filter(d => !d.online).length;
-      m.el.querySelector('#tr-summary').textContent = '已选 ' + right.size + ' 台' +
-        (off ? '，其中 ' + off + ' 台离线' : '');
-      m.el.querySelector('#tr-addall').disabled = left.length === 0;
-      m.el.querySelector('#tr-add').disabled = left.length === 0;
-      m.el.querySelector('#tr-rem').disabled = right.size === 0;
-      m.el.querySelector('#tr-clear').disabled = right.size === 0;
-    };
-    const picked = cls => [...m.el.querySelectorAll('.' + cls + ':checked')].map(x => x.value);
-    const move = (values, toRight) => {
-      const set = new Set(values);
-      if (toRight) {
-        all.filter(d => set.has(d.devid) && !right.has(d.devid)).forEach(d => right.set(d.devid, d));
-      } else {
-        set.forEach(v => right.delete(v));
-      }
-      render();
-    };
-    m.el.querySelector('#tr-add').onclick = () => move(picked('tr-pick'), true);
-    m.el.querySelector('#tr-addall').onclick = () => {
-      const q = m.el.querySelector('#tr-q').value.trim().toLowerCase();
-      const only = m.el.querySelector('#tr-online').checked;
-      move(all.filter(d => !right.has(d.devid) && (!only || d.online) &&
-        (!q || d.devid.toLowerCase().includes(q))).map(d => d.devid), true);
-    };
-    m.el.querySelector('#tr-rem').onclick = () => move(picked('tr-rpick'), false);
-    m.el.querySelector('#tr-clear').onclick = () => { right.clear(); render(); };
-    m.el.querySelector('#tr-q').oninput = render;
-    m.el.querySelector('#tr-online').onchange = render;
-    m.el.querySelector('#tr-left').onclick = (e) => {
-      const item = e.target.closest('.transfer-item');
-      if (!item) return;
-      if (e.detail === 2) move([item.querySelector('input').value], true);
-    };
-    m.el.querySelector('#tr-right').onclick = (e) => {
-      const item = e.target.closest('.transfer-item');
-      if (!item) return;
-      if (e.detail === 2) move([item.querySelector('input').value], false);
-    };
-    m.el.querySelector('#tr-ok').onclick = async () => {
-      if (!right.size) { UI.toast('请先选择设备', true); return; }
-      const devids = [...right.keys()];
-      if (isNew) {
-        const box = document.getElementById('pa-devices');
-        devids.forEach(v => {
-          if ([...box.querySelectorAll('.perm-chip')].some(c => c.dataset.v === v)) return;
-          const d = document.createElement('span');
-          d.className = 'perm-chip'; d.dataset.v = v;
-          d.innerHTML = esc(v) + ' <button class="perm-chip-x">×</button>';
-          box.appendChild(d);
-        });
-        box.querySelectorAll('.perm-chip-x').forEach(b => { b.onclick = () => b.closest('.perm-chip').remove(); });
-        m.close();
-        return;
-      }
-      try {
-        await Api.post('/api/v1/permission/agent-groups/' + id + '/devices', { devids });
-        m.close(); UI.toast('已添加 ' + devids.length + ' 台设备');
-        this.detail = null; this.refresh();
-      } catch (e) { UI.toast('添加失败：' + e.message, true); }
-    };
-    render();
+        ((d.groups || []).length ? '<span class="muted-sm">' + esc(d.groups.join(',')) + '</span>' : ''),
+      text: d => d.devid,
+      filters: [{ id: 'online', label: '仅在线', test: d => d.online }],
+      leftTitle: '可选设备', rightTitle: '已选设备',
+      countText: n => '共 ' + n + ' 台',
+      summary: (n, picked) => {
+        const off = picked.filter(d => !d.online).length;
+        return '已选 ' + n + ' 台' + (off ? '，其中 ' + off + ' 台离线' : '');
+      },
+      emptyLeft: '没有可添加的设备',
+      emptyRight: '从左侧勾选设备后点 >',
+      emptyMsg: '请先选择设备',
+      okText: '确定添加',
+      onOk: async (devids, close) => {
+        if (isNew) {
+          const box = document.getElementById('pa-devices');
+          devids.forEach(v => {
+            if ([...box.querySelectorAll('.perm-chip')].some(c => c.dataset.v === v)) return;
+            const d = document.createElement('span');
+            d.className = 'perm-chip'; d.dataset.v = v;
+            d.innerHTML = esc(v) + ' <button class="perm-chip-x">×</button>';
+            box.appendChild(d);
+          });
+          box.querySelectorAll('.perm-chip-x').forEach(b => { b.onclick = () => b.closest('.perm-chip').remove(); });
+          close();
+          return;
+        }
+        try {
+          await Api.post('/api/v1/permission/agent-groups/' + id + '/devices', { devids });
+          close(); UI.toast('已添加 ' + devids.length + ' 台设备');
+          this.detail = null; this.refresh();
+        } catch (e) { UI.toast('添加失败：' + e.message, true); }
+      },
+    });
   },
   bindCapEditors() {
     document.querySelectorAll('.pa-ports-edit').forEach(b => {
@@ -860,80 +963,38 @@ const PermissionPage = Object.assign(new Page(), {
     try { list = await Api.get('/api/v1/permission/dict/' + kind); }
     catch (e) { UI.toast('加载字典失败：' + e.message, true); return; }
     list = (list || []).slice();
-    const selected = new Map();
     const values = String(current || '').split(',').map(x => x.trim()).filter(Boolean);
     for (const v of values) {
-      let item = list.find(x => x.value === v);
-      if (!item) {
-        try {
-          const r = await Api.post('/api/v1/permission/dict/' + kind, { value: v, name: v });
-          item = { id: r.id, value: v, name: v, enabled: true };
-          list.push(item);
-        } catch (e) {
-          item = { id: 0, value: v, name: '未入库', enabled: true };
-        }
-      }
-      selected.set(v, item);
+      if (list.some(x => x.value === v)) continue;
+      try {
+        const r = await Api.post('/api/v1/permission/dict/' + kind, { value: v, name: v });
+        list.push({ id: r.id, value: v, name: v, enabled: true });
+      } catch (e) { /* 保留为未入库，仍可展示与回填 */ }
     }
-    const m = UI.modal({
+    UI.transfer({
       title: isPort ? '选择 TCP 端口' : '选择 TTY',
-      body: '<div class="transfer-toolbar"><input id="cap-q" placeholder="搜索">' +
-        '<label><input type="checkbox" id="cap-enabled" checked> 仅启用</label>' +
-        '<span id="cap-count"></span><span class="spacer"></span><button id="cap-add">+ 新增字典项</button></div>' +
-        '<div class="transfer"><div class="transfer-list"><h4 id="cap-left-title">备选</h4><div id="cap-left"></div></div>' +
-        '<div class="transfer-ops"><button id="cap-add-sel">></button><button id="cap-add-all">>></button>' +
-        '<button id="cap-rem">&lt;</button><button id="cap-clear">&lt;&lt;</button></div>' +
-        '<div class="transfer-list"><h4 id="cap-right-title">已选</h4><div id="cap-right"></div></div></div>' +
-        '<div class="transfer-foot" id="cap-summary"></div>',
-      buttons: '<button data-modal-close>取消</button><button class="primary" id="cap-ok">确定</button>',
+      items: list,
+      selected: values,
+      key: d => d.value,
+      renderItem: d => '<span class="transfer-dev">' + UI.esc(d.value) + '</span>' +
+        '<span class="muted-sm">' + UI.esc(d.name || '') + '</span>',
+      renderMissing: v => '<span class="transfer-dev">' + UI.esc(v) + '</span>' +
+        '<span class="muted-sm">未入库</span>',
+      text: d => d.value + ' ' + (d.name || ''),
+      filters: [{ id: 'enabled', label: '仅启用', checked: true, test: d => d.enabled !== false }],
+      leftTitle: isPort ? '备选端口' : '备选 TTY',
+      rightTitle: '已选',
+      countText: () => '字典 ' + list.length + ' 项',
+      summary: n => '已选 ' + n + ' 项',
+      emptyLeft: '没有可用字典项',
+      emptyRight: '从左侧选择',
+      allowEmpty: true,
+      addon: {
+        label: '+ 新增字典项',
+        onClick: add => this.openDictAdd(kind, d => { list.push(d); add(d); }),
+      },
+      onOk: (picked, close) => { close(); onSave(picked.join(',')); },
     });
-    m.el.querySelector('.tty-modal').classList.add('transfer-modal');
-    const esc = UI.esc;
-    const render = () => {
-      const q = m.el.querySelector('#cap-q').value.trim().toLowerCase();
-      const only = m.el.querySelector('#cap-enabled').checked;
-      const left = list.filter(d => !selected.has(d.value) && (!only || d.enabled !== false) &&
-        (!q || d.value.toLowerCase().includes(q) || (d.name || '').toLowerCase().includes(q)));
-      m.el.querySelector('#cap-left').innerHTML = left.length ? left.map(d =>
-        '<label class="transfer-item"><input type="checkbox" class="cap-pick" value="' + esc(d.value) + '">' +
-        '<span class="transfer-dev">' + esc(d.value) + '</span><span class="muted-sm">' + esc(d.name || '') + '</span></label>').join('')
-        : '<div class="empty">没有可用字典项</div>';
-      m.el.querySelector('#cap-right').innerHTML = selected.size ? [...selected.values()].map(d =>
-        '<label class="transfer-item"><input type="checkbox" class="cap-rpick" value="' + esc(d.value) + '">' +
-        '<span class="transfer-dev">' + esc(d.value) + '</span><span class="muted-sm">' + esc(d.name || '') + '</span></label>').join('')
-        : '<div class="empty">从左侧选择</div>';
-      m.el.querySelector('#cap-left-title').textContent = (isPort ? '备选端口' : '备选 TTY') + ' · ' + left.length;
-      m.el.querySelector('#cap-right-title').textContent = '已选 · ' + selected.size;
-      m.el.querySelector('#cap-count').textContent = '字典 ' + list.length + ' 项';
-      m.el.querySelector('#cap-summary').textContent = '已选 ' + selected.size + ' 项';
-    };
-    const picked = cls => [...m.el.querySelectorAll('.' + cls + ':checked')].map(x => x.value);
-    const add = vals => { vals.forEach(v => { const d = list.find(x => x.value === v); if (d && !selected.has(v)) selected.set(v, d); }); render(); };
-    const remove = vals => { vals.forEach(v => selected.delete(v)); render(); };
-    m.el.querySelector('#cap-add-sel').onclick = () => add(picked('cap-pick'));
-    m.el.querySelector('#cap-add-all').onclick = () => {
-      const q = m.el.querySelector('#cap-q').value.trim().toLowerCase();
-      const only = m.el.querySelector('#cap-enabled').checked;
-      add(list.filter(d => !selected.has(d.value) && (!only || d.enabled !== false) &&
-        (!q || d.value.toLowerCase().includes(q) || (d.name || '').toLowerCase().includes(q))).map(d => d.value));
-    };
-    m.el.querySelector('#cap-rem').onclick = () => remove(picked('cap-rpick'));
-    m.el.querySelector('#cap-clear').onclick = () => { selected.clear(); render(); };
-    m.el.querySelector('#cap-q').oninput = render;
-    m.el.querySelector('#cap-enabled').onchange = render;
-    m.el.querySelector('#cap-left').onclick = e => {
-      const item = e.target.closest('.transfer-item');
-      if (item && e.detail === 2) add([item.querySelector('input').value]);
-    };
-    m.el.querySelector('#cap-right').onclick = e => {
-      const item = e.target.closest('.transfer-item');
-      if (item && e.detail === 2) remove([item.querySelector('input').value]);
-    };
-    m.el.querySelector('#cap-add').onclick = () => this.openDictAdd(kind, d => {
-      list.push(d); selected.set(d.value, d); render();
-    });
-    m.el.querySelector('#cap-ok').onclick = () => { m.close(); onSave([...selected.keys()].join(',')); };
-    render();
   },
   bindAcl() {
     const add = document.getElementById('pc-add-acl');
@@ -1119,162 +1180,6 @@ const PermissionPage = Object.assign(new Page(), {
       eaRes.textContent = '已复制到剪贴板';
     };
   },
-  async openDictManager(kind) {
-    const state = { kind, q: '', sel: new Set(), list: [] };
-    let tabs;
-    const m = UI.modal({
-      title: '字典管理',
-      body: '<div id="dict-tabs"></div>' +
-        '<div class="dict-toolbar"><input id="dict-q" placeholder="搜索">' +
-        '<span class="spacer"></span><button id="dict-batch">+ 批量新增</button></div>' +
-        '<div id="dict-body"></div>',
-      buttons: '<button data-modal-close>关闭</button><button class="danger" id="dict-del">删除选中</button>',
-      onClose: () => { if (tabs) tabs.destroy(); },
-    });
-    m.el.querySelector('.tty-modal').classList.add('dict-modal');
-    const render = () => {
-      const q = state.q.toLowerCase();
-      const rows = state.list.filter(d => !q || d.value.toLowerCase().includes(q) || (d.name || '').toLowerCase().includes(q));
-      m.el.querySelector('#dict-body').innerHTML =
-        '<table class="detail-table dict-table"><thead><tr><th><input type="checkbox" id="dict-all"></th>' +
-        '<th>' + (state.kind === 'ports' ? '端口/范围' : 'TTY 路径/模式') + '</th><th>名称</th><th>引用</th><th>状态</th><th>操作</th></tr></thead><tbody>' +
-        (rows.length ? rows.map(d => '<tr><td><input type="checkbox" class="dict-pick" value="' + d.id + '"' +
-          (state.sel.has(d.id) ? ' checked' : '') + '></td><td><code>' + UI.esc(d.value) + '</code></td>' +
-          '<td>' + UI.esc(d.name || '') + '</td><td>' + (d.refs || 0) + '</td>' +
-          '<td>' + (d.enabled ? '<span class="pill ok">启用</span>' : '<span class="pill info">停用</span>') + '</td>' +
-          '<td><button class="dict-edit" data-id="' + d.id + '">编辑</button> ' +
-          '<button class="dict-del" data-id="' + d.id + '">删除</button></td></tr>').join('')
-          : '<tr><td colspan="6" class="empty">暂无字典项</td></tr>') +
-        '</tbody></table>';
-      m.el.querySelector('#dict-all').checked = rows.length > 0 && rows.every(d => state.sel.has(d.id));
-      m.el.querySelector('#dict-all').onchange = e => {
-        rows.forEach(d => e.target.checked ? state.sel.add(d.id) : state.sel.delete(d.id));
-        render();
-      };
-      m.el.querySelectorAll('.dict-pick').forEach(c => c.onchange = () => {
-        const id = Number(c.value); c.checked ? state.sel.add(id) : state.sel.delete(id);
-        m.el.querySelector('#dict-del').disabled = state.sel.size === 0;
-      });
-      m.el.querySelectorAll('.dict-edit').forEach(b => b.onclick = () => {
-        const d = state.list.find(x => x.id === Number(b.dataset.id));
-        if (d) this.editDictItem(state, d, load);
-      });
-      m.el.querySelectorAll('.dict-del').forEach(b => b.onclick = () => {
-        const d = state.list.find(x => x.id === Number(b.dataset.id));
-        if (d) this.deleteDictItems(state, [d.id], load);
-      });
-      m.el.querySelector('#dict-del').disabled = state.sel.size === 0;
-    };
-    const load = async () => {
-      try { state.list = await Api.get('/api/v1/permission/dict/' + state.kind); }
-      catch (e) { UI.toast('加载失败：' + e.message, true); return; }
-      state.sel.clear(); render();
-    };
-    tabs = UI.tabs(m.el.querySelector('#dict-tabs'), {
-      items: [{ key: 'ports', label: '端口字典' }, { key: 'ttys', label: 'TTY 字典' }],
-      value: state.kind,
-      onChange: key => { state.kind = key; state.sel.clear(); load(); },
-    });
-    m.el.querySelector('#dict-q').oninput = e => { state.q = e.target.value.trim(); render(); };
-    m.el.querySelector('#dict-batch').onclick = () => this.openDictBatch(state, load);
-    m.el.querySelector('#dict-del').onclick = () => this.deleteDictItems(state, [...state.sel], load);
-    await load();
-  },
-  async openDictBatch(state, onDone) {
-    const isPort = state.kind === 'ports';
-    const m = UI.modal({
-      title: isPort ? '批量新增端口字典' : '批量新增 TTY 字典',
-      body: '<label>' + (isPort ? '端口/范围，逗号或换行分隔' : 'TTY 路径/模式，逗号或换行分隔') +
-        '<textarea id="db-values" rows="4" style="width:100%;font-family:monospace" placeholder="' +
-        (isPort ? '22,80,443,8000-8100' : 'ttyS0,ttyS1,ttyUSB*,ttyACM*') + '"></textarea></label>' +
-        '<label>名称前缀（可选）<input id="db-prefix" placeholder="例如 产线"></label>' +
-        '<div class="dict-parse" id="db-parse"></div>',
-      buttons: '<button data-modal-close>取消</button><button class="primary" id="db-ok">批量添加</button>',
-    });
-    const parse = () => {
-      const raw = m.el.querySelector('#db-values').value;
-      const seen = new Set();
-      const items = raw.split(/[,，\s\n]+/).map(x => x.trim()).filter(Boolean).filter(x => {
-        if (seen.has(x)) return false; seen.add(x); return true;
-      });
-      const bad = [];
-      const preview = items.map(v => {
-        let ok = true;
-        if (isPort) {
-          const mm = /^(\d+)(?:-(\d+))?$/.exec(v);
-          if (!mm) ok = false;
-          else {
-            const a = Number(mm[1]), b = mm[2] ? Number(mm[2]) : a;
-            if (a < 1 || b > 65535 || a > b) ok = false;
-          }
-        } else if (!/^[A-Za-z0-9_./?*-]+$/.test(v)) ok = false;
-        if (!ok) bad.push(v);
-        return '<span class="dict-token ' + (ok ? 'ok' : 'bad') + '">' + UI.esc(v) + (ok ? ' ✓' : ' ✗') + '</span>';
-      }).join(' ');
-      m.el.querySelector('#db-parse').innerHTML = preview || '<span class="muted">输入后显示解析结果</span>';
-      m.el.querySelector('#db-ok').disabled = items.length === 0 || bad.length > 0;
-      return items;
-    };
-    m.el.querySelector('#db-values').oninput = parse;
-    m.el.querySelector('#db-values').focus();
-    m.el.querySelector('#db-ok').onclick = async () => {
-      const values = parse();
-      try {
-        const r = await Api.post('/api/v1/permission/dict/' + state.kind + '/batch', {
-          values, name_prefix: m.el.querySelector('#db-prefix').value.trim(),
-        });
-        m.close();
-        UI.toast('已添加 ' + (r.added || []).length + ' 项' +
-          ((r.existing || []).length ? '，跳过已存在 ' + r.existing.length + ' 项' : ''));
-        onDone();
-      } catch (e) {
-        UI.toast('添加失败：' + e.message, true);
-      }
-    };
-    parse();
-  },
-  editDictItem(state, d, onDone) {
-    const m = UI.modal({
-      title: state.kind === 'ports' ? '编辑端口字典' : '编辑 TTY 字典',
-      body: '<label>值<input value="' + UI.esc(d.value) + '" disabled></label>' +
-        '<label>名称<input id="de-name" value="' + UI.esc(d.name || '') + '"></label>' +
-        '<label>描述<input id="de-desc" value="' + UI.esc(d.description || '') + '"></label>' +
-        '<label class="row"><input type="checkbox" id="de-enabled"' + (d.enabled ? ' checked' : '') + '> 启用</label>',
-      buttons: '<button data-modal-close>取消</button><button class="primary" id="de-ok">保存</button>',
-    });
-    m.el.querySelector('#de-ok').onclick = async () => {
-      try {
-        await Api.put('/api/v1/permission/dict/' + state.kind + '/' + d.id, {
-          name: m.el.querySelector('#de-name').value.trim(),
-          description: m.el.querySelector('#de-desc').value.trim(),
-          enabled: m.el.querySelector('#de-enabled').checked,
-        });
-        m.close(); onDone();
-      } catch (e) { UI.toast('保存失败：' + e.message, true); }
-    };
-  },
-  async deleteDictItems(state, ids, onDone) {
-    if (!ids.length) return;
-    if (ids.length === 1) {
-      const d = state.list.find(x => x.id === ids[0]);
-      if (d && d.refs > 0) {
-        if (await UI.confirm({ title: '无法删除', message: '该项被 ' + d.refs + ' 处权限引用，只能停用。', danger: true })) {
-          try {
-            await Api.put('/api/v1/permission/dict/' + state.kind + '/' + d.id, { name: d.name, description: d.description, enabled: false });
-            onDone();
-          } catch (e) { UI.toast('停用失败：' + e.message, true); }
-        }
-        return;
-      }
-    }
-    if (!await UI.confirm({ title: '删除字典项', message: '删除选中的 ' + ids.length + ' 项？被引用项会自动跳过。', danger: true })) return;
-    try {
-      const r = await Api.post('/api/v1/permission/dict/' + state.kind + '/batch-delete', { ids });
-      UI.toast('已删除 ' + (r.deleted || []).length + ' 项' +
-        ((r.skipped || []).length ? '，跳过 ' + r.skipped.length + ' 项' : ''));
-      onDone();
-    } catch (e) { UI.toast('删除失败：' + e.message, true); }
-  },
   enter(el) { this.el = el; return Page.prototype.enter.call(this, el, []); },
 });
 
@@ -1351,162 +1256,6 @@ const SettingsPage = Object.assign(new Page(), {
         } catch (e) { UI.toast('保存失败：' + e.message, true); }
       };
     });
-  },
-  async openDictManager(kind) {
-    const state = { kind, q: '', sel: new Set(), list: [] };
-    let tabs;
-    const m = UI.modal({
-      title: '字典管理',
-      body: '<div id="dict-tabs"></div>' +
-        '<div class="dict-toolbar"><input id="dict-q" placeholder="搜索">' +
-        '<span class="spacer"></span><button id="dict-batch">+ 批量新增</button></div>' +
-        '<div id="dict-body"></div>',
-      buttons: '<button data-modal-close>关闭</button><button class="danger" id="dict-del">删除选中</button>',
-      onClose: () => { if (tabs) tabs.destroy(); },
-    });
-    m.el.querySelector('.tty-modal').classList.add('dict-modal');
-    const render = () => {
-      const q = state.q.toLowerCase();
-      const rows = state.list.filter(d => !q || d.value.toLowerCase().includes(q) || (d.name || '').toLowerCase().includes(q));
-      m.el.querySelector('#dict-body').innerHTML =
-        '<table class="detail-table dict-table"><thead><tr><th><input type="checkbox" id="dict-all"></th>' +
-        '<th>' + (state.kind === 'ports' ? '端口/范围' : 'TTY 路径/模式') + '</th><th>名称</th><th>引用</th><th>状态</th><th>操作</th></tr></thead><tbody>' +
-        (rows.length ? rows.map(d => '<tr><td><input type="checkbox" class="dict-pick" value="' + d.id + '"' +
-          (state.sel.has(d.id) ? ' checked' : '') + '></td><td><code>' + UI.esc(d.value) + '</code></td>' +
-          '<td>' + UI.esc(d.name || '') + '</td><td>' + (d.refs || 0) + '</td>' +
-          '<td>' + (d.enabled ? '<span class="pill ok">启用</span>' : '<span class="pill info">停用</span>') + '</td>' +
-          '<td><button class="dict-edit" data-id="' + d.id + '">编辑</button> ' +
-          '<button class="dict-del" data-id="' + d.id + '">删除</button></td></tr>').join('')
-          : '<tr><td colspan="6" class="empty">暂无字典项</td></tr>') +
-        '</tbody></table>';
-      m.el.querySelector('#dict-all').checked = rows.length > 0 && rows.every(d => state.sel.has(d.id));
-      m.el.querySelector('#dict-all').onchange = e => {
-        rows.forEach(d => e.target.checked ? state.sel.add(d.id) : state.sel.delete(d.id));
-        render();
-      };
-      m.el.querySelectorAll('.dict-pick').forEach(c => c.onchange = () => {
-        const id = Number(c.value); c.checked ? state.sel.add(id) : state.sel.delete(id);
-        m.el.querySelector('#dict-del').disabled = state.sel.size === 0;
-      });
-      m.el.querySelectorAll('.dict-edit').forEach(b => b.onclick = () => {
-        const d = state.list.find(x => x.id === Number(b.dataset.id));
-        if (d) this.editDictItem(state, d, load);
-      });
-      m.el.querySelectorAll('.dict-del').forEach(b => b.onclick = () => {
-        const d = state.list.find(x => x.id === Number(b.dataset.id));
-        if (d) this.deleteDictItems(state, [d.id], load);
-      });
-      m.el.querySelector('#dict-del').disabled = state.sel.size === 0;
-    };
-    const load = async () => {
-      try { state.list = await Api.get('/api/v1/permission/dict/' + state.kind); }
-      catch (e) { UI.toast('加载失败：' + e.message, true); return; }
-      state.sel.clear(); render();
-    };
-    tabs = UI.tabs(m.el.querySelector('#dict-tabs'), {
-      items: [{ key: 'ports', label: '端口字典' }, { key: 'ttys', label: 'TTY 字典' }],
-      value: state.kind,
-      onChange: key => { state.kind = key; state.sel.clear(); load(); },
-    });
-    m.el.querySelector('#dict-q').oninput = e => { state.q = e.target.value.trim(); render(); };
-    m.el.querySelector('#dict-batch').onclick = () => this.openDictBatch(state, load);
-    m.el.querySelector('#dict-del').onclick = () => this.deleteDictItems(state, [...state.sel], load);
-    await load();
-  },
-  async openDictBatch(state, onDone) {
-    const isPort = state.kind === 'ports';
-    const m = UI.modal({
-      title: isPort ? '批量新增端口字典' : '批量新增 TTY 字典',
-      body: '<label>' + (isPort ? '端口/范围，逗号或换行分隔' : 'TTY 路径/模式，逗号或换行分隔') +
-        '<textarea id="db-values" rows="4" style="width:100%;font-family:monospace" placeholder="' +
-        (isPort ? '22,80,443,8000-8100' : 'ttyS0,ttyS1,ttyUSB*,ttyACM*') + '"></textarea></label>' +
-        '<label>名称前缀（可选）<input id="db-prefix" placeholder="例如 产线"></label>' +
-        '<div class="dict-parse" id="db-parse"></div>',
-      buttons: '<button data-modal-close>取消</button><button class="primary" id="db-ok">批量添加</button>',
-    });
-    const parse = () => {
-      const raw = m.el.querySelector('#db-values').value;
-      const seen = new Set();
-      const items = raw.split(/[,，\s\n]+/).map(x => x.trim()).filter(Boolean).filter(x => {
-        if (seen.has(x)) return false; seen.add(x); return true;
-      });
-      const bad = [];
-      const preview = items.map(v => {
-        let ok = true;
-        if (isPort) {
-          const mm = /^(\d+)(?:-(\d+))?$/.exec(v);
-          if (!mm) ok = false;
-          else {
-            const a = Number(mm[1]), b = mm[2] ? Number(mm[2]) : a;
-            if (a < 1 || b > 65535 || a > b) ok = false;
-          }
-        } else if (!/^[A-Za-z0-9_./?*-]+$/.test(v)) ok = false;
-        if (!ok) bad.push(v);
-        return '<span class="dict-token ' + (ok ? 'ok' : 'bad') + '">' + UI.esc(v) + (ok ? ' ✓' : ' ✗') + '</span>';
-      }).join(' ');
-      m.el.querySelector('#db-parse').innerHTML = preview || '<span class="muted">输入后显示解析结果</span>';
-      m.el.querySelector('#db-ok').disabled = items.length === 0 || bad.length > 0;
-      return items;
-    };
-    m.el.querySelector('#db-values').oninput = parse;
-    m.el.querySelector('#db-values').focus();
-    m.el.querySelector('#db-ok').onclick = async () => {
-      const values = parse();
-      try {
-        const r = await Api.post('/api/v1/permission/dict/' + state.kind + '/batch', {
-          values, name_prefix: m.el.querySelector('#db-prefix').value.trim(),
-        });
-        m.close();
-        UI.toast('已添加 ' + (r.added || []).length + ' 项' +
-          ((r.existing || []).length ? '，跳过已存在 ' + r.existing.length + ' 项' : ''));
-        onDone();
-      } catch (e) {
-        UI.toast('添加失败：' + e.message, true);
-      }
-    };
-    parse();
-  },
-  editDictItem(state, d, onDone) {
-    const m = UI.modal({
-      title: state.kind === 'ports' ? '编辑端口字典' : '编辑 TTY 字典',
-      body: '<label>值<input value="' + UI.esc(d.value) + '" disabled></label>' +
-        '<label>名称<input id="de-name" value="' + UI.esc(d.name || '') + '"></label>' +
-        '<label>描述<input id="de-desc" value="' + UI.esc(d.description || '') + '"></label>' +
-        '<label class="row"><input type="checkbox" id="de-enabled"' + (d.enabled ? ' checked' : '') + '> 启用</label>',
-      buttons: '<button data-modal-close>取消</button><button class="primary" id="de-ok">保存</button>',
-    });
-    m.el.querySelector('#de-ok').onclick = async () => {
-      try {
-        await Api.put('/api/v1/permission/dict/' + state.kind + '/' + d.id, {
-          name: m.el.querySelector('#de-name').value.trim(),
-          description: m.el.querySelector('#de-desc').value.trim(),
-          enabled: m.el.querySelector('#de-enabled').checked,
-        });
-        m.close(); onDone();
-      } catch (e) { UI.toast('保存失败：' + e.message, true); }
-    };
-  },
-  async deleteDictItems(state, ids, onDone) {
-    if (!ids.length) return;
-    if (ids.length === 1) {
-      const d = state.list.find(x => x.id === ids[0]);
-      if (d && d.refs > 0) {
-        if (await UI.confirm({ title: '无法删除', message: '该项被 ' + d.refs + ' 处权限引用，只能停用。', danger: true })) {
-          try {
-            await Api.put('/api/v1/permission/dict/' + state.kind + '/' + d.id, { name: d.name, description: d.description, enabled: false });
-            onDone();
-          } catch (e) { UI.toast('停用失败：' + e.message, true); }
-        }
-        return;
-      }
-    }
-    if (!await UI.confirm({ title: '删除字典项', message: '删除选中的 ' + ids.length + ' 项？被引用项会自动跳过。', danger: true })) return;
-    try {
-      const r = await Api.post('/api/v1/permission/dict/' + state.kind + '/batch-delete', { ids });
-      UI.toast('已删除 ' + (r.deleted || []).length + ' 项' +
-        ((r.skipped || []).length ? '，跳过 ' + r.skipped.length + ' 项' : ''));
-      onDone();
-    } catch (e) { UI.toast('删除失败：' + e.message, true); }
   },
   enter(el) { this.el = el; return Page.prototype.enter.call(this, el, []); },
 });
