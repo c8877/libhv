@@ -20,12 +20,13 @@ protected:
     void        onReady() override;
     void        onFrame(rtnp::Frame* f) override;
     void        onLinkDown() override;
-    bool        autoReconnect() const override { return false; }
+    bool        autoReconnect() const override { return !ready_ && attempts_ < (int)endpoints.size(); }
 
 private:
     std::string devid_;
     uint32_t    sid_ = 0;
     bool        ready_ = false;
+    int         attempts_ = 0;   // 已尝试的 relay 数
     rtnp::Buffer pending_input_;
     struct termios saved_tio_;
     bool        raw_active_ = false;

@@ -59,12 +59,14 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
 add_executable(rtunnel-agent  agent/main.cpp agent/agent_app.cpp)
 add_executable(rtunnel-client client/main.cpp client/client_app.cpp client/shell_client.cpp)
 add_executable(rtnp-codec-test tests/codec_test.cpp)
+add_executable(rtunnel-endpoint-test tests/endpoint_test.cpp)
 
 target_include_directories(rtunnel-relay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/3rd/sqlite3)
 target_link_libraries(rtunnel-relay  rtnp rtunnel_sqlite rtunnel_gzip)
 target_link_libraries(rtunnel-agent  rtunnel_common)
 target_link_libraries(rtunnel-client rtunnel_common)
 target_link_libraries(rtnp-codec-test rtnp)
+target_link_libraries(rtunnel-endpoint-test rtunnel_common)
 
 if (RTUNNEL_STATIC_LIBGCC)
     target_link_options(rtunnel-relay  PRIVATE -static-libstdc++ -static-libgcc)

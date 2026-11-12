@@ -1405,9 +1405,10 @@ int AgentApp::run(int argc, char** argv) {
         if (i) args_line += " ";
         args_line += argv[i];
     }
+    std::vector<std::string> servers;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--server") == 0 && i + 1 < argc) {
-            host = argv[++i];
+            servers.push_back(argv[++i]);
         } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             port = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--devid") == 0 && i + 1 < argc) {
@@ -1445,8 +1446,9 @@ int AgentApp::run(int argc, char** argv) {
             verbose = 1;
         } else {
             fprintf(stderr,
-                "Usage: %s --devid ID [--server H] [--port P] [--allow 22,80] [--allow-all]\n"
-                "          [--allow-shell [--max-idle SEC]] [--verbose]\n",
+                "Usage: %s --devid ID [--server H[:P] ...] [--port P] [--allow 22,80] [--allow-all]\n"
+                "          [--allow-shell [--max-idle SEC]] [--verbose]\n"
+                "       --server 可重复或逗号分隔，故障时按顺序自动切换（最多 8 个）\n",
                 argv[0]);
             return 1;
         }
@@ -1454,6 +1456,20 @@ int AgentApp::run(int argc, char** argv) {
     if (devid[0] == '\0') {
         fprintf(stderr, "--devid is required\n");
         return 1;
+    }
+
+    {
+        std::string spec, err;
+        for (auto& s : servers) {
+            if (!spec.empty()) spec += ",";
+            spec += s;
+        }
+        if (spec.empty()) spec = "127.0.0.1";
+        if (!tunnel_parse_endpoints(spec, port, endpoints, err)) {
+            fprintf(stderr, "--server: %s\n", err.c_str());
+            return 1;
+        }
+        host = endpoints[0].host.c_str();
     }
 
     hloop_t* lp = hloop_new(0);

@@ -78,6 +78,7 @@ protected:
     void        onReady() override;
     void        onAuthInfo(const char* username) override;
     void        onLinkDown() override;
+    void        onEndpointChange(size_t from, size_t to) override;
 
 private:
     ClientStream* streamFind(uint32_t sid);

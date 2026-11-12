@@ -115,7 +115,10 @@ void ShellClient::onFrame(rtnp::Frame* f) {
 }
 
 void ShellClient::onLinkDown() {
-    hloop_stop(loop);
+    attempts_++;
+    // 没拿到会话前可以在地址列表里换一个再试；已建立过会话则直接退出
+    bool retry = !ready_ && attempts_ < (int)endpoints.size();
+    if (!retry) hloop_stop(loop);
 }
 
 int ShellClient::run(const char* devid) {

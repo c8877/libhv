@@ -4,6 +4,68 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+
+// ---------------------------------------------------------------- 地址解析
+
+static bool parsePort(const std::string& s, int& port) {
+    if (s.empty()) return false;
+    char* end = NULL;
+    long v = strtol(s.c_str(), &end, 10);
+    if (!end || *end != '\0' || v <= 0 || v > 65535) return false;
+    port = (int)v;
+    return true;
+}
+
+bool tunnel_parse_endpoints(const std::string& spec, int default_port,
+                            std::vector<TunnelEndpoint>& out, std::string& err) {
+    out.clear();
+    err.clear();
+    size_t pos = 0;
+    while (pos <= spec.size()) {
+        size_t comma = spec.find(',', pos);
+        std::string item = spec.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+        pos = (comma == std::string::npos) ? spec.size() + 1 : comma + 1;
+
+        size_t b = item.find_first_not_of(" \t");
+        if (b == std::string::npos) continue;
+        size_t e = item.find_last_not_of(" \t");
+        item = item.substr(b, e - b + 1);
+        if (item.empty()) continue;
+
+        TunnelEndpoint ep;
+        ep.port = default_port;
+        if (item[0] == '[') {
+            size_t rb = item.find(']');
+            if (rb == std::string::npos) { err = "invalid IPv6 endpoint: " + item; return false; }
+            ep.host = item.substr(1, rb - 1);
+            if (rb + 1 < item.size()) {
+                if (item[rb + 1] != ':' || !parsePort(item.substr(rb + 2), ep.port)) {
+                    err = "invalid port in endpoint: " + item;
+                    return false;
+                }
+            }
+        } else {
+            size_t c1 = item.find(':');
+            // 单个冒号才当 host:port；多个冒号视为裸 IPv6，用默认端口
+            if (c1 != std::string::npos && item.find(':', c1 + 1) == std::string::npos) {
+                ep.host = item.substr(0, c1);
+                if (!parsePort(item.substr(c1 + 1), ep.port)) {
+                    err = "invalid port in endpoint: " + item;
+                    return false;
+                }
+            } else {
+                ep.host = item;
+            }
+        }
+        if (ep.host.empty()) { err = "empty host in endpoint: " + item; return false; }
+        if (ep.port <= 0 || ep.port > 65535) { err = "invalid default port"; return false; }
+        if (out.size() >= 8) break;   // 超出上限的部分忽略
+        out.push_back(ep);
+    }
+    if (out.empty()) { err = "no endpoint in: " + spec; return false; }
+    return true;
+}
 
 // ---------------------------------------------------------------- 回调薄封装
 
@@ -83,7 +145,13 @@ void TunnelLink::handleFrame(rtnp::Frame* f) {
         logf_("[%s] auth failed: code=%u %s", logTag(), code, msg.c_str());
         if (code == rtnp::TOKEN_EXPIRED || code == rtnp::TOKEN_DISABLED ||
             code == rtnp::QUOTA_EXCEEDED) {
-            auth_fatal_ = 1;
+            // 该地址凭证被永久拒绝：换下一个地址；全部被拒才停止重连
+            if (ep_index_ < ep_auth_bad_.size()) ep_auth_bad_[ep_index_] = 1;
+            bool all_bad = !ep_auth_bad_.empty();
+            for (char bad : ep_auth_bad_) {
+                if (!bad) { all_bad = false; break; }
+            }
+            if (all_bad) auth_fatal_ = 1;
         }
         hio_close(io);
         return;
@@ -123,23 +191,23 @@ void TunnelLink::onTunnelRead(void* buf, int readbytes) {
 }
 
 void TunnelLink::onTunnelClose() {
-    if (auth_fatal_) {
-        logf_("[%s] credential rejected, stop reconnecting", logTag());
-        onLinkDown();
-        io = NULL;
-        state = 0;
-        in_.reset();
-        return;
-    }
-    if (autoReconnect()) {
-        logf_("[%s] tunnel closed, reconnect in %d ms", logTag(), backoff_ms);
-    }
+    bool was_ready = (state == 2);
     onLinkDown();
     if (hs_timer_) { htimer_del(hs_timer_); hs_timer_ = NULL; }
     io = NULL;
     state = 0;
+    ping_unacked_ = 0;
     in_.reset();
-    if (autoReconnect()) scheduleReconnect();
+
+    if (auth_fatal_) {
+        logf_("[%s] credential rejected, stop reconnecting", logTag());
+        return;
+    }
+    if (!autoReconnect()) return;
+
+    advanceEndpoint(was_ready ? "session lost" : "connect/auth failed");
+    logf_("[%s] tunnel closed, reconnect in %d ms", logTag(), backoff_ms);
+    scheduleReconnect();
 }
 
 // 握手/认证阶段超时：HELLO_ACK 5s、AUTH_OK 10s（设计 §8.8）
@@ -193,8 +261,9 @@ void TunnelLink::onPing() {
 }
 
 void TunnelLink::onReconnect() {
-    if (io != NULL) return;
-    hio_t* nio = hloop_create_tcp_client(loop, host, port, connectCb, tunnelCloseCb);
+    if (io != NULL || endpoints.empty()) return;
+    const TunnelEndpoint& ep = endpoints[ep_index_];
+    hio_t* nio = hloop_create_tcp_client(loop, ep.host.c_str(), ep.port, connectCb, tunnelCloseCb);
     if (nio == NULL) { scheduleReconnect(); return; }
     if (tls_ca[0]) {
         hssl_ctx_opt_t opt;
@@ -220,14 +289,52 @@ void TunnelLink::onReconnect() {
 
 void TunnelLink::scheduleReconnect() {
     int delay = backoff_ms;
+    // 多地址时加 ±20% 抖动，避免所有设备同时重连打爆 relay
+    if (endpoints.size() > 1) {
+        jitter_seed_ = jitter_seed_ * 1103515245u + 12345u;
+        int span = delay / 5;
+        if (span > 0) delay += (int)(jitter_seed_ % (uint32_t)(2 * span + 1)) - span;
+        if (delay < 100) delay = 100;
+    }
     backoff_ms *= 2;
     if (backoff_ms > 30000) backoff_ms = 30000;
     htimer_t* t = htimer_add(loop, reconnectCb, (uint32_t)delay, 1);
     hevent_set_userdata(t, this);
 }
 
+// 切到下一个可用地址；全部失败时保持当前地址继续重试
+void TunnelLink::advanceEndpoint(const char* why) {
+    if (endpoints.size() <= 1) return;
+    size_t next = ep_index_;
+    for (size_t i = 1; i <= endpoints.size(); ++i) {
+        size_t cand = (ep_index_ + i) % endpoints.size();
+        if (ep_auth_bad_.size() > cand && ep_auth_bad_[cand]) continue;
+        next = cand;
+        break;
+    }
+    if (next == ep_index_) return;
+    logf_("[%s] failover %s:%d -> %s:%d (%s)", logTag(),
+          endpoints[ep_index_].host.c_str(), endpoints[ep_index_].port,
+          endpoints[next].host.c_str(), endpoints[next].port, why);
+    size_t from = ep_index_;
+    ep_index_ = next;
+    onEndpointChange(from, next);
+}
+
 void TunnelLink::init(hloop_t* loop) {
     this->loop = loop;
+    if (endpoints.empty()) {
+        TunnelEndpoint ep;
+        ep.host = (host && host[0]) ? host : "127.0.0.1";
+        ep.port = port > 0 ? port : 8443;
+        endpoints.push_back(ep);
+    }
+    if (ep_index_ >= endpoints.size()) ep_index_ = 0;
+    ep_auth_bad_.assign(endpoints.size(), 0);
+    if (jitter_seed_ == 0) {
+        jitter_seed_ = (uint32_t)(hloop_now_ms(loop) ^ (uint64_t)(uintptr_t)this);
+        if (jitter_seed_ == 0) jitter_seed_ = 1;
+    }
     onReconnect();
     htimer_t* t = htimer_add(loop, pingCb, 15000, INFINITE);
     hevent_set_userdata(t, this);

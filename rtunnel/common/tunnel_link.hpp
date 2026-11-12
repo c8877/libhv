@@ -6,6 +6,23 @@
 
 #include "rtnp/codec.hpp"
 
+#include <string>
+#include <vector>
+
+struct TunnelEndpoint {
+    std::string host;
+    int         port = 8443;
+};
+
+// 解析 relay 地址列表（agent/client 的 --server 共用）：
+//   "h"               -> h:default_port
+//   "h:8443"          -> h:8443
+//   "[::1]:8443"      -> ::1:8443
+//   "h1,h2:9000"      -> 两个地址
+// 最多保留 8 个，多余的丢弃。格式错误返回 false 并填充 err。
+bool tunnel_parse_endpoints(const std::string& spec, int default_port,
+                            std::vector<TunnelEndpoint>& out, std::string& err);
+
 class TunnelLink {
 public:
     TunnelLink() = default;
@@ -19,6 +36,7 @@ public:
     // 配置（init 前填）
     const char* host = "127.0.0.1";
     int         port = 8443;
+    std::vector<TunnelEndpoint> endpoints;   // 非空时优先于 host/port
     char        tls_ca[256] = {0};
     char        tls_cert[256] = {0};
     char        tls_key[256] = {0};
@@ -33,6 +51,8 @@ public:
     int         backoff_ms = 1000;
 
     bool ready() const { return state == 2 && io && !hio_is_closed(io); }
+    size_t endpointIndex() const { return ep_index_; }
+    const TunnelEndpoint& currentEndpoint() const { return endpoints[ep_index_]; }
 
 protected:
     virtual uint8_t     role() const = 0;      // rtnp::ROLE_AGENT / ROLE_CLIENT
@@ -44,6 +64,8 @@ protected:
     virtual void        onFrame(rtnp::Frame* f) = 0;  // READY 后的会话级帧
     virtual void        onLinkDown() = 0;      // 断线：子类清理自己的流表
     virtual bool        autoReconnect() const { return true; }  // shell 等一次性会话返回 false
+    // 已切换到新 relay（from -> to）。client 用它处理随需 agent 的绑定关系
+    virtual void        onEndpointChange(size_t from, size_t to) { (void)from; (void)to; }
 
 private:
     void handleFrame(rtnp::Frame* f);
@@ -55,11 +77,15 @@ private:
     void onPing();
     void onReconnect();
     void scheduleReconnect();
+    void advanceEndpoint(const char* why);
 
     rtnp::Decoder in_;
     htimer_t*     hs_timer_ = nullptr;   // 握手/认证阶段超时
     int           ping_unacked_ = 0;     // 连续未获 PONG 的 PING 数
     int           auth_fatal_ = 0;       // 认证被永久拒绝：不再重连
+    size_t        ep_index_ = 0;         // 当前 relay 下标
+    std::vector<char> ep_auth_bad_;      // 各地址是否被凭证拒绝
+    uint32_t      jitter_seed_ = 0;
 
     // libhv C 回调的薄封装（对象经 hio_context / hevent_userdata 取回）
     static void tunnelReadCb(hio_t* io, void* buf, int n);

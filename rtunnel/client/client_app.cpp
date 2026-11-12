@@ -416,10 +416,28 @@ void ClientApp::spawnAgent(const char* devid) {
     snprintf(port_s, sizeof(port_s), "%d", port);
     snprintf(idle_s, sizeof(idle_s), "%d", agent_idle);
 
-    const char* argv[32];
+    // 把完整 relay 列表传给子 agent，让它也能故障切换
+    char ep_buf[8][300];
+    const char* ep_arg[8] = {0};
+    int nep = (int)endpoints.size();
+    if (nep > 8) nep = 8;
+    for (int i = 0; i < nep; ++i) {
+        const TunnelEndpoint& ep = endpoints[i];
+        if (ep.host.find(':') != std::string::npos) {
+            snprintf(ep_buf[i], sizeof(ep_buf[i]), "[%s]:%d", ep.host.c_str(), ep.port);
+        } else {
+            snprintf(ep_buf[i], sizeof(ep_buf[i]), "%s:%d", ep.host.c_str(), ep.port);
+        }
+        ep_arg[i] = ep_buf[i];
+    }
+
+    const char* argv[64];
     int argc = 0;
     argv[argc++] = path;
-    argv[argc++] = "--server"; argv[argc++] = host;
+    for (int i = 0; i < nep; ++i) {
+        argv[argc++] = "--server"; argv[argc++] = ep_arg[i];
+    }
+    if (nep == 0) { argv[argc++] = "--server"; argv[argc++] = host; }
     argv[argc++] = "--port";   argv[argc++] = port_s;
     argv[argc++] = "--devid";  argv[argc++] = devid;
     argv[argc++] = "--allow-shell";
@@ -566,17 +584,30 @@ void ClientApp::onLinkDown() {
     }
 }
 
+// 换了 relay：随需 agent 仍绑在旧 relay 上，杀掉让新 relay 重新触发拉起
+void ClientApp::onEndpointChange(size_t from, size_t to) {
+    (void)from; (void)to;
+    for (auto& c : children) {
+        if (c.pid > 0) {
+            kill(c.pid, SIGTERM);
+            logf_("[client] spawn agent %s stopped (relay switched)", c.devid);
+            c.pid = -1;
+        }
+    }
+}
+
 // ---------------------------------------------------------------- 入口
 
 int ClientApp::run(int argc, char** argv) {
     g_self = this;
 
     const char* shell_devid = NULL;
+    std::vector<std::string> servers;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "shell") == 0 && i + 1 < argc) {
             shell_devid = argv[++i];
         } else if (strcmp(argv[i], "--server") == 0 && i + 1 < argc) {
-            host = argv[++i];
+            servers.push_back(argv[++i]);
         } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             port = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--user") == 0 && i + 1 < argc) {
@@ -640,13 +671,28 @@ int ClientApp::run(int argc, char** argv) {
             verbose = 1;
         } else {
             fprintf(stderr,
-                "Usage: %s --user U [--token T] [--server H] [--port P] [--socks5 HOST:PORT]\n"
+                "Usage: %s --user U [--token T] [--server H[:P] ...] [--port P] [--socks5 HOST:PORT]\n"
                 "          [--forward 127.0.0.1:16022=devid:22 ...]\n"
                 "          [--allow-shell [--agent-path P] [--agent-idle S] [--agent-config F]] [--verbose]\n"
-                "          shell <devid>   # 直连设备免密 shell\n",
+                "          shell <devid>   # 直连设备免密 shell\n"
+                "       --server 可重复或逗号分隔，故障时按顺序自动切换（最多 8 个）\n",
                 argv[0]);
             return 1;
         }
+    }
+
+    {
+        std::string spec, err;
+        for (auto& s : servers) {
+            if (!spec.empty()) spec += ",";
+            spec += s;
+        }
+        if (spec.empty()) spec = "127.0.0.1";
+        if (!tunnel_parse_endpoints(spec, port, endpoints, err)) {
+            fprintf(stderr, "--server: %s\n", err.c_str());
+            return 1;
+        }
+        host = endpoints[0].host.c_str();
     }
     // 账号 Token 自带身份，允许省略 --user（AUTH_OK 里回填）
     bool token_identity = auth_token[0] != '\0' && strncmp(auth_token, "rtk_", 4) == 0;
@@ -664,6 +710,7 @@ int ClientApp::run(int argc, char** argv) {
         ShellClient sc;
         sc.host = host;
         sc.port = port;
+        sc.endpoints = endpoints;
         sc.verbose = verbose;
         snprintf(sc.user, sizeof(sc.user), "%s", user);
         snprintf(sc.auth_token, sizeof(sc.auth_token), "%s", auth_token);
