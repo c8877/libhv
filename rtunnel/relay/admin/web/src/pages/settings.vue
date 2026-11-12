@@ -12,12 +12,19 @@
           <div v-if="d.desc" class="muted">{{ d.desc }}<span v-if="d.min || d.max"> · 范围 {{ d.min }}–{{ d.max }}</span></div>
         </el-descriptions-item>
       </el-descriptions>
+      <div v-if="g.name === '告警' && isAdmin" class="alert-bar">
+        <span class="muted">{{ alertText }}</span>
+        <span class="spacer" />
+        <el-button size="small" :loading="testing" @click="sendTest">发送测试</el-button>
+      </div>
     </div>
 
     <el-dialog v-model="dlg" :title="'编辑 ' + (group ? group.name : '')" width="520px">
       <el-form label-width="150px">
         <el-form-item v-for="d in (group ? group.defs : [])" :key="d.key" :label="d.label">
-          <el-input v-if="isText(d)" v-model="form[d.key]" />
+          <el-input v-if="isText(d)" v-model="form[d.key]"
+                    :type="d.secret ? 'password' : 'text'" :show-password="!!d.secret"
+                    :maxlength="Number(d.maxlen) || 64" />
           <template v-else>
             <el-input-number v-model="form[d.key]" :min="Number(d.min)" :max="Number(d.max)" />
             <span v-if="d.unit" class="unit">{{ d.unit }}</span>
@@ -36,10 +43,11 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Api } from '@/shared/api.js'
-import { auth } from '@/shared/store.js'
+import { auth, roleOf } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 
 const { isPhone } = useBreakpoint()
+const isAdmin = computed(() => roleOf() === 'admin')
 const st = ref(auth.settings || {})
 const schema = computed(() => st.value._schema || [])
 const groups = computed(() => {
@@ -59,12 +67,25 @@ const dlg = ref(false)
 const saving = ref(false)
 const group = ref(null)
 const form = reactive({})
+const alertStatus = ref(null)
+const testing = ref(false)
+const alertText = computed(() => {
+  const s = alertStatus.value
+  if (!s) return '告警状态加载中…'
+  if (!s.enabled) return '告警未启用'
+  let t = s.sent_total ? ('已发送 ' + s.sent_total + ' 条') : '尚未发送'
+  if (s.queue) t += '，队列 ' + s.queue
+  if (s.devices_offline) t += '，离线设备 ' + s.devices_offline
+  if (s.last_error) t += ' · 最近错误：' + s.last_error
+  return t
+})
 
 function isText(d) {
   return Number(d.min) === 0 && Number(d.max) === 0
 }
 function valueOf(d) {
   const v = st.value[d.key]
+  if (d.secret) return v ? '已配置' : '—'
   return v === undefined || v === '' ? '—' : v
 }
 
@@ -88,10 +109,32 @@ async function save() {
     auth.settings = st.value
     ElMessage.success('已保存，立即生效')
     dlg.value = false
+    loadAlertStatus()
   } catch (e) {
     ElMessage.error('保存失败：' + e.message)
   } finally {
     saving.value = false
+  }
+}
+
+async function loadAlertStatus() {
+  try {
+    alertStatus.value = await Api.get('/api/v1/alerts/status')
+  } catch (e) {
+    alertStatus.value = null
+  }
+}
+
+async function sendTest() {
+  testing.value = true
+  try {
+    await Api.post('/api/v1/alerts/test', {})
+    ElMessage.success('测试告警已入队，请查看通知渠道')
+    setTimeout(loadAlertStatus, 1500)
+  } catch (e) {
+    ElMessage.error('发送失败：' + e.message)
+  } finally {
+    testing.value = false
   }
 }
 
@@ -102,6 +145,7 @@ async function load() {
   } catch (e) {
     ElMessage.error('加载失败：' + e.message)
   }
+  loadAlertStatus()
 }
 
 onMounted(load)
@@ -109,4 +153,5 @@ onMounted(load)
 
 <style scoped>
 .unit { margin-left: 6px; color: var(--el-text-color-secondary); font-size: 12px; }
+.alert-bar { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 </style>

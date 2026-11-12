@@ -345,6 +345,7 @@ int AdminServer::start(const AdminConfig& cfg) {
             audit_.rotate(100 * 1024 * 1024);
         }
     });
+    spawnWorker([this]() { alertLoop(); });
 
     char host[64] = "127.0.0.1";
     int port = 9443;
@@ -413,6 +414,7 @@ int AdminServer::start(const AdminConfig& cfg) {
             return -1;
         }
         server_.https_port = port;   // 只开 HTTPS，不开明文 HTTP
+        admin_cert_path_ = tls_crt;  // 证书到期检查也会盯它
     } else {
         server_.setPort(port);
     }

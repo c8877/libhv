@@ -31,7 +31,40 @@ const Def kDefs[] = {
     {"ui.site_title",        "rtunnel", 0, 0,    "站点标题",       "",    "展示", "浏览器标题和页面标题"},
     {"token.max_per_account","20",   1, 200,      "单账号 Token 上限","个", "接入账号", "每个账号可同时存在的 Token 数"},
     {"token.usage_flush_ms", "5000", 1000, 60000,"用量落库间隔",   "ms",  "接入账号", "relay 用量写回数据库的间隔"},
+    {"alert.enabled",        "0",   0, 1,        "启用告警",       "",    "告警", "总开关，关闭后不发送任何通知"},
+    {"alert.kind",           "generic", 0, 0,    "通知渠道",       "",    "告警", "generic / wecom / dingtalk / feishu"},
+    {"alert.webhook_url",    "",    0, 0,        "Webhook 地址",   "",    "告警", "http(s):// 完整地址，留空则不发送"},
+    {"alert.webhook_secret", "",    0, 0,        "签名密钥",       "",    "告警", "可选：钉钉加签或通用 HMAC-SHA256"},
+    {"alert.device_offline", "1",   0, 1,        "设备离线",       "",    "告警", "设备断开超过阈值时通知"},
+    {"alert.offline_after_s","120", 30, 3600,    "离线判定",       "秒",  "告警", "断开多久判定为离线"},
+    {"alert.cert_warn_days", "30",  1, 365,      "证书预警",       "天",  "告警", "剩余多少天开始提醒"},
+    {"alert.cert_crit_days", "7",   1, 90,       "证书紧急",       "天",  "告警", "剩余多少天升级为严重"},
+    {"alert.task_fail",      "1",   0, 1,        "分发失败",       "",    "告警", "分发任务最终失败或超时时通知"},
+    {"alert.cooldown_s",     "300", 10, 86400,   "同类冷却",       "秒",  "告警", "同一事件的最小发送间隔"},
 };
+
+// 字符串类配置的最大长度（默认 64）
+int maxLenOf(const std::string& key) {
+    if (key == "alert.webhook_url") return 512;
+    if (key == "alert.webhook_secret") return 256;
+    return 64;
+}
+
+// 是否敏感：GET 时对非 admin 脱敏，审计日志写 ***
+bool isSecretKey(const std::string& key) {
+    return key == "alert.webhook_url" || key == "alert.webhook_secret";
+}
+
+// 只保留 scheme+主机+末 4 位，够判断配没配、指向谁，又不会泄露完整 token
+std::string maskUrl(const std::string& url) {
+    if (url.empty()) return "";
+    size_t scheme = url.find("://");
+    size_t host_start = scheme == std::string::npos ? 0 : scheme + 3;
+    size_t slash = url.find('/', host_start);
+    std::string head = url.substr(0, slash == std::string::npos ? url.size() : slash);
+    std::string tail = url.size() > 4 ? url.substr(url.size() - 4) : url;
+    return head + "/…" + tail;
+}
 
 const Def* findDef(const std::string& k) {
     for (auto& d : kDefs) if (k == d.key) return &d;
@@ -42,7 +75,17 @@ bool validate(const std::string& key, const std::string& val, std::string& err) 
     const Def* d = findDef(key);
     if (!d) { err = "unknown key"; return false; }
     if (d->lo == 0 && d->hi == 0) {
-        if (val.size() > 64) { err = "value too long"; return false; }
+        if (val.size() > (size_t)maxLenOf(key)) { err = "value too long"; return false; }
+        if (key == "alert.kind" &&
+            val != "generic" && val != "wecom" && val != "dingtalk" && val != "feishu") {
+            err = "kind must be generic/wecom/dingtalk/feishu";
+            return false;
+        }
+        if (key == "alert.webhook_url" && !val.empty() &&
+            val.rfind("http://", 0) != 0 && val.rfind("https://", 0) != 0) {
+            err = "webhook_url must start with http:// or https://";
+            return false;
+        }
         return true;
     }
     if (val.empty()) { err = "empty value"; return false; }
@@ -75,15 +118,33 @@ int AdminServer::settingInt(const std::string& key, int def) {
     return atoi(it->second.c_str());
 }
 
+std::string AdminServer::settingStr(const std::string& key, const std::string& def) {
+    std::lock_guard<std::mutex> lk(settings_mu_);
+    auto it = settings_.find(key);
+    if (it == settings_.end()) return def;
+    return it->second;
+}
+
 void AdminServer::handleSettingsGet(const HttpContextPtr& ctx) {
+    std::string role = roleOf(ctx);
+    bool admin = (role == "admin");
     std::lock_guard<std::mutex> lk(settings_mu_);
     nlohmann::json j = nlohmann::json::object();
-    for (auto& kv : settings_) j[kv.first] = kv.second;
+    for (auto& kv : settings_) {
+        if (!admin && isSecretKey(kv.first)) continue;   // 非 admin 不下发敏感项
+        j[kv.first] = kv.second;
+    }
+    if (!admin) {
+        j["alert.webhook_url"] = maskUrl(settings_.count("alert.webhook_url")
+                                             ? settings_["alert.webhook_url"] : "");
+        j["_redacted"] = true;
+    }
     nlohmann::json schema = nlohmann::json::array();
     for (auto& d : kDefs) {
         schema.push_back({{"key", d.key}, {"label", d.label}, {"unit", d.unit},
                           {"group", d.group}, {"min", d.lo}, {"max", d.hi},
-                          {"desc", d.desc}});
+                          {"desc", d.desc}, {"maxlen", maxLenOf(d.key)},
+                          {"secret", isSecretKey(d.key)}});
     }
     j["_schema"] = schema;
     ctx->send(j.dump());
@@ -120,7 +181,9 @@ void AdminServer::handleSettingsSet(const HttpContextPtr& ctx) {
             ctx->send("{\"error\":\"db error\"}");
             return;
         }
-        audit(by, "settings.update", kv.first + " = " + kv.second);
+        audit(by, "settings.update", isSecretKey(kv.first)
+                                          ? kv.first + " = ***"
+                                          : kv.first + " = " + kv.second);
     }
     {
         std::lock_guard<std::mutex> lk(settings_mu_);

@@ -15,3 +15,6 @@ bool admin_tls_ensure_selfsigned(const std::string& dir, const std::string& extr
                                  int days, int renew_days,
                                  std::string& cert_path, std::string& key_path,
                                  std::string& err);
+
+// 读取证书剩余天数；文件不可读/无 OpenSSL 时返回 false
+bool admin_tls_cert_days_left(const std::string& cert_path, int& days);

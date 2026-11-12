@@ -294,3 +294,21 @@ bool admin_tls_ensure_selfsigned(const std::string& dir, const std::string& extr
     return true;
 #endif
 }
+
+bool admin_tls_cert_days_left(const std::string& cert_path, int& days) {
+#if !defined(WITH_OPENSSL)
+    (void)cert_path; (void)days;
+    return false;
+#else
+    FILE* fp = fopen(cert_path.c_str(), "r");
+    if (!fp) return false;
+    X509* x = PEM_read_X509(fp, NULL, NULL, NULL);
+    fclose(fp);
+    if (!x) return false;
+    int pday = 0, psec = 0;
+    bool ok = ASN1_TIME_diff(&pday, &psec, NULL, X509_getm_notAfter(x)) == 1;
+    X509_free(x);
+    days = pday;
+    return ok;
+#endif
+}

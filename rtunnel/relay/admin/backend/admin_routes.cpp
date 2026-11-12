@@ -38,6 +38,14 @@ void AdminServer::registerRoutes() {
         handleSettingsSet(ctx);
         return (int)ctx->response->status_code;
     });
+    access(ROLE_ADMIN, "GET", "/api/v1/alerts/status", &AdminServer::handleAlertStatus);
+    service_.Handle("POST", "/api/v1/alerts/test", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_ADMIN, role);
+        if (rc) return rc;
+        handleAlertTest(ctx);
+        return (int)ctx->response->status_code;
+    });
     service_.Handle("PUT", "/api/v1/me/profile", [this](const HttpContextPtr& ctx) {
         std::string role;
         int rc = requireRole(ctx, ROLE_VIEWER, role);

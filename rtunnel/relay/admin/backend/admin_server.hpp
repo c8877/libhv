@@ -9,6 +9,7 @@
 #include <string>
 #include <map>
 #include <set>
+#include <deque>
 #include <thread>
 #include <mutex>
 #include <atomic>
@@ -50,6 +51,17 @@ struct AdminActor {
     long long   id = 0;          // 0 = bootstrap token
     std::string username;
     std::string role;            // superadmin / admin / user / token-role
+};
+
+// 一条待发告警：由采集线程入队，通知线程发送
+struct AlertEvent {
+    std::string key;        // 去重键（同键在冷却期内只发一次）
+    std::string event;      // device.offline / device.online / cert.expiring / task.failed / test
+    std::string level;      // info / warning / critical
+    std::string title;
+    std::string text;
+    std::string details;    // JSON 对象字符串
+    int         cooldown_s = 0;   // 0 = 用全局 alert.cooldown_s
 };
 
 class AdminServer {
@@ -111,8 +123,18 @@ private:
     // api_settings.cpp
     void loadSettings();
     int  settingInt(const std::string& key, int def);
+    std::string settingStr(const std::string& key, const std::string& def);
     void handleSettingsGet(const HttpContextPtr& ctx);
     void handleSettingsSet(const HttpContextPtr& ctx);
+    // api_alerts.cpp + alert_notifier.cpp
+    void alertLoop();
+    void alertEnqueue(const AlertEvent& ev);
+    void alertCheckDevices(long long now_ms);
+    void alertCheckCerts(long long now_ms);
+    bool alertSend(const AlertEvent& ev);
+    std::string alertStatusJson();
+    void handleAlertStatus(const HttpContextPtr& ctx);
+    void handleAlertTest(const HttpContextPtr& ctx);
     void handleProfileGet(const HttpContextPtr& ctx);
     void handleProfileSet(const HttpContextPtr& ctx);
     void handleLogoutAll(const HttpContextPtr& ctx);
@@ -228,6 +250,26 @@ private:
     void onWsOpen(const WebSocketChannelPtr& channel, const HttpRequestPtr& req);
     void onWsMessage(const WebSocketChannelPtr& channel, const std::string& msg);
     void onWsClose(const WebSocketChannelPtr& channel);
+
+public:
+    // 分发任务失败/超时（dist_scheduler 调用，随时可能来自 worker 线程）
+    void notifyTaskFailed(long long id, const std::string& devid,
+                          const std::string& status, const std::string& err);
+
+private:
+    // 告警状态（notifier 线程 + 采集共用，全部走 alert_mu_）
+    std::deque<AlertEvent>          alert_q_;
+    std::mutex                      alert_mu_;
+    std::map<std::string, long long> alert_last_sent_;    // key -> ms
+    std::map<std::string, long long> alert_agent_seen_;   // devid -> 最后在线 ms
+    std::map<std::string, int>       alert_agent_online_; // devid -> 1 在线
+    std::map<std::string, int>       alert_cert_level_;   // san -> 已发级别
+    long long alert_last_ok_ms_ = 0;
+    long long alert_last_try_ms_ = 0;
+    long long alert_sent_total_ = 0;
+    std::string alert_last_error_;
+    bool alert_baseline_done_ = false;
+    std::string admin_cert_path_;   // 管理台 TLS 证书（自签时为生成路径）
 };
 
 // 角色权重：viewer=1 operator=2 admin=3

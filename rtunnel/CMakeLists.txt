@@ -27,6 +27,7 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
                common/sha256.cpp common/token_util.cpp
                relay/admin/backend/admin_server.cpp
                relay/admin/backend/admin_tls.cpp
+               relay/admin/backend/alert_notifier.cpp
                relay/admin/backend/admin_routes.cpp
                relay/admin/backend/api_agents.cpp
                relay/admin/backend/api_streams.cpp

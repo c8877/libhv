@@ -44,12 +44,18 @@ void AdminServer::distTick() {
         long long deadline = j.value("deadline_at_ms", 0LL);
         int nr = retry + 1;
         long long backoff = nr == 1 ? 30000 : (nr == 2 ? 60000 : 120000);
+        const char* final_status = NULL;
         if (std::string(statusNow) == "timeout" || now >= deadline) {
             db_.distUpdate(id, "timeout", err, sent, 0, now, 0, retry);
+            final_status = "timeout";
         } else if (nr <= maxr && now + backoff < deadline) {
             db_.distUpdate(id, "queued", err, sent, 0, 0, now + backoff, nr);
         } else {
             db_.distUpdate(id, "failed", err, sent, 0, now, 0, nr);
+            final_status = "failed";
+        }
+        if (final_status) {
+            notifyTaskFailed(id, j.value("devid", std::string()), final_status, err);
         }
     };
 

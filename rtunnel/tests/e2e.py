@@ -309,6 +309,8 @@ def main():
     with open(clientusers, "w") as f:
         f.write("# user:token\ntester:tok-tester\nbob:tok-bob\nadmin:tok-admin\n")
     try:
+        webdist = os.path.join(ROOT, "rtunnel", "relay", "admin", "web", "dist")
+        docroot_args = ["--admin-docroot", webdist] if os.path.isdir(webdist) else []
         relay = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-relay"), "--host", "127.0.0.1", "--port", str(relay_port),
              "--acl", "tester=*", "--acl", "admin=a:*", "--acl-file", aclfile, "--drain-timeout", "500",
@@ -317,7 +319,7 @@ def main():
              "--admin-token", "admintok",
              "--admin-db", os.path.join(logdir, "admin.db"),
              "--admin-ca-cert", admin_ca_crt, "--admin-ca-key", admin_ca_key,
-             "--admin-cert-dir", certout, "--admin-file-dir", filedir] + tls_relay + ["--verbose"],
+             "--admin-cert-dir", certout, "--admin-file-dir", filedir] + docroot_args + tls_relay + ["--verbose"],
             stdout=logs["relay"], stderr=subprocess.STDOUT, env=env)
         procs.append(relay)
         time.sleep(0.3)
@@ -627,13 +629,15 @@ def main():
                 s.close()
             with urllib.request.urlopen(admin_base + "/", timeout=5) as r:
                 html = r.read().decode()
-            check("admin 前端页面", "RTUNNEL" in html and "/admin.js" in html)
-            with urllib.request.urlopen(admin_base + "/admin.js", timeout=5) as r:
-                js = r.read().decode()
-            check("admin.js 可访问", "Router" in js)
-            with urllib.request.urlopen(admin_base + "/admin.css", timeout=5) as r:
-                css = r.read().decode()
-            check("admin.css 可访问", "sidebar" in css)
+            check("admin 前端页面", '<div id="app">' in html, html[:80])
+            import re
+            m = re.search(r'src="(/assets/[^"]+\.js)"', html)
+            if m:
+                with urllib.request.urlopen(admin_base + m.group(1), timeout=5) as r:
+                    js = r.read().decode()
+                check("admin 静态资源可访问", len(js) > 1000, "len=%d" % len(js))
+            else:
+                check("admin 静态资源可访问", False, "no asset in html")
         except Exception as e:
             check("admin 管理台", False, str(e))
 
