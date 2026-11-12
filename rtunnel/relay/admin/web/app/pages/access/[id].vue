@@ -212,7 +212,6 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import { Api } from '~/shared/api.js'
 import { canManage, roleOf } from '~/shared/store.js'
 import { bytes, time } from '~/shared/utils.js'

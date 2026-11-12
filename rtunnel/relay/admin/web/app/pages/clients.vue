@@ -34,7 +34,6 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { Api } from '~/shared/api.js'
 import { ago, bytes } from '~/shared/utils.js'
 import { useBreakpoint } from '~/shared/useBreakpoint.js'

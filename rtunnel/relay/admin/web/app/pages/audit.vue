@@ -40,7 +40,6 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
 import { Api } from '~/shared/api.js'
 import { useBreakpoint } from '~/shared/useBreakpoint.js'
 

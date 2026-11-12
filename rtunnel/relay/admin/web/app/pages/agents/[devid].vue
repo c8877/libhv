@@ -128,7 +128,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import Chart from 'chart.js/auto'
 import { Api } from '~/shared/api.js'
 import { useBreakpoint } from '~/shared/useBreakpoint.js'

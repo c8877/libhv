@@ -200,22 +200,44 @@ int AdminServer::serveFrontend(const HttpContextPtr& ctx, const char* name, cons
         ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
         return 404;
     }
+    auto read_file = [](const std::string& path, std::string& body) -> bool {
+        FILE* fp = fopen(path.c_str(), "rb");
+        if (!fp) return false;
+        fseek(fp, 0, SEEK_END);
+        long n = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        body.resize(n > 0 ? n : 0);
+        bool ok = n > 0 && fread(&body[0], 1, n, fp) == (size_t)n;
+        fclose(fp);
+        if (!ok) body.clear();
+        return ok;
+    };
     if (!cfg_.docroot.empty()) {
         std::string path = cfg_.docroot + "/" + name;
-        FILE* fp = fopen(path.c_str(), "rb");
-        if (fp) {
-            fseek(fp, 0, SEEK_END);
-            long n = ftell(fp);
-            fseek(fp, 0, SEEK_SET);
+        // 构建期生成的 .br/.gz 预压缩文件，按 Accept-Encoding 直接返回
+        std::string ae = ctx->header("Accept-Encoding");
+        const char* encoding = NULL;
+        const char* ext = NULL;
+        if (ae.find("br") != std::string::npos) {
+            encoding = "br"; ext = ".br";
+        } else if (ae.find("gzip") != std::string::npos) {
+            encoding = "gzip"; ext = ".gz";
+        }
+        if (encoding) {
             std::string body;
-            body.resize(n > 0 ? n : 0);
-            if (n > 0 && fread(&body[0], 1, n, fp) != (size_t)n) body.clear();
-            fclose(fp);
-            if (!body.empty()) {
+            if (read_file(path + ext, body)) {
                 ctx->response->content_type = http_content_type_enum(ctype);
-                ctx->response->body = body;
+                ctx->response->headers["Content-Encoding"] = encoding;
+                ctx->response->headers["Vary"] = "Accept-Encoding";
+                ctx->response->body = std::move(body);
                 return 200;
             }
+        }
+        std::string body;
+        if (read_file(path, body)) {
+            ctx->response->content_type = http_content_type_enum(ctype);
+            ctx->response->body = std::move(body);
+            return 200;
         }
     }
     for (int i = 0; i < g_embedded_frontend_count; ++i) {

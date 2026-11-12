@@ -22,7 +22,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import '@xterm/xterm/css/xterm.css'
 import { TermMgr } from '~/shared/term.js'
 import { auth } from '~/shared/store.js'

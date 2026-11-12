@@ -35,7 +35,6 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
 import { Api } from '~/shared/api.js'
 import { auth } from '~/shared/store.js'
 import { useBreakpoint } from '~/shared/useBreakpoint.js'

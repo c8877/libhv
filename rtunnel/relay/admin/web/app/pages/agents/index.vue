@@ -61,7 +61,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import { Api } from '~/shared/api.js'
 import { canManage, canOperate } from '~/shared/store.js'
 import { ago, bytes } from '~/shared/utils.js'

@@ -2,9 +2,13 @@ export default defineNuxtConfig({
   ssr: false,
   devtools: { enabled: false },
   compatibilityDate: '2026-11-01',
+  modules: ['@element-plus/nuxt'],
+  elementPlus: {
+    importStyle: 'css',
+    themes: ['dark'],
+    installMethods: ['ElMessage', 'ElMessageBox', 'ElNotification', 'ElLoading'],
+  },
   css: [
-    'element-plus/dist/index.css',
-    'element-plus/theme-chalk/dark/css-vars.css',
     '~/assets/css/main.css',
   ],
   app: {

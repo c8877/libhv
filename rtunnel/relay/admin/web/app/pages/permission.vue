@@ -331,7 +331,6 @@
 
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import { Api } from '~/shared/api.js'
 import { canManage, roleOf } from '~/shared/store.js'
 import { ago } from '~/shared/utils.js'

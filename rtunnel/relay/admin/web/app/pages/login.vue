@@ -30,7 +30,6 @@
 <script setup>
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { auth, login, setup } from '~/shared/store.js'
 
 definePageMeta({ layout: 'blank' })

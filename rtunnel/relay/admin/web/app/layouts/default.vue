@@ -84,7 +84,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import { Api } from '~/shared/api.js'
 import {
   auth, avatarColor, logout, roleOf, ROLE_NAMES, saveTheme, siteTitle, overview,

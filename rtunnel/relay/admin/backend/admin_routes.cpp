@@ -417,7 +417,9 @@ void AdminServer::registerRoutes() {
         std::string tail = path.size() > 4 ? path.substr(path.size() - 4) : "";
         if (tail == ".css") ctype = "text/css";
         else if (path.size() > 5 && path.compare(path.size() - 5, 5, ".json") == 0) ctype = "application/json";
-        return serveFrontend(ctx, path.c_str() + 1, ctype);
+        int rc = serveFrontend(ctx, path.c_str() + 1, ctype);
+        if (rc == 200) ctx->response->headers["Cache-Control"] = "public, max-age=31536000, immutable";
+        return rc;
     });
     service_.GET("/admin_agent.js", [this](const HttpContextPtr& ctx) {
         return serveFrontend(ctx, "admin_agent.js", "application/javascript");
