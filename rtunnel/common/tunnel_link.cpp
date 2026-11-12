@@ -143,16 +143,14 @@ void TunnelLink::handleFrame(rtnp::Frame* f) {
         uint16_t code = r.u16();
         std::string msg = r.strBytes();
         logf_("[%s] auth failed: code=%u %s", logTag(), code, msg.c_str());
-        if (code == rtnp::TOKEN_EXPIRED || code == rtnp::TOKEN_DISABLED ||
-            code == rtnp::QUOTA_EXCEEDED) {
-            // 该地址凭证被永久拒绝：换下一个地址；全部被拒才停止重连
-            if (ep_index_ < ep_auth_bad_.size()) ep_auth_bad_[ep_index_] = 1;
-            bool all_bad = !ep_auth_bad_.empty();
-            for (char bad : ep_auth_bad_) {
-                if (!bad) { all_bad = false; break; }
-            }
-            if (all_bad) auth_fatal_ = 1;
+        // 凭证问题不会自愈：该地址标记失败，继续试其它 relay；
+        // 全部地址都拒绝才彻底停止重连（运维改完配置后重启进程即可）。
+        if (ep_index_ < ep_auth_bad_.size()) ep_auth_bad_[ep_index_] = 1;
+        bool all_bad = !ep_auth_bad_.empty();
+        for (char bad : ep_auth_bad_) {
+            if (!bad) { all_bad = false; break; }
         }
+        if (all_bad) auth_fatal_ = 1;
         hio_close(io);
         return;
     }

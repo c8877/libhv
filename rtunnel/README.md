@@ -88,7 +88,8 @@ build/bin/rtunnel-client --server r1.example.com --server r2.example.com --port 
 
 - 最多 8 个地址；连接失败、握手/认证超时、已认证后掉线，都会切下一个地址
 - 退避仍是 1s→30s，多地址时加 ±20% 抖动；AUTH_OK 后重置
-- 凭证被永久拒绝（token 过期/禁用/超额）时按地址标记，全部地址都被拒才停止重连
+- 任何认证失败（token 错/过期/禁用/超额、证书身份不匹配）都会把当前地址标记为不可用，
+  继续试下一个；全部地址都被拒才停止重连（改完配置重启进程即可）
 - client 的按需 agent 继承完整地址列表；client 切到新 relay 时会停掉旧 relay 上的随需 agent
 - `shell <devid>` 子命令在建立会话前也会依次尝试后续地址
 
