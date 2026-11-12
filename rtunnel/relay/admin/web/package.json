@@ -1,23 +1,26 @@
 {
-  "name": "rtunnel-admin-nuxt",
+  "name": "rtunnel-admin-web",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "nuxt dev",
-    "build": "nuxt build",
-    "generate": "nuxt generate && node scripts/precompress.mjs",
-    "preview": "nuxt preview",
-    "precompress": "node scripts/precompress.mjs"
+    "dev": "vite",
+    "build": "vite build && node scripts/precompress.mjs dist",
+    "preview": "vite preview",
+    "precompress": "node scripts/precompress.mjs dist"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",
-    "@element-plus/nuxt": "^1.1.5",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
     "chart.js": "^4.6.1",
     "element-plus": "^2.14.8",
-    "nuxt": "^4.6.4",
     "vue": "^3.5.45",
     "vue-router": "^4.6.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.10",
+    "unplugin-auto-import": "^21.1.0",
+    "unplugin-vue-components": "^32.1.0",
+    "vite": "^8.3.8"
   }
 }

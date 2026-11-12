@@ -410,17 +410,28 @@ void AdminServer::registerRoutes() {
         if (rc == HTTP_STATUS_NOT_FOUND) rc = serveFrontend(ctx, "index.html", "text/html");
         return rc;
     });
-    // Nuxt/Vite 构建产物：/_nuxt/<file>
-    service_.GET("/_nuxt/*", [this](const HttpContextPtr& ctx) {
+    // 前端静态产物：Nuxt(_nuxt/) 与 Vite(assets/) 共用
+    auto static_asset = [this](const HttpContextPtr& ctx) {
         std::string path = ctx->path();
+        auto ends_with = [&path](const char* suffix) {
+            size_t n = strlen(suffix);
+            return path.size() >= n && path.compare(path.size() - n, n, suffix) == 0;
+        };
         const char* ctype = "application/javascript";
-        std::string tail = path.size() > 4 ? path.substr(path.size() - 4) : "";
-        if (tail == ".css") ctype = "text/css";
-        else if (path.size() > 5 && path.compare(path.size() - 5, 5, ".json") == 0) ctype = "application/json";
+        if (ends_with(".css")) ctype = "text/css";
+        else if (ends_with(".json")) ctype = "application/json";
+        else if (ends_with(".svg")) ctype = "image/svg+xml";
+        else if (ends_with(".png")) ctype = "image/png";
+        else if (ends_with(".ico")) ctype = "image/x-icon";
+        else if (ends_with(".woff2")) ctype = "font/woff2";
+        else if (ends_with(".woff")) ctype = "font/woff";
+        else if (ends_with(".ttf")) ctype = "font/ttf";
         int rc = serveFrontend(ctx, path.c_str() + 1, ctype);
         if (rc == 200) ctx->response->headers["Cache-Control"] = "public, max-age=31536000, immutable";
         return rc;
-    });
+    };
+    service_.GET("/_nuxt/*", static_asset);
+    service_.GET("/assets/*", static_asset);
     service_.GET("/admin_agent.js", [this](const HttpContextPtr& ctx) {
         return serveFrontend(ctx, "admin_agent.js", "application/javascript");
     });
