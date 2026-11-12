@@ -130,11 +130,12 @@ static std::string buildSan(const std::string& extra_host) {
     if (hostname[0] && strcmp(hostname, "localhost") != 0) {
         appendSan(san, std::string("DNS:") + hostname);
     }
-    if (!extra_host.empty()) {
+    // 监听地址：0.0.0.0/:: 这类通配地址没有意义，跳过
+    if (!extra_host.empty() && extra_host != "0.0.0.0" && extra_host != "::") {
         bool v6 = false;
         if (isIpLiteral(extra_host, v6)) {
             appendSan(san, "IP:" + extra_host);
-        } else if (extra_host != "localhost" && extra_host != "0.0.0.0" && extra_host != "::") {
+        } else if (extra_host != "localhost") {
             appendSan(san, "DNS:" + extra_host);
         }
     }
