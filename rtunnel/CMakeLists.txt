@@ -77,7 +77,7 @@ install(TARGETS rtunnel-relay rtunnel-agent rtunnel-client
 
 # ---------------------------------------------------------------- 部署目录
 # build/deploy/relay/{bin,service,web/dist}
-# build/deploy/agent/{bin,service}
+# build/deploy/agent/{bin,service}，其中 rtunnel-agent 由 build_mp135.sh 交叉编译
 set(RTUNNEL_DEPLOY_DIR "${CMAKE_SOURCE_DIR}/build/deploy" CACHE PATH "rtunnel deploy output directory")
 set(RTUNNEL_WEB_DIST "${CMAKE_CURRENT_SOURCE_DIR}/relay/admin/web/dist")
 if(BUILD_SHARED)
@@ -91,7 +91,6 @@ set(RTUNNEL_STRIP_ARGS "")
 if(CMAKE_STRIP)
     list(APPEND RTUNNEL_STRIP_ARGS
         COMMAND ${CMAKE_STRIP} --strip-all "${RTUNNEL_DEPLOY_DIR}/relay/bin/rtunnel-relay"
-        COMMAND ${CMAKE_STRIP} --strip-all "${RTUNNEL_DEPLOY_DIR}/agent/bin/rtunnel-agent"
         COMMAND ${CMAKE_STRIP} --strip-all "${RTUNNEL_DEPLOY_DIR}/agent/bin/rtunnel-client")
 endif()
 add_custom_target(rtunnel-deploy
@@ -104,8 +103,6 @@ add_custom_target(rtunnel-deploy
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:rtunnel-relay> "${RTUNNEL_DEPLOY_DIR}/relay/bin/rtunnel-relay"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:rtunnel-agent> "${RTUNNEL_DEPLOY_DIR}/agent/bin/rtunnel-agent"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:rtunnel-client> "${RTUNNEL_DEPLOY_DIR}/agent/bin/rtunnel-client"
     ${RTUNNEL_STRIP_ARGS}
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -116,5 +113,5 @@ add_custom_target(rtunnel-deploy
             "${RTUNNEL_DEPLOY_DIR}/agent/service/rtunnel-agent.service"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${RTUNNEL_WEB_DIST}" "${RTUNNEL_DEPLOY_DIR}/relay/web/dist"
-    DEPENDS rtunnel-relay rtunnel-agent rtunnel-client
-    COMMENT "assembling rtunnel deploy directory")
+    DEPENDS rtunnel-relay rtunnel-client
+    COMMENT "assembling rtunnel deploy directory (agent: build_mp135.sh)")

@@ -1,0 +1,21 @@
+# STM32MP135（MYIR YF13x，Cortex-A7）交叉编译工具链
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR arm)
+
+set(MP135_TOOLCHAIN_DIR "/opt/mp135/local" CACHE PATH "mp135 toolchain directory")
+set(CMAKE_C_COMPILER   "${MP135_TOOLCHAIN_DIR}/arm-linux-gnueabi-gcc")
+set(CMAKE_CXX_COMPILER "${MP135_TOOLCHAIN_DIR}/arm-linux-gnueabi-g++")
+
+# 编译器自带 sysroot，避免 find_package 误用宿主机的 x86 库
+execute_process(COMMAND ${CMAKE_C_COMPILER} -print-sysroot
+                OUTPUT_VARIABLE MP135_SYSROOT
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(MP135_SYSROOT)
+    set(CMAKE_SYSROOT "${MP135_SYSROOT}")
+    set(CMAKE_FIND_ROOT_PATH "${MP135_SYSROOT}")
+endif()
+
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
