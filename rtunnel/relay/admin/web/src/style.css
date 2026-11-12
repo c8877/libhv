@@ -1,10 +1,37 @@
 :root {
+  /* 主题基色与圆角：Element 变量统一在这里调，页面无需改动 */
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 6px;
+  --el-bg-color-page: #f4f6fa;
+  --el-border-color-light: #e6eaf0;
+  --el-border-color-lighter: #edf0f5;
+  --el-fill-color-light: #f6f8fb;
+  --el-text-color-primary: #0f172a;
+  --el-text-color-regular: #334155;
+  --el-text-color-secondary: #64748b;
+
+  --app-radius: 12px;
+  --app-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 12px 32px -22px rgba(15, 23, 42, 0.28);
+  --app-nav-width: 232px;
+
   font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 14px;
   color-scheme: light;
 }
 
 html.dark {
+  --el-bg-color-page: #0e1117;
+  --el-bg-color: #161a22;
+  --el-bg-color-overlay: #1b202a;
+  --el-fill-color-light: #1f2530;
+  --el-fill-color-lighter: #1b202a;
+  --el-fill-color-blank: #161a22;
+  --el-border-color-light: #262c38;
+  --el-border-color-lighter: #222731;
+  --el-text-color-primary: #e6eaf2;
+  --el-text-color-regular: #cbd5e1;
+  --el-text-color-secondary: #94a3b8;
+  --app-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 16px 36px -24px rgba(0, 0, 0, 0.65);
   color-scheme: dark;
 }
 
@@ -16,16 +43,23 @@ body,
 }
 
 body {
-  background: var(--el-fill-color-light);
+  background: var(--el-bg-color-page);
   color: var(--el-text-color-primary);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* 页面通用容器：与 Element 卡片风格一致，后续页面共用 */
+::selection {
+  background: color-mix(in srgb, var(--el-color-primary) 26%, transparent);
+}
+
+/* 页面通用容器：卡片化但去掉 Element 默认的平铺感 */
 .panel {
   background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
-  padding: 16px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--app-radius);
+  box-shadow: var(--app-shadow);
+  padding: 18px;
   margin-bottom: 16px;
 }
 
@@ -33,13 +67,14 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .panel-head h2 {
   margin: 0;
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
 }
 
 .panel-head .spacer {
@@ -66,6 +101,78 @@ body {
   min-width: 0;
 }
 
+/* ---------------------------------------------------------------- 组件微调 */
+.el-button {
+  font-weight: 500;
+}
+
+.el-tag {
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+.el-table {
+  --el-table-header-bg-color: var(--el-fill-color-light);
+  --el-table-header-text-color: var(--el-text-color-secondary);
+  --el-table-row-hover-bg-color: var(--el-fill-color-light);
+  --el-table-border-color: var(--el-border-color-lighter);
+  font-size: 13px;
+}
+
+.el-table th.el-table__cell {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.el-table .cell {
+  line-height: 1.5;
+}
+
+.el-dialog {
+  border-radius: 14px;
+}
+
+.el-message-box {
+  border-radius: 14px;
+}
+
+.el-popover.el-popper,
+.el-dropdown__popper,
+.el-select__popper,
+.el-picker__popper {
+  border-radius: 10px;
+  box-shadow: 0 16px 40px -18px rgba(15, 23, 42, 0.35);
+}
+
+.el-card {
+  border-radius: var(--app-radius);
+}
+
+.el-descriptions__body {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* 主内容区滚动条：细一点，不抢视觉 */
+.page::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.page::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+}
+
+.page::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.55);
+}
+
+.page::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 @media (max-width: 900px) {
   .grid-2 {
     grid-template-columns: 1fr;
@@ -74,6 +181,7 @@ body {
 
 @media (max-width: 599px) {
   .panel {
-    padding: 12px;
+    padding: 14px;
+    border-radius: 10px;
   }
 }

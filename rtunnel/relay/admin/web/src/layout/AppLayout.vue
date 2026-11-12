@@ -165,35 +165,90 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 <style scoped>
 .layout {
   display: flex;
-  min-height: 100vh;
-  background: var(--el-fill-color-light);
+  height: 100vh;
+  overflow: hidden;
+  background: var(--el-bg-color-page);
 }
 .side {
-  width: 216px;
+  width: var(--app-nav-width);
   flex: none;
   display: flex;
   flex-direction: column;
-  background: var(--el-bg-color);
-  border-right: 1px solid var(--el-border-color-light);
+  background: linear-gradient(180deg, #141b2b 0%, #0f1420 100%);
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+}
+html.dark .side {
+  background: linear-gradient(180deg, #0b0f17 0%, #080b11 100%);
 }
 .logo {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 18px 20px 14px;
+  gap: 10px;
+  padding: 20px 18px 18px;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.01em;
 }
-.logo .mark { color: var(--el-color-primary); font-size: 16px; }
-.logo .name { font-size: 15px; }
-.menu { border-right: 0; flex: 1; }
-.menu :deep(.el-menu-item) { height: 42px; line-height: 42px; margin: 2px 8px; border-radius: 6px; }
-.menu :deep(.el-menu-item.is-active) { background: var(--el-color-primary-light-9); }
+.logo .mark {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  color: #fff;
+  font-size: 16px;
+  background: linear-gradient(135deg, var(--el-color-primary), color-mix(in srgb, var(--el-color-primary) 55%, #7c3aed));
+  box-shadow: 0 8px 18px -10px var(--el-color-primary);
+}
+.logo .name { color: #f8fafc; font-size: 16px; }
+.menu {
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: rgba(203, 213, 225, 0.78);
+  --el-menu-hover-bg-color: rgba(148, 163, 184, 0.1);
+  --el-menu-hover-text-color: #fff;
+  --el-menu-active-color: #fff;
+  --el-menu-item-height: 40px;
+  border-right: 0;
+  flex: 1;
+  padding: 4px 0;
+  overflow-y: auto;
+}
+.menu :deep(.el-menu-item) {
+  position: relative;
+  height: 40px;
+  line-height: 40px;
+  margin: 2px 10px;
+  border-radius: 8px;
+  font-size: 13.5px;
+}
+.menu :deep(.el-menu-item .el-icon) {
+  margin-right: 10px;
+  font-size: 16px;
+  opacity: 0.9;
+}
+.menu :deep(.el-menu-item:hover) {
+  color: #fff;
+}
+.menu :deep(.el-menu-item.is-active) {
+  background: color-mix(in srgb, var(--el-color-primary) 26%, transparent);
+  color: #fff;
+}
+.menu :deep(.el-menu-item.is-active)::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 11px;
+  bottom: 11px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--el-color-primary);
+}
 .side-foot {
-  padding: 12px 20px 16px;
+  padding: 12px 18px 14px;
   font-size: 12px;
-  color: var(--el-text-color-secondary);
-  border-top: 1px solid var(--el-border-color-lighter);
+  color: rgba(148, 163, 184, 0.7);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -204,28 +259,39 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
   height: 6px;
   margin-right: 6px;
   border-radius: 50%;
-  background: var(--el-color-success);
+  background: #34d399;
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.15);
   vertical-align: 1px;
 }
-.main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100vh; }
 .topbar {
   display: flex;
   align-items: center;
   gap: 10px;
-  height: 56px;
-  padding: 0 20px;
+  height: 64px;
+  flex: none;
+  padding: 0 24px;
   background: var(--el-bg-color);
-  border-bottom: 1px solid var(--el-border-color-light);
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 .hamburger { display: none; }
-.crumb { font-size: 15px; font-weight: 600; }
+.crumb { font-size: 16px; font-weight: 650; letter-spacing: 0.01em; }
 .spacer { flex: 1; }
-.relay-info { font-size: 12px; color: var(--el-text-color-secondary); white-space: nowrap; }
+.relay-info {
+  padding: 3px 10px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 999px;
+  background: var(--el-fill-color-light);
+  font-size: 11.5px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 .icon-btn { color: var(--el-text-color-regular); }
 .user { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; outline: none; }
 .avatar {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   color: #fff;
   font-size: 12px;
@@ -233,26 +299,37 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  box-shadow: 0 0 0 3px var(--el-fill-color-light);
 }
 .uname { font-size: 13px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .caret { color: var(--el-text-color-secondary); }
 .who { display: flex; flex-direction: column; line-height: 1.5; }
 .who span { font-size: 12px; color: var(--el-text-color-secondary); }
-.page { flex: 1; padding: 20px; min-width: 0; }
+.page { flex: 1; padding: 24px; min-width: 0; overflow-y: auto; }
 .nav-mask { display: none; }
 
 .theme-box { display: flex; flex-direction: column; gap: 12px; }
-.theme-modes { display: flex; gap: 6px; }
+.theme-modes {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--el-fill-color-light);
+}
 .theme-modes .el-button { flex: 1; }
-.swatches { display: flex; gap: 8px; }
+.swatches { display: flex; gap: 9px; }
 .swatches i {
   width: 22px;
   height: 22px;
   border-radius: 50%;
   cursor: pointer;
   border: 2px solid transparent;
+  box-shadow: 0 0 0 1px var(--el-border-color-darker) inset;
 }
-.swatches i.on { border-color: var(--el-text-color-primary); }
+.swatches i.on {
+  border-color: var(--el-bg-color);
+  box-shadow: 0 0 0 2px var(--el-color-primary);
+}
 .custom { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--el-text-color-secondary); }
 
 @media (max-width: 959px) {
@@ -278,7 +355,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
   .page { padding: 16px; }
 }
 @media (max-width: 599px) {
-  .topbar { padding: 0 12px; gap: 8px; height: 52px; }
+  .topbar { padding: 0 14px; gap: 8px; height: 56px; }
   .relay-info, .uname { display: none; }
   .page { padding: 12px; }
 }

@@ -70,28 +70,37 @@ async function submit() {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: var(--el-fill-color-light);
+  background:
+    radial-gradient(900px 480px at 6% -12%, color-mix(in srgb, var(--el-color-primary) 22%, transparent), transparent 62%),
+    radial-gradient(760px 420px at 108% 112%, rgba(124, 58, 237, 0.16), transparent 60%),
+    var(--el-bg-color-page);
 }
 .login-card {
-  width: min(380px, 100%);
-  padding: 28px 28px 24px;
+  width: min(400px, 100%);
+  padding: 32px 32px 28px;
   background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 12px;
-  box-shadow: var(--el-box-shadow-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 18px;
+  box-shadow: 0 32px 64px -34px rgba(15, 23, 42, 0.38), 0 2px 6px rgba(15, 23, 42, 0.04);
 }
 .login-logo {
-  font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 9px;
+  background: var(--el-color-primary-light-9);
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   color: var(--el-color-primary);
 }
 h1 {
-  margin: 14px 0 4px;
-  font-size: 22px;
+  margin: 16px 0 6px;
+  font-size: 24px;
+  letter-spacing: -0.01em;
 }
 .sub {
-  margin: 0 0 18px;
+  margin: 0 0 22px;
   color: var(--el-text-color-secondary);
   font-size: 13px;
 }
@@ -100,5 +109,11 @@ h1 {
 }
 .submit {
   width: 100%;
+  height: 40px;
+}
+
+@media (max-width: 599px) {
+  .login-card { padding: 26px 22px 22px; border-radius: 16px; }
+  h1 { font-size: 21px; }
 }
 </style>

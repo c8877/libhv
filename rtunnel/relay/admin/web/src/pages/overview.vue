@@ -66,24 +66,44 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 <style scoped>
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
 }
 .stat {
+  position: relative;
+  overflow: hidden;
   background: var(--el-bg-color);
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
-  padding: 14px 16px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--app-radius);
+  box-shadow: var(--app-shadow);
+  padding: 18px 18px 16px;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.stat::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 30px;
+  height: 3px;
+  border-radius: 0 0 4px 0;
+  background: var(--el-color-primary);
+  opacity: 0.85;
+}
+.stat:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(15, 23, 42, 0.05), 0 20px 44px -26px rgba(15, 23, 42, 0.4);
 }
 .num {
-  font-size: 24px;
+  font-size: 28px;
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
 .label {
-  margin-top: 4px;
+  margin-top: 6px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
