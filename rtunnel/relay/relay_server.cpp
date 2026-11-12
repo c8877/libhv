@@ -1601,6 +1601,11 @@ int RelayServer::run(int argc, char** argv) {
     const char* admin_shell_user = "devuser";
     const char* admin_shell_token = NULL;
     const char* admin_db = NULL;
+    const char* admin_tls_cert = NULL;
+    const char* admin_tls_key = NULL;
+    const char* admin_tls_dir = NULL;
+    int         admin_tls_selfsigned = 0;
+    int         admin_tls_days = 3650;
     const char* client_users_file = NULL;
     const char* client_token_arg = NULL;
     const char* shell_users_arg = NULL;
@@ -1628,6 +1633,17 @@ int RelayServer::run(int argc, char** argv) {
             admin_shell_token = argv[++i];
         } else if (strcmp(argv[i], "--admin-db") == 0 && i + 1 < argc) {
             admin_db = argv[++i];
+        } else if (strcmp(argv[i], "--admin-tls-cert") == 0 && i + 1 < argc) {
+            admin_tls_cert = argv[++i];
+        } else if (strcmp(argv[i], "--admin-tls-key") == 0 && i + 1 < argc) {
+            admin_tls_key = argv[++i];
+        } else if (strcmp(argv[i], "--admin-tls-selfsigned") == 0) {
+            admin_tls_selfsigned = 1;
+        } else if (strcmp(argv[i], "--admin-tls-dir") == 0 && i + 1 < argc) {
+            admin_tls_dir = argv[++i];
+        } else if (strcmp(argv[i], "--admin-tls-days") == 0 && i + 1 < argc) {
+            admin_tls_days = atoi(argv[++i]);
+            if (admin_tls_days <= 0) admin_tls_days = 3650;
         } else if (strcmp(argv[i], "--verbose") == 0) {
             verbose = 1;
         } else if (strcmp(argv[i], "--acl") == 0 && i + 1 < argc) {
@@ -1666,7 +1682,9 @@ int RelayServer::run(int argc, char** argv) {
                 "          [--client-users F] [--client-token T] [--shell-users u1,u2]\n"
                 "          [--admin 127.0.0.1:9443 [--admin-token T] [--admin-db PATH]\n"
                 "            [--admin-docroot DIR]\n"
-                "            [--admin-ca-cert C --admin-ca-key K --admin-cert-dir D]]\n",
+                "            [--admin-ca-cert C --admin-ca-key K --admin-cert-dir D]\n"
+                "            [--admin-tls-cert C --admin-tls-key K | --admin-tls-selfsigned\n"
+                "             [--admin-tls-dir D] [--admin-tls-days N]]]\n",
                 argv[0]);
             return 1;
         }
@@ -1750,6 +1768,11 @@ int RelayServer::run(int argc, char** argv) {
         cfg.shell_user = admin_shell_user;
         cfg.shell_token = admin_shell_token ? admin_shell_token : "";
         if (admin_db) cfg.db_path = admin_db;
+        cfg.tls_cert = admin_tls_cert ? admin_tls_cert : "";
+        cfg.tls_key = admin_tls_key ? admin_tls_key : "";
+        cfg.tls_selfsigned = admin_tls_selfsigned != 0;
+        cfg.tls_dir = admin_tls_dir ? admin_tls_dir : "";
+        cfg.tls_days = admin_tls_days;
         if (adm->start(cfg) != 0) {
             delete adm;
             admin = NULL;

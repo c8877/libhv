@@ -12,6 +12,12 @@ using nlohmann::json;
 
 extern thread_local AdminActor tl_actor;
 
+// 本次请求是否走 HTTPS：管理台本地 TLS，或反代声明 X-Forwarded-Proto
+static bool reqIsHttps(const HttpContextPtr& ctx) {
+    if (ctx->request && ctx->request->scheme == "https") return true;
+    return ctx->header("X-Forwarded-Proto") == "https";
+}
+
 static std::string cookieVal(const HttpContextPtr& ctx, const std::string& key) {
     const HttpCookie& ck = ctx->request->GetCookie(key.c_str());
     if (!ck.name.empty()) return ck.value;
@@ -186,10 +192,14 @@ void AdminServer::handleLogin(const HttpContextPtr& ctx) {
         ctx->send("{\"error\":\"session create failed\"}");
         return;
     }
+    bool https = reqIsHttps(ctx);
     ctx->response->headers["Set-Cookie"] =
         "rt_sid=" + sid + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" +
-        std::to_string(hours * 3600) +
-        (ctx->header("X-Forwarded-Proto") == "https" ? "; Secure" : "");
+        std::to_string(hours * 3600) + (https ? "; Secure" : "");
+    if (https && ctx->request && ctx->request->scheme == "https") {
+        // 本地 TLS 终止：顺便告诉浏览器以后只走 HTTPS
+        ctx->response->headers["Strict-Transport-Security"] = "max-age=31536000";
+    }
     json j;
     j["username"] = u.username;
     j["role"] = u.role;
@@ -201,7 +211,7 @@ void AdminServer::handleLogout(const HttpContextPtr& ctx) {
     std::string sid = cookieVal(ctx, "rt_sid");
     if (!sid.empty() && db_.ok()) db_.dropSession(AdminDb::sha256Hex(sid));
     ctx->response->headers["Set-Cookie"] = "rt_sid=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0" +
-        std::string(ctx->header("X-Forwarded-Proto") == "https" ? "; Secure" : "");
+        std::string(reqIsHttps(ctx) ? "; Secure" : "");
     ctx->send("{\"ok\":true}");
 }
 

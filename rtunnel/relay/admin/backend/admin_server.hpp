@@ -38,6 +38,12 @@ struct AdminConfig {
     std::string shell_token;             // 该用户连 relay 的凭证（--admin-shell-token）
     int         shell_relay_port = 8443; // direct 模式连接的 relay 端口（本机）
     std::string db_path = "rtunnel-admin.db"; // SQLite 账号库
+    // 管理台 TLS：显式证书或自签；都为空时保持明文 HTTP
+    std::string tls_cert;                // --admin-tls-cert
+    std::string tls_key;                 // --admin-tls-key
+    bool        tls_selfsigned = false;  // --admin-tls-selfsigned
+    std::string tls_dir;                 // --admin-tls-dir（默认 cert_dir/admin-tls）
+    int         tls_days = 3650;         // --admin-tls-days
 };
 
 struct AdminActor {

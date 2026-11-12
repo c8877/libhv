@@ -1,4 +1,5 @@
 #include "admin_server.hpp"
+#include "admin_tls.hpp"
 #include "common/logging.hpp"
 #include "cpputil/json.hpp"
 
@@ -11,6 +12,7 @@ using nlohmann::json;
 #include <memory>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 // ---------------------------------------------------------------- 跨线程调用
 
@@ -294,8 +296,9 @@ int AdminServer::start(const AdminConfig& cfg) {
     });
 
     db_.purgeExpiredSessions(AdminDb::nowMs());
-    if (cfg_.addr.rfind("0.0.0.0", 0) == 0) {
-        logf_("[admin] WARNING: 明文监听 %s，请使用反向代理 TLS 或绑定 127.0.0.1",
+    bool want_tls = !cfg_.tls_cert.empty() || cfg_.tls_selfsigned;
+    if (!want_tls && cfg_.addr.rfind("0.0.0.0", 0) == 0) {
+        logf_("[admin] WARNING: 明文监听 %s，请使用 --admin-tls-selfsigned 或反向代理 TLS",
               cfg_.addr.c_str());
     }
     spawnWorker([this]() { distLoop(); });
@@ -364,16 +367,72 @@ int AdminServer::start(const AdminConfig& cfg) {
     registerRoutes();
     initTerminal();
     server_.setHost(host);
-    server_.setPort(port);
     server_.setThreadNum(1);
+
+    // 管理台 TLS：显式 cert/key 或自签；未配置时维持原有明文行为
+    std::string tls_crt = cfg_.tls_cert;
+    std::string tls_key = cfg_.tls_key;
+    if (want_tls) {
+        if (!admin_tls_supported()) {
+            logf_("[admin] 请求了 TLS，但当前构建没有可用的 TLS 后端（WITH_OPENSSL=OFF）");
+            stop();
+            return -1;
+        }
+        if (cfg_.tls_selfsigned && cfg_.tls_cert.empty()) {
+            std::string dir = cfg_.tls_dir;
+            if (dir.empty()) {
+                dir = cfg_.cert_dir.empty() ? "admin-tls" : cfg_.cert_dir + "/admin-tls";
+            }
+            std::string err;
+            if (!admin_tls_ensure_selfsigned(dir, host, cfg_.tls_days, 30,
+                                             tls_crt, tls_key, err)) {
+                logf_("[admin] 自签证书生成失败: %s", err.c_str());
+                stop();
+                return -1;
+            }
+        }
+        if (tls_key.empty()) {
+            logf_("[admin] --admin-tls-cert 需要同时指定 --admin-tls-key");
+            stop();
+            return -1;
+        }
+        if (access(tls_crt.c_str(), R_OK) != 0 || access(tls_key.c_str(), R_OK) != 0) {
+            logf_("[admin] 证书不可读: cert=%s key=%s", tls_crt.c_str(), tls_key.c_str());
+            stop();
+            return -1;
+        }
+        hssl_ctx_opt_t opt;
+        memset(&opt, 0, sizeof(opt));
+        opt.crt_file = tls_crt.c_str();
+        opt.key_file = tls_key.c_str();
+        opt.endpoint = HSSL_SERVER;
+        opt.verify_peer = 0;
+        if (server_.newSslCtx(&opt) != 0) {
+            logf_("[admin] SSL_CTX 初始化失败（cert=%s key=%s）", tls_crt.c_str(), tls_key.c_str());
+            stop();
+            return -1;
+        }
+        server_.https_port = port;   // 只开 HTTPS，不开明文 HTTP
+    } else {
+        server_.setPort(port);
+    }
     int rc = server_.start();
     if (rc != 0) {
         logf_("[admin] listen %s:%d failed rc=%d", host, port, rc);
         stop();
         return rc;
     }
-    logf_("[admin] listening on http://%s:%d/ (%s, users=%zu)", host, port,
-          cfg_.token.empty() ? "no auth (loopback)" : "bearer token", 0);
+    if (want_tls) {
+        logf_("[admin] listening on https://%s:%d/ (%s, cert=%s)", host, port,
+              cfg_.token.empty() ? "no auth (loopback)" : "bearer token", tls_crt.c_str());
+        if (cfg_.tls_selfsigned && cfg_.tls_cert.empty()) {
+            logf_("[admin] 自签证书：浏览器首次访问需手动信任，或把 %s 加入系统信任库",
+                  tls_crt.c_str());
+        }
+    } else {
+        logf_("[admin] listening on http://%s:%d/ (%s, users=%zu)", host, port,
+              cfg_.token.empty() ? "no auth (loopback)" : "bearer token", 0);
+    }
     if (cfg_.docroot.empty()) {
         logf_("[admin] WARNING: --admin-docroot not set, admin UI disabled");
     }
