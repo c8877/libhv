@@ -15,6 +15,10 @@ WorkingDirectory=/opt/rtunnel/relay
 #              --admin-ca-cert /var/lib/rtunnel/relay/ca.crt \
 #              --admin-ca-key /var/lib/rtunnel/relay/ca.key \
 #              --admin-cert-dir /var/lib/rtunnel/relay/certs
+# 管理台 HTTPS（二选一）：
+#   RELAY_ARGS=... --admin-tls-selfsigned --admin-tls-days 3650
+#   RELAY_ARGS=... --admin-tls-cert /etc/rtunnel/relay/admin.crt \
+#                  --admin-tls-key /etc/rtunnel/relay/admin.key
 EnvironmentFile=-/etc/rtunnel/relay.env
 ExecStart=/opt/rtunnel/relay/bin/rtunnel-relay \
     --host 0.0.0.0 --port 18443 \

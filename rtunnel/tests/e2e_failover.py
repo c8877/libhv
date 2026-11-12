@@ -30,7 +30,10 @@ def start_relay(port, log):
 
 
 def echo_roundtrip(socks_ep, echo_port, timeout=10):
-    s, rep = e2e.socks5_open(socks_ep, "dev1", echo_port, timeout=timeout)
+    try:
+        s, rep = e2e.socks5_open(socks_ep, "dev1", echo_port, timeout=timeout)
+    except OSError as e:
+        return False, str(e)
     if s is None:
         return False, "socks rep=%d" % rep
     try:

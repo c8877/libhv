@@ -74,13 +74,35 @@ build/bin/rtunnel-client --server B_IP --port 8443 --user alice --socks5 127.0.0
     --tls-ca server.crt --tls-sni localhost
 ```
 
+## 多 relay 与故障切换
+
+A/C 都支持多个 relay 地址，按顺序尝试，连上后保持（sticky，不自动切回）：
+
+```bash
+# 重复 --server 或逗号分隔都行；host[:port] 用 --port 作默认端口
+build/bin/rtunnel-agent  --server r1.example.com:8443,r2.example.com:8443 --devid dev1 --allow 22
+build/bin/rtunnel-client --server r1.example.com --server r2.example.com --port 8443 \
+    --user alice --socks5 127.0.0.1:1080
+# IPv6 用方括号：--server [2001:db8::1]:8443
+```
+
+- 最多 8 个地址；连接失败、握手/认证超时、已认证后掉线，都会切下一个地址
+- 退避仍是 1s→30s，多地址时加 ±20% 抖动；AUTH_OK 后重置
+- 凭证被永久拒绝（token 过期/禁用/超额）时按地址标记，全部地址都被拒才停止重连
+- client 的按需 agent 继承完整地址列表；client 切到新 relay 时会停掉旧 relay 上的随需 agent
+- `shell <devid>` 子命令在建立会话前也会依次尝试后续地址
+
 ## 测试
 
 ```bash
-make rtunnel_test                  # 明文
-RTUNNEL_TLS=1 make rtunnel_test    # TLS（需要 --with-openssl 构建）
-RTUNNEL_MTLS=1 make rtunnel_test   # mTLS：证书 SAN 必须等于 devid（另含负向用例）
-RTUNNEL_UDS=1 make rtunnel_test    # 本地入口走 UDS（需要 -DENABLE_UDS=ON 构建）
+make rtunnel_test                        # 明文
+RTUNNEL_TLS=1 make rtunnel_test          # TLS（需要 --with-openssl 构建）
+RTUNNEL_MTLS=1 make rtunnel_test         # mTLS：证书 SAN 必须等于 devid（另含负向用例）
+RTUNNEL_UDS=1 make rtunnel_test          # 本地入口走 UDS（需要 -DENABLE_UDS=ON 构建）
+
+python3 rtunnel/tests/e2e_failover.py    # 双 relay 故障切换
+python3 rtunnel/tests/e2e_alerts.py      # 告警（本地 webhook sink）
+build/bin/rtunnel-endpoint-test          # --server 地址解析单测
 ```
 
 覆盖：CONNECT 建链、数据回环、离线设备、端口白名单、ACL、并发（两个 A 客户端同 sid 不串流）、
@@ -119,8 +141,19 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
   （SQLite + HttpOnly 会话）；非回环监听必须配置 `--admin-token`；
 - 证书配置：`--admin-ca-cert C --admin-ca-key K --admin-cert-dir D`（台账 index.txt、
   黑名单 revoked.txt、审计 audit.log 均落在 D 下，启动自动加载黑名单）；
+- **HTTPS**：`--admin-tls-selfsigned` 自动生成并复用自签证书（EC P-256，
+  SAN 覆盖 localhost、主机名、监听地址与本机全部 IP，目录 0700 / 私钥 0600，
+  剩余不足 30 天自动重签）；也可以 `--admin-tls-cert C --admin-tls-key K` 用已有证书。
+  启用后同一端口只开 HTTPS，明文 HTTP 不再监听；自签证书首次访问需手动信任。
+  未加这两个参数时行为不变（明文 HTTP）。
+- **告警**（设置页「告警」组）：总开关 + webhook，支持 `generic` / 企业微信 / 钉钉（加签）/
+  飞书；事件为设备离线/恢复、证书到期（预警与紧急两级）、分发任务失败/超时；
+  同类事件按冷却时间去重，`GET /api/v1/alerts/status` 看发送结果，
+  `POST /api/v1/alerts/test`（或设置页「发送测试」）验证通道。webhook URL 与签名密钥
+  对非 admin 脱敏，审计日志不记录明文密钥。
 - 线程模型：HTTP 在 admin worker 线程，relay 状态访问经 `hloop_post_event` 投递回
-  relay 线程执行（promise/future 同步），relay 数据无锁。
+  relay 线程执行（promise/future 同步），relay 数据无锁；分发/告警/清理等后台任务
+  由 `AdminServer` 统一管理，`stop()` 时置标志并 join 全部 worker。
 
 ## 账号与权限（SQLite）
 
@@ -230,6 +263,8 @@ http://B:9443/device/<devid>/<port>/<path>
 | `--admin-db PATH` | SQLite 账号库，默认 `rtunnel-admin.db`（需 OpenSSL 构建） |
 | `--admin-shell-user U --admin-shell-token T` | Web 终端连本机 relay 的身份与凭证 |
 | `--admin-ca-cert/--admin-ca-key/--admin-cert-dir` | 证书签发 CA 与台账目录 |
+| `--admin-tls-cert/--admin-tls-key` | 管理台 HTTPS：使用已有证书 |
+| `--admin-tls-selfsigned [--admin-tls-dir D] [--admin-tls-days N]` | 管理台 HTTPS：自签并自动续期 |
 | `--admin-file-dir` / `--admin-docroot` | 文件管理目录 / 前端磁盘目录 |
 | `--drain-timeout` | 优雅退出等待时长，默认 10000ms |
 
@@ -237,7 +272,7 @@ http://B:9443/device/<devid>/<port>/<path>
 
 | 参数 | 说明 |
 |---|---|
-| `--server/--port --user --token` | relay 地址与登录身份 |
+| `--server/--port --user --token` | relay 地址与登录身份；`--server` 可重复或逗号分隔（最多 8 个，故障自动切换） |
 | `--socks5 HOST:PORT` / `unix:PATH` | 本地 SOCKS5 入口；**可省略**，省略时只做 `--forward` / `shell`，不会再默认占用 1080 |
 | `--forward 127.0.0.1:16022=devid:22` | 本地端口映射，可多次 |
 | `--allow-shell` | 允许 B 通知本机按需拉起 agent（默认关） |
@@ -249,7 +284,7 @@ http://B:9443/device/<devid>/<port>/<path>
 
 | 参数 | 说明 |
 |---|---|
-| `--server/--port --devid` | relay 地址与设备 ID |
+| `--server/--port --devid` | relay 地址与设备 ID；`--server` 可重复或逗号分隔（最多 8 个，故障自动切换） |
 | `--allow 22,80` / `--allow-all` | 目标端口白名单 |
 | `--allow-shell` / `--max-idle` | 允许 `OPEN_SHELL` / 空闲自退秒数 |
 | `--tls-ca/--tls-cert/--tls-key/--tls-sni` | TLS / mTLS |

@@ -11,6 +11,9 @@ WorkingDirectory=/opt/rtunnel/agent
 # 必填参数，例如：
 #   AGENT_ARGS=--devid board01 --server 10.0.0.10 --port 18443 \
 #              --allow 22,8080 --allow-shell
+# 多 relay（按顺序故障切换，最多 8 个）：
+#   AGENT_ARGS=--devid board01 --server 10.0.0.10:18443,10.0.0.11:18443 \
+#              --allow 22 --allow-shell
 EnvironmentFile=-/etc/rtunnel/agent.env
 ExecStart=/opt/rtunnel/agent/bin/rtunnel-agent ${AGENT_ARGS}
 Restart=on-failure
