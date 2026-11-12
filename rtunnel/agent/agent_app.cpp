@@ -901,14 +901,14 @@ bool AgentApp::otaProbe(const std::string& path, const std::string& expect, std:
         if (r < 0) break;
         usleep(10000);
     }
-    // 先读管道再判超时，避免子进程输出填满管道卡住
-    ssize_t got = read(pfd[0], buf, sizeof(buf) - 1);
-    close(pfd[0]);
     if (!exited) {
         kill(pid, SIGKILL);
         waitpid(pid, &status, 0);
-        return false;
     }
+    // 先杀再读：不合作的子进程会一直占着写端，read 会阻塞
+    ssize_t got = read(pfd[0], buf, sizeof(buf) - 1);
+    close(pfd[0]);
+    if (!exited) return false;
     if (got > 0) {
         n = (size_t)got;
         while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == ' ')) buf[--n] = '\0';
@@ -926,15 +926,15 @@ int AgentApp::otaApply(std::string& err, std::string& warn) {
     std::string prev = self + ".prev";
 
     std::string probe;
+    mode_t mode = 0755;
+    struct stat st{};
+    if (stat(self.c_str(), &st) == 0) mode = st.st_mode & 07777;
+    if (chmod(newp.c_str(), mode) != 0) { err = "chmod failed"; return -1; }
     if (!otaProbe(newp, ota_rx_.version, probe)) {
         err = "version probe failed";
         if (!probe.empty()) err += ": " + probe;
         return -1;
     }
-    mode_t mode = 0755;
-    struct stat st{};
-    if (stat(self.c_str(), &st) == 0) mode = st.st_mode & 07777;
-    if (chmod(newp.c_str(), mode) != 0) { err = "chmod failed"; return -1; }
 
     unlink(prev.c_str());
     if (rename(self.c_str(), prev.c_str()) != 0) { err = "backup failed"; return -1; }
@@ -955,6 +955,7 @@ void AgentApp::handleOtaFrame(const rtnp::Frame* f) {
         if (applied) j["applied"] = true;
         if (restarting) j["restarting"] = true;
         if (!err.empty()) j["error"] = err;
+        if (!ok) logf_("[agent] ota: %s", err.c_str());
         std::string s = j.dump();
         rtnp::Writer w; w.str(s.c_str());
         rtnp::send(io, rtnp::OTA_ACK, f->sid, w.data, (uint16_t)w.len);
@@ -980,6 +981,8 @@ void AgentApp::handleOtaFrame(const rtnp::Frame* f) {
         }
         if (ota_rx_.fp) {
             if (ota_rx_.sid != f->sid) { ack(false, 0, false, false, "ota busy"); return; }
+            fclose(ota_rx_.fp);   // 同一传输重发 BEGIN：关掉旧句柄按 .part 重新续传
+            ota_rx_.fp = nullptr;
         }
         std::string dir = ota_dir;
         if (dir.empty()) {

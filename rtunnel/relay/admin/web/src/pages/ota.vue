@@ -24,6 +24,9 @@
       <label class="cfg-item">最大重试
         <el-input-number v-model="maxRetries" :min="0" :max="5" controls-position="right" />
       </label>
+      <label class="cfg-item">强制重装
+        <el-switch v-model="force" />
+      </label>
       <el-button link type="primary" @click="$router.push('/files')">上传新文件 →</el-button>
     </div>
 
@@ -123,6 +126,7 @@ const fileName = ref('')
 const version = ref('')
 const deadline = ref(Date.now() + 3600 * 1000)
 const maxRetries = ref(2)
+const force = ref(false)
 const q = ref('')
 const page = ref(1)
 const per = 10
@@ -244,6 +248,7 @@ async function submit() {
       devids: Array.from(selected.value),
       deadline_at_ms: end,
       max_retries: Number(maxRetries.value) || 0,
+      force: force.value,
     })
     if (r.unsupported) ElMessage.warning('部分设备未开启 OTA：' + r.unsupported)
     ElMessage.success('已创建 ' + r.tasks.length + ' 条升级任务')

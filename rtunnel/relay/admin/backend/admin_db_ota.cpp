@@ -9,7 +9,7 @@
 using nlohmann::json;
 
 static const char* kOtaCols =
-    "id,batch_id,devid,version,file_name,file_size,file_sha,status,sent,relay_tid,error,"
+    "id,batch_id,devid,version,file_name,file_size,file_sha,force,status,sent,relay_tid,error,"
     "retry_count,max_retries,next_retry_ms,deadline_at_ms,started_ms,finished_ms,actor,created_ms";
 
 static void fillOtaRow(sqlite3_stmt* st, nlohmann::json& j) {
@@ -20,28 +20,29 @@ static void fillOtaRow(sqlite3_stmt* st, nlohmann::json& j) {
     j["file_name"] = (const char*)sqlite3_column_text(st, 4);
     j["file_size"] = sqlite3_column_int64(st, 5);
     j["file_sha"] = (const char*)sqlite3_column_text(st, 6);
-    j["status"] = (const char*)sqlite3_column_text(st, 7);
-    j["sent"] = sqlite3_column_int64(st, 8);
-    j["relay_tid"] = sqlite3_column_int64(st, 9);
-    j["error"] = (const char*)sqlite3_column_text(st, 10);
-    j["retry_count"] = sqlite3_column_int(st, 11);
-    j["max_retries"] = sqlite3_column_int(st, 12);
-    j["next_retry_ms"] = sqlite3_column_int64(st, 13);
-    j["deadline_at_ms"] = sqlite3_column_int64(st, 14);
-    j["started_ms"] = sqlite3_column_int64(st, 15);
-    j["finished_ms"] = sqlite3_column_int64(st, 16);
-    j["actor"] = (const char*)sqlite3_column_text(st, 17);
-    j["created_ms"] = sqlite3_column_int64(st, 18);
+    j["force"] = sqlite3_column_int(st, 7);
+    j["status"] = (const char*)sqlite3_column_text(st, 8);
+    j["sent"] = sqlite3_column_int64(st, 9);
+    j["relay_tid"] = sqlite3_column_int64(st, 10);
+    j["error"] = (const char*)sqlite3_column_text(st, 11);
+    j["retry_count"] = sqlite3_column_int(st, 12);
+    j["max_retries"] = sqlite3_column_int(st, 13);
+    j["next_retry_ms"] = sqlite3_column_int64(st, 14);
+    j["deadline_at_ms"] = sqlite3_column_int64(st, 15);
+    j["started_ms"] = sqlite3_column_int64(st, 16);
+    j["finished_ms"] = sqlite3_column_int64(st, 17);
+    j["actor"] = (const char*)sqlite3_column_text(st, 18);
+    j["created_ms"] = sqlite3_column_int64(st, 19);
 }
 
 bool AdminDb::otaInsert(const std::string& batch, const std::string& devid, const std::string& version,
                         const std::string& file, long long size, const std::string& sha,
                         const std::string& status, long long deadline_ms, int max_retries,
-                        const std::string& actor, long long* id) {
+                        const std::string& actor, int force, long long* id) {
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
     const char* sql = "INSERT INTO ota_tasks(batch_id,devid,version,file_name,file_size,file_sha,"
-        "status,deadline_at_ms,max_retries,actor,created_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?)";
+        "force,status,deadline_at_ms,max_retries,actor,created_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)";
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
     sqlite3_bind_text(st, 1, batch.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 2, devid.c_str(), -1, SQLITE_TRANSIENT);
@@ -49,11 +50,12 @@ bool AdminDb::otaInsert(const std::string& batch, const std::string& devid, cons
     sqlite3_bind_text(st, 4, file.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int64(st, 5, size);
     sqlite3_bind_text(st, 6, sha.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 7, status.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 8, deadline_ms);
-    sqlite3_bind_int(st, 9, max_retries);
-    sqlite3_bind_text(st, 10, actor.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 11, nowMs());
+    sqlite3_bind_int(st, 7, force ? 1 : 0);
+    sqlite3_bind_text(st, 8, status.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 9, deadline_ms);
+    sqlite3_bind_int(st, 10, max_retries);
+    sqlite3_bind_text(st, 11, actor.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 12, nowMs());
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
     if (rc != SQLITE_DONE) return false;

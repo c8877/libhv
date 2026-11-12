@@ -183,7 +183,7 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 - 内存/CPU sparkline（可选「每 5s 刷新」，浏览器本地累积 60 点）
 - 存储：按分区横向条，条长 = 分区总量 / 最大分区总量，条内按已用/空闲分色
 - 网卡、系统（架构/内核/CPU/板卡/采集时间）、运行时（版本/能力/启动参数）
-- 「能力」行展示 TCP 端口、Shell、SYSINFO、mTLS；manager/admin 可在线编辑
+- 「能力」行展示 TCP 端口、Shell、SYSINFO、mTLS、OTA；manager/admin 可在线编辑
 
 采集与配置：
 
@@ -196,6 +196,38 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
   （默认 `/opt/data/files`），32KiB 分片、256KiB 窗口、sha256 校验、断点续传、
   冲突校验；`.part` 超过 24h 自动清理
   （端口 manager/admin；Shell 仅 admin；设备离线直接报错）
+
+## Agent OTA 升级
+
+管理台「Agent 升级」页（manager/admin）把新的 `rtunnel-agent` 推到设备并原地重启，
+全程不需要登录设备：
+
+1. 文件页上传新二进制（也可直接放进 `--admin-file-dir`）；
+2. `/ota` 选择升级包、填目标版本（须与新二进制的 `--version` 完全一致）、勾选设备；
+3. relay 用 `OTA_BEGIN/DATA/END`（0x30-0x32）流式下发，agent 逐帧 `OTA_ACK` 回报进度；
+4. agent 校验 sha256 → `chmod` → 跑 `<新二进制> --version` 自检 → 备份 `<self>.prev`
+   → 原子替换 → `execv` 重启（pid 不变，连接重建）；
+5. 重连后 SYSINFO 上报新 `version`，relay 比对目标版本，任务置 `success`。
+
+设备侧前置条件：
+
+- agent 必须显式开启 `--allow-ota`（或 `agent.json` 的 `"ota": true`），默认关闭；
+- 只对常驻 agent 生效，按需 agent（`a:<user>`）会拒绝；
+- 二进制所在目录必须可写（默认 `dirname(/proc/self/exe)`）；`--ota-dir` 可改临时文件目录，
+  但必须与二进制在同一文件系统（安装靠 `rename`，跨分区会失败）。
+
+限制与回滚：
+
+- 同一设备同时只允许一个 OTA；relay 并发 `ota.max_concurrent`（默认 1），
+  版本确认超时 `ota.apply_timeout_s`（默认 180s）；
+- 升级会重启 agent，正在进行的隧道/shell 会断开，管理台任务会记录每台设备的结果；
+- 失败时原二进制不变；已替换但重启失败会自动回滚；
+- 手动回滚：设备上 `mv rtunnel-agent.prev rtunnel-agent` 后重启；
+  或在页面勾选「强制重装」再推一次旧版本（版本相同也允许）；
+- 未开启 OTA 的 agent（`caps.ota=false`）在列表里显示「未开启」，创任务时直接标记 `unsupported`；
+  更老的、没有该能力位的 agent 不会被下发，任务排队到截止时间后置 `timeout`；
+- API：`POST/GET /api/v1/otas`、`GET /api/v1/otas/summary|:id`、
+  `POST /api/v1/otas/:id/retry|cancel`。
 
 ## Web 终端（免密）
 
@@ -288,6 +320,7 @@ http://B:9443/device/<devid>/<port>/<path>
 | `--server/--port --devid` | relay 地址与设备 ID；`--server` 可重复或逗号分隔（最多 8 个，故障自动切换） |
 | `--allow 22,80` / `--allow-all` | 目标端口白名单 |
 | `--allow-shell` / `--max-idle` | 允许 `OPEN_SHELL` / 空闲自退秒数 |
+| `--allow-ota` / `--ota-dir` | 允许 relay 推送自身升级 / 升级临时文件目录（默认二进制目录） |
 | `--tls-ca/--tls-cert/--tls-key/--tls-sni` | TLS / mTLS |
 
 ## 三机部署示例

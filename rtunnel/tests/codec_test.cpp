@@ -57,6 +57,20 @@ int main(void) {
     dec3.append(bad2, sizeof(bad2));
     CHECK(dec3.next(f) == -1, "reserved != 0 返回 -1");
 
+    // 5) OTA_BEGIN payload 往返（version + u64 size + sha256）
+    {
+        rtnp::Writer ow;
+        ow.str("1.3.307");
+        ow.u64(346104);
+        ow.str("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+        rtnp::Reader orr(ow.data, ow.len);
+        CHECK(orr.strBytes() == "1.3.307", "OTA version 往返");
+        CHECK(orr.u64() == 346104, "OTA size 往返");
+        CHECK(orr.strBytes().size() == 64, "OTA sha 往返");
+        CHECK(!orr.err, "OTA payload 解析无错");
+        CHECK(rtnp::OTA_END == 0x32, "OTA_END 编号固定");
+    }
+
     printf(failures ? "\n%d FAILED\n" : "\nall passed\n", failures);
     return failures ? 1 : 0;
 }

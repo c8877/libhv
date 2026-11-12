@@ -204,6 +204,7 @@ bool AdminDb::migrate(std::string& err) {
         " file_name TEXT NOT NULL,"
         " file_size INTEGER NOT NULL,"
         " file_sha TEXT NOT NULL DEFAULT '',"
+        " force INTEGER NOT NULL DEFAULT 0,"
         " status TEXT NOT NULL DEFAULT 'queued',"
         " sent INTEGER NOT NULL DEFAULT 0,"
         " relay_tid INTEGER NOT NULL DEFAULT 0,"

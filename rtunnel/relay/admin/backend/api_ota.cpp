@@ -37,6 +37,7 @@ void AdminServer::handleOtaCreate(const HttpContextPtr& ctx, const AdminActor& a
     long long now = nowMs();
     long long deadline = req.value("deadline_at_ms", now + 3600LL * 1000);
     int max_retries = req.value("max_retries", 2);
+    int force = req.value("force", false) ? 1 : 0;
     if (file.empty() || file.find("..") != std::string::npos || file.find('/') != std::string::npos) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"bad file\"}");
@@ -83,15 +84,17 @@ void AdminServer::handleOtaCreate(const HttpContextPtr& ctx, const AdminActor& a
             return std::to_string(relay_->agentOtaCap(devid.c_str()));
         }).c_str());
         std::string status = cap == 0 ? "unsupported" : "queued";
-        std::string err = cap == 0 ? "agent does not support ota" : "";
         long long id = 0;
         if (!db_.otaInsert(batch, devid, version, file, (long long)st.st_size, sha, status,
-                           deadline, max_retries, actor.username, &id)) {
+                           deadline, max_retries, actor.username, force, &id)) {
             ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
             ctx->send("{\"error\":\"db error\"}");
             return;
         }
-        if (cap == 0) unsupported += (unsupported.empty() ? "" : ",") + devid;
+        if (cap == 0) {
+            db_.otaUpdate(id, "unsupported", "agent does not support ota", 0, 0, now, 0, 0);
+            unsupported += (unsupported.empty() ? "" : ",") + devid;
+        }
         ids.push_back(id);
     }
     audit(actor.username, "ota.create",
@@ -277,6 +280,19 @@ void AdminServer::otaTick() {
         }
 
         if (st == "applying") {
+            // agent 可能补发一条失败 ACK（exec 失败已回滚），以 relay 最新结果为准
+            uint32_t tid = (uint32_t)j.value("relay_tid", 0);
+            if (tid) {
+                std::string p = callRelay([this, tid]() { return relay_->otaProgress(tid); });
+                auto pg = json::parse(p, nullptr, false);
+                if (!pg.is_discarded() && pg.value("done", false) && !pg.value("ok", false)) {
+                    std::string err = pg.value("error", std::string("restart failed"));
+                    db_.otaUpdate(id, "failed", err, sent, 0, now, 0, j.value("retry_count", 0));
+                    ota_active.erase(id);
+                    ota_busy_dev.erase(devid);
+                    continue;
+                }
+            }
             std::string ver = callRelay([this, &devid]() { return relay_->agentVersion(devid.c_str()); });
             if (!ver.empty() && ver == version) {
                 db_.otaUpdate(id, "success", "", j.value("file_size", 0LL), 0, now, 0,
@@ -323,7 +339,7 @@ void AdminServer::otaTick() {
             continue;
         }
         std::string cur = callRelay([this, &devid]() { return relay_->agentVersion(devid.c_str()); });
-        if (!cur.empty() && cur == version) {
+        if (!j.value("force", 0) && !cur.empty() && cur == version) {
             db_.otaUpdate(id, "success", "already at version", j.value("file_size", 0LL), 0, now, 0,
                           j.value("retry_count", 0));
             continue;

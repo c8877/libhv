@@ -100,7 +100,7 @@ public:
     bool otaInsert(const std::string& batch, const std::string& devid, const std::string& version,
                    const std::string& file, long long size, const std::string& sha,
                    const std::string& status, long long deadline_ms, int max_retries,
-                   const std::string& actor, long long* id);
+                   const std::string& actor, int force, long long* id);
     bool otaUpdate(long long id, const std::string& status, const std::string& error,
                    long long sent, long long relay_tid, long long finished_ms,
                    long long next_retry_ms, int retry_count);
