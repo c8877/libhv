@@ -19,6 +19,7 @@ const TITLES = {
 const PREFIX = [
   ['/agents/', '设备详情'],
   ['/terminal/', '终端'],
+  ['/tty/', '串口调试'],
   ['/access/', '接入账号详情'],
   ['/tasks/', '任务详情'],
 ]

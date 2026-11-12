@@ -10,6 +10,7 @@ const routes = [
   { path: '/agents', component: () => import('./pages/agents/index.vue'), meta: { title: '设备 C' } },
   { path: '/agents/:devid', component: () => import('./pages/agents/[devid].vue'), meta: { title: '设备详情' } },
   { path: '/terminal/:devid', component: () => import('./pages/terminal/[devid].vue'), meta: { title: '终端' } },
+  { path: '/tty/:devid/:alias', component: () => import('./pages/tty/console.vue'), meta: { title: '串口调试' } },
   { path: '/permission', component: () => import('./pages/permission.vue'), meta: { title: '权限' } },
   { path: '/clients', component: () => import('./pages/clients.vue'), meta: { title: '客户端 A' } },
   { path: '/access', component: () => import('./pages/access/index.vue'), meta: { title: '接入账号' } },
