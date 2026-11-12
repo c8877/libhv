@@ -238,10 +238,35 @@ int AdminServer::serveFrontend(const HttpContextPtr& ctx, const char* name, cons
     return 404;
 }
 
+// ---------------------------------------------------------------- 后台 worker
+
+void AdminServer::spawnWorker(std::function<void()> fn) {
+    std::lock_guard<std::mutex> lk(worker_mu_);
+    workers_.emplace_back(std::move(fn));
+}
+
+bool AdminServer::waitStop(int ms) {
+    std::unique_lock<std::mutex> lk(worker_mu_);
+    return worker_cv_.wait_for(lk, std::chrono::milliseconds(ms),
+                               [this]() { return stopping_.load(); });
+}
+
+void AdminServer::joinWorkers() {
+    std::vector<std::thread> ws;
+    {
+        std::lock_guard<std::mutex> lk(worker_mu_);
+        ws.swap(workers_);
+    }
+    for (auto& t : ws) {
+        if (t.joinable()) t.join();
+    }
+}
+
 // ---------------------------------------------------------------- 路由与启动
 
 int AdminServer::start(const AdminConfig& cfg) {
     cfg_ = cfg;
+    stopping_.store(false);
 
     {
         std::string db_err;
@@ -262,34 +287,33 @@ int AdminServer::start(const AdminConfig& cfg) {
         audit_.init(cfg_.cert_dir + "/audit.log");
     }
 
-    std::thread([this]() {
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    spawnWorker([this]() {
+        if (waitStop(200)) return;
         refreshGroupAcl();
         refreshTokenCache();
-    }).detach();
+    });
 
     db_.purgeExpiredSessions(AdminDb::nowMs());
     if (cfg_.addr.rfind("0.0.0.0", 0) == 0) {
         logf_("[admin] WARNING: 明文监听 %s，请使用反向代理 TLS 或绑定 127.0.0.1",
               cfg_.addr.c_str());
     }
-    std::thread([this]() { distLoop(); }).detach();
+    spawnWorker([this]() { distLoop(); });
     // Token 用量：relay 只保留内存计数，这里按周期拉快照落库
-    std::thread([this]() {
-        for (;;) {
+    spawnWorker([this]() {
+        while (!stopping_.load()) {
             int ms = settingInt("token.usage_flush_ms", 5000);
             if (ms < 1000) ms = 1000;
-            std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+            if (waitStop(ms)) break;
             if (!db_.ok()) continue;
             std::string snap = callRelay([this]() { return relay_->tokenUsageSnapshot(); });
             if (snap.empty() || snap[0] != '[') continue;
             std::string err;
             db_.clientTokenUsageApply(snap, err);
         }
-    }).detach();
-    std::thread([this]() {
-        for (;;) {
-            std::this_thread::sleep_for(std::chrono::seconds(10));
+    });
+    spawnWorker([this]() {
+        while (!waitStop(10000)) {
             std::vector<std::string> devs;
             db_.ttyDevids(devs);
             for (auto& d : devs) {
@@ -309,16 +333,15 @@ int AdminServer::start(const AdminConfig& cfg) {
                 }
             }
         }
-    }).detach();
-    std::thread([this]() {
-        for (;;) {
-            std::this_thread::sleep_for(std::chrono::hours(1));
+    });
+    spawnWorker([this]() {
+        while (!waitStop(3600 * 1000)) {
             cleanupAudit(settingInt("audit.retention_days", 30));
             cleanupUploads();
             cleanupTtyLogs();
             audit_.rotate(100 * 1024 * 1024);
         }
-    }).detach();
+    });
 
     char host[64] = "127.0.0.1";
     int port = 9443;
@@ -334,6 +357,7 @@ int AdminServer::start(const AdminConfig& cfg) {
                     strcmp(host, "::1") == 0;
     if (!loopback && cfg_.token.empty()) {
         logf_("[admin] refuse to listen on %s without credentials", host);
+        stop();
         return -1;
     }
 
@@ -345,6 +369,7 @@ int AdminServer::start(const AdminConfig& cfg) {
     int rc = server_.start();
     if (rc != 0) {
         logf_("[admin] listen %s:%d failed rc=%d", host, port, rc);
+        stop();
         return rc;
     }
     logf_("[admin] listening on http://%s:%d/ (%s, users=%zu)", host, port,
@@ -356,5 +381,11 @@ int AdminServer::start(const AdminConfig& cfg) {
 }
 
 void AdminServer::stop() {
+    {
+        std::lock_guard<std::mutex> lk(worker_mu_);
+        stopping_.store(true);
+    }
+    worker_cv_.notify_all();
     server_.stop();
+    joinWorkers();
 }

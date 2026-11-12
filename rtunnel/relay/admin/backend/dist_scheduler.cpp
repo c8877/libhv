@@ -14,8 +14,7 @@ static long long nowMs() { return AdminDb::nowMs(); }
 // ---------------------------------------------------------------- 调度
 
 void AdminServer::distLoop() {
-    for (;;) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+    while (!waitStop(1000)) {
         try { distTick(); } catch (...) { logf_("[dist] tick exception"); }
     }
 }

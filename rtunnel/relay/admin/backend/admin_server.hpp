@@ -11,6 +11,8 @@
 #include <set>
 #include <thread>
 #include <mutex>
+#include <atomic>
+#include <condition_variable>
 #include <unordered_map>
 
 #include "http/server/HttpServer.h"
@@ -204,6 +206,15 @@ private:
     std::mutex settings_mu_;
     std::map<long long, uint32_t> dist_active;   // task id -> relay tid
     std::set<std::string> dist_busy_dev;
+
+    // 后台 worker：统一受 stop() 管理，避免 detached 线程在析构后访问 this
+    std::atomic<bool>       stopping_{false};
+    std::vector<std::thread> workers_;
+    std::mutex              worker_mu_;
+    std::condition_variable worker_cv_;
+    void spawnWorker(std::function<void()> fn);
+    bool waitStop(int ms);       // 等待 ms；stop 请求时立即返回 true
+    void joinWorkers();
 
     // Web 终端
     hv::WebSocketService ws_service_;
