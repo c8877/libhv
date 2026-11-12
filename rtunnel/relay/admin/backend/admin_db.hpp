@@ -112,6 +112,7 @@ public:
     bool otaDue(std::string& json_out);
     bool otaSummary(std::string& json_out);
     bool otaReset(long long id);
+    bool otaRecover();   // relay 重启后把中断的 running 任务重新入队
 
     // 设备分组映射与账号范围
     bool groupGet(long long id, std::string& json_out, std::string& err);

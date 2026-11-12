@@ -223,6 +223,17 @@ bool AdminDb::otaSummary(std::string& json_out) {
     return true;
 }
 
+bool AdminDb::otaRecover() {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    const char* sql = "UPDATE ota_tasks SET status='queued', relay_tid=0, next_retry_ms=0,"
+        " error='relay restarted' WHERE status='running'";
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE;
+}
+
 bool AdminDb::otaReset(long long id) {
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;

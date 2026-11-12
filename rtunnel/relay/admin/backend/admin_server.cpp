@@ -276,6 +276,7 @@ int AdminServer::start(const AdminConfig& cfg) {
             loadSettings();
             db_.permMigrateLegacy();
             db_.permSyncDictIds();
+            db_.otaRecover();
             logf_("[admin] db: %s", cfg_.db_path.c_str());
         } else {
             logf_("[admin] db open failed: %s (%s)", cfg_.db_path.c_str(), db_err.c_str());
