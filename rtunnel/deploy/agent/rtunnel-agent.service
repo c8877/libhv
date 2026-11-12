@@ -1,0 +1,22 @@
+[Unit]
+Description=rtunnel agent (C)
+After=network-online.target
+Wants=network-online.target
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/rtunnel/agent
+# 必填参数，例如：
+#   AGENT_ARGS=--devid board01 --server 10.0.0.10 --port 18443 \
+#              --allow 22,8080 --allow-shell
+EnvironmentFile=-/etc/rtunnel/agent.env
+ExecStart=/opt/rtunnel/agent/bin/rtunnel-agent ${AGENT_ARGS}
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65535
+LogsDirectory=rtunnel
+
+[Install]
+WantedBy=multi-user.target

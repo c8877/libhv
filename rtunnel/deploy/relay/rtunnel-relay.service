@@ -1,0 +1,33 @@
+[Unit]
+Description=rtunnel relay (B)
+After=network-online.target
+Wants=network-online.target
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+User=rtunnel
+Group=rtunnel
+WorkingDirectory=/opt/rtunnel/relay
+# 可选参数文件，例如：
+#   RELAY_ARGS=--admin 0.0.0.0:9443 --admin-token <token> \
+#              --admin-ca-cert /var/lib/rtunnel/relay/ca.crt \
+#              --admin-ca-key /var/lib/rtunnel/relay/ca.key \
+#              --admin-cert-dir /var/lib/rtunnel/relay/certs
+EnvironmentFile=-/etc/rtunnel/relay.env
+ExecStart=/opt/rtunnel/relay/bin/rtunnel-relay \
+    --host 0.0.0.0 --port 18443 \
+    --admin 127.0.0.1:9443 \
+    --admin-db /var/lib/rtunnel/relay/admin.db \
+    --admin-file-dir /var/lib/rtunnel/relay/files \
+    --admin-docroot /opt/rtunnel/relay/web/dist \
+    ${RELAY_ARGS}
+Restart=on-failure
+RestartSec=2
+LimitNOFILE=65535
+StateDirectory=rtunnel/relay
+StateDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

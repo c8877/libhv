@@ -74,3 +74,38 @@ endif()
 
 install(TARGETS rtunnel-relay rtunnel-agent rtunnel-client
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+# ---------------------------------------------------------------- 部署目录
+# build/deploy/relay/{bin,service,web/dist}
+# build/deploy/agent/{bin,service}
+set(RTUNNEL_DEPLOY_DIR "${CMAKE_SOURCE_DIR}/build/deploy" CACHE PATH "rtunnel deploy output directory")
+set(RTUNNEL_WEB_DIST "${CMAKE_CURRENT_SOURCE_DIR}/relay/admin/web/dist")
+if(BUILD_SHARED)
+    message(WARNING "rtunnel-deploy: BUILD_SHARED=ON，部署二进制依赖 libhv.so；请用 -DBUILD_SHARED=OFF 的构建目录")
+endif()
+if(NOT EXISTS "${RTUNNEL_WEB_DIST}/admin.html")
+    message(STATUS "rtunnel-deploy: ${RTUNNEL_WEB_DIST} 未构建，先执行 npm run build")
+endif()
+add_custom_target(rtunnel-deploy
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+            "${RTUNNEL_DEPLOY_DIR}/relay/bin"
+            "${RTUNNEL_DEPLOY_DIR}/relay/service"
+            "${RTUNNEL_DEPLOY_DIR}/relay/web"
+            "${RTUNNEL_DEPLOY_DIR}/agent/bin"
+            "${RTUNNEL_DEPLOY_DIR}/agent/service"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:rtunnel-relay> "${RTUNNEL_DEPLOY_DIR}/relay/bin/rtunnel-relay"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:rtunnel-agent> "${RTUNNEL_DEPLOY_DIR}/agent/bin/rtunnel-agent"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:rtunnel-client> "${RTUNNEL_DEPLOY_DIR}/agent/bin/rtunnel-client"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/deploy/relay/rtunnel-relay.service"
+            "${RTUNNEL_DEPLOY_DIR}/relay/service/rtunnel-relay.service"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/deploy/agent/rtunnel-agent.service"
+            "${RTUNNEL_DEPLOY_DIR}/agent/service/rtunnel-agent.service"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${RTUNNEL_WEB_DIST}" "${RTUNNEL_DEPLOY_DIR}/relay/web/dist"
+    DEPENDS rtunnel-relay rtunnel-agent rtunnel-client
+    COMMENT "assembling rtunnel deploy directory")
