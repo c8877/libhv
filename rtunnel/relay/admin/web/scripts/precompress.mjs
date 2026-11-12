@@ -1,11 +1,21 @@
 // 为静态产物生成 .gz/.br 预压缩副本，relay 按 Accept-Encoding 直接返回
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { copyFile, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib'
 
 const root = process.argv[2] || '.output/public'
 const EXT = new Set(['.js', '.css', '.html', '.json', '.svg', '.txt'])
 const files = []
+
+// relay 以 admin.html 作为入口；dist 里没有时从 index.html 复制一份
+try {
+  await stat(join(root, 'index.html'))
+  try {
+    await stat(join(root, 'admin.html'))
+  } catch {
+    await copyFile(join(root, 'index.html'), join(root, 'admin.html'))
+  }
+} catch { /* 非 Vite 产物布局，跳过 */ }
 
 async function walk(dir) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {

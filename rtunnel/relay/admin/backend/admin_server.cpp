@@ -239,6 +239,9 @@ int AdminServer::serveFrontend(const HttpContextPtr& ctx, const char* name, cons
             ctx->response->body = std::move(body);
             return 200;
         }
+        // 指定 docroot 时以磁盘产物为准，不再回退内嵌前端
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        return 404;
     }
     for (int i = 0; i < g_embedded_frontend_count; ++i) {
         const EmbeddedFile& f = g_embedded_frontend[i];
