@@ -42,6 +42,12 @@ void AdminServer::handleAgents(const HttpContextPtr& ctx) {
                 if (it != relay_->caps_shell.end()) sh = it->second;
                 j["caps_shell"] = sh;
             }
+            {
+                auto it = relay_->caps_ota.find(c->devid);
+                j["caps_ota"] = it == relay_->caps_ota.end() ? -1 : it->second;
+                auto vt = relay_->agent_versions.find(c->devid);
+                j["version"] = vt == relay_->agent_versions.end() ? "" : vt->second;
+            }
             fillConnCommon(c, j);
             arr.push_back(j);
         }

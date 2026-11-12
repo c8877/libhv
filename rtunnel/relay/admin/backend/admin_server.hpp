@@ -120,6 +120,15 @@ private:
     void handleDistVerify(const HttpContextPtr& ctx, const AdminActor& actor);
     void distLoop();
     void distTick();
+    // api_ota.cpp
+    void handleOtaCreate(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleOtaList(const HttpContextPtr& ctx);
+    void handleOtaSummary(const HttpContextPtr& ctx);
+    void handleOtaGet(const HttpContextPtr& ctx);
+    void handleOtaRetry(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleOtaCancel(const HttpContextPtr& ctx, const AdminActor& actor);
+    void otaLoop();
+    void otaTick();
     // api_settings.cpp
     void loadSettings();
     int  settingInt(const std::string& key, int def);
@@ -234,6 +243,8 @@ private:
     std::mutex settings_mu_;
     std::map<long long, uint32_t> dist_active;   // task id -> relay tid
     std::set<std::string> dist_busy_dev;
+    std::map<long long, uint32_t> ota_active;    // ota task id -> relay tid
+    std::set<std::string> ota_busy_dev;
 
     // 后台 worker：统一受 stop() 管理，避免 detached 线程在析构后访问 this
     std::atomic<bool>       stopping_{false};

@@ -57,6 +57,8 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
                relay/admin/backend/api_dist.cpp
                relay/admin/backend/hash_util.cpp
                relay/admin/backend/dist_scheduler.cpp
+               relay/admin/backend/api_ota.cpp
+               relay/admin/backend/admin_db_ota.cpp
                relay/admin/backend/terminal.cpp)
 add_executable(rtunnel-agent  agent/main.cpp agent/agent_app.cpp)
 add_executable(rtunnel-client client/main.cpp client/client_app.cpp client/shell_client.cpp)

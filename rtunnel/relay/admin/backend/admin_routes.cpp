@@ -105,6 +105,32 @@ void AdminServer::registerRoutes() {
         handleDistExtend(ctx, currentActor());
         return (int)ctx->response->status_code;
     });
+
+    // agent OTA 升级
+    service_.Handle("POST", "/api/v1/otas", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
+        if (rc) return rc;
+        handleOtaCreate(ctx, currentActor());
+        return (int)ctx->response->status_code;
+    });
+    access(ROLE_MANAGER, "GET", "/api/v1/otas", &AdminServer::handleOtaList);
+    access(ROLE_MANAGER, "GET", "/api/v1/otas/summary", &AdminServer::handleOtaSummary);
+    access(ROLE_MANAGER, "GET", "/api/v1/otas/:id", &AdminServer::handleOtaGet);
+    service_.Handle("POST", "/api/v1/otas/:id/retry", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
+        if (rc) return rc;
+        handleOtaRetry(ctx, currentActor());
+        return (int)ctx->response->status_code;
+    });
+    service_.Handle("POST", "/api/v1/otas/:id/cancel", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requireRole(ctx, ROLE_MANAGER, role);
+        if (rc) return rc;
+        handleOtaCancel(ctx, currentActor());
+        return (int)ctx->response->status_code;
+    });
     service_.Handle("PUT", "/api/v1/agents/:devid/caps", [this](const HttpContextPtr& ctx) {
         std::string role;
         int rc = requireRole(ctx, ROLE_MANAGER, role);

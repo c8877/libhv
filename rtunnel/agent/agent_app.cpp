@@ -508,6 +508,11 @@ void AgentApp::loadConfig() {
         nallow = idx;
     }
     if (j.contains("shell") && j["shell"].is_boolean()) allow_shell = j["shell"].get<bool>() ? 1 : 0;
+    if (j.contains("ota") && j["ota"].is_boolean()) allow_ota = j["ota"].get<bool>() ? 1 : 0;
+    if (j.contains("ota_dir") && j["ota_dir"].is_string()) {
+        std::string v = j["ota_dir"].get<std::string>();
+        if (!v.empty() && v[0] == '/' && v.find("..") == std::string::npos) ota_dir = v;
+    }
     if (j.contains("metrics") && j["metrics"].is_object()) {
         auto& m = j["metrics"];
         if (m.contains("series") && m["series"].is_array()) {
@@ -543,6 +548,8 @@ bool AgentApp::saveConfig() {
     for (int i = 0; i < 32 && allow_ports[i] > 0; ++i) j["allow"].push_back(allow_ports[i]);
     j["shell"] = allow_shell != 0;
     j["file_dir"] = file_dir;
+    j["ota"] = allow_ota != 0;
+    if (!ota_dir.empty()) j["ota_dir"] = ota_dir;
     std::string tmp = config_file + ".tmp";
     FILE* fp = fopen(tmp.c_str(), "w");
     if (!fp) return false;
@@ -854,6 +861,219 @@ void AgentApp::cleanupParts(const std::string& dir, time_t cutoff) {
     closedir(d);
 }
 
+// ---------------------------------------------------------------- OTA 自升级
+
+static bool otaVersionOk(const std::string& v) {
+    if (v.empty() || v.size() > 40) return false;
+    for (char c : v) {
+        if (!(isalnum((unsigned char)c) || c == '.' || c == '_' || c == '-' || c == '+')) return false;
+    }
+    return true;
+}
+
+void AgentApp::otaAbort() {
+    if (ota_rx_.fp) { fclose(ota_rx_.fp); ota_rx_.fp = nullptr; }
+    ota_rx_ = OtaRx{};
+}
+
+// 跑 <new-binary> --version，2s 超时；输出需与目标版本完全一致
+bool AgentApp::otaProbe(const std::string& path, const std::string& expect, std::string& out) {
+    int pfd[2];
+    if (pipe(pfd) != 0) return false;
+    pid_t pid = fork();
+    if (pid < 0) { close(pfd[0]); close(pfd[1]); return false; }
+    if (pid == 0) {
+        close(pfd[0]);
+        dup2(pfd[1], 1);
+        dup2(pfd[1], 2);
+        close(pfd[1]);
+        execl(path.c_str(), path.c_str(), "--version", (char*)NULL);
+        _exit(127);
+    }
+    close(pfd[1]);
+    char buf[256] = {0};
+    size_t n = 0;
+    int status = 0;
+    bool exited = false;
+    for (int i = 0; i < 200; ++i) {
+        pid_t r = waitpid(pid, &status, WNOHANG);
+        if (r == pid) { exited = true; break; }
+        if (r < 0) break;
+        usleep(10000);
+    }
+    // 先读管道再判超时，避免子进程输出填满管道卡住
+    ssize_t got = read(pfd[0], buf, sizeof(buf) - 1);
+    close(pfd[0]);
+    if (!exited) {
+        kill(pid, SIGKILL);
+        waitpid(pid, &status, 0);
+        return false;
+    }
+    if (got > 0) {
+        n = (size_t)got;
+        while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == ' ')) buf[--n] = '\0';
+        out.assign(buf, n);
+    }
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) return false;
+    return out == expect;
+}
+
+// 安装已校验的新二进制；成功返回 0，并把 self 备份为 .prev
+int AgentApp::otaApply(std::string& err, std::string& warn) {
+    if (self_path.empty()) { err = "self path unknown"; return -1; }
+    std::string newp = ota_rx_.part;
+    std::string self = self_path;
+    std::string prev = self + ".prev";
+
+    std::string probe;
+    if (!otaProbe(newp, ota_rx_.version, probe)) {
+        err = "version probe failed";
+        if (!probe.empty()) err += ": " + probe;
+        return -1;
+    }
+    mode_t mode = 0755;
+    struct stat st{};
+    if (stat(self.c_str(), &st) == 0) mode = st.st_mode & 07777;
+    if (chmod(newp.c_str(), mode) != 0) { err = "chmod failed"; return -1; }
+
+    unlink(prev.c_str());
+    if (rename(self.c_str(), prev.c_str()) != 0) { err = "backup failed"; return -1; }
+    if (rename(newp.c_str(), self.c_str()) != 0) {
+        rename(prev.c_str(), self.c_str());
+        err = "install failed";
+        return -1;
+    }
+    warn = prev;
+    return 0;
+}
+
+void AgentApp::handleOtaFrame(const rtnp::Frame* f) {
+    auto ack = [&](bool ok, uint64_t received, bool applied, bool restarting, const std::string& err) {
+        nlohmann::json j;
+        j["ok"] = ok;
+        j["received"] = received;
+        if (applied) j["applied"] = true;
+        if (restarting) j["restarting"] = true;
+        if (!err.empty()) j["error"] = err;
+        std::string s = j.dump();
+        rtnp::Writer w; w.str(s.c_str());
+        rtnp::send(io, rtnp::OTA_ACK, f->sid, w.data, (uint16_t)w.len);
+    };
+
+    if (!allow_ota) { ack(false, 0, false, false, "ota disabled"); return; }
+    if (strncmp(devid, "a:", 2) == 0) { ack(false, 0, false, false, "on-demand agent"); return; }
+
+    if (f->type == rtnp::OTA_CANCEL) {
+        otaAbort();
+        ack(false, 0, false, false, "canceled");
+        return;
+    }
+
+    if (f->type == rtnp::OTA_BEGIN) {
+        rtnp::Reader r(f->payload, f->len);
+        std::string ver = r.strBytes();
+        uint64_t size = r.u64();
+        std::string sha = r.strBytes();
+        if (r.err || !otaVersionOk(ver) || size == 0 || size > 64ULL * 1024 * 1024 || sha.size() != 64) {
+            ack(false, 0, false, false, "bad begin");
+            return;
+        }
+        if (ota_rx_.fp) {
+            if (ota_rx_.sid != f->sid) { ack(false, 0, false, false, "ota busy"); return; }
+        }
+        std::string dir = ota_dir;
+        if (dir.empty()) {
+            size_t p = self_path.find_last_of('/');
+            dir = (p == std::string::npos) ? "." : self_path.substr(0, p);
+        }
+        if (access(dir.c_str(), W_OK) != 0) { ack(false, 0, false, false, "ota dir not writable"); return; }
+        std::string part = dir + "/.rtunnel-agent-" + ver + ".new.part";
+        uint64_t have = 0;
+        struct stat st{};
+        if (stat(part.c_str(), &st) == 0 && st.st_size > 0 && (uint64_t)st.st_size <= size) {
+            have = (uint64_t)st.st_size;
+        } else if (stat(part.c_str(), &st) == 0 && (uint64_t)st.st_size > size) {
+            unlink(part.c_str());
+        }
+        FILE* fp = fopen(part.c_str(), have ? "ab" : "wb");
+        if (!fp) { ack(false, 0, false, false, "open failed"); return; }
+        ota_rx_.fp = fp;
+        ota_rx_.sid = f->sid;
+        ota_rx_.part = part;
+        ota_rx_.version = ver;
+        ota_rx_.sha = sha;
+        ota_rx_.size = size;
+        ota_rx_.written = have;
+        if (have) logf_("[agent] ota resume %s at %llu", ver.c_str(), (unsigned long long)have);
+        ack(true, have, false, false, "");
+        return;
+    }
+
+    if (ota_rx_.sid != f->sid || !ota_rx_.fp) { ack(false, 0, false, false, "no ota transfer"); return; }
+
+    if (f->type == rtnp::OTA_DATA) {
+        if (f->len > 0 && fwrite(f->payload, 1, f->len, ota_rx_.fp) != f->len) {
+            ack(false, ota_rx_.written, false, false, "write failed");
+            return;
+        }
+        ota_rx_.written += f->len;
+        ack(true, ota_rx_.written, false, false, "");
+        return;
+    }
+
+    // OTA_END
+    fflush(ota_rx_.fp);
+    fsync(fileno(ota_rx_.fp));
+    fclose(ota_rx_.fp);
+    ota_rx_.fp = nullptr;
+    if (ota_rx_.written != ota_rx_.size) {
+        ack(false, ota_rx_.written, false, false, "size mismatch");
+        otaAbort();
+        return;
+    }
+    std::string want = sha256File(ota_rx_.part);
+    if (want.empty() || want != ota_rx_.sha) {
+        unlink(ota_rx_.part.c_str());
+        ack(false, ota_rx_.written, false, false, "sha256 mismatch");
+        otaAbort();
+        return;
+    }
+    std::string err, warn;
+    if (otaApply(err, warn) != 0) {
+        ack(false, ota_rx_.written, false, false, err);
+        otaAbort();
+        return;
+    }
+    std::string self = self_path;
+    uint32_t sid = f->sid;
+    logf_("[agent] ota installed %s, restarting", ota_rx_.version.c_str());
+    ack(true, ota_rx_.size, true, true, "");
+    otaAbort();
+    htimer_t* t = htimer_add(loop, [](htimer_t* tm) {
+        auto* app = (AgentApp*)hevent_userdata(tm);
+        // 所有 fd 置 CLOEXEC：新进程要重新建立 relay 连接，不能继承旧 socket
+        for (int fd = 3; fd < 1024; ++fd) fcntl(fd, F_SETFD, FD_CLOEXEC);
+        std::vector<char*> av;
+        for (auto& s : app->saved_argv) av.push_back(const_cast<char*>(s.c_str()));
+        av.push_back(NULL);
+        execv(app->self_path.c_str(), av.data());
+        // exec 失败：回滚二进制，连接还在，回报错误后继续以旧进程运行
+        int e = errno;
+        std::string prev = app->self_path + ".prev";
+        unlink(app->self_path.c_str());
+        rename(prev.c_str(), app->self_path.c_str());
+        logf_("[agent] ota restart failed: %s", strerror(e));
+        nlohmann::json j;
+        j["ok"] = false;
+        j["error"] = std::string("restart failed: ") + strerror(e);
+        std::string s = j.dump();
+        rtnp::Writer w; w.str(s.c_str());
+        rtnp::send(app->io, rtnp::OTA_ACK, app->ota_restart_sid_, w.data, (uint16_t)w.len);
+    }, 300, 1);
+    hevent_set_userdata(t, this);
+    ota_restart_sid_ = sid;
+}
+
 static bool readTtyCounters(const std::string& want, unsigned long long& rx, unsigned long long& tx) {
     // /dev/ttyS0 对应 /proc/tty/driver 中的 "0:" 端口行
     int port = -1;
@@ -1094,6 +1314,8 @@ void AgentApp::sendSysinfo(int mode) {
         caps["sysinfo"] = true;
         caps["mtls"] = (tls_cert[0] != '\0');
         caps["file_dir"] = file_dir;
+        caps["ota"] = allow_ota != 0;
+        caps["version"] = hv_version();
         j["caps"] = caps;
     }
 
@@ -1163,6 +1385,12 @@ void AgentApp::onFrame(rtnp::Frame* f) {
     case rtnp::FILE_DATA:
     case rtnp::FILE_END:
         handleFileFrame(f);
+        return;
+    case rtnp::OTA_BEGIN:
+    case rtnp::OTA_DATA:
+    case rtnp::OTA_END:
+    case rtnp::OTA_CANCEL:
+        handleOtaFrame(f);
         return;
     case rtnp::TTY_LIST_REQ: {
         nlohmann::json arr = nlohmann::json::array();
@@ -1388,6 +1616,7 @@ void AgentApp::onFrame(rtnp::Frame* f) {
 }
 
 void AgentApp::onLinkDown() {
+    otaAbort();   // .part 保留，重连后可续传
     // 关闭所有本地连接
     while (streams) {
         LocalStream* s = streams;
@@ -1404,6 +1633,12 @@ int AgentApp::run(int argc, char** argv) {
     for (int i = 0; i < argc; ++i) {
         if (i) args_line += " ";
         args_line += argv[i];
+    }
+    saved_argv.assign(argv, argv + argc);
+    {
+        char buf[4096];
+        ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+        if (n > 0) { buf[n] = '\0'; self_path = buf; }
     }
     std::vector<std::string> servers;
     for (int i = 1; i < argc; ++i) {
@@ -1432,6 +1667,13 @@ int AgentApp::run(int argc, char** argv) {
             snprintf(allow_tty, sizeof(allow_tty), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--allow-shell") == 0) {
             allow_shell = 1;
+        } else if (strcmp(argv[i], "--allow-ota") == 0) {
+            allow_ota = 1;
+        } else if (strcmp(argv[i], "--ota-dir") == 0 && i + 1 < argc) {
+            ota_dir = argv[++i];
+        } else if (strcmp(argv[i], "--version") == 0) {
+            printf("%s\n", hv_version());
+            return 0;
         } else if (strcmp(argv[i], "--max-idle") == 0 && i + 1 < argc) {
             max_idle = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--tls-ca") == 0 && i + 1 < argc) {
@@ -1447,7 +1689,7 @@ int AgentApp::run(int argc, char** argv) {
         } else {
             fprintf(stderr,
                 "Usage: %s --devid ID [--server H[:P] ...] [--port P] [--allow 22,80] [--allow-all]\n"
-                "          [--allow-shell [--max-idle SEC]] [--verbose]\n"
+                "          [--allow-shell [--max-idle SEC]] [--allow-ota [--ota-dir DIR]] [--verbose]\n"
                 "       --server 可重复或逗号分隔，故障时按顺序自动切换（最多 8 个）\n",
                 argv[0]);
             return 1;
@@ -1456,6 +1698,10 @@ int AgentApp::run(int argc, char** argv) {
     if (devid[0] == '\0') {
         fprintf(stderr, "--devid is required\n");
         return 1;
+    }
+    if (ota_dir.empty() && !self_path.empty()) {
+        size_t p = self_path.find_last_of('/');
+        if (p != std::string::npos) ota_dir = self_path.substr(0, p);
     }
 
     {

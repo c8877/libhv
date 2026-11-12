@@ -56,6 +56,11 @@ enum Type : uint8_t {
     METRICS_STATUS = 0x2D,   // C→B：str json {applied,error}
     METRICS_QUERY  = 0x2E,   // B→C：str json {series,since_ts}
     METRICS_DATA   = 0x2F,   // C→B：str json {series,points,...}
+    OTA_BEGIN      = 0x30,   // B→C：str version + u64 size + str sha256；sid=升级号
+    OTA_DATA       = 0x31,   // B→C：原始字节；sid=升级号
+    OTA_END        = 0x32,   // B→C：无载荷；sid=升级号
+    OTA_ACK        = 0x33,   // C→B：str json {ok,received,applied,restarting,error}
+    OTA_CANCEL     = 0x34,   // B→C：无载荷
 };
 
 // 错误码

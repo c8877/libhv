@@ -302,6 +302,7 @@ int AdminServer::start(const AdminConfig& cfg) {
               cfg_.addr.c_str());
     }
     spawnWorker([this]() { distLoop(); });
+    spawnWorker([this]() { otaLoop(); });
     // Token 用量：relay 只保留内存计数，这里按周期拉快照落库
     spawnWorker([this]() {
         while (!stopping_.load()) {

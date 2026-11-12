@@ -938,8 +938,180 @@ void RelayServer::onFileAck(RelayConn* c, const rtnp::Frame* f) {
     pushes.erase(it);
 }
 
-bool RelayServer::sendConfig(const char* devid, uint32_t sid, const std::string& json) {
+// ---------------------------------------------------------------- OTA
+
+static bool sendOtaChunk(RelayConn* a, uint32_t tid, OtaPush& p) {
+    if (!p.fp || p.sent >= p.size) return false;
+    size_t want = (size_t)((p.size - p.sent) > FILE_CHUNK ? FILE_CHUNK : (p.size - p.sent));
+    std::vector<char> buf(want);
+    size_t got = fread(buf.data(), 1, want, p.fp);
+    if (got == 0) return false;
+    rtnp::send(a->io, rtnp::OTA_DATA, tid, buf.data(), (uint16_t)got);
+    p.sent += got;
+    return true;
+}
+
+static bool pumpOta(RelayConn* a, uint32_t tid, OtaPush& p) {
+    while (p.sent < p.size && p.sent - p.received < FILE_WINDOW) {
+        if (!sendOtaChunk(a, tid, p)) return false;
+    }
+    return true;
+}
+
+bool RelayServer::startOtaPush(const char* devid, const char* path, const std::string& version,
+                               uint64_t size, const std::string& sha, std::string& err, uint32_t& tid) {
     RelayConn* a = findAgent(devid);
+    if (!a || !a->io) { err = "device offline"; return false; }
+    for (auto& kv : ota_pushes) {
+        if (kv.second.devid == devid) { err = "ota already running"; return false; }
+    }
+    FILE* fp = fopen(path, "rb");
+    if (!fp) { err = "open failed"; return false; }
+    tid = ++ota_seq;
+    OtaPush p;
+    p.fp = fp;
+    p.size = size;
+    p.devid = devid;
+    p.version = version;
+    p.sha = sha;
+    p.phase = 0;
+    ota_pushes[tid] = p;
+    rtnp::Writer w;
+    w.str(version.c_str());
+    w.u64(size);
+    w.str(sha.c_str());
+    rtnp::send(a->io, rtnp::OTA_BEGIN, tid, w.data, (uint16_t)w.len);
+    return true;
+}
+
+std::string RelayServer::otaProgress(uint32_t tid) {
+    nlohmann::json j;
+    auto pit = ota_pushes.find(tid);
+    if (pit != ota_pushes.end()) {
+        j["found"] = true;
+        j["done"] = false;
+        j["sent"] = pit->second.sent;
+        j["size"] = pit->second.size;
+        j["phase"] = pit->second.phase;
+        return j.dump();
+    }
+    auto rit = ota_results.find(tid);
+    if (rit != ota_results.end()) {
+        auto r = nlohmann::json::parse(rit->second, nullptr, false);
+        j["found"] = true;
+        j["done"] = true;
+        j["ok"] = r.is_discarded() ? false : r.value("ok", false);
+        j["applied"] = r.is_discarded() ? false : r.value("applied", false);
+        j["received"] = r.is_discarded() ? 0 : r.value("received", (uint64_t)0);
+        j["size"] = r.is_discarded() ? 0 : r.value("size", (uint64_t)0);
+        if (!r.is_discarded() && r.contains("error")) j["error"] = r["error"];
+        return j.dump();
+    }
+    j["found"] = false;
+    return j.dump();
+}
+
+bool RelayServer::cancelOtaPush(uint32_t tid) {
+    auto it = ota_pushes.find(tid);
+    if (it == ota_pushes.end()) return false;
+    RelayConn* a = findAgent(it->second.devid.c_str());
+    if (a && a->io) rtnp::send(a->io, rtnp::OTA_CANCEL, tid, NULL, 0);
+    if (it->second.fp) fclose(it->second.fp);
+    nlohmann::json r;
+    r["ok"] = false;
+    r["error"] = "canceled";
+    ota_results[tid] = r.dump();
+    if (ota_results.size() > 1024) ota_results.erase(ota_results.begin());
+    ota_pushes.erase(it);
+    return true;
+}
+
+std::string RelayServer::agentVersion(const char* devid) {
+    auto it = agent_versions.find(devid);
+    if (it != agent_versions.end()) return it->second;
+    auto si = sysinfo_cache.find(devid);
+    if (si != sysinfo_cache.end()) {
+        auto j = nlohmann::json::parse(si->second.json, nullptr, false);
+        if (!j.is_discarded() && j.contains("version") && j["version"].is_string()) {
+            return j["version"].get<std::string>();
+        }
+    }
+    return std::string();
+}
+
+int RelayServer::agentOtaCap(const char* devid) {
+    auto it = caps_ota.find(devid);
+    return it == caps_ota.end() ? -1 : it->second;
+}
+
+void RelayServer::onOtaAck(RelayConn* c, const rtnp::Frame* f) {
+    auto it = ota_pushes.find(f->sid);
+    if (it == ota_pushes.end()) {
+        // 已完成的升级可能补发失败 ACK（exec 失败），覆盖结果
+        auto rit = ota_results.find(f->sid);
+        if (rit == ota_results.end()) return;
+        rtnp::Reader rr(f->payload, f->len);
+        static char ab[1024];
+        rr.str(ab, sizeof ab);
+        auto j = nlohmann::json::parse(rr.err ? std::string() : std::string(ab), nullptr, false);
+        if (!j.is_discarded() && !j.value("ok", true)) {
+            nlohmann::json r;
+            r["ok"] = false;
+            r["applied"] = false;
+            r["error"] = j.value("error", std::string("agent error"));
+            r["received"] = j.value("received", (uint64_t)0);
+            r["size"] = j.value("received", (uint64_t)0);
+            ota_results[f->sid] = r.dump();
+        }
+        return;
+    }
+    OtaPush& p = it->second;
+    rtnp::Reader rr(f->payload, f->len);
+    static char ackbuf[1024];
+    rr.str(ackbuf, sizeof ackbuf);
+    auto j = nlohmann::json::parse(rr.err ? std::string() : std::string(ackbuf), nullptr, false);
+    auto finish = [&](bool ok, bool applied, const std::string& e) {
+        if (p.fp) fclose(p.fp);
+        nlohmann::json r;
+        r["ok"] = ok;
+        r["applied"] = applied;
+        r["received"] = p.received;
+        r["size"] = p.size;
+        if (!e.empty()) r["error"] = e;
+        ota_results[f->sid] = r.dump();
+        if (ota_results.size() > 1024) ota_results.erase(ota_results.begin());
+        ota_pushes.erase(it);
+    };
+    if (j.is_discarded() || !j.value("ok", false)) {
+        finish(false, false, j.is_discarded() ? "bad ack" : j.value("error", std::string("agent error")));
+        return;
+    }
+    uint64_t received = j.value("received", (uint64_t)0);
+    if (p.phase == 0) {
+        if (received > p.size) { finish(false, false, "received > size"); return; }
+        p.received = received;
+        p.sent = received;
+        if (p.fp) fseek(p.fp, (long)received, SEEK_SET);
+        p.phase = 1;
+        if (!pumpOta(c, f->sid, p)) finish(false, false, "read failed");
+        return;
+    }
+    if (p.phase == 1) {
+        if (received > p.sent) { finish(false, false, "received mismatch"); return; }
+        p.received = received;
+        if (p.sent >= p.size && p.received >= p.size) {
+            p.phase = 2;
+            rtnp::send(c->io, rtnp::OTA_END, f->sid, NULL, 0);
+            return;
+        }
+        if (!pumpOta(c, f->sid, p)) finish(false, false, "read failed");
+        return;
+    }
+    // phase 2：agent 已安装
+    finish(true, j.value("applied", false), "");
+}
+
+bool RelayServer::sendConfig(const char* devid, uint32_t sid, const std::string& json) {    RelayConn* a = findAgent(devid);
     if (!a || !a->io) return false;
     rtnp::Writer w;
     w.str(json.c_str());
@@ -1032,6 +1204,9 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
     case rtnp::FILE_ACK:
         onFileAck(c, f);
         return;
+    case rtnp::OTA_ACK:
+        onOtaAck(c, f);
+        return;
     case rtnp::METRICS_DATA: {
         rtnp::Reader rr(f->payload, f->len);
         std::string md = rr.strBytes();
@@ -1076,6 +1251,12 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             }
             if (!aj.is_discarded() && aj.contains("file_dir")) {
                 caps_file_dir[c->devid] = aj["file_dir"].get<std::string>();
+            }
+            if (!aj.is_discarded() && aj.contains("ota")) {
+                caps_ota[c->devid] = aj["ota"].get<bool>() ? 1 : 0;
+            }
+            if (!aj.is_discarded() && aj.contains("version")) {
+                agent_versions[c->devid] = aj["version"].get<std::string>();
             }
         }
         return;
@@ -1136,6 +1317,12 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             }
             if (!sj.is_discarded() && sj.contains("caps") && sj["caps"].contains("file_dir")) {
                 caps_file_dir[c->devid] = sj["caps"]["file_dir"].get<std::string>();
+            }
+            if (!sj.is_discarded() && sj.contains("caps") && sj["caps"].contains("ota")) {
+                caps_ota[c->devid] = sj["caps"]["ota"].get<bool>() ? 1 : 0;
+            }
+            if (!sj.is_discarded() && sj.contains("version") && sj["version"].is_string()) {
+                agent_versions[c->devid] = sj["version"].get<std::string>();
             }
         }
         return;
@@ -1491,6 +1678,26 @@ void RelayServer::onClose(RelayConn* c) {
     connCloseAllStreams(c, c->role == rtnp::ROLE_AGENT ? rtnp::DEVICE_OFFLINE : rtnp::CANCELLED);
     dropPendingFor(c);
     if (c->role == rtnp::ROLE_AGENT) {
+        // 该设备未完成的 OTA 立即失败，调度器据此重新入队（.part 续传）
+        if (c->devid[0]) {
+            std::vector<uint32_t> dead;
+            for (auto& kv : ota_pushes) {
+                if (kv.second.devid == c->devid) dead.push_back(kv.first);
+            }
+            for (uint32_t tid : dead) {
+                auto& p = ota_pushes[tid];
+                if (p.fp) fclose(p.fp);
+                nlohmann::json r;
+                r["ok"] = false;
+                r["applied"] = false;
+                r["received"] = p.received;
+                r["size"] = p.size;
+                r["error"] = "device disconnected";
+                ota_results[tid] = r.dump();
+                ota_pushes.erase(tid);
+            }
+            if (ota_results.size() > 1024) ota_results.erase(ota_results.begin());
+        }
         registryRemove(c);
         if (c->devid[0]) logf_("[relay] agent offline: %s", c->devid);
     } else if (c->role == rtnp::ROLE_CLIENT && c->user[0]) {

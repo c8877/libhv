@@ -10,6 +10,7 @@ export const NAV = [
   { path: '/accounts', title: '账号', icon: 'User', roles: ['manager', 'admin'] },
   { path: '/files', title: '文件', icon: 'FolderOpened', roles: ['operator', 'manager', 'admin'] },
   { path: '/tasks', title: '任务', icon: 'List', roles: ['manager', 'admin'] },
+  { path: '/ota', title: 'Agent 升级', icon: 'Refresh', roles: ['manager', 'admin'] },
   { path: '/audit', title: '审计', icon: 'Tickets', roles: ['manager', 'admin'] },
   { path: '/settings', title: '设置', icon: 'Setting', roles: ['admin'] },
 ]
