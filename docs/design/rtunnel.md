@@ -40,7 +40,7 @@
 | **devid** | 设备唯一标识，命名规则见 §8.5 |
 | **a_sid / c_sid** | A↔B 段与 B↔C 段各自的 stream_id，由 B 映射（§10） |
 | **a:\<user\>** | A 侧按需 agent 的 devid：shell 落在开发者机器上，而不是设备 |
-| **admin** | B 上的管理台：HTTP API + WebSocket 终端 + 内嵌前端 |
+| **admin** | B 上的管理台：HTTP API + WebSocket 终端 + Web 前端（dist，需 `--admin-docroot`） |
 | **RTNP** | 反向通道协议（Reverse Tunnel Protocol），运行在 TCP 之上 |
 
 ---
@@ -506,7 +506,7 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 |---|---|
 | `--admin ADDR` | 监听地址，如 `127.0.0.1:9443`；启动时不带凭据且非回环会被拒绝 |
 | `--admin-token T` | 单 token，全权（等价 admin 角色） |
-| `--admin-docroot D` | 前端改从磁盘读（调试用）；默认编译期内嵌 |
+| `--admin-docroot D` | 前端静态目录，指向 `web/dist`；未指定时管理台页面不可用 |
 | `--admin-ca-cert/--admin-ca-key/--admin-cert-dir` | 签发 CA 与台账目录 |
 | `--admin-file-dir D` | 文件管理根目录 |
 | `--admin-shell-user/--admin-shell-token` | Web 终端连本机 relay 的身份与凭证 |

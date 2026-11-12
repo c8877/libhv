@@ -19,16 +19,6 @@ target_link_libraries(rtunnel_common PUBLIC rtnp rtunnel_gzip)
 # 嵌入式目标静态链接 C++ 运行时（目标机无 libstdc++ 时使用，如 MP135）
 option(RTUNNEL_STATIC_LIBGCC "静态链接 libstdc++/libgcc" OFF)
 
-# relay 管理台前端：编译期内嵌 admin.html/admin.js/admin.css
-find_package(Python3 COMPONENTS Interpreter)
-set(ADMIN_FRONTEND ${CMAKE_CURRENT_SOURCE_DIR}/relay/admin/frontend)
-set(EMBEDDED_CPP ${CMAKE_CURRENT_BINARY_DIR}/embedded_frontend.cpp)
-add_custom_command(OUTPUT ${EMBEDDED_CPP}
-    COMMAND ${Python3_EXECUTABLE} ${ADMIN_FRONTEND}/embed.py ${ADMIN_FRONTEND} ${EMBEDDED_CPP}
-    DEPENDS ${ADMIN_FRONTEND}/admin.html ${ADMIN_FRONTEND}/admin.js ${ADMIN_FRONTEND}/admin_ui.js ${ADMIN_FRONTEND}/admin_agent.js ${ADMIN_FRONTEND}/admin_pages.js ${ADMIN_FRONTEND}/admin_permission.js ${ADMIN_FRONTEND}/admin_terminal.js ${ADMIN_FRONTEND}/admin_accounts.js ${ADMIN_FRONTEND}/admin_dist.js ${ADMIN_FRONTEND}/admin.css ${ADMIN_FRONTEND}/embed.py
-            ${ADMIN_FRONTEND}/vendor/xterm.js ${ADMIN_FRONTEND}/vendor/xterm.css ${ADMIN_FRONTEND}/vendor/xterm-addon-fit.js
-    COMMENT "embed rtunnel admin frontend")
-
 add_library(rtunnel_sqlite STATIC 3rd/sqlite3/sqlite3.c)
 target_compile_definitions(rtunnel_sqlite PRIVATE SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION=1)
 set_target_properties(rtunnel_sqlite PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -65,8 +55,7 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
                relay/admin/backend/api_dist.cpp
                relay/admin/backend/hash_util.cpp
                relay/admin/backend/dist_scheduler.cpp
-               relay/admin/backend/terminal.cpp
-               ${EMBEDDED_CPP})
+               relay/admin/backend/terminal.cpp)
 add_executable(rtunnel-agent  agent/main.cpp agent/agent_app.cpp)
 add_executable(rtunnel-client client/main.cpp client/client_app.cpp client/shell_client.cpp)
 add_executable(rtnp-codec-test tests/codec_test.cpp)

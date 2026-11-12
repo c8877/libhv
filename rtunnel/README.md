@@ -113,7 +113,8 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
   任务页支持状态过滤、重试、取消、超时延长
 - 文件哈希：上传即计算 sha256；同设备同哈希重复分发标记「冲突」，
   可校验设备文件（相同则直接成功）或强制重发
-- 前端：`http://127.0.0.1:9443/`（编译期内嵌，`--admin-docroot DIR` 可改磁盘读取）
+- 前端：构建 `rtunnel/relay/admin/web` 后，用 `--admin-docroot DIR` 指向 `dist/`；
+  未指定时管理台页面不可用（仅 API 正常）
 - 鉴权：`--admin-token T` 仅用于首次初始化管理员；之后使用账号密码登录
   （SQLite + HttpOnly 会话）；非回环监听必须配置 `--admin-token`；
 - 证书配置：`--admin-ca-cert C --admin-ca-key K --admin-cert-dir D`（台账 index.txt、

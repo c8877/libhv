@@ -782,7 +782,7 @@ rtunnel/common/sha256.*            自带 SHA-256（relay 无 OpenSSL 也能校�
 rtunnel/common/token_util.*        Token 生成 / base64url / 周期边界
 rtunnel/relay/admin/backend/admin_db_accounts.cpp   账号与 Token 存取
 rtunnel/relay/admin/backend/api_accounts.cpp        管理 API
-rtunnel/relay/admin/frontend/admin_accounts.js      接入账号页
+rtunnel/relay/admin/web/src/pages/accounts.vue         接入账号页
 ```
 
 协议扩展在 `rtnp/frame.hpp`（`TOKEN_*` 错误码）与 `common/tunnel_link.cpp`（auth_type=2、

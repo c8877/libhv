@@ -410,7 +410,7 @@ void AdminServer::registerRoutes() {
         if (rc == HTTP_STATUS_NOT_FOUND) rc = serveFrontend(ctx, "index.html", "text/html");
         return rc;
     });
-    // 前端静态产物：Nuxt(_nuxt/) 与 Vite(assets/) 共用
+    // 前端静态产物（Vite）
     auto static_asset = [this](const HttpContextPtr& ctx) {
         std::string path = ctx->path();
         auto ends_with = [&path](const char* suffix) {
@@ -430,40 +430,6 @@ void AdminServer::registerRoutes() {
         if (rc == 200) ctx->response->headers["Cache-Control"] = "public, max-age=31536000, immutable";
         return rc;
     };
-    service_.GET("/_nuxt/*", static_asset);
     service_.GET("/assets/*", static_asset);
-    service_.GET("/admin_agent.js", [this](const HttpContextPtr& ctx) {
-        return serveFrontend(ctx, "admin_agent.js", "application/javascript");
-    });
-    service_.GET("/admin_pages.js", [this](const HttpContextPtr& ctx) {
-        return serveFrontend(ctx, "admin_pages.js", "application/javascript");
-    });
-    service_.GET("/admin_permission.js", [this](const HttpContextPtr& ctx) {
-        return serveFrontend(ctx, "admin_permission.js", "application/javascript");
-    });
-    service_.GET("/admin_terminal.js", [this](const HttpContextPtr& ctx) {
-        return serveFrontend(ctx, "admin_terminal.js", "application/javascript");
-    });
-    service_.GET("/admin_accounts.js", [this](const HttpContextPtr& ctx) {
-        return serveFrontend(ctx, "admin_accounts.js", "application/javascript");
-    });
-    service_.GET("/admin_dist.js", [this](const HttpContextPtr& ctx) {
-        return serveFrontend(ctx, "admin_dist.js", "application/javascript");
-    });
-    service_.GET("/admin_ui.js", [this](const HttpContextPtr& ctx) {
-        return serveFrontend(ctx, "admin_ui.js", "application/javascript");
-    });
-    service_.GET("/admin.js", [this](const HttpContextPtr& ctx) {
-        return serveFrontend(ctx, "admin.js", "application/javascript");
-    });
-    service_.GET("/admin.css", [this](const HttpContextPtr& ctx) {
-        return serveFrontend(ctx, "admin.css", "text/css");
-    });
-    service_.GET("/vendor/:name", [this](const HttpContextPtr& ctx) {
-        std::string name = ctx->param("name");
-        std::string ctype = name.size() > 4 && name.compare(name.size() - 4, 4, ".css") == 0
-                                ? "text/css" : "application/javascript";
-        return serveFrontend(ctx, ("vendor/" + name).c_str(), ctype.c_str());
-    });
 }
 

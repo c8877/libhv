@@ -934,35 +934,20 @@ viewer 只能看，不显示写操作按钮。
 
 # 11. 实现结构
 
-当前实现（`rtunnel/relay/admin/frontend/admin_permission.js`，进入权限页时按需加载）：
+当前实现：`rtunnel/relay/admin/web/src/pages/permission.vue`（Vue 3 + Element Plus，路由按需加载）：
 
 ```
-PermissionPage
-├─ UI.tabs                客户端分组 / 设备分组
-├─ 分组表格                固定列宽，点行展开一个表单
+权限页
+├─ el-tabs                客户端分组 / 设备分组
+├─ 分组表格                点行打开编辑弹窗
 │   ├─ clientForm          名称、用户 chips、ACL 矩阵
 │   └─ agentForm           名称、设备 chips、能力上限
-├─ UI.transfer             加设备、选端口 / TTY
-├─ DictManager             端口 / TTY 字典（弹窗 + 行内编辑）
+├─ 设备穿梭弹窗            加设备、选端口 / TTY
+├─ 字典管理弹窗            端口 / TTY 字典
 └─ 有效权限 / 旧 ACL 导入导出
 ```
 
-共用组件（`admin_ui.js`）：
-
-```
-UI.tabs       分组切换、Token 状态筛选、字典类型切换
-UI.transfer   设备穿梭与端口 / TTY 选择
-UI.dataTable  列声明表格，支持 head / cells / rowAttrs / expand
-UI.editTable  单条记录 KV 表原地转表单
-UI.formGrid   行内展开表单的字段网格
-UI.actions    data-act 事件委托
-```
-
-行内展开只保留一个 key：
-
-```
-expandedKey = "client:1" | "agent:3" | "client:new"
-```
+前端组件统一使用 Element Plus，样式在 `web/src/style.css`。
 
 ---
 

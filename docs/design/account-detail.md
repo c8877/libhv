@@ -612,6 +612,10 @@ if (!r.ok) {
 
 # 10. 前端实现
 
+> 注：本节记录旧手写前端（已删除的 `admin/frontend/`）的实现；当前实现在
+> `rtunnel/relay/admin/web/src/pages/access/[id].vue`（Vue + Element Plus），
+> 交互与状态设计仍可参考。
+
 ## 10.1 文件
 
 ```

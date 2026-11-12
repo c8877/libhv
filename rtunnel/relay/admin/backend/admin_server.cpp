@@ -12,16 +12,6 @@ using nlohmann::json;
 #include <string.h>
 #include <sys/stat.h>
 
-// 编译期内嵌前端（embed.py 生成 embedded_frontend.cpp）
-struct EmbeddedFile {
-    const char*          name;
-    const char*          ctype;
-    const unsigned char* data;
-    unsigned int         len;
-};
-extern const EmbeddedFile g_embedded_frontend[];
-extern const int          g_embedded_frontend_count;
-
 // ---------------------------------------------------------------- 跨线程调用
 
 // 在 relay 线程执行 fn 并同步等结果。relay 状态只在 relay 线程被访问。
@@ -212,44 +202,37 @@ int AdminServer::serveFrontend(const HttpContextPtr& ctx, const char* name, cons
         if (!ok) body.clear();
         return ok;
     };
-    if (!cfg_.docroot.empty()) {
-        std::string path = cfg_.docroot + "/" + name;
-        // 构建期生成的 .br/.gz 预压缩文件，按 Accept-Encoding 直接返回
-        std::string ae = ctx->header("Accept-Encoding");
-        const char* encoding = NULL;
-        const char* ext = NULL;
-        if (ae.find("br") != std::string::npos) {
-            encoding = "br"; ext = ".br";
-        } else if (ae.find("gzip") != std::string::npos) {
-            encoding = "gzip"; ext = ".gz";
-        }
-        if (encoding) {
-            std::string body;
-            if (read_file(path + ext, body)) {
-                ctx->response->content_type = http_content_type_enum(ctype);
-                ctx->response->headers["Content-Encoding"] = encoding;
-                ctx->response->headers["Vary"] = "Accept-Encoding";
-                ctx->response->body = std::move(body);
-                return 200;
-            }
-        }
+    if (cfg_.docroot.empty()) {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->response->content_type = http_content_type_enum("text/plain");
+        ctx->response->body = "admin frontend not deployed: start relay with --admin-docroot <web/dist>\n";
+        return 404;
+    }
+    std::string path = cfg_.docroot + "/" + name;
+    // 构建期生成的 .br/.gz 预压缩文件，按 Accept-Encoding 直接返回
+    std::string ae = ctx->header("Accept-Encoding");
+    const char* encoding = NULL;
+    const char* ext = NULL;
+    if (ae.find("br") != std::string::npos) {
+        encoding = "br"; ext = ".br";
+    } else if (ae.find("gzip") != std::string::npos) {
+        encoding = "gzip"; ext = ".gz";
+    }
+    if (encoding) {
         std::string body;
-        if (read_file(path, body)) {
+        if (read_file(path + ext, body)) {
             ctx->response->content_type = http_content_type_enum(ctype);
+            ctx->response->headers["Content-Encoding"] = encoding;
+            ctx->response->headers["Vary"] = "Accept-Encoding";
             ctx->response->body = std::move(body);
             return 200;
         }
-        // 指定 docroot 时以磁盘产物为准，不再回退内嵌前端
-        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
-        return 404;
     }
-    for (int i = 0; i < g_embedded_frontend_count; ++i) {
-        const EmbeddedFile& f = g_embedded_frontend[i];
-        if (strcmp(f.name, name) == 0) {
-            ctx->response->content_type = http_content_type_enum(ctype);
-            ctx->response->body.assign((const char*)f.data, f.len);
-            return 200;
-        }
+    std::string body;
+    if (read_file(path, body)) {
+        ctx->response->content_type = http_content_type_enum(ctype);
+        ctx->response->body = std::move(body);
+        return 200;
     }
     ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
     return 404;
@@ -366,6 +349,9 @@ int AdminServer::start(const AdminConfig& cfg) {
     }
     logf_("[admin] listening on http://%s:%d/ (%s, users=%zu)", host, port,
           cfg_.token.empty() ? "no auth (loopback)" : "bearer token", 0);
+    if (cfg_.docroot.empty()) {
+        logf_("[admin] WARNING: --admin-docroot not set, admin UI disabled");
+    }
     return 0;
 }
 
