@@ -1,0 +1,21 @@
+{
+  "name": "rtunnel-admin-nuxt",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "nuxt build",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview"
+  },
+  "dependencies": {
+    "@element-plus/icons-vue": "^2.3.2",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "chart.js": "^4.6.1",
+    "element-plus": "^2.14.8",
+    "nuxt": "^4.6.4",
+    "vue": "^3.5.45",
+    "vue-router": "^4.6.4"
+  }
+}

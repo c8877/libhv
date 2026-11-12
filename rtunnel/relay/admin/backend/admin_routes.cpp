@@ -406,7 +406,18 @@ void AdminServer::registerRoutes() {
     service_.Handle("HEAD", "/device/*", devproxy);
 
     service_.GET("/", [this](const HttpContextPtr& ctx) {
-        return serveFrontend(ctx, "admin.html", "text/html");
+        int rc = serveFrontend(ctx, "admin.html", "text/html");
+        if (rc == HTTP_STATUS_NOT_FOUND) rc = serveFrontend(ctx, "index.html", "text/html");
+        return rc;
+    });
+    // Nuxt/Vite 构建产物：/_nuxt/<file>
+    service_.GET("/_nuxt/*", [this](const HttpContextPtr& ctx) {
+        std::string path = ctx->path();
+        const char* ctype = "application/javascript";
+        std::string tail = path.size() > 4 ? path.substr(path.size() - 4) : "";
+        if (tail == ".css") ctype = "text/css";
+        else if (path.size() > 5 && path.compare(path.size() - 5, 5, ".json") == 0) ctype = "application/json";
+        return serveFrontend(ctx, path.c_str() + 1, ctype);
     });
     service_.GET("/admin_agent.js", [this](const HttpContextPtr& ctx) {
         return serveFrontend(ctx, "admin_agent.js", "application/javascript");
