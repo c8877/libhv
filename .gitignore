@@ -72,6 +72,7 @@ test
 *_test
 build
 build-*
+build_*
 config.mk
 hconfig.h
 html/uploads
