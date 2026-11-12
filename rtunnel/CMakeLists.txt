@@ -86,6 +86,14 @@ endif()
 if(NOT EXISTS "${RTUNNEL_WEB_DIST}/admin.html")
     message(STATUS "rtunnel-deploy: ${RTUNNEL_WEB_DIST} 未构建，先执行 npm run build")
 endif()
+# 只裁剪部署副本，保留构建目录里的调试符号
+set(RTUNNEL_STRIP_ARGS "")
+if(CMAKE_STRIP)
+    list(APPEND RTUNNEL_STRIP_ARGS
+        COMMAND ${CMAKE_STRIP} --strip-all "${RTUNNEL_DEPLOY_DIR}/relay/bin/rtunnel-relay"
+        COMMAND ${CMAKE_STRIP} --strip-all "${RTUNNEL_DEPLOY_DIR}/agent/bin/rtunnel-agent"
+        COMMAND ${CMAKE_STRIP} --strip-all "${RTUNNEL_DEPLOY_DIR}/agent/bin/rtunnel-client")
+endif()
 add_custom_target(rtunnel-deploy
     COMMAND ${CMAKE_COMMAND} -E make_directory
             "${RTUNNEL_DEPLOY_DIR}/relay/bin"
@@ -99,6 +107,7 @@ add_custom_target(rtunnel-deploy
             $<TARGET_FILE:rtunnel-agent> "${RTUNNEL_DEPLOY_DIR}/agent/bin/rtunnel-agent"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:rtunnel-client> "${RTUNNEL_DEPLOY_DIR}/agent/bin/rtunnel-client"
+    ${RTUNNEL_STRIP_ARGS}
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/deploy/relay/rtunnel-relay.service"
             "${RTUNNEL_DEPLOY_DIR}/relay/service/rtunnel-relay.service"
