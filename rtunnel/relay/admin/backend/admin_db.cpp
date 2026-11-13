@@ -149,7 +149,7 @@ bool AdminDb::open(const std::string& path, std::string& err) {
 }
 
 bool AdminDb::migrate(std::string& err) {
-    return exec(
+    if (!exec(
         "CREATE TABLE IF NOT EXISTS users("
         " id INTEGER PRIMARY KEY AUTOINCREMENT,"
         " username TEXT NOT NULL UNIQUE,"
@@ -175,6 +175,8 @@ bool AdminDb::migrate(std::string& err) {
         " id INTEGER PRIMARY KEY AUTOINCREMENT,"
         " batch_id TEXT NOT NULL,"
         " devid TEXT NOT NULL,"
+        " kind TEXT NOT NULL DEFAULT 'file',"
+        " target_version TEXT NOT NULL DEFAULT '',"
         " file_name TEXT NOT NULL,"
         " file_size INTEGER NOT NULL,"
         " file_sha TEXT NOT NULL DEFAULT '',"
@@ -196,30 +198,6 @@ bool AdminDb::migrate(std::string& err) {
         " finished_ms INTEGER NOT NULL DEFAULT 0);"
         "CREATE INDEX IF NOT EXISTS idx_dist_due ON distribution_tasks(status, start_at_ms);"
         "CREATE INDEX IF NOT EXISTS idx_dist_dead ON distribution_tasks(status, deadline_at_ms);"
-        "CREATE TABLE IF NOT EXISTS ota_tasks("
-        " id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        " batch_id TEXT NOT NULL,"
-        " devid TEXT NOT NULL,"
-        " version TEXT NOT NULL,"
-        " file_name TEXT NOT NULL,"
-        " file_size INTEGER NOT NULL,"
-        " file_sha TEXT NOT NULL DEFAULT '',"
-        " force INTEGER NOT NULL DEFAULT 0,"
-        " status TEXT NOT NULL DEFAULT 'queued',"
-        " sent INTEGER NOT NULL DEFAULT 0,"
-        " relay_tid INTEGER NOT NULL DEFAULT 0,"
-        " error TEXT NOT NULL DEFAULT '',"
-        " retry_count INTEGER NOT NULL DEFAULT 0,"
-        " max_retries INTEGER NOT NULL DEFAULT 2,"
-        " next_retry_ms INTEGER NOT NULL DEFAULT 0,"
-        " deadline_at_ms INTEGER NOT NULL DEFAULT 0,"
-        " started_ms INTEGER NOT NULL DEFAULT 0,"
-        " finished_ms INTEGER NOT NULL DEFAULT 0,"
-        " actor TEXT NOT NULL DEFAULT '',"
-        " created_ms INTEGER NOT NULL DEFAULT 0);"
-        "CREATE INDEX IF NOT EXISTS idx_ota_due ON ota_tasks(status, next_retry_ms);"
-        "CREATE INDEX IF NOT EXISTS idx_ota_batch ON ota_tasks(batch_id);"
-        "CREATE INDEX IF NOT EXISTS idx_ota_dev ON ota_tasks(devid, id DESC);"
         "CREATE TABLE IF NOT EXISTS file_meta("
         " name TEXT PRIMARY KEY,"
         " size INTEGER NOT NULL DEFAULT 0,"
@@ -392,7 +370,30 @@ bool AdminDb::migrate(std::string& err) {
         "CREATE INDEX IF NOT EXISTS idx_client_token_account ON client_tokens(account_id);"
         "UPDATE users SET role='admin' WHERE role='superadmin';"
         "UPDATE users SET role='viewer' WHERE role='user';",
-        err);
+        err)) return false;
+
+    // 增量迁移：distribution_tasks 增加 OTA 字段（老库没有）
+    auto hasColumn = [&](const char* table, const char* col) {
+        std::string sql = std::string("PRAGMA table_info(") + table + ")";
+        sqlite3_stmt* st = nullptr;
+        bool found = false;
+        if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                const char* n = (const char*)sqlite3_column_text(st, 1);
+                if (n && strcmp(n, col) == 0) { found = true; break; }
+            }
+            sqlite3_finalize(st);
+        }
+        return found;
+    };
+    if (!hasColumn("distribution_tasks", "kind")) {
+        if (!exec("ALTER TABLE distribution_tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'file'", err)) return false;
+    }
+    if (!hasColumn("distribution_tasks", "target_version")) {
+        if (!exec("ALTER TABLE distribution_tasks ADD COLUMN target_version TEXT NOT NULL DEFAULT ''", err)) return false;
+    }
+    exec("CREATE INDEX IF NOT EXISTS idx_dist_kind ON distribution_tasks(kind, status)", err);
+    return true;
 }
 
 bool AdminDb::getSettings(std::map<std::string, std::string>& out) {

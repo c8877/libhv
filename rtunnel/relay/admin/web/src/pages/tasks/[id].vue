@@ -12,11 +12,11 @@
         <h2>任务 #{{ t.id }}</h2>
         <el-tag :type="statusType(t.status)" size="small">{{ statusText(t.status) }}</el-tag>
         <span class="spacer" />
-        <el-button v-if="t.status === 'failed'" type="primary" @click="retry">重试</el-button>
-        <el-button v-if="t.status === 'scheduled' || t.status === 'queued'" @click="cancel">取消</el-button>
+        <el-button v-if="canRetry()" type="primary" @click="retry">重试</el-button>
+        <el-button v-if="canCancel()" @click="cancel">取消</el-button>
         <el-button v-if="t.status === 'timeout' && t.extend_count === 0" @click="extend">延长截止</el-button>
-        <el-button v-if="t.status === 'conflict'" @click="check('verify')">校验设备</el-button>
-        <el-button v-if="t.status === 'conflict'" @click="check('force')">强制重发</el-button>
+        <el-button v-if="t.kind !== 'ota' && t.status === 'conflict'" @click="check('verify')">校验设备</el-button>
+        <el-button v-if="t.kind !== 'ota' && t.status === 'conflict'" @click="check('force')">强制重发</el-button>
         <el-button @click="$router.push('/tasks')">返回列表</el-button>
       </div>
 
@@ -38,6 +38,8 @@
         <div class="panel-head"><h2>传输</h2></div>
         <el-descriptions :column="1" size="small" border>
           <el-descriptions-item label="设备">{{ t.devid }}</el-descriptions-item>
+          <el-descriptions-item label="类型">{{ t.kind === 'ota' ? 'Agent 升级' : '文件分发' }}</el-descriptions-item>
+          <el-descriptions-item v-if="t.kind === 'ota'" label="目标版本">{{ t.target_version }}</el-descriptions-item>
           <el-descriptions-item label="目标路径">{{ t.target_path || '—' }}</el-descriptions-item>
           <el-descriptions-item label="重试">{{ t.retry_count }} / {{ t.max_retries }}</el-descriptions-item>
           <el-descriptions-item label="批次">{{ t.batch_id || '—' }}</el-descriptions-item>
@@ -69,8 +71,18 @@ const t = ref(null)
 
 const STATUS = {
   scheduled: ['等待开始', 'warning'], queued: ['排队中', 'warning'], running: ['传输中', 'warning'],
+  verifying: ['版本校验', 'warning'], installing: ['安装中', 'warning'], confirming: ['等待重启', 'warning'],
   success: ['成功', 'success'], failed: ['失败', 'danger'], timeout: ['超时', 'danger'],
-  canceled: ['已取消', 'info'], conflict: ['冲突', 'warning'],
+  canceled: ['已取消', 'info'], conflict: ['冲突', 'warning'], unsupported: ['不支持 OTA', 'info'],
+}
+function canRetry() {
+  if (!t.value) return false
+  if (t.value.status === 'failed') return true
+  return t.value.kind === 'ota' && ['timeout', 'conflict', 'unsupported', 'canceled'].includes(t.value.status)
+}
+function canCancel() {
+  if (!t.value) return false
+  return ['scheduled', 'queued', 'running'].includes(t.value.status)
 }
 function statusText(s) { return (STATUS[s] || ['未知', 'warning'])[0] }
 function statusType(s) { return (STATUS[s] || ['未知', 'warning'])[1] }
@@ -83,7 +95,7 @@ const pct = computed(() => {
 const progressStatus = computed(() => {
   if (!t.value) return ''
   if (t.value.status === 'success') return 'success'
-  if (['failed', 'timeout', 'conflict'].includes(t.value.status)) return 'exception'
+  if (['failed', 'timeout', 'conflict', 'unsupported'].includes(t.value.status)) return 'exception'
   return ''
 })
 

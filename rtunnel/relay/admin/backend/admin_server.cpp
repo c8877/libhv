@@ -276,7 +276,7 @@ int AdminServer::start(const AdminConfig& cfg) {
             loadSettings();
             db_.permMigrateLegacy();
             db_.permSyncDictIds();
-            db_.otaRecover();
+            db_.distRecover();
             logf_("[admin] db: %s", cfg_.db_path.c_str());
         } else {
             logf_("[admin] db open failed: %s (%s)", cfg_.db_path.c_str(), db_err.c_str());
@@ -303,7 +303,6 @@ int AdminServer::start(const AdminConfig& cfg) {
               cfg_.addr.c_str());
     }
     spawnWorker([this]() { distLoop(); });
-    spawnWorker([this]() { otaLoop(); });
     // Token 用量：relay 只保留内存计数，这里按周期拉快照落库
     spawnWorker([this]() {
         while (!stopping_.load()) {

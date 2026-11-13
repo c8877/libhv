@@ -35,16 +35,15 @@ struct ConfigAck {
     uint64_t    ts = 0;
 };
 
-// agent OTA：新二进制流式下发，agent 校验后自替换并重启
-struct OtaPush {
-    FILE*        fp = nullptr;
-    uint64_t     size = 0;
-    uint64_t     sent = 0;
-    uint64_t     received = 0;
-    int          phase = 0;        // 0=等 BEGIN ACK，1=传数据，2=等 END ACK
+// agent OTA：文件已由分发通道落到设备 file_dir，这里只下发安装指令并跟踪阶段
+struct OtaApply {
     std::string  devid;
     std::string  version;
-    std::string  sha;
+    std::string  phase;      // verifying / installing / installed
+    std::string  error;
+    int          done = 0;
+    int          ok = 0;
+    uint64_t     ts = 0;
 };
 
 struct RelayStream {
@@ -168,8 +167,7 @@ public:
     std::unordered_map<uint32_t, FilePush> pushes;
     std::unordered_map<uint32_t, std::string> push_results;
     uint32_t push_seq = 0;
-    std::unordered_map<uint32_t, OtaPush> ota_pushes;
-    std::unordered_map<uint32_t, std::string> ota_results;
+    std::unordered_map<uint32_t, OtaApply> ota_applies;
     uint32_t ota_seq = 0;
     std::unordered_map<uint32_t, std::string> check_results;
     uint32_t check_seq = 0;
@@ -240,10 +238,10 @@ private:
                                std::string& err, uint32_t& tid);
     std::string  pushProgress(uint32_t tid);
     bool         cancelFilePush(uint32_t tid);
-    bool         startOtaPush(const char* devid, const char* path, const std::string& version,
-                              uint64_t size, const std::string& sha, std::string& err, uint32_t& tid);
-    std::string  otaProgress(uint32_t tid);
-    bool         cancelOtaPush(uint32_t tid);
+    bool         startOtaApply(const char* devid, const char* path, const std::string& version,
+                               uint64_t size, const std::string& sha, std::string& err, uint32_t& tid);
+    std::string  otaApplyProgress(uint32_t tid);
+    bool         cancelOtaApply(uint32_t tid);
     std::string  agentVersion(const char* devid);
     int          agentOtaCap(const char* devid);   // -1 未知 0 不支持 1 支持
     bool         startFileCheck(const char* devid, const char* dir, const char* name,
@@ -260,8 +258,7 @@ private:
     bool         agentOnline(const char* devid) { return findAgent(devid) != nullptr; }
     std::string  fileDirOf(const char* devid);
     void         onFileAck(RelayConn* c, const rtnp::Frame* f);
-    void         onOtaAck(RelayConn* c, const rtnp::Frame* f);
-    void         onHsTimeout(RelayConn* c);
+    void         onOtaAck(RelayConn* c, const rtnp::Frame* f);    void         onHsTimeout(RelayConn* c);
     void         handleFrame(RelayConn* c, rtnp::Frame* f);
     void         onRead(RelayConn* c, void* buf, int readbytes);
     void         onClose(RelayConn* c);

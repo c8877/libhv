@@ -31,32 +31,37 @@ static void fillDistRow(sqlite3_stmt* st, nlohmann::json& j) {
     j["started_ms"] = sqlite3_column_int64(st, 19);
     j["finished_ms"] = sqlite3_column_int64(st, 20);
     j["file_sha"] = (const char*)sqlite3_column_text(st, 21);
+    j["kind"] = (const char*)sqlite3_column_text(st, 22);
+    j["target_version"] = (const char*)sqlite3_column_text(st, 23);
 }
 
 bool AdminDb::distInsert(const std::string& batch, const std::string& devid, const std::string& file,
                          long long size, const std::string& sha, const std::string& sub,
                          const std::string& target, const std::string& status,
                          long long start_ms, long long deadline_ms, int max_retries,
-                         const std::string& actor, long long* id) {
+                         const std::string& actor, const std::string& kind,
+                         const std::string& version, long long* id) {
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
-    const char* sql = "INSERT INTO distribution_tasks(batch_id,devid,file_name,file_size,file_sha,"
-        "sub_dir,target_path,status,start_at_ms,deadline_at_ms,max_retries,actor,created_ms)"
-        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)";
+    const char* sql = "INSERT INTO distribution_tasks(batch_id,devid,kind,target_version,file_name,"
+        "file_size,file_sha,sub_dir,target_path,status,start_at_ms,deadline_at_ms,max_retries,actor,created_ms)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
     sqlite3_bind_text(st, 1, batch.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 2, devid.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 3, file.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 4, size);
-    sqlite3_bind_text(st, 5, sha.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 6, sub.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 7, target.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 8, status.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 9, start_ms);
-    sqlite3_bind_int64(st, 10, deadline_ms);
-    sqlite3_bind_int(st, 11, max_retries);
-    sqlite3_bind_text(st, 12, actor.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 13, nowMs());
+    sqlite3_bind_text(st, 3, kind.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 4, version.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 5, file.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 6, size);
+    sqlite3_bind_text(st, 7, sha.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 8, sub.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 9, target.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 10, status.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 11, start_ms);
+    sqlite3_bind_int64(st, 12, deadline_ms);
+    sqlite3_bind_int(st, 13, max_retries);
+    sqlite3_bind_text(st, 14, actor.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 15, nowMs());
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
     if (rc != SQLITE_DONE) return false;
@@ -114,7 +119,7 @@ bool AdminDb::distGet(long long id, std::string& json_out) {
     sqlite3_stmt* st = nullptr;
     const char* sql = "SELECT id,batch_id,devid,file_name,file_size,sub_dir,target_path,status,"
         "start_at_ms,deadline_at_ms,retry_count,max_retries,next_retry_ms,extend_count,sent,error,"
-        "relay_tid,actor,created_ms,started_ms,finished_ms,file_sha FROM distribution_tasks WHERE id=?";
+        "relay_tid,actor,created_ms,started_ms,finished_ms,file_sha,kind,target_version FROM distribution_tasks WHERE id=?";
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
     sqlite3_bind_int64(st, 1, id);
     bool ok = false;
@@ -129,16 +134,21 @@ bool AdminDb::distGet(long long id, std::string& json_out) {
 }
 
 bool AdminDb::distList(const std::string& status, const std::string& q, const std::string& batch,
-                       int page, int per_page, std::string& json_out, int& total) {
+                       const std::string& kind, int page, int per_page,
+                       std::string& json_out, int& total) {
     std::lock_guard<std::mutex> lk(mu_);
     std::string where = " WHERE 1=1";
     std::vector<std::string> args;
+    if (!kind.empty()) {
+        where += " AND kind=?";
+        args.push_back(kind);
+    }
     if (status == "active") {
-        where += " AND status IN ('scheduled','queued','running')";
+        where += " AND status IN ('scheduled','queued','running','verifying','installing','confirming')";
     } else if (status == "done") {
         where += " AND status='success'";
     } else if (status == "failed_group") {
-        where += " AND status IN ('failed','timeout')";
+        where += " AND status IN ('failed','timeout','unsupported')";
     } else if (!status.empty()) {
         where += " AND status=?";
         args.push_back(status);
@@ -163,7 +173,7 @@ bool AdminDb::distList(const std::string& status, const std::string& q, const st
 
     std::string sql = "SELECT id,batch_id,devid,file_name,file_size,sub_dir,target_path,status,"
         "start_at_ms,deadline_at_ms,retry_count,max_retries,next_retry_ms,extend_count,sent,error,"
-        "relay_tid,actor,created_ms,started_ms,finished_ms,file_sha FROM distribution_tasks" + where +
+        "relay_tid,actor,created_ms,started_ms,finished_ms,file_sha,kind,target_version FROM distribution_tasks" + where +
         " ORDER BY id DESC LIMIT ? OFFSET ?";
     if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return false;
     int idx = 1;
@@ -187,8 +197,8 @@ bool AdminDb::distDue(std::string& json_out) {
     sqlite3_stmt* st = nullptr;
     const char* sql = "SELECT id,batch_id,devid,file_name,file_size,sub_dir,target_path,status,"
         "start_at_ms,deadline_at_ms,retry_count,max_retries,next_retry_ms,extend_count,sent,error,"
-        "relay_tid,actor,created_ms,started_ms,finished_ms,file_sha FROM distribution_tasks"
-        " WHERE status IN ('scheduled','queued','running') ORDER BY id";
+        "relay_tid,actor,created_ms,started_ms,finished_ms,file_sha,kind,target_version FROM distribution_tasks"
+        " WHERE status IN ('scheduled','queued','running','verifying','installing','confirming') ORDER BY id";
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
     nlohmann::json arr = nlohmann::json::array();
     while (sqlite3_step(st) == SQLITE_ROW) {
@@ -212,7 +222,7 @@ bool AdminDb::distSummary(std::string& json_out) {
         long long n = sqlite3_column_int64(st, 1);
         all += n;
         if (s == "success") done += n;
-        else if (s == "failed" || s == "timeout") failed += n;
+        else if (s == "failed" || s == "timeout" || s == "unsupported") failed += n;
         else if (s == "conflict") conflict += n;
         else if (s == "canceled") { /* 归入全部，不计进行中 */ }
         else active += n;
@@ -273,5 +283,59 @@ bool AdminDb::distAlreadyPushed(const std::string& devid, const std::string& sha
     bool found = (sqlite3_step(st) == SQLITE_ROW);
     sqlite3_finalize(st);
     return found;
+}
+
+bool AdminDb::distSetPhase(long long id, const std::string& status, const std::string& error,
+                           long long sent, long long relay_tid, long long started_ms) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    const char* sql = "UPDATE distribution_tasks SET status=?, error=?, sent=?, relay_tid=?,"
+        " started_ms=? WHERE id=?";
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(st, 1, status.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, error.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 3, sent);
+    sqlite3_bind_int64(st, 4, relay_tid);
+    sqlite3_bind_int64(st, 5, started_ms);
+    sqlite3_bind_int64(st, 6, id);
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE;
+}
+
+bool AdminDb::distOtaActive(const std::string& devid) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    const char* sql = "SELECT 1 FROM distribution_tasks WHERE devid=? AND kind='ota'"
+        " AND status IN ('scheduled','queued','running','verifying','installing','confirming') LIMIT 1";
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(st, 1, devid.c_str(), -1, SQLITE_TRANSIENT);
+    bool found = (sqlite3_step(st) == SQLITE_ROW);
+    sqlite3_finalize(st);
+    return found;
+}
+
+bool AdminDb::distOtaSucceeded(const std::string& devid, const std::string& version) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    const char* sql = "SELECT 1 FROM distribution_tasks WHERE devid=? AND kind='ota'"
+        " AND target_version=? AND status='success' LIMIT 1";
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(st, 1, devid.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 2, version.c_str(), -1, SQLITE_TRANSIENT);
+    bool found = (sqlite3_step(st) == SQLITE_ROW);
+    sqlite3_finalize(st);
+    return found;
+}
+
+bool AdminDb::distRecover() {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    const char* sql = "UPDATE distribution_tasks SET status='queued', relay_tid=0, next_retry_ms=0,"
+        " error='relay restarted' WHERE status IN ('running','verifying','installing')";
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
+    int rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    return rc == SQLITE_DONE;
 }
 

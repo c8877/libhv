@@ -25,7 +25,15 @@
       <el-table-column prop="file_name" label="文件" min-width="130">
         <template #default="{ row }">
           {{ row.file_name }}
+          <div v-if="row.kind === 'ota'" class="muted">目标版本 {{ row.target_version }}</div>
           <div v-if="isPhone" class="muted">{{ row.devid }}</div>
+        </template>
+      </el-table-column>
+      <el-table-column label="类型" width="76">
+        <template #default="{ row }">
+          <el-tag :type="row.kind === 'ota' ? 'warning' : 'info'" size="small">
+            {{ row.kind === 'ota' ? 'OTA' : '文件' }}
+          </el-tag>
         </template>
       </el-table-column>
       <el-table-column v-if="!isPhone" prop="devid" label="设备" min-width="100" />
@@ -56,21 +64,21 @@
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item command="detail">详情</el-dropdown-item>
-                <el-dropdown-item v-if="row.status === 'failed'" command="retry">重试</el-dropdown-item>
-                <el-dropdown-item v-if="row.status === 'scheduled' || row.status === 'queued'" command="cancel">取消</el-dropdown-item>
+                <el-dropdown-item v-if="canRetry(row)" command="retry">重试</el-dropdown-item>
+                <el-dropdown-item v-if="canCancel(row)" command="cancel">取消</el-dropdown-item>
                 <el-dropdown-item v-if="row.status === 'timeout' && row.extend_count === 0" command="extend">延长</el-dropdown-item>
-                <el-dropdown-item v-if="row.status === 'conflict'" command="verify">校验</el-dropdown-item>
-                <el-dropdown-item v-if="row.status === 'conflict'" command="force">强制重发</el-dropdown-item>
+                <el-dropdown-item v-if="row.kind !== 'ota' && row.status === 'conflict'" command="verify">校验</el-dropdown-item>
+                <el-dropdown-item v-if="row.kind !== 'ota' && row.status === 'conflict'" command="force">强制重发</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
           <template v-else>
             <el-button link type="primary" @click="$router.push('/tasks/' + row.id)">详情</el-button>
-            <el-button v-if="row.status === 'failed'" size="small" @click="retry(row)">重试</el-button>
-            <el-button v-if="row.status === 'scheduled' || row.status === 'queued'" size="small" @click="cancel(row)">取消</el-button>
+            <el-button v-if="canRetry(row)" size="small" @click="retry(row)">重试</el-button>
+            <el-button v-if="canCancel(row)" size="small" @click="cancel(row)">取消</el-button>
             <el-button v-if="row.status === 'timeout' && row.extend_count === 0" size="small" @click="extend(row)">延长</el-button>
-            <el-button v-if="row.status === 'conflict'" size="small" @click="check(row, 'verify')">校验</el-button>
-            <el-button v-if="row.status === 'conflict'" size="small" @click="check(row, 'force')">强制重发</el-button>
+            <el-button v-if="row.kind !== 'ota' && row.status === 'conflict'" size="small" @click="check(row, 'verify')">校验</el-button>
+            <el-button v-if="row.kind !== 'ota' && row.status === 'conflict'" size="small" @click="check(row, 'force')">强制重发</el-button>
           </template>
         </template>
       </el-table-column>
@@ -115,8 +123,16 @@ const tabs = ref([
 
 const STATUS = {
   scheduled: ['等待开始', 'warning'], queued: ['排队中', 'warning'], running: ['传输中', 'warning'],
+  verifying: ['版本校验', 'warning'], installing: ['安装中', 'warning'], confirming: ['等待重启', 'warning'],
   success: ['成功', 'success'], failed: ['失败', 'danger'], timeout: ['超时', 'danger'],
-  canceled: ['已取消', 'info'], conflict: ['冲突', 'warning'],
+  canceled: ['已取消', 'info'], conflict: ['冲突', 'warning'], unsupported: ['不支持 OTA', 'info'],
+}
+function canRetry(row) {
+  if (row.status === 'failed') return true
+  return row.kind === 'ota' && ['timeout', 'conflict', 'unsupported', 'canceled'].includes(row.status)
+}
+function canCancel(row) {
+  return ['scheduled', 'queued', 'running'].includes(row.status)
 }
 function statusText(s) { return (STATUS[s] || ['未知', 'warning'])[0] }
 function statusType(s) { return (STATUS[s] || ['未知', 'warning'])[1] }

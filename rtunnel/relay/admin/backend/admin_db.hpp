@@ -81,38 +81,27 @@ public:
                     long long size, const std::string& sha, const std::string& sub,
                     const std::string& target, const std::string& status,
                     long long start_ms, long long deadline_ms, int max_retries,
-                    const std::string& actor, long long* id);
+                    const std::string& actor, const std::string& kind,
+                    const std::string& version, long long* id);
     bool distUpdate(long long id, const std::string& status, const std::string& error,
                     long long sent, long long relay_tid, long long finished_ms,
                     long long next_retry_ms, int retry_count);
     bool distProgress(long long id, long long sent);
     bool distExtend(long long id, long long deadline_ms);
     bool distList(const std::string& status, const std::string& q, const std::string& batch,
-                  int page, int per_page, std::string& json_out, int& total);
+                  const std::string& kind, int page, int per_page,
+                  std::string& json_out, int& total);
     bool distGet(long long id, std::string& json_out);
     bool distDue(std::string& json_out);   // status/start/deadline/retry 字段列表
     bool distSummary(std::string& json_out);
     bool fileMetaGet(const std::string& name, long long size, long long mtime_ms, std::string& sha);
     bool fileMetaPut(const std::string& name, long long size, long long mtime_ms, const std::string& sha);
     bool distAlreadyPushed(const std::string& devid, const std::string& sha);
-
-    // agent OTA 升级任务（每设备一行）
-    bool otaInsert(const std::string& batch, const std::string& devid, const std::string& version,
-                   const std::string& file, long long size, const std::string& sha,
-                   const std::string& status, long long deadline_ms, int max_retries,
-                   const std::string& actor, int force, long long* id);
-    bool otaUpdate(long long id, const std::string& status, const std::string& error,
-                   long long sent, long long relay_tid, long long finished_ms,
-                   long long next_retry_ms, int retry_count);
-    bool otaProgress(long long id, long long sent);
-    bool otaMarkApplying(long long id, long long sent, long long relay_tid, long long now_ms);
-    bool otaList(const std::string& status, const std::string& q, const std::string& batch,
-                 int page, int per_page, std::string& json_out, int& total);
-    bool otaGet(long long id, std::string& json_out);
-    bool otaDue(std::string& json_out);
-    bool otaSummary(std::string& json_out);
-    bool otaReset(long long id);
-    bool otaRecover();   // relay 重启后把中断的 running 任务重新入队
+    bool distSetPhase(long long id, const std::string& status, const std::string& error,
+                      long long sent, long long relay_tid, long long started_ms);
+    bool distOtaActive(const std::string& devid);
+    bool distOtaSucceeded(const std::string& devid, const std::string& version);
+    bool distRecover();   // relay 重启后把中断的传输/安装阶段重新入队
 
     // 设备分组映射与账号范围
     bool groupGet(long long id, std::string& json_out, std::string& err);

@@ -199,35 +199,39 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 
 ## Agent OTA 升级
 
-管理台「Agent 升级」页（manager/admin）把新的 `rtunnel-agent` 推到设备并原地重启，
-全程不需要登录设备：
+OTA 不另建传输通道：升级包走「文件上传 + 文件分发」已实现的能力落到设备 `--file-dir`，
+分发任务完成后由 relay 下发安装指令，按阶段推进并统一记录在 `distribution_tasks`：
 
-1. 文件页上传新二进制（也可直接放进 `--admin-file-dir`）；
-2. `/ota` 选择升级包、填目标版本（须与新二进制的 `--version` 完全一致）、勾选设备；
-3. relay 用 `OTA_BEGIN/DATA/END`（0x30-0x32）流式下发，agent 逐帧 `OTA_ACK` 回报进度；
-4. agent 校验 sha256 → `chmod` → 跑 `<新二进制> --version` 自检 → 备份 `<self>.prev`
-   → 原子替换 → `execv` 重启（pid 不变，连接重建）；
-5. 重连后 SYSINFO 上报新 `version`，relay 比对目标版本，任务置 `success`。
+1. 文件页上传新二进制（或直接放入 `--admin-file-dir`）；
+2. `/ota` 选择升级包、目标版本（须与新二进制 `--version` 一致）、设备；
+3. 传输阶段复用 `FILE_BEGIN/DATA/END`（0x1D-0x1F）：32KiB 分片、256KiB 窗口、
+   sha256 校验、断点续传，任务状态 `running`；
+4. relay 发 `OTA_APPLY`（0x30，JSON：path/version/size/sha256）：
+   agent 校验文件大小与 sha256 → 执行 `--version` 自检（`verifying`）→
+   校验通过后 ACK `verified`（`installing`）→ 复制到二进制目录、备份 `<self>.prev`、
+   原子替换、ACK `installed` 并 `execv` 重启（`confirming`）；
+5. agent 以新版本重连并上报 SYSINFO，relay 比对目标版本 → `success`。
 
-设备侧前置条件：
+任务状态：`scheduled→queued→running→verifying→installing→confirming→success`；
+失败分支为 `failed / timeout / conflict / unsupported / canceled`，重试沿用分发任务的
+退避与截止时间；重试会重新走传输（`.part` 续传）和安装。OTA 与普通分发任务都在
+「任务」页查看，可按 `kind=ota` 过滤，任务详情显示目标版本和当前阶段。
+
+设备侧前置条件与限制：
 
 - agent 必须显式开启 `--allow-ota`（或 `agent.json` 的 `"ota": true`），默认关闭；
-- 只对常驻 agent 生效，按需 agent（`a:<user>`）会拒绝；
-- 二进制所在目录必须可写（默认 `dirname(/proc/self/exe)`）；`--ota-dir` 可改临时文件目录，
-  但必须与二进制在同一文件系统（安装靠 `rename`，跨分区会失败）。
-
-限制与回滚：
-
-- 同一设备同时只允许一个 OTA；relay 并发 `ota.max_concurrent`（默认 1），
-  版本确认超时 `ota.apply_timeout_s`（默认 180s）；
-- 升级会重启 agent，正在进行的隧道/shell 会断开，管理台任务会记录每台设备的结果；
-- 失败时原二进制不变；已替换但重启失败会自动回滚；
+- 只对常驻 agent 生效，按需 agent（`a:<user>`）拒绝；
+- 二进制所在目录必须可写；分发临时文件在 `--file-dir`；
+- 同设备已有进行中的 OTA 时，新任务记 `conflict`；设备已是目标版本且未勾选
+  「强制重装」也记 `conflict`；
+- 升级会重启 agent，正在进行的隧道/shell 会断开；
+- 失败时原二进制不变；替换后重启失败会自动回滚 `.prev`；
 - 手动回滚：设备上 `mv rtunnel-agent.prev rtunnel-agent` 后重启；
-  或在页面勾选「强制重装」再推一次旧版本（版本相同也允许）；
-- 未开启 OTA 的 agent（`caps.ota=false`）在列表里显示「未开启」，创任务时直接标记 `unsupported`；
-  更老的、没有该能力位的 agent 不会被下发，任务排队到截止时间后置 `timeout`；
-- API：`POST/GET /api/v1/otas`、`GET /api/v1/otas/summary|:id`、
-  `POST /api/v1/otas/:id/retry|cancel`。
+- 版本确认超时 `ota.apply_timeout_s`（默认 180s）。
+
+API：`POST /api/v1/distributions` 增加 `kind: "ota"` 与 `version`、`force` 字段；
+查询复用 `GET /api/v1/distributions?kind=ota` 与 `.../summary`，重试/取消复用
+`POST /api/v1/distributions/:id/retry|cancel`。
 
 ## Web 终端（免密）
 
@@ -320,7 +324,7 @@ http://B:9443/device/<devid>/<port>/<path>
 | `--server/--port --devid` | relay 地址与设备 ID；`--server` 可重复或逗号分隔（最多 8 个，故障自动切换） |
 | `--allow 22,80` / `--allow-all` | 目标端口白名单 |
 | `--allow-shell` / `--max-idle` | 允许 `OPEN_SHELL` / 空闲自退秒数 |
-| `--allow-ota` / `--ota-dir` | 允许 relay 推送自身升级 / 升级临时文件目录（默认二进制目录） |
+| `--allow-ota` | 允许 relay 通知安装 file_dir 中的新版本（默认关） |
 | `--tls-ca/--tls-cert/--tls-key/--tls-sni` | TLS / mTLS |
 
 ## 三机部署示例

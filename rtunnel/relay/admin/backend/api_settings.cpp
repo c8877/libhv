@@ -22,6 +22,7 @@ const Def kDefs[] = {
     {"proxy.max_concurrent", "32",  1, 256,      "并发上限",       "条",  "代理", "同时进行的分发任务上限"},
     {"proxy.sysinfo_wait_ms","2000",500, 10000,  "SYSINFO 等待",   "ms",  "代理", "请求 SYSINFO 的最长等待时间"},
     {"proxy.config_wait_ms", "2000",500, 10000,  "CONFIG_ACK 等待","ms",  "代理", "下发配置后等待 agent 确认的最长时间"},
+    {"ota.apply_timeout_s",  "180", 30, 1800,    "OTA 确认超时",   "秒",  "OTA",  "安装后等待 agent 以新版本重连的最长时间"},
     {"auth.session_hours",   "12",  1, 168,      "会话有效期",     "小时","账号安全", "登录会话的有效时长"},
     {"auth.password_min",    "8",   6, 32,       "密码最小长度",   "位",  "账号安全", "密码允许的最小长度"},
     {"auth.lock_fails",      "5",   1, 20,       "登录失败锁定",   "次",  "账号安全", "连续失败多少次后锁定账号"},

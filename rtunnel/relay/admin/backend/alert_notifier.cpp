@@ -115,19 +115,21 @@ void AdminServer::alertEnqueue(const AlertEvent& ev) {
 }
 
 void AdminServer::notifyTaskFailed(long long id, const std::string& devid,
-                                   const std::string& status, const std::string& err) {
+                                   const std::string& status, const std::string& err,
+                                   const std::string& kind) {
     if (!settingInt("alert.task_fail", 1)) return;
     AlertEvent ev;
     ev.key = "task:" + std::to_string(id) + ":" + status;
     ev.event = "task.failed";
     ev.level = (status == "timeout") ? "warning" : "critical";
-    ev.title = "分发任务" + status;
+    ev.title = (kind == "ota" ? "OTA 任务" : "分发任务") + status;
     ev.text = "任务 #" + std::to_string(id) + " → " + devid + " " + status;
     if (!err.empty()) ev.text += "：" + err;
     json d;
     d["task_id"] = id;
     d["devid"] = devid;
     d["status"] = status;
+    d["kind"] = kind;
     d["error"] = err;
     ev.details = d.dump();
     alertEnqueue(ev);

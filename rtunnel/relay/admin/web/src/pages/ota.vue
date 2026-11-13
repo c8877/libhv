@@ -76,12 +76,13 @@
         <el-option label="进行中" value="active" />
         <el-option label="成功" value="done" />
         <el-option label="失败" value="failed_group" />
+        <el-option label="冲突" value="conflict" />
       </el-select>
       <el-button @click="loadTasks">刷新</el-button>
     </div>
     <el-table :data="tasks" v-loading="taskLoading" size="small">
       <el-table-column prop="devid" label="设备" min-width="140" />
-      <el-table-column prop="version" label="目标版本" width="110" />
+      <el-table-column prop="target_version" label="目标版本" width="110" />
       <el-table-column label="状态" width="100">
         <template #default="{ row }">
           <el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
@@ -162,15 +163,16 @@ function ts(ms) {
 
 function statusText(s) {
   return {
-    queued: '排队', running: '传输中', applying: '重启中', success: '成功',
-    failed: '失败', timeout: '超时', unsupported: '不支持', canceled: '已取消',
+    scheduled: '等待开始', queued: '排队', running: '传输中', verifying: '版本校验',
+    installing: '安装中', confirming: '等待重启', success: '成功', failed: '失败',
+    timeout: '超时', conflict: '冲突', unsupported: '不支持 OTA', canceled: '已取消',
   }[s] || s
 }
 
 function statusType(s) {
   if (s === 'success') return 'success'
   if (s === 'failed' || s === 'timeout') return 'danger'
-  if (s === 'running' || s === 'applying') return 'warning'
+  if (s === 'running' || s === 'verifying' || s === 'installing' || s === 'confirming') return 'warning'
   if (s === 'unsupported') return 'info'
   return 'info'
 }
@@ -179,16 +181,17 @@ function percent(row) {
   const size = Number(row.file_size) || 0
   const sent = Number(row.sent) || 0
   if (row.status === 'success') return 100
+  if (['verifying', 'installing', 'confirming'].includes(row.status)) return 100
   if (!size) return 0
   return Math.min(100, Math.floor((sent * 100) / size))
 }
 
 function canCancel(row) {
-  return ['queued', 'running', 'applying'].includes(row.status)
+  return ['scheduled', 'queued', 'running'].includes(row.status)
 }
 
 function canRetry(row) {
-  return ['failed', 'timeout', 'unsupported', 'canceled'].includes(row.status)
+  return ['failed', 'timeout', 'unsupported', 'canceled', 'conflict'].includes(row.status)
 }
 
 function onSelect(rows) {
@@ -222,7 +225,8 @@ async function load() {
 async function loadTasks() {
   taskLoading.value = true
   try {
-    const r = await Api.get('/api/v1/otas?page=' + taskPage.value + '&per_page=' + taskPer +
+    const r = await Api.get('/api/v1/distributions?kind=ota&page=' + taskPage.value +
+      '&per_page=' + taskPer +
       (taskStatus.value ? '&status=' + encodeURIComponent(taskStatus.value) : ''))
     tasks.value = r.items || []
     taskTotal.value = r.total || 0
@@ -242,7 +246,8 @@ async function submit() {
   }
   saving.value = true
   try {
-    const r = await Api.post('/api/v1/otas', {
+    const r = await Api.post('/api/v1/distributions', {
+      kind: 'ota',
       file: fileName.value,
       version: version.value.trim(),
       devids: Array.from(selected.value),
@@ -264,7 +269,7 @@ async function submit() {
 
 async function cancel(row) {
   try {
-    await Api.post('/api/v1/otas/' + row.id + '/cancel', {})
+    await Api.post('/api/v1/distributions/' + row.id + '/cancel', {})
     ElMessage.success('已请求取消')
     await loadTasks()
   } catch (e) {
@@ -274,7 +279,7 @@ async function cancel(row) {
 
 async function retry(row) {
   try {
-    await Api.post('/api/v1/otas/' + row.id + '/retry', {})
+    await Api.post('/api/v1/distributions/' + row.id + '/retry', {})
     ElMessage.success('已重新入队')
     await loadTasks()
   } catch (e) {

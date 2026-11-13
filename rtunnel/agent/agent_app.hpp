@@ -43,16 +43,7 @@ struct LocalStream {
     LocalStream* next = nullptr;
 };
 
-// 一次 OTA 升级的落盘状态（.part 保留用于断点续传）
-struct OtaRx {
-    FILE*        fp = nullptr;
-    uint32_t     sid = 0;
-    std::string  part;       // <ota_dir>/.rtunnel-agent-<version>.new.part
-    std::string  version;
-    std::string  sha;
-    uint64_t     size = 0;
-    uint64_t     written = 0;
-};
+// 一次 OTA 安装的临时状态由函数栈持有；.new 文件仅用于原子替换
 
 class AgentApp : public TunnelLink {
 public:
@@ -71,8 +62,7 @@ public:
     std::vector<unsigned long long> cpu_last_tot, cpu_last_idle;
     std::string  args_line;         // 启动参数（展示/排障）
     std::vector<std::string> saved_argv;  // 原样 argv，OTA 重启时 execv 使用
-    int          allow_ota = 0;         // 允许 relay 推送自身升级（默认关）
-    std::string  ota_dir;               // 升级落盘目录（默认二进制所在目录）
+    int          allow_ota = 0;         // 允许 relay 通知安装 file_dir 里的新版本（默认关）
     std::string  self_path;             // /proc/self/exe
     int          max_idle = 0;      // 无会话空闲多少秒后退出（0=常驻，按需 agent 用）
     uint64_t     last_active_ms = 0;
@@ -111,12 +101,9 @@ private:
     bool         saveConfig();
     void         handleConfigSet(const rtnp::Frame* f);
     void         handleFileFrame(const rtnp::Frame* f);
-    void         handleOtaFrame(const rtnp::Frame* f);
-    void         otaAbort();
-    int          otaApply(std::string& err, std::string& warn);
+    void         handleOtaApply(const rtnp::Frame* f);
     static bool  otaProbe(const std::string& path, const std::string& expect, std::string& out);
-    OtaRx        ota_rx_;
-    uint32_t     ota_restart_sid_ = 0;   // exec 失败时补发 OTA_ACK 用
+    uint32_t     ota_restart_sid_ = 0;   // exec 失败时补发 OTA_APPLY_ACK 用
     struct TtyCfg { int enabled = 1; int baud = 115200; int data_bits = 8; char parity = 'N'; int stop_bits = 1; };
     std::map<std::string, TtyCfg> tty_cfgs_;
     struct SeriesCfg { int enabled = 1; int interval = 5; int points = 720; };
