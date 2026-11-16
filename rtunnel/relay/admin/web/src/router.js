@@ -26,9 +26,6 @@ const routes = [
   { path: '/audit', component: () => import('./pages/audit.vue'), meta: { title: '审计' } },
   { path: '/settings', component: () => import('./pages/settings.vue'), meta: { title: '设置' } },
   { path: '/profile', component: () => import('./pages/profile.vue'), meta: { title: '个人设置' } },
-  // 旧前端遗留入口
-  { path: '/acl', redirect: '/permission' },
-  { path: '/groups', redirect: '/permission' },
   { path: '/:pathMatch(.*)*', redirect: '/overview' },
 ]
 

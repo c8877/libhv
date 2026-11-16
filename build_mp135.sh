@@ -10,7 +10,8 @@ cd "$(dirname "$0")"
 if command -v npm >/dev/null 2>&1; then
     (cd rtunnel/relay/admin/web && npm run build:editor)
 else
-    echo "warning: npm 不可用，跳过 cm-editor.js，本地页编辑器退化为 textarea"
+    echo "error: 需要 npm 构建 cm-editor.bundle.js（本地页编辑功能依赖它）" >&2
+    exit 1
 fi
 
 cmake -S . -B build_mp135 \

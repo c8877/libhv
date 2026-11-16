@@ -387,7 +387,7 @@ http://B:9443/device/<devid>/<port>/<path>
 - 重命名和移动在列表内展开表单（回车确认、Esc 取消），不弹浏览器对话框
 - 文本编辑使用 CodeMirror 6（shell/json 语法高亮，Ctrl+S 保存、Esc 关闭），
   组件打包为 `shared/web/cm-editor.bundle.js`：管理台经 Vite 作为带 hash 的静态资源引入，
-  本地页由 CMake 内嵌到二进制并从 `/assets/cm-editor.js` 加载；未构建时自动退化为纯 textarea
+  本地页由 CMake 内嵌到二进制并从 `/assets/cm-editor.js` 加载
 - JSON 文件在编辑器里点「树形」切换为树形查看：展开/收起、按需渲染（大文件不会卡）、
   解析失败给出提示；树形里点「源码」可切回编辑器，未保存内容一并带过去
 - 路径隔离：`--file-root` 为唯一根，拒绝 `..`、绝对路径和逃出根目录的符号链接
@@ -395,8 +395,7 @@ http://B:9443/device/<devid>/<port>/<path>
 - 管理台角色：`operator` 只读，`manager/admin` 读写；agent 侧还会再按 `--file-ro/--file-rw`
   和 `--file-token` 校验一次
 - 管理台「能力配置」可启停文件服务并修改根目录、读写模式、单文件上限，
-  热生效并写入 agent 配置文件（`--config-file`，默认 `/opt/data/etc/agent.json`）；
-  旧版 agent 不认识这些字段，需要先升级
+  热生效并写入 agent 配置文件（`--config-file`，默认 `/opt/data/etc/agent.json`）
 - relay-admin 通过本机 relay 打开管理流，需要配置 `--admin-shell-user/--admin-shell-token`
   并确保该用户对目标设备有 ACL（与 Web 终端一致）
 - 本地 Web 与 relay 两条路径都可单独使用：lite 包没有本地页面，但管理台仍能管理文件

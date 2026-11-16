@@ -131,7 +131,7 @@ export async function login(username, password) {
 
 export async function setup(token, username, password) {
   await Api.post('/api/v1/setup', { token, username, password })
-  // setup 只建账号不签发会话，与旧前端一致，接着登录一次
+  // setup 只建账号不签发会话，接着登录一次
   await Api.post('/api/v1/login', { username, password })
   await reloadAuth()
 }

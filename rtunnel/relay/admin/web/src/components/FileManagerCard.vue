@@ -10,7 +10,7 @@
       <div class="mono fs-line">
         <template v-if="!sys">正在读取设备能力…</template>
         <template v-else-if="fsOn">{{ root }} · 单文件上限 {{ maxMb }} MB<span v-if="usage"> · {{ usage }}</span><span v-if="!writable"> · 当前角色只能浏览和下载</span></template>
-        <template v-else>该设备未启用文件服务（可在「能力配置」中开启；旧版 agent 需先升级）</template>
+        <template v-else>该设备未启用文件服务（可在「能力配置」中开启）</template>
       </div>
     </div>
     <div ref="fsHost" class="fs-host"></div>

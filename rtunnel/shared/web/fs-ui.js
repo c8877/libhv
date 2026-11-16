@@ -236,13 +236,10 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
 .mbox{width:min(820px,100%);height:min(620px,100%);background:var(--bg);border:1px solid var(--line);border-radius:14px;display:flex;flex-direction:column;overflow:hidden}
 .mhead{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);background:var(--panel)}
 .mhead .t{font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-textarea{flex:1;width:100%;border:0;outline:0;resize:none;padding:12px 14px;background:var(--input);color:var(--fg);
-  font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre;tab-size:4}
 .mfoot{display:flex;justify-content:flex-end;gap:8px;padding:9px 12px;border-top:1px solid var(--line);background:var(--panel)}
 .pv{flex:1;display:flex;align-items:center;justify-content:center;overflow:auto;background:var(--input);padding:12px}
 .pv img{max-width:100%;max-height:100%;object-fit:contain}
 .ed{flex:1;min-height:0;display:flex;overflow:hidden}
-.ed textarea{flex:1;min-height:0}
 .ed .cm-editor{flex:1;min-width:0;height:100%}
 .jv{flex:1;overflow:auto;background:var(--input);padding:10px 12px;
   font:12.5px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace}
@@ -338,7 +335,7 @@ textarea{flex:1;width:100%;border:0;outline:0;resize:none;padding:12px 14px;back
   <div class="mbox">
     <div class="mhead"><span class="t" id="edTitle">编辑</span>
       <button id="edTree" hidden>树形</button><button id="edClose">关闭</button></div>
-    <div class="ed" id="edHost"><textarea id="edText" spellcheck="false"></textarea></div>
+    <div class="ed" id="edHost"></div>
     <div class="mfoot"><button id="edCancel">取消</button><button class="primary" id="edSave">保存</button></div>
   </div>
 </div>
@@ -389,7 +386,6 @@ textarea{flex:1;width:100%;border:0;outline:0;resize:none;padding:12px 14px;back
         this.sel = new Set();
         this.dirSizes = new Map();     // 勾选目录后递归统计的结果
         this.dirPending = new Map();
-        this.dirSizeUnsupported = false;
         this.sortKey = 'name';
         this.sortDir = 1;
         this.filter = '';
@@ -433,7 +429,7 @@ textarea{flex:1;width:100%;border:0;outline:0;resize:none;padding:12px 14px;back
         var q = this.q = {};
         var ids = ['close', 'title', 'rootLine', 'crumb', 'path', 'editPath', 'refresh', 'hidden', 'rowmenu',
             'mkdir', 'touch', 'upload', 'del', 'search', 'meta', 'all', 'rows', 'empty', 'summary',
-            'upbox', 'upname', 'upbar', 'uppct', 'upcancel', 'editor', 'edTitle', 'edText', 'edHost', 'edTree',
+            'upbox', 'upname', 'upbar', 'uppct', 'upcancel', 'editor', 'edTitle', 'edHost', 'edTree',
             'edClose', 'edCancel', 'edSave', 'preview', 'pvTitle', 'pvBody', 'pvClose',
             'jsonview', 'jvTitle', 'jvBody', 'jvClose', 'jvSource', 'jvExpand', 'jvCollapse', 'toast', 'file'];
         for (var i = 0; i < ids.length; i++) q[ids[i]] = this.sh.getElementById(ids[i]);
@@ -478,7 +474,7 @@ textarea{flex:1;width:100%;border:0;outline:0;resize:none;padding:12px 14px;back
         on('edTree', 'click', function () {
             var ed = self.editing;
             if (!ed) return;
-            var text = self.editorInst ? self.editorInst.getValue() : self.q.edText.value;
+            var text = self.editorInst ? self.editorInst.getValue() : ed.text;
             self.closeEditor();
             self.openJsonView(ed.path, text);
         });
@@ -585,7 +581,7 @@ textarea{flex:1;width:100%;border:0;outline:0;resize:none;padding:12px 14px;back
             if (!self.visible) return;
             var path = e.composedPath ? e.composedPath() : [e.target];
             var t = path && path[0];
-            if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || (t.closest && t.closest('.cm-editor')))) return;
+            if (t && (t.tagName === 'INPUT' || (t.closest && t.closest('.cm-editor')))) return;
             if (e.key === 'Escape') {
                 if (!self.q.rowmenu.hidden) self.closeRowMenu();
                 else if (!self.q.jsonview.hidden) self.closeJsonView();
@@ -760,7 +756,7 @@ textarea{flex:1;width:100%;border:0;outline:0;resize:none;padding:12px 14px;back
     Manager.prototype.applyWelcome = function () {
         var w = this.welcome || {};
         var rw = !!w.rw;
-        this.q.rootLine.textContent = '根目录: ' + (w.root || '/') + ' · 可用 ' + fmtSize((w.free_kb || 0) * 1024) +
+        this.q.rootLine.textContent = '根目录: ' + (w.root || '/') + ' · 可用 ' + fmtSize(w.free_kb * 1024) +
             ' / ' + fmtSize((w.total_kb || 0) * 1024);
         this.rw = rw;
         var ro = this.readonly || !rw;
@@ -973,12 +969,10 @@ textarea{flex:1;width:100%;border:0;outline:0;resize:none;padding:12px 14px;back
                 self.q.path.value = self.cwd;
                 self.renderCrumb();
                 self.render();
-                if (r.free_kb !== undefined) {
-                    self.q.rootLine.textContent = '根目录: ' + (r.root || '/') + ' · 可用 ' + fmtSize(r.free_kb * 1024) +
-                        ' / ' + fmtSize(r.total_kb * 1024) + (r.rw ? '' : ' · 只读');
-                    self.space = { root: r.root || '/', free_kb: r.free_kb, total_kb: r.total_kb };
-                    if (self.onSpace) self.onSpace(self.space);
-                }
+                self.q.rootLine.textContent = '根目录: ' + (r.root || '/') + ' · 可用 ' + fmtSize(r.free_kb * 1024) +
+                    ' / ' + fmtSize(r.total_kb * 1024) + (r.rw ? '' : ' · 只读');
+                self.space = { root: r.root || '/', free_kb: r.free_kb, total_kb: r.total_kb };
+                if (self.onSpace) self.onSpace(self.space);
             })
             .catch(function (e) { if (self.visible) self.toast(e.message, true); });
     };
@@ -1195,7 +1189,6 @@ textarea{flex:1;width:100%;border:0;outline:0;resize:none;padding:12px 14px;back
     // 勾选目录时按需递归统计，结果缓存在当前目录的 dirSizes 中
     Manager.prototype.fetchDirSize = function (name) {
         var self = this;
-        if (this.dirSizeUnsupported) return;
         if (this.dirSizes.has(name) || this.dirPending.has(name)) return;
         this.dirPending.set(name, true);
         var id = this.id();
@@ -1207,9 +1200,6 @@ textarea{flex:1;width:100%;border:0;outline:0;resize:none;padding:12px 14px;back
             })
             .catch(function (e) {
                 self.dirPending.delete(name);
-                var unsupported = /unknown op/i.test(e.message || '');
-                if (unsupported && self.dirSizeUnsupported) return self.render();
-                if (unsupported) self.dirSizeUnsupported = true;
                 self.toast('统计大小失败：' + e.message, true);
                 self.render();
             });
@@ -1612,31 +1602,31 @@ textarea{flex:1;width:100%;border:0;outline:0;resize:none;padding:12px 14px;back
     };
 
     Manager.prototype.showEditor = function (path, name, text) {
-        this.editing = { path: path, name: name };
+        this.editing = { path: path, name: name, text: text };
         this.q.edTitle.textContent = '编辑 - ' + path;
         this.q.edTree.hidden = ext(name) !== 'json';
         this.q.editor.hidden = false;
-        this.mountEditor(text, name);
+        this.mountEditor();
     };
 
-    Manager.prototype.mountEditor = function (text, name) {
+    Manager.prototype.mountEditor = function () {
         var self = this;
+        var ed = this.editing;
+        if (!ed) return;
         this.destroyEditorInst();
-        this.q.edText.hidden = false;
-        this.q.edText.value = text;
         var tok = this.editorToken;
         this.ensureEditorLib().then(function (factory) {
-            if (!factory || tok !== self.editorToken || !self.editing) return;
-            var inst = factory(self.q.edHost, {
-                value: text,
-                language: langOf(name),
+            if (tok !== self.editorToken || !self.editing) return;
+            self.editorInst = factory(self.q.edHost, {
+                value: ed.text,
+                language: langOf(ed.name),
                 onSave: function () { self.saveEditor(); },
                 onEscape: function () { self.closeEditor(); }
             });
-            if (tok !== self.editorToken || !self.editing) { try { inst.destroy(); } catch (e) {} return; }
-            self.editorInst = inst;
-            self.q.edText.hidden = true;
-        }).catch(function () { /* 组件不可用时继续用 textarea */ });
+        }).catch(function (e) {
+            self.toast(e.message || '编辑器组件加载失败', true);
+            self.closeEditor();
+        });
     };
 
     Manager.prototype.destroyEditorInst = function () {
@@ -1649,14 +1639,16 @@ textarea{flex:1;width:100%;border:0;outline:0;resize:none;padding:12px 14px;back
 
     Manager.prototype.ensureEditorLib = function () {
         var self = this;
-        if (this.opts.createEditor) return Promise.resolve(this.opts.createEditor);
         if (global.hvCreateEditor) return Promise.resolve(global.hvCreateEditor);
         if (this._editorLib) return this._editorLib;
         this._editorLib = new Promise(function (resolve, reject) {
             var s = document.createElement('script');
             s.src = self.opts.editorUrl || '/assets/cm-editor.js';
             s.async = true;
-            s.onload = function () { resolve(global.hvCreateEditor || null); };
+            s.onload = function () {
+                if (global.hvCreateEditor) resolve(global.hvCreateEditor);
+                else { self._editorLib = null; reject(new Error('编辑器组件不可用')); }
+            };
             s.onerror = function () { self._editorLib = null; reject(new Error('编辑器组件加载失败')); };
             document.head.appendChild(s);
         });
@@ -1667,14 +1659,13 @@ textarea{flex:1;width:100%;border:0;outline:0;resize:none;padding:12px 14px;back
         this.editing = null;
         this.destroyEditorInst();
         this.q.editor.hidden = true;
-        this.q.edText.value = '';
     };
 
     Manager.prototype.saveEditor = function () {
         var self = this;
         if (!this.editing) return;
         if (this.readonly || !this.rw) { this.toast('只读模式', true); return; }
-        var text = this.editorInst ? this.editorInst.getValue() : this.q.edText.value;
+        var text = this.editorInst ? this.editorInst.getValue() : this.editing.text;
         var blob = new Blob([text], { type: 'text/plain' });
         var name = this.editing.name;
         var dir = parentOf(this.editing.path);

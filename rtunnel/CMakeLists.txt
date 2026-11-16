@@ -70,14 +70,14 @@ set(RTUNNEL_AGENT_SOURCES agent/main.cpp agent/agent_app.cpp
 set(RTUNNEL_FS_UI_JS "${CMAKE_CURRENT_SOURCE_DIR}/shared/web/fs-ui.js")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RTUNNEL_FS_UI_JS}")
 file(READ "${RTUNNEL_FS_UI_JS}" RTUNNEL_FS_UI_JS_CONTENT)
-# 编辑器组件（CodeMirror IIFE）：由 npm run build:editor 生成，缺失时页面退化为 textarea。
+# 编辑器组件（CodeMirror IIFE）：由 npm run build:editor 生成，缺失时本地页编辑功能不可用。
 set(RTUNNEL_CM_EDITOR_JS "${CMAKE_CURRENT_SOURCE_DIR}/shared/web/cm-editor.bundle.js")
 set(RTUNNEL_CM_EDITOR_JS_CONTENT "")
 if(EXISTS "${RTUNNEL_CM_EDITOR_JS}")
     file(READ "${RTUNNEL_CM_EDITOR_JS}" RTUNNEL_CM_EDITOR_JS_CONTENT)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RTUNNEL_CM_EDITOR_JS}")
 else()
-    message(STATUS "rtunnel-agent: cm-editor.bundle.js 未构建，本地页编辑器使用 textarea（先在 relay/admin/web 执行 npm run build:editor）")
+    message(WARNING "rtunnel-agent: cm-editor.bundle.js 未构建，本地页的编辑功能不可用（先在 relay/admin/web 执行 npm run build:editor）")
 endif()
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/fs_ui_js.hpp"
