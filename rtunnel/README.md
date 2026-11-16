@@ -325,7 +325,88 @@ http://B:9443/device/<devid>/<port>/<path>
 | `--allow 22,80` / `--allow-all` | 目标端口白名单 |
 | `--allow-shell` / `--max-idle` | 允许 `OPEN_SHELL` / 空闲自退秒数 |
 | `--allow-ota` | 允许 relay 通知安装 file_dir 中的新版本（默认关） |
+| `--local-web [ADDR:]PORT` | 本地只读设备详情页（带 Web 构建），默认 `127.0.0.1:8080` |
+| `--file-root DIR` | 文件管理根目录，默认同 `--file-dir`（`/opt/data/files`） |
+| `--file-rw` / `--file-ro` | 允许/禁止写操作；二进制默认只读，部署服务默认开启读写 |
+| `--file-max-mb N` | 单文件上传上限，默认 512 |
+| `--file-token T` | 本地 Web 文件通道 token（relay-admin 代理路径由 relay 认证，不需要） |
 | `--tls-ca/--tls-cert/--tls-key/--tls-sni` | TLS / mTLS |
+
+### agent 本地设备详情页
+
+带 `RTUNNEL_AGENT_WEB=ON`（默认）编译的 `rtunnel-agent` 内置设备详情页，
+不依赖 relay 管理台；隧道断开时页面仍可打开（文件管理是否可写由 `--file-rw` 决定）：
+
+```bash
+./rtunnel-agent --server 192.168.1.133 --port 18443 --devid board01 \
+    --allow 22 --local-web 0.0.0.0:8080
+# 浏览器打开 http://<设备IP>:8080/
+```
+
+- `--local-web [ADDR:]PORT`：`8080` / `127.0.0.1:8080` 只监听本机；
+  `:8080` / `0.0.0.0:8080` 监听所有网卡（页面会暴露设备型号、IP、串口等只读信息）
+- 页面内容与管理台设备详情同源：连接状态、CPU/内存/负载曲线、存储、网卡、
+  系统信息、能力配置、mTLS 证书、串口 TTY；每 2 秒刷新
+- HTTP 只读接口：`GET /`、`GET /api/v1/sysinfo`、`GET /api/v1/health`；
+  文件管理走 `GET /ws/fs`（WebSocket，见下节）
+- 响应支持 gzip 协商（`Accept-Encoding: gzip`），HTML 与 JSON 都会压缩，并带 `Vary: Accept-Encoding`
+- 数据由 agent 主循环采集并缓存，HTTP 线程只读快照，不直接访问隧道状态
+- 两个构建变体：`rtunnel-agent`（带 Web）与 `rtunnel-agent-noweb`（纯隧道，体积更小）。
+  `build/deploy/agent` / `build/deploy/agent-web` 是对应的两份部署目录，
+  `deploy/package_agent.sh` 会打包为 `rtunnel-agent-lite-*.tar.gz` 与
+  `rtunnel-agent-web-*.tar.gz`（解压后都是 `agent/`，可直接替换）
+
+### 文件管理（WebSocket）
+
+设备详情页的「文件管理」卡片提供浏览、上传、下载、新建/重命名/移动/删除、
+文本编辑和图片预览。本地页面与管理台共用同一个 WebSocket 协议和同一份前端
+（`shared/web/fs-ui.js`），relay 只转发数据流，不解析文件协议：
+
+```
+本地页面  ws://device:8080/ws/fs
+管理台    wss://relay/ws/fs/<devid>
+              |
+              v
+        RTNP OPEN_FS + DATA(u8 kind + ws message)
+              |
+              v
+        agent FsSession -> --file-root
+```
+
+- 协议：文本帧为 JSON 控制消息（`hello/list/download_open/upload_open/...`），
+  二进制帧为 16 字节头（`id/kind/offset`）+ 数据；单帧 ≤ 30 KiB
+- 上传分片写入目标目录的 `.rtunnel-upload/<id>.part`，完成后 `fsync + rename` 原子落盘；
+  页面刷新或断线后可用 `upload_id` 从已接收位置续传
+- 下载按 30 KiB 分块，客户端逐块 `download_ack` 流控；文件夹下载走 `archive_open`，
+  由 agent 边遍历边打 tar + gzip 流式输出（保留符号链接、空目录和长文件名），
+  前端优先用 File System Access API 边收边写盘
+- 路径栏为可点击面包屑，可直接跳到任意上级目录；「编辑」可切换为手动输入路径
+- 双击文件节点打开：文本进编辑器、图片进预览、其他类型直接下载；操作列只保留
+  下载/重命名/移动/删除，按可用宽度平铺，放不下的收进 `⋯` 菜单；
+  信息行显示根目录、单文件上限和分区已用/总容量
+- 重命名和移动在列表内展开表单（回车确认、Esc 取消），不弹浏览器对话框
+- 文本编辑使用 CodeMirror 6（shell/json 语法高亮，Ctrl+S 保存、Esc 关闭），
+  组件打包为 `shared/web/cm-editor.bundle.js`：管理台经 Vite 作为带 hash 的静态资源引入，
+  本地页由 CMake 内嵌到二进制并从 `/assets/cm-editor.js` 加载；未构建时自动退化为纯 textarea
+- JSON 文件在编辑器里点「树形」切换为树形查看：展开/收起、按需渲染（大文件不会卡）、
+  解析失败给出提示；树形里点「源码」可切回编辑器，未保存内容一并带过去
+- 路径隔离：`--file-root` 为唯一根，拒绝 `..`、绝对路径和逃出根目录的符号链接
+  （Linux 5.6+ 用 `openat2(RESOLVE_BENEATH)`，MP135 5.15 可用）
+- 管理台角色：`operator` 只读，`manager/admin` 读写；agent 侧还会再按 `--file-ro/--file-rw`
+  和 `--file-token` 校验一次
+- 管理台「能力配置」可启停文件服务并修改根目录、读写模式、单文件上限，
+  热生效并写入 agent 配置文件（`--config-file`，默认 `/opt/data/etc/agent.json`）；
+  旧版 agent 不认识这些字段，需要先升级
+- relay-admin 通过本机 relay 打开管理流，需要配置 `--admin-shell-user/--admin-shell-token`
+  并确保该用户对目标设备有 ACL（与 Web 终端一致）
+- 本地 Web 与 relay 两条路径都可单独使用：lite 包没有本地页面，但管理台仍能管理文件
+
+```bash
+# 本地页面 + 局域网可写
+./rtunnel-agent --devid board01 --server 192.168.1.133 --port 18443 \
+    --file-root /opt/data/files --file-rw \
+    --local-web 0.0.0.0:8080 --file-token <token>
+```
 
 ## 三机部署示例
 

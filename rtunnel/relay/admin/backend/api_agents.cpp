@@ -35,7 +35,7 @@ void AdminServer::handleAgents(const HttpContextPtr& ctx) {
             if (!all && std::find(mine.begin(), mine.end(), std::string(c->devid)) == mine.end()) continue;
             json j;
             j["devid"] = c->devid;
-            j["online"] = true;   // 注册表在册即在线
+            j["online"] = true; // 注册表在册即在线
             {
                 int sh = 1;
                 auto it = relay_->caps_shell.find(c->devid);
@@ -113,9 +113,18 @@ void AdminServer::handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& a
     bool has_ports = req.contains("ports");
     bool has_shell = req.contains("shell");
     bool has_dir = req.contains("file_dir");
-    if (!has_ports && !has_shell && !has_dir) {
+    bool has_fs = req.contains("fs");
+    bool has_fs_root = req.contains("fs_root");
+    bool has_fs_rw = req.contains("fs_rw");
+    bool has_fs_max = req.contains("fs_max_mb");
+    if (!has_ports && !has_shell && !has_dir && !has_fs && !has_fs_root && !has_fs_rw && !has_fs_max) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"nothing to update\"}");
+        return;
+    }
+    if ((has_fs || has_fs_root || has_fs_rw || has_fs_max) && (actor.role == "operator" || actor.role == "viewer")) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"file capability requires manager\"}");
         return;
     }
     if (has_ports) {
@@ -127,9 +136,17 @@ void AdminServer::handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& a
         nlohmann::json arr = nlohmann::json::array();
         std::set<int> seen;
         for (auto& v : req["ports"]) {
-            if (!v.is_number_integer()) { ctx->response->status_code = HTTP_STATUS_BAD_REQUEST; ctx->send("{\"error\":\"bad port\"}"); return; }
+            if (!v.is_number_integer()) {
+                ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+                ctx->send("{\"error\":\"bad port\"}");
+                return;
+            }
             int p = v.get<int>();
-            if (p <= 0 || p > 65535) { ctx->response->status_code = HTTP_STATUS_BAD_REQUEST; ctx->send("{\"error\":\"port out of range\"}"); return; }
+            if (p <= 0 || p > 65535) {
+                ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+                ctx->send("{\"error\":\"port out of range\"}");
+                return;
+            }
             if (seen.insert(p).second) arr.push_back(p);
         }
         out["ports"] = arr;
@@ -148,6 +165,50 @@ void AdminServer::handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& a
         }
         out["file_dir"] = v;
     }
+    if (has_fs) {
+        if (!req["fs"].is_boolean()) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"fs must be bool\"}");
+            return;
+        }
+        out["fs"] = req["fs"].get<bool>();
+    }
+    if (has_fs_root) {
+        if (!req["fs_root"].is_string()) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"fs_root must be string\"}");
+            return;
+        }
+        std::string v = req["fs_root"].get<std::string>();
+        if (v.empty() || v[0] != '/' || v.find("..") != std::string::npos || v.size() > 512) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"bad fs_root\"}");
+            return;
+        }
+        out["fs_root"] = v;
+    }
+    if (has_fs_rw) {
+        if (!req["fs_rw"].is_boolean()) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"fs_rw must be bool\"}");
+            return;
+        }
+        out["fs_rw"] = req["fs_rw"].get<bool>();
+    }
+    if (has_fs_max) {
+        if (!req["fs_max_mb"].is_number_integer()) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"fs_max_mb must be integer\"}");
+            return;
+        }
+        int v = req["fs_max_mb"].get<int>();
+        if (v <= 0 || v > 10240) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"fs_max_mb must be 1..10240\"}");
+            return;
+        }
+        out["fs_max_mb"] = v;
+    }
     if (has_shell) {
         if (actor.role != "admin") {
             ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
@@ -163,9 +224,7 @@ void AdminServer::handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& a
     }
     uint32_t sid = ++g_cfg_sid;
     std::string body = out.dump();
-    std::string sent = callRelay([this, &devid, sid, &body]() {
-        return relay_->sendConfig(devid.c_str(), sid, body) ? std::string("1") : std::string("0");
-    });
+    std::string sent = callRelay([this, &devid, sid, &body]() { return relay_->sendConfig(devid.c_str(), sid, body) ? std::string("1") : std::string("0"); });
     if (sent != "1") {
         ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
         ctx->send("{\"error\":\"device offline\"}");
@@ -175,9 +234,7 @@ void AdminServer::handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& a
     int waits = settingInt("proxy.config_wait_ms", 2000) / 50;
     for (int i = 0; i < waits && ack.empty(); ++i) {
         usleep(50000);
-        ack = callRelay([this, &devid, sid]() {
-            return relay_->configAck(devid.c_str(), sid, nullptr);
-        });
+        ack = callRelay([this, &devid, sid]() { return relay_->configAck(devid.c_str(), sid, nullptr); });
     }
     if (ack.empty()) {
         ctx->response->status_code = HTTP_STATUS_GATEWAY_TIMEOUT;
@@ -206,18 +263,13 @@ void AdminServer::handleAgentSysinfo(const HttpContextPtr& ctx) {
     uint64_t ts = 0;
     cached = callRelay([this, &devid, &ts]() { return relay_->sysinfoOf(devid.c_str(), &ts); });
     if (cached.empty()) inc = false;
-    uint64_t start_ms = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
-    callRelay([this, &devid, inc]() {
-        return relay_->sendSysinfoReq(devid.c_str(), inc ? 1 : 0) ? std::string("1") : std::string("0");
-    });
+    uint64_t start_ms = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    callRelay([this, &devid, inc]() { return relay_->sendSysinfoReq(devid.c_str(), inc ? 1 : 0) ? std::string("1") : std::string("0"); });
     std::string js;
     int waits = settingInt("proxy.sysinfo_wait_ms", 2000) / 50;
     for (int i = 0; i < waits; ++i) {
         usleep(50000);
-        js = callRelay([this, &devid, &ts]() {
-            return relay_->sysinfoOf(devid.c_str(), &ts);
-        });
+        js = callRelay([this, &devid, &ts]() { return relay_->sysinfoOf(devid.c_str(), &ts); });
         if (!js.empty() && ts >= start_ms) break;
         js.clear();
     }
@@ -232,9 +284,7 @@ void AdminServer::handleAgentSysinfo(const HttpContextPtr& ctx) {
     }
     bool last_full = true;
     uint64_t last_ts = 0;
-    std::string last = callRelay([this, &devid, &last_full, &last_ts]() {
-        return relay_->sysinfoLastOf(devid.c_str(), &last_full, &last_ts);
-    });
+    std::string last = callRelay([this, &devid, &last_full, &last_ts]() { return relay_->sysinfoLastOf(devid.c_str(), &last_full, &last_ts); });
     if (inc && !last.empty() && !last_full) {
         ctx->send("{\"ts\":" + std::to_string(last_ts) + ",\"mode\":\"inc\",\"sysinfo\":" + last + "}");
         return;

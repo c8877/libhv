@@ -213,6 +213,10 @@ private:
     bool handleTtyWsOpen(const WebSocketChannelPtr& channel, const HttpRequestPtr& req);
     bool handleTtyWsMessage(const WebSocketChannelPtr& channel, const std::string& msg);
     bool handleTtyWsClose(const WebSocketChannelPtr& channel);
+    // api_fs_ws.cpp
+    bool handleFsWsOpen(const WebSocketChannelPtr& channel, const HttpRequestPtr& req);
+    bool handleFsWsMessage(const WebSocketChannelPtr& channel, const std::string& msg);
+    bool handleFsWsClose(const WebSocketChannelPtr& channel);
     void handleTtyLogDownload(const HttpContextPtr& ctx);
     void cleanupTtyLogs();
     bool handleDeviceWsMessage(const WebSocketChannelPtr& channel, const std::string& msg);

@@ -158,6 +158,10 @@ void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequest
         handleTtyWsOpen(channel, req);
         return;
     }
+    if (req->path.compare(0, 7, "/ws/fs/") == 0) {
+        handleFsWsOpen(channel, req);
+        return;
+    }
     // 权限：query 里的 token（浏览器 WebSocket 无法自定义 Authorization 头）
     std::string token, devid, user;
     for (const auto& kv : req->query_params) {
@@ -203,6 +207,7 @@ void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequest
 
 void AdminServer::onWsMessage(const WebSocketChannelPtr& channel, const std::string& msg) {
     if (handleTtyWsMessage(channel, msg)) return;
+    if (handleFsWsMessage(channel, msg)) return;
     if (handleDeviceWsMessage(channel, msg)) return;
     auto it = terms_.find(channel.get());
     if (it == terms_.end()) return;
@@ -233,6 +238,7 @@ void AdminServer::onWsMessage(const WebSocketChannelPtr& channel, const std::str
 
 void AdminServer::onWsClose(const WebSocketChannelPtr& channel) {
     if (handleTtyWsClose(channel)) return;
+    if (handleFsWsClose(channel)) return;
     if (handleDeviceWsClose(channel)) return;
     auto it = terms_.find(channel.get());
     if (it == terms_.end()) return;

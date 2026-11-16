@@ -8,10 +8,10 @@
 // 保持下面四行的形态，钩子按行首 "#define HV_VERSION_xxx" 定点改写。
 // =============================================================================
 #define HV_VERSION_MAJOR    1
-#define HV_VERSION_MINOR    3
-#define HV_VERSION_PATCH    310
+#define HV_VERSION_MINOR    4
+#define HV_VERSION_PATCH    0
 
-#define HV_VERSION_STRING   "1.3.310"
+#define HV_VERSION_STRING   "1.4.0"
 
 const char* hv_version(void) {
     return HV_VERSION_STRING;

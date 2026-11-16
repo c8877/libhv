@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # ============================================================================
-# .githooks/pre-commit —— libhv 版本号自增（base/hversion.c）
+# .githooks/pre-commit —— libhv 版本号维护（base/hversion.c）
 #
-# 每次提交做三件事：
+# 默认每次提交做三件事：
 #   1) HV_VERSION_PATCH += 1（MAJOR / MINOR 不动）
 #   2) HV_VERSION_STRING 重算为 "MAJOR.MINOR.PATCH"
 #   3) git add base/hversion.c，让这次 bump 进入本次提交
+#
+# 发布需要指定版本时（不做 +1）：
+#   HV_VERSION_SET=1.4.0 git commit ...
 #
 # 版本数据只在 base/hversion.c（hversion.h 只有 getter 声明），所以只改一个文件。
 #
@@ -45,15 +48,27 @@ if [ -z "$major" ] || [ -z "$minor" ] || [ -z "$patch" ]; then
     die "无法从 $VERSION_FILE 解析 HV_VERSION_MAJOR/MINOR/PATCH（期望 #define HV_VERSION_xxx <数字>）"
 fi
 
-patch=$((patch + 1))
-version="$major.$minor.$patch"
+if [ -n "${HV_VERSION_SET:-}" ]; then
+    # 显式指定（发布用），格式必须严格为 x.y.z
+    printf '%s' "$HV_VERSION_SET" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' \
+        || die "HV_VERSION_SET 需形如 1.4.0（当前：$HV_VERSION_SET）"
+    IFS='.' read -r major minor patch <<< "$HV_VERSION_SET"
+    version="$major.$minor.$patch"
+    mode="指定"
+else
+    patch=$((patch + 1))
+    version="$major.$minor.$patch"
+    mode="自增"
+fi
 
-# 定点改写：保留其余行（含行尾注释）原样，只改 patch 与 string 两行
+# 定点改写：保留其余行（含行尾注释）原样，只改版本四行
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 
-awk -v p="$patch" -v ver="$version" '
-$1 == "#define" && $2 == "HV_VERSION_PATCH"  { printf "#define HV_VERSION_PATCH    %s\n", p;    next }
+awk -v ma="$major" -v mi="$minor" -v p="$patch" -v ver="$version" '
+$1 == "#define" && $2 == "HV_VERSION_MAJOR"  { printf "#define HV_VERSION_MAJOR    %s\n", ma;  next }
+$1 == "#define" && $2 == "HV_VERSION_MINOR"  { printf "#define HV_VERSION_MINOR    %s\n", mi;  next }
+$1 == "#define" && $2 == "HV_VERSION_PATCH"  { printf "#define HV_VERSION_PATCH    %s\n", p;   next }
 $1 == "#define" && $2 == "HV_VERSION_STRING" { printf "#define HV_VERSION_STRING   \"%s\"\n", ver; next }
 { print }
 ' "$VERSION_FILE" > "$tmp"
@@ -62,9 +77,11 @@ $1 == "#define" && $2 == "HV_VERSION_STRING" { printf "#define HV_VERSION_STRING
 cat "$tmp" > "$VERSION_FILE"
 
 # 断言替换生效，避免 awk 未命中却“成功”提交
+grep -qE "^#define HV_VERSION_MAJOR +$major$" "$VERSION_FILE" || die "HV_VERSION_MAJOR 更新失败"
+grep -qE "^#define HV_VERSION_MINOR +$minor$" "$VERSION_FILE" || die "HV_VERSION_MINOR 更新失败"
 grep -qE "^#define HV_VERSION_PATCH +$patch$" "$VERSION_FILE" || die "HV_VERSION_PATCH 更新失败"
 grep -qF "\"$version\"" "$VERSION_FILE" || die "HV_VERSION_STRING 更新失败（$version）"
 
 git add -- "$VERSION_FILE"
 
-echo "[pre-commit] 版本自增: $version"
+echo "[pre-commit] 版本$mode: $version"

@@ -1,5 +1,6 @@
 [Unit]
 Description=rtunnel agent (C)
+# 本单元对应不带本地 Web 的 rtunnel-agent；需要设备详情页请用 rtunnel-agent-web.service
 After=network-online.target
 Wants=network-online.target
 StartLimitBurst=5
@@ -15,7 +16,16 @@ WorkingDirectory=/opt/rtunnel/agent
 #   AGENT_ARGS=--devid board01 --server 10.0.0.10:18443,10.0.0.11:18443 \
 #              --allow 22 --allow-shell
 EnvironmentFile=-/etc/rtunnel/agent.env
-ExecStart=/opt/rtunnel/agent/bin/rtunnel-agent ${AGENT_ARGS}
+# 文件管理：relay-admin 可远程浏览/上传/下载；默认只读，需要写入时在
+# /etc/rtunnel/agent.env 里设置 AGENT_FILE_FLAGS=--file-rw
+Environment=AGENT_FILE_ROOT=/opt/data/files
+Environment=AGENT_FILE_MAX_MB=512
+Environment=AGENT_FILE_FLAGS=--file-ro
+Environment=AGENT_FILE_TOKEN_ARG=
+ExecStartPre=/bin/mkdir -p ${AGENT_FILE_ROOT}
+ExecStart=/opt/rtunnel/agent/bin/rtunnel-agent ${AGENT_ARGS} \
+          --file-root ${AGENT_FILE_ROOT} --file-max-mb ${AGENT_FILE_MAX_MB} \
+          ${AGENT_FILE_FLAGS} ${AGENT_FILE_TOKEN_ARG}
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65535

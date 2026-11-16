@@ -91,5 +91,7 @@ constexpr uint16_t OPEN_SHELL = 0x0001;
 constexpr uint16_t OPEN_TTY   = 0x0002;   // 打开设备串口，payload: devid + path + baud + db/parity/stop
 constexpr uint16_t OPEN_TTY_MONITOR  = 0x0004;   // 只读监听已打开的 tty
 constexpr uint16_t OPEN_TTY_TAKEOVER = 0x0008;   // 强制接管，断开现有会话
+// 设备文件管理：payload = u8 want_rw + u8 trusted（trusted 由 relay 填写，本地 Web 为 0）
+constexpr uint16_t OPEN_FS            = 0x0010;
 
 } // namespace rtnp

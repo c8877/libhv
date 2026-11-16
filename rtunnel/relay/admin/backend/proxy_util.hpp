@@ -25,3 +25,5 @@ std::string dechunk(const std::string& in);
 int openStream(const AdminConfig& cfg, const std::string& devid, int port, std::string& err);
 int openTtyStream(const AdminConfig& cfg, const std::string& devid, const std::string& path,
                   int baud, int data_bits, char parity, int stop_bits, uint16_t flags, std::string& err);
+// 打开设备文件管理流（OPEN_FS）。rw=false 时对方按只读处理。
+int openFsStream(const AdminConfig& cfg, const std::string& devid, bool rw, std::string& err);

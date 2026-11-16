@@ -1426,17 +1426,25 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             rtnp::Reader r(f->payload, f->len);
             char devid[128] = {0};
             r.str(devid, sizeof(devid));
-            uint16_t port = r.u16();
-            // OPEN_SHELL 无目标端口（设备侧 forkpty），port=0 合法；普通 OPEN 必须非 0
+            // OPEN_SHELL/OPEN_FS 无目标端口（设备侧内建服务），port=0 合法；普通 OPEN 必须非 0
             bool is_shell = (f->flags & rtnp::OPEN_SHELL) != 0;
             bool is_tty = (f->flags & rtnp::OPEN_TTY) != 0;
+            bool is_fs = (f->flags & rtnp::OPEN_FS) != 0;
+            uint16_t port = 0;
+            uint8_t fs_rw = 0;
+            if (is_fs) {
+                fs_rw = r.u8();
+                r.u8();   // trusted：客户端值忽略，relay 转发时重写
+            } else {
+                port = r.u16();
+            }
             char tty_path[256] = {0};
             if (is_tty && !r.err) {
                 char tdev[128] = {0};
                 r.str(tdev, sizeof(tdev));
                 r.str(tty_path, sizeof(tty_path));
             }
-            if (r.err || devid[0] == '\0' || (!is_shell && !is_tty && port == 0)) {
+            if (r.err || devid[0] == '\0' || (!is_shell && !is_tty && !is_fs && port == 0)) {
                 sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::PROTOCOL_ERROR, "bad open");
                 return;
             }
@@ -1469,6 +1477,8 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             bool acl_ok = grouped
                 ? groupAclCheck(c->user, devid, port, is_shell ? 1 : 0, tty_path)
                 : aclCheck(c->user, devid);
+            // 文件管理是设备级能力，分组 ACL 没配端口时按设备级 ACL 放行
+            if (is_fs && !acl_ok) acl_ok = aclCheck(c->user, devid) != 0;
             if (!acl_ok) {
                 sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::ACL_DENIED, "acl denied");
                 return;
@@ -1503,6 +1513,11 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
 
             if (is_tty) {
                 rtnp::send(agent->io, rtnp::OPEN, s->c_sid, f->payload, f->len, f->flags);
+            } else if (is_fs) {
+                // payload: u8 want_rw + u8 trusted。relay 已完成认证，trusted 由 relay 填写，
+                // agent 侧据此跳过本地 file-token 校验（本地 Web 入口仍会校验）。
+                char pl[2] = {(char)(fs_rw ? 1 : 0), 1};
+                rtnp::send(agent->io, rtnp::OPEN, s->c_sid, pl, sizeof(pl), f->flags);
             } else {
                 rtnp::Writer w;
                 w.u16(port);

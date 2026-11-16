@@ -59,6 +59,8 @@
       </div>
     </div>
 
+    <FileManagerCard :devid="devid" :sys="sys" :can-edit="canEdit" />
+
     <div class="panel">
       <div class="panel-head"><h2>系统信息</h2></div>
       <el-descriptions v-if="sys" :column="sysCols" size="small" border>
@@ -100,11 +102,26 @@
       <div v-if="capsOpen && sys" class="caps-edit">
         <div class="form-grid">
           <label>转发端口<el-input v-model="capsForm.ports" size="small" placeholder="22, 8080, 8099" /></label>
-          <label>文件目录<el-input v-model="capsForm.file_dir" size="small" placeholder="/opt/data/files" /></label>
+          <label>OTA 文件目录<el-input v-model="capsForm.file_dir" size="small" placeholder="/opt/data/files" /></label>
           <label class="check">
             <el-checkbox v-model="capsForm.shell" :disabled="!isAdmin">允许 Shell</el-checkbox>
           </label>
         </div>
+        <div v-if="capsForm.fsSupported" class="fs-caps">
+          <div class="fs-caps-head">
+            <el-checkbox v-model="capsForm.fs">启用文件管理</el-checkbox>
+            <span class="muted">设备侧文件浏览、上传、下载与编辑</span>
+          </div>
+          <div class="form-grid">
+            <label>文件根目录<el-input v-model="capsForm.fs_root" size="small" :disabled="!capsForm.fs" placeholder="/opt/data/files" /></label>
+            <label>单文件上限 (MB)<el-input-number v-model="capsForm.fs_max_mb" :min="1" :max="10240" :disabled="!capsForm.fs" size="small" /></label>
+            <label class="check">
+              <el-switch v-model="capsForm.fs_rw" :disabled="!capsForm.fs" />
+              <span>允许写入（关闭为只读）</span>
+            </label>
+          </div>
+        </div>
+        <div v-else class="fs-caps muted">当前 agent 版本不支持文件管理配置，升级 agent 后可在此开启</div>
         <div class="form-actions">
           <span v-if="!isAdmin" class="muted">仅 admin 可修改 Shell</span>
           <span class="spacer" />
@@ -368,6 +385,7 @@ import { Api } from '@/shared/api.js'
 import { canManage, roleOf } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import { ago, bytes, downloadJson, kbPair, time } from '@/shared/utils.js'
+import FileManagerCard from '@/components/FileManagerCard.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -406,7 +424,7 @@ const charts = {}
 
 const capsOpen = ref(false)
 const capsSaving = ref(false)
-const capsForm = reactive({ ports: '', file_dir: '', shell: false })
+const capsForm = reactive({ ports: '', file_dir: '', shell: false, fsSupported: false, fs: false, fs_root: '', fs_rw: false, fs_max_mb: 512 })
 
 const addMetricOpen = ref(false)
 const addMetricPick = ref([])
@@ -450,7 +468,8 @@ const capsChips = computed(() => {
   ;(c.ports || []).forEach((p) => out.push('TCP ' + p))
   if (c.shell) out.push('Shell')
   if (c.sysinfo) out.push('SYSINFO')
-  if (c.file_dir) out.push('文件 ' + c.file_dir)
+  if (c.file_dir) out.push('OTA ' + c.file_dir)
+  if (c.fs) out.push('文件管理 ' + (c.fs_root || '') + (c.fs_rw ? ' (读写)' : ' (只读)'))
   out.push(c.mtls ? 'mTLS' : 'mTLS 未启用')
   return out
 })
@@ -762,6 +781,11 @@ function toggleCaps() {
     capsForm.ports = (c.ports || []).join(', ')
     capsForm.file_dir = c.file_dir || ''
     capsForm.shell = !!c.shell
+    capsForm.fsSupported = Object.prototype.hasOwnProperty.call(c, 'fs')
+    capsForm.fs = !!c.fs
+    capsForm.fs_root = c.fs_root || c.file_dir || ''
+    capsForm.fs_rw = !!c.fs_rw
+    capsForm.fs_max_mb = Number(c.fs_max_mb) || 512
   }
 }
 
@@ -776,11 +800,34 @@ async function saveCaps() {
   const dir = capsForm.file_dir.trim()
   if (dir) body.file_dir = dir
   if (isAdmin.value) body.shell = capsForm.shell
+  if (capsForm.fsSupported) {
+    if (capsForm.fs) {
+      const root = capsForm.fs_root.trim()
+      if (!root || root[0] !== '/' || root.includes('..')) {
+        ElMessage.error('文件根目录必须是绝对路径，且不能包含 ..')
+        return
+      }
+      const maxMb = Number(capsForm.fs_max_mb)
+      if (!Number.isInteger(maxMb) || maxMb < 1 || maxMb > 10240) {
+        ElMessage.error('单文件上限必须是 1–10240 MB 的整数')
+        return
+      }
+      body.fs = true
+      body.fs_root = root
+      body.fs_rw = !!capsForm.fs_rw
+      body.fs_max_mb = maxMb
+    } else {
+      body.fs = false
+    }
+  }
   capsSaving.value = true
   try {
     const r = await Api.put('/api/v1/agents/' + encodeURIComponent(devid.value) + '/caps', body)
     capsOpen.value = false
-    if (r && r.persisted === false) ElMessage.warning('已生效，但未能写入配置文件，重启后会丢失')
+    const fsMissed = body.fs !== undefined &&
+      !(typeof r.fs === 'boolean' && r.fs === body.fs && (!body.fs || r.fs_root === body.fs_root))
+    if (fsMissed) ElMessage.warning('设备未应用文件管理配置：请确认 agent 已升级')
+    else if (r && r.persisted === false) ElMessage.warning('已生效，但未能写入配置文件，重启后会丢失')
     else ElMessage.success('能力已更新')
     await loadAll({ silent: true })
   } catch (e) {
@@ -1073,6 +1120,8 @@ onBeforeUnmount(() => {
 .form-grid > label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--el-text-color-secondary); }
 .form-grid > label.check { flex-direction: row; align-items: center; }
 .form-grid .readonly { font-size: 12px; color: var(--el-text-color-secondary); }
+.fs-caps { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--el-border-color-lighter); }
+.fs-caps-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 12px; }
 .form-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 .form-actions .spacer { flex: 1; }
 

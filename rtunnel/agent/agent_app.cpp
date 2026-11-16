@@ -3,8 +3,11 @@
 #include "hversion.h"
 #include "cpputil/json.hpp"
 #include "common/logging.hpp"
-#include "cpputil/json.hpp"
 #include "common/shell_spawn.hpp"
+#include "fs_session.hpp"
+#ifdef RTUNNEL_AGENT_WEB
+#include "agent_web.hpp"
+#endif
 
 #include <stdio.h>
 #include <sys/utsname.h>
@@ -37,13 +40,36 @@
 
 // ---------------------------------------------------------------- 回调薄封装
 
+namespace {
+
+// 把 FsSession 的输出装进 RTNP DATA：u8 kind + WebSocket 原始消息
+class FsTunnelSink : public rtfs::Sink {
+public:
+    FsTunnelSink(AgentApp* app, uint32_t sid) : app_(app), sid_(sid) {}
+    void send(bool binary, const std::string& msg) override {
+        if (!app_->ready()) return;
+        std::string p;
+        p.reserve(msg.size() + 1);
+        p.push_back(binary ? (char)1 : (char)0);
+        p.append(msg);
+        rtnp::send(app_->io, rtnp::DATA, sid_, p.data(), (uint16_t)p.size());
+    }
+
+private:
+    AgentApp* app_;
+    uint32_t sid_;
+};
+
+} // namespace
+
 void AgentApp::localReadCb(hio_t* io, void* buf, int n) {
     auto* s = (LocalStream*)hio_context(io);
     if (s) s->app->onLocalRead(s, buf, n);
 }
 
 void AgentApp::localWriteCb(hio_t* io, const void* buf, int len) {
-    (void)buf; (void)len;
+    (void)buf;
+    (void)len;
     auto* s = (LocalStream*)hio_context(io);
     if (s) s->app->onLocalWrite(s);
 }
@@ -85,11 +111,22 @@ void AgentApp::streamFree(LocalStream* s) {
     s->freed = 1;
     LocalStream** pp = &streams;
     while (*pp) {
-        if (*pp == s) { *pp = s->next; break; }
+        if (*pp == s) {
+            *pp = s->next;
+            break;
+        }
         pp = &(*pp)->next;
     }
-    if (s->close_timer) { htimer_del(s->close_timer); s->close_timer = NULL; }
+    if (s->close_timer) {
+        htimer_del(s->close_timer);
+        s->close_timer = NULL;
+    }
     killShellChild(s);
+    if (s->fs_session) {
+        s->fs_session->onClose();
+        delete s->fs_session;
+        s->fs_session = NULL;
+    }
     if (s->local && !hio_is_closed(s->local)) {
         hio_set_context(s->local, NULL);
         hio_close(s->local);
@@ -145,8 +182,12 @@ void AgentApp::flushPending(LocalStream* s) {
         s->pending.consume(n);
     }
     if (s->pending.len > 0) {
-        if (!s->paused) { hio_read_stop(s->local); s->paused = 1; }
-    } else if (s->paused) {
+        if (!s->paused) {
+            hio_read_stop(s->local);
+            s->paused = 1;
+        }
+    }
+    else if (s->paused) {
         s->paused = 0;
         hio_read(s->local);
     }
@@ -200,7 +241,8 @@ void AgentApp::onLocalClose(LocalStream* s) {
     s->local = NULL;
     if (s->remote_closed) {
         streamFree(s);
-    } else {
+    }
+    else {
         armCloseTimer(s);
     }
 }
@@ -241,6 +283,37 @@ void AgentApp::onLocalConnect(LocalStream* s) {
 
 void AgentApp::handleOpen(const rtnp::Frame* f) {
     if (verbose) logf_("[agent] OPEN sid=%u flags=0x%04x", f->sid, f->flags);
+    // OPEN_FS：设备文件管理协议，payload = u8 want_rw + u8 trusted
+    if (f->flags & rtnp::OPEN_FS) {
+        if (!fs_.ready()) {
+            sendOpenFail(f->sid, rtnp::TARGET_NOT_ALLOWED, "file service disabled");
+            return;
+        }
+        if (streamFind(f->sid) != NULL) {
+            sendOpenFail(f->sid, rtnp::PROTOCOL_ERROR, "sid in use");
+            return;
+        }
+        bool want_rw = f->len >= 1 && f->payload[0] != 0;
+        bool trusted = f->len >= 2 && f->payload[1] != 0;
+        auto* s = new LocalStream{};
+        s->app = this;
+        s->sid = f->sid;
+        s->credit = rtnp::DEFAULT_CREDIT;
+        s->connected = 1;
+        s->is_fs = 1;
+        had_stream = 1;
+        s->next = streams;
+        streams = s;
+        auto* sink = new FsTunnelSink(this, f->sid);
+        s->fs_session = new rtfs::Session(&fs_, sink, devid, trusted, want_rw);
+        s->fs_session->setCredit(rtnp::DEFAULT_CREDIT);
+        rtnp::Writer w;
+        w.str("fs");
+        w.u16(0);
+        rtnp::send(io, rtnp::OPEN_OK, f->sid, w.data, (uint16_t)w.len);
+        if (verbose) logf_("[agent] fs stream %u rw=%d trusted=%d", f->sid, (int)want_rw, (int)trusted);
+        return;
+    }
     // OPEN_SHELL：设备侧直接起 shell（forkpty），独立于端口白名单，须 --allow-shell 显式开启
     if (f->flags & rtnp::OPEN_TTY) {
         rtnp::Reader tr(f->payload, f->len);
@@ -261,7 +334,10 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
         while (pos <= list.size()) {
             size_t comma = list.find(',', pos);
             std::string one = list.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
-            if (!one.empty() && one == path) { allowed = true; break; }
+            if (!one.empty() && one == path) {
+                allowed = true;
+                break;
+            }
             if (comma == std::string::npos) break;
             pos = comma + 1;
         }
@@ -283,7 +359,10 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
         if (want_monitor) {
             LocalStream* target = nullptr;
             for (LocalStream* it = streams; it; it = it->next) {
-                if (!it->is_monitor && it->tty_path == path) { target = it; break; }
+                if (!it->is_monitor && it->tty_path == path) {
+                    target = it;
+                    break;
+                }
             }
             if (!target) {
                 sendOpenFail(f->sid, rtnp::TARGET_REFUSED, "tty not open");
@@ -322,27 +401,50 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
             sendOpenFail(f->sid, rtnp::TARGET_REFUSED, "open tty failed");
             return;
         }
-        struct termios tio{};
-        if (tcgetattr(fd, &tio) != 0) { close(fd); sendOpenFail(f->sid, rtnp::TARGET_REFUSED, "termios failed"); return; }
+        struct termios tio {};
+        if (tcgetattr(fd, &tio) != 0) {
+            close(fd);
+            sendOpenFail(f->sid, rtnp::TARGET_REFUSED, "termios failed");
+            return;
+        }
         cfmakeraw(&tio);
         speed_t sp = B115200;
         switch (baud) {
-            case 9600: sp = B9600; break; case 19200: sp = B19200; break;
-            case 38400: sp = B38400; break; case 57600: sp = B57600; break;
-            case 115200: sp = B115200; break; case 230400: sp = B230400; break;
-            case 460800: sp = B460800; break; case 921600: sp = B921600; break;
-            default: sp = B115200; break;
+        case 9600: sp = B9600; break;
+        case 19200: sp = B19200; break;
+        case 38400: sp = B38400; break;
+        case 57600: sp = B57600; break;
+        case 115200: sp = B115200; break;
+        case 230400: sp = B230400; break;
+        case 460800: sp = B460800; break;
+        case 921600: sp = B921600; break;
+        default: sp = B115200; break;
         }
-        cfsetispeed(&tio, sp); cfsetospeed(&tio, sp);
+        cfsetispeed(&tio, sp);
+        cfsetospeed(&tio, sp);
         tio.c_cflag &= ~CSIZE;
         tio.c_cflag |= (db == 5 ? CS5 : db == 6 ? CS6 : db == 7 ? CS7 : CS8);
-        if (par == 1) { tio.c_cflag |= PARENB; tio.c_cflag &= ~PARODD; }
-        else if (par == 2) { tio.c_cflag |= PARENB | PARODD; }
-        else tio.c_cflag &= ~PARENB;
-        if (stop == 2) tio.c_cflag |= CSTOPB; else tio.c_cflag &= ~CSTOPB;
+        if (par == 1) {
+            tio.c_cflag |= PARENB;
+            tio.c_cflag &= ~PARODD;
+        }
+        else if (par == 2) {
+            tio.c_cflag |= PARENB | PARODD;
+        }
+        else
+            tio.c_cflag &= ~PARENB;
+        if (stop == 2)
+            tio.c_cflag |= CSTOPB;
+        else
+            tio.c_cflag &= ~CSTOPB;
         tio.c_cflag |= CLOCAL | CREAD;
-        tio.c_cc[VMIN] = 0; tio.c_cc[VTIME] = 0;
-        if (tcsetattr(fd, TCSANOW, &tio) != 0) { close(fd); sendOpenFail(f->sid, rtnp::TARGET_REFUSED, "termios set failed"); return; }
+        tio.c_cc[VMIN] = 0;
+        tio.c_cc[VTIME] = 0;
+        if (tcsetattr(fd, TCSANOW, &tio) != 0) {
+            close(fd);
+            sendOpenFail(f->sid, rtnp::TARGET_REFUSED, "termios set failed");
+            return;
+        }
 
         auto* s = new LocalStream{};
         s->app = this;
@@ -352,7 +454,12 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
         s->next = streams;
         streams = s;
         hio_t* io = hio_get(loop, fd);
-        if (!io) { close(fd); streamFree(s); sendOpenFail(f->sid, rtnp::TARGET_REFUSED, "hio failed"); return; }
+        if (!io) {
+            close(fd);
+            streamFree(s);
+            sendOpenFail(f->sid, rtnp::TARGET_REFUSED, "hio failed");
+            return;
+        }
         s->local = io;
         s->connected = 1;
         s->tty_path = path;
@@ -454,6 +561,12 @@ void AgentApp::killShellChild(LocalStream* s) {
 }
 
 // READY 后的会话级帧（连接级 HELLO/AUTH/PING 由 TunnelLink 处理）
+static uint64_t agentMonotonicMs() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
+}
+
 static void agentSampleCpu(AgentApp* app) {
     std::ifstream f("/proc/stat");
     if (!f) return;
@@ -462,8 +575,7 @@ static void agentSampleCpu(AgentApp* app) {
     while (std::getline(f, line)) {
         if (line.rfind("cpu", 0) != 0) break;
         unsigned long long v[8] = {0};
-        int n = sscanf(line.c_str(), "%*s %llu %llu %llu %llu %llu %llu %llu %llu",
-                       &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7]);
+        int n = sscanf(line.c_str(), "%*s %llu %llu %llu %llu %llu %llu %llu %llu", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7]);
         if (n < 4) continue;
         unsigned long long t = 0;
         for (int i = 0; i < 8; ++i) t += v[i];
@@ -478,8 +590,10 @@ static void agentSampleCpu(AgentApp* app) {
             unsigned long long dt = tot[i] - app->cpu_last_tot[i];
             unsigned long long di = idl[i] - app->cpu_last_idle[i];
             double u = dt > 0 ? 100.0 * (double)(dt - di) / (double)dt : 0.0;
-            if (i == 0) app->cpu_usage = u;
-            else app->cpu_cores.push_back(u);
+            if (i == 0)
+                app->cpu_usage = u;
+            else
+                app->cpu_cores.push_back(u);
         }
     }
     app->cpu_last_tot = tot;
@@ -528,8 +642,17 @@ void AgentApp::loadConfig() {
         std::string v = j["file_dir"].get<std::string>();
         if (!v.empty() && v[0] == '/' && v.find("..") == std::string::npos) file_dir = v;
     }
-    logf_("[agent] config loaded from %s (allow=%d shell=%d)", config_file.c_str(),
-          allow_ports[0], allow_shell);
+    if (j.contains("fs_enabled") && j["fs_enabled"].is_boolean()) file_enabled = j["fs_enabled"].get<bool>() ? 1 : 0;
+    if (j.contains("fs_root") && j["fs_root"].is_string()) {
+        std::string v = j["fs_root"].get<std::string>();
+        if (!v.empty() && v[0] == '/' && v.find("..") == std::string::npos && v.size() <= 512) file_root = v;
+    }
+    if (j.contains("fs_rw") && j["fs_rw"].is_boolean()) file_rw = j["fs_rw"].get<bool>() ? 1 : 0;
+    if (j.contains("fs_max_mb") && j["fs_max_mb"].is_number_integer()) {
+        int v = j["fs_max_mb"].get<int>();
+        if (v > 0 && v <= 10240) file_max_mb = v;
+    }
+    logf_("[agent] config loaded from %s (allow=%d shell=%d)", config_file.c_str(), allow_ports[0], allow_shell);
 }
 
 bool AgentApp::saveConfig() {
@@ -537,13 +660,18 @@ bool AgentApp::saveConfig() {
     std::string dir = config_file.substr(0, config_file.find_last_of('/'));
     if (!dir.empty()) {
         std::string cmd = "mkdir -p '" + dir + "'";
-        if (system(cmd.c_str()) != 0) { /* 目录可能已存在 */ }
+        if (system(cmd.c_str()) != 0) { /* 目录可能已存在 */
+        }
     }
     nlohmann::json j;
     j["allow"] = nlohmann::json::array();
     for (int i = 0; i < 32 && allow_ports[i] > 0; ++i) j["allow"].push_back(allow_ports[i]);
     j["shell"] = allow_shell != 0;
     j["file_dir"] = file_dir;
+    j["fs_enabled"] = file_enabled != 0;
+    j["fs_root"] = file_root.empty() ? file_dir : file_root;
+    j["fs_rw"] = file_rw != 0;
+    j["fs_max_mb"] = file_max_mb;
     j["ota"] = allow_ota != 0;
     std::string tmp = config_file + ".tmp";
     FILE* fp = fopen(tmp.c_str(), "w");
@@ -551,8 +679,35 @@ bool AgentApp::saveConfig() {
     std::string body = j.dump(2);
     bool ok = fwrite(body.data(), 1, body.size(), fp) == body.size();
     fclose(fp);
-    if (!ok) { unlink(tmp.c_str()); return false; }
+    if (!ok) {
+        unlink(tmp.c_str());
+        return false;
+    }
     return rename(tmp.c_str(), config_file.c_str()) == 0;
+}
+
+int AgentApp::applyFileConfig(const std::string& root, int rw, int max_mb, int enabled, std::string& err) {
+    std::string effective = root.empty() ? file_dir : root;
+    if (max_mb <= 0) max_mb = 512;
+    if (!enabled) {
+        fs_.close();
+        file_root = root;
+        file_rw = rw ? 1 : 0;
+        file_max_mb = max_mb;
+        file_enabled = 0;
+        return 0;
+    }
+    rtfs::Config c;
+    c.root = effective;
+    c.rw = rw != 0;
+    c.max_upload = (uint64_t)max_mb * 1024 * 1024;
+    c.token = file_token;
+    if (fs_.open(c, err) != 0) return -1; // 失败时保留原服务与配置
+    file_root = root;
+    file_rw = rw ? 1 : 0;
+    file_max_mb = max_mb;
+    file_enabled = 1;
+    return 0;
 }
 
 void AgentApp::handleConfigSet(const rtnp::Frame* f) {
@@ -562,7 +717,8 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     auto r = nlohmann::json::parse(rr.err ? std::string() : std::string(cfg), nullptr, false);
     if (r.is_discarded() || !r.is_object()) {
         std::string e = "{\"ok\":false,\"error\":\"bad json\"}";
-        rtnp::Writer w; w.str(e.c_str());
+        rtnp::Writer w;
+        w.str(e.c_str());
         rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
         return;
     }
@@ -572,7 +728,8 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     if (r.contains("ports")) {
         if (!r["ports"].is_array()) {
             std::string e = "{\"ok\":false,\"error\":\"ports must be array\"}";
-            rtnp::Writer w; w.str(e.c_str());
+            rtnp::Writer w;
+            w.str(e.c_str());
             rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
             return;
         }
@@ -580,19 +737,22 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
         for (auto& v : r["ports"]) {
             if (!v.is_number_integer()) {
                 std::string e = "{\"ok\":false,\"error\":\"bad port\"}";
-                rtnp::Writer w; w.str(e.c_str());
+                rtnp::Writer w;
+                w.str(e.c_str());
                 rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
                 return;
             }
             int p = v.get<int>();
             if (p <= 0 || p > 65535 || idx >= 32) {
                 std::string e = "{\"ok\":false,\"error\":\"port out of range or too many\"}";
-                rtnp::Writer w; w.str(e.c_str());
+                rtnp::Writer w;
+                w.str(e.c_str());
                 rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
                 return;
             }
             bool dup = false;
-            for (int k = 0; k < idx; ++k) if (new_ports[k] == p) dup = true;
+            for (int k = 0; k < idx; ++k)
+                if (new_ports[k] == p) dup = true;
             if (!dup) new_ports[idx++] = p;
         }
         ports_set = true;
@@ -601,7 +761,8 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     if (r.contains("shell")) {
         if (!r["shell"].is_boolean()) {
             std::string e = "{\"ok\":false,\"error\":\"shell must be bool\"}";
-            rtnp::Writer w; w.str(e.c_str());
+            rtnp::Writer w;
+            w.str(e.c_str());
             rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
             return;
         }
@@ -612,18 +773,98 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     if (r.contains("file_dir")) {
         if (!r["file_dir"].is_string()) {
             std::string e = "{\"ok\":false,\"error\":\"file_dir must be string\"}";
-            rtnp::Writer w; w.str(e.c_str());
+            rtnp::Writer w;
+            w.str(e.c_str());
             rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
             return;
         }
         std::string v = r["file_dir"].get<std::string>();
         if (v.empty() || v[0] != '/' || v.find("..") != std::string::npos || v.size() > 200) {
             std::string e = "{\"ok\":false,\"error\":\"bad file_dir\"}";
-            rtnp::Writer w; w.str(e.c_str());
+            rtnp::Writer w;
+            w.str(e.c_str());
             rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
             return;
         }
         new_file_dir = v;
+    }
+    bool fs_set = false;
+    int new_fs_enabled = file_enabled;
+    std::string new_fs_root = file_root;
+    int new_fs_rw = file_rw;
+    int new_fs_max = file_max_mb;
+    if (r.contains("fs")) {
+        if (!r["fs"].is_boolean()) {
+            std::string e = "{\"ok\":false,\"error\":\"fs must be bool\"}";
+            rtnp::Writer w;
+            w.str(e.c_str());
+            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
+        new_fs_enabled = r["fs"].get<bool>() ? 1 : 0;
+        fs_set = true;
+    }
+    if (r.contains("fs_root")) {
+        if (!r["fs_root"].is_string()) {
+            std::string e = "{\"ok\":false,\"error\":\"fs_root must be string\"}";
+            rtnp::Writer w;
+            w.str(e.c_str());
+            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
+        std::string v = r["fs_root"].get<std::string>();
+        if (v.empty() || v[0] != '/' || v.find("..") != std::string::npos || v.size() > 512) {
+            std::string e = "{\"ok\":false,\"error\":\"bad fs_root\"}";
+            rtnp::Writer w;
+            w.str(e.c_str());
+            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
+        new_fs_root = v;
+        fs_set = true;
+    }
+    if (r.contains("fs_rw")) {
+        if (!r["fs_rw"].is_boolean()) {
+            std::string e = "{\"ok\":false,\"error\":\"fs_rw must be bool\"}";
+            rtnp::Writer w;
+            w.str(e.c_str());
+            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
+        new_fs_rw = r["fs_rw"].get<bool>() ? 1 : 0;
+        fs_set = true;
+    }
+    if (r.contains("fs_max_mb")) {
+        if (!r["fs_max_mb"].is_number_integer()) {
+            std::string e = "{\"ok\":false,\"error\":\"fs_max_mb must be integer\"}";
+            rtnp::Writer w;
+            w.str(e.c_str());
+            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
+        int v = r["fs_max_mb"].get<int>();
+        if (v <= 0 || v > 10240) {
+            std::string e = "{\"ok\":false,\"error\":\"fs_max_mb out of range\"}";
+            rtnp::Writer w;
+            w.str(e.c_str());
+            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
+        new_fs_max = v;
+        fs_set = true;
+    }
+    if (fs_set) {
+        std::string ferr;
+        if (applyFileConfig(new_fs_root, new_fs_rw, new_fs_max, new_fs_enabled, ferr) != 0) {
+            nlohmann::json e;
+            e["ok"] = false;
+            e["error"] = ferr.empty() ? std::string("file service unavailable") : ferr;
+            std::string es = e.dump();
+            rtnp::Writer w;
+            w.str(es.c_str());
+            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
     }
     if (ports_set) {
         memcpy(allow_ports, new_ports, sizeof(allow_ports));
@@ -640,9 +881,14 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     for (int i = 0; i < 32 && allow_ports[i] > 0; ++i) ack["ports"].push_back(allow_ports[i]);
     ack["shell"] = allow_shell != 0;
     ack["file_dir"] = file_dir;
+    ack["fs"] = file_enabled && fs_.ready();
+    ack["fs_root"] = file_root.empty() ? file_dir : file_root;
+    ack["fs_rw"] = file_rw != 0;
+    ack["fs_max_mb"] = file_max_mb;
     std::string body = ack.dump();
-    logf_("[agent] config set: ports=%d shell=%d persisted=%d", allow_ports[0], allow_shell, (int)persisted);
-    rtnp::Writer w; w.str(body.c_str());
+    logf_("[agent] config set: ports=%d shell=%d fs=%d persisted=%d", allow_ports[0], allow_shell, file_enabled && fs_.ready(), (int)persisted);
+    rtnp::Writer w;
+    w.str(body.c_str());
     rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
 }
 
@@ -656,7 +902,6 @@ struct FileRx {
 
 static std::map<uint32_t, FileRx> g_file_rx;
 
-
 // 自带 SHA-256（不依赖 OpenSSL，板子可能按无 TLS 构建）
 struct Sha256 {
     uint32_t h[8];
@@ -664,42 +909,53 @@ struct Sha256 {
     unsigned char buf[64];
     size_t n;
     void init() {
-        static const uint32_t H[8] = {0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-                                      0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
+        static const uint32_t H[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
         for (int i = 0; i < 8; ++i) h[i] = H[i];
-        total = 0; n = 0;
+        total = 0;
+        n = 0;
     }
     static uint32_t rotr(uint32_t x, int r) { return (x >> r) | (x << (32 - r)); }
     void block(const unsigned char* p) {
-        static const uint32_t K[64] = {
-            0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-            0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-            0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-            0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
-            0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
-            0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
-            0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
-            0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2};
+        static const uint32_t K[64] = {0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01,
+                                       0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
+                                       0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+                                       0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+                                       0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08,
+                                       0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+                                       0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
         uint32_t w[64];
         for (int i = 0; i < 16; ++i)
-            w[i] = ((uint32_t)p[i*4] << 24) | ((uint32_t)p[i*4+1] << 16) |
-                   ((uint32_t)p[i*4+2] << 8) | (uint32_t)p[i*4+3];
+            w[i] = ((uint32_t)p[i * 4] << 24) | ((uint32_t)p[i * 4 + 1] << 16) | ((uint32_t)p[i * 4 + 2] << 8) | (uint32_t)p[i * 4 + 3];
         for (int i = 16; i < 64; ++i) {
-            uint32_t s0 = rotr(w[i-15],7) ^ rotr(w[i-15],18) ^ (w[i-15] >> 3);
-            uint32_t s1 = rotr(w[i-2],17) ^ rotr(w[i-2],19) ^ (w[i-2] >> 10);
-            w[i] = w[i-16] + s0 + w[i-7] + s1;
+            uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+            uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16] + s0 + w[i - 7] + s1;
         }
-        uint32_t a=h[0],b=h[1],c=h[2],d=h[3],e=h[4],f=h[5],g=h[6],hh=h[7];
+        uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7];
         for (int i = 0; i < 64; ++i) {
-            uint32_t S1 = rotr(e,6)^rotr(e,11)^rotr(e,25);
+            uint32_t S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
             uint32_t ch = (e & f) ^ (~e & g);
             uint32_t t1 = hh + S1 + ch + K[i] + w[i];
-            uint32_t S0 = rotr(a,2)^rotr(a,13)^rotr(a,22);
+            uint32_t S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
             uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
             uint32_t t2 = S0 + maj;
-            hh=g; g=f; f=e; e=d+t1; d=c; c=b; b=a; a=t1+t2;
+            hh = g;
+            g = f;
+            f = e;
+            e = d + t1;
+            d = c;
+            c = b;
+            b = a;
+            a = t1 + t2;
         }
-        h[0]+=a; h[1]+=b; h[2]+=c; h[3]+=d; h[4]+=e; h[5]+=f; h[6]+=g; h[7]+=hh;
+        h[0] += a;
+        h[1] += b;
+        h[2] += c;
+        h[3] += d;
+        h[4] += e;
+        h[5] += f;
+        h[6] += g;
+        h[7] += hh;
     }
     void update(const void* data, size_t len) {
         const unsigned char* p = (const unsigned char*)data;
@@ -708,8 +964,13 @@ struct Sha256 {
             size_t take = 64 - n;
             if (take > len) take = len;
             memcpy(buf + n, p, take);
-            n += take; p += take; len -= take;
-            if (n == 64) { block(buf); n = 0; }
+            n += take;
+            p += take;
+            len -= take;
+            if (n == 64) {
+                block(buf);
+                n = 0;
+            }
         }
     }
     std::string hex() {
@@ -719,14 +980,15 @@ struct Sha256 {
         unsigned char zero = 0;
         while (n != 56) update(&zero, 1);
         unsigned char lenb[8];
-        for (int i = 0; i < 8; ++i) lenb[i] = (unsigned char)(bits >> (56 - i*8));
+        for (int i = 0; i < 8; ++i) lenb[i] = (unsigned char)(bits >> (56 - i * 8));
         update(lenb, 8);
         static const char* hx = "0123456789abcdef";
         std::string out;
         for (int i = 0; i < 8; ++i) {
             for (int j = 3; j >= 0; --j) {
-                unsigned char c = (h[i] >> (j*8)) & 0xFF;
-                out += hx[c >> 4]; out += hx[c & 0xF];
+                unsigned char c = (h[i] >> (j * 8)) & 0xFF;
+                out += hx[c >> 4];
+                out += hx[c & 0xF];
             }
         }
         return out;
@@ -736,14 +998,14 @@ struct Sha256 {
 std::string AgentApp::sha256File(const std::string& path) {
     FILE* fp0 = fopen(path.c_str(), "rb");
     if (!fp0) return std::string();
-    Sha256 ctx; ctx.init();
+    Sha256 ctx;
+    ctx.init();
     char b[64 * 1024];
     size_t n;
     while ((n = fread(b, 1, sizeof(b), fp0)) > 0) ctx.update(b, n);
     fclose(fp0);
     return ctx.hex();
 }
-
 
 void AgentApp::handleFileFrame(const rtnp::Frame* f) {
     auto sendAck = [&](bool ok, uint64_t received, const std::string& err) {
@@ -752,7 +1014,8 @@ void AgentApp::handleFileFrame(const rtnp::Frame* f) {
         j["received"] = received;
         if (!err.empty()) j["error"] = err;
         std::string s = j.dump();
-        rtnp::Writer w; w.str(s.c_str());
+        rtnp::Writer w;
+        w.str(s.c_str());
         rtnp::send(io, rtnp::FILE_ACK, f->sid, w.data, (uint16_t)w.len);
     };
     if (f->type == rtnp::FILE_BEGIN) {
@@ -767,12 +1030,12 @@ void AgentApp::handleFileFrame(const rtnp::Frame* f) {
         bool bad_dir = false;
         for (const char* p = dir; *p; ++p) {
             if (!(isalnum((unsigned char)*p) || *p == '/' || *p == '.' || *p == '_' || *p == '-')) {
-                bad_dir = true; break;
+                bad_dir = true;
+                break;
             }
         }
         if (strstr(dir, "..") || dir[0] == '/') bad_dir = true;
-        if (r.err || name[0] == '\0' || strstr(name, "..") || strchr(name, '/') ||
-            size == 0 || bad_dir) {
+        if (r.err || name[0] == '\0' || strstr(name, "..") || strchr(name, '/') || size == 0 || bad_dir) {
             sendAck(false, 0, "bad begin");
             return;
         }
@@ -785,21 +1048,31 @@ void AgentApp::handleFileFrame(const rtnp::Frame* f) {
         std::string dest = target + "/" + name;
         std::string part = dest + ".part";
         uint64_t have = 0;
-        struct stat st{};
+        struct stat st {};
         if (stat(part.c_str(), &st) == 0 && st.st_size > 0 && (uint64_t)st.st_size <= size) {
             have = (uint64_t)st.st_size;
         }
         FILE* fp = fopen(part.c_str(), have ? "ab" : "wb");
-        if (!fp) { sendAck(false, 0, "open failed"); return; }
+        if (!fp) {
+            sendAck(false, 0, "open failed");
+            return;
+        }
         FileRx rx;
-        rx.fp = fp; rx.expect = size; rx.written = have; rx.name = name; rx.dest = dest;
+        rx.fp = fp;
+        rx.expect = size;
+        rx.written = have;
+        rx.name = name;
+        rx.dest = dest;
         g_file_rx[f->sid] = rx;
         if (have) logf_("[agent] resume %s at %llu", name, (unsigned long long)have);
         sendAck(true, have, "");
         return;
     }
     auto it = g_file_rx.find(f->sid);
-    if (it == g_file_rx.end()) { sendAck(false, 0, "no transfer"); return; }
+    if (it == g_file_rx.end()) {
+        sendAck(false, 0, "no transfer");
+        return;
+    }
     FileRx& rx = it->second;
     if (f->type == rtnp::FILE_DATA) {
         if (f->len > 0 && fwrite(f->payload, 1, f->len, rx.fp) != f->len) {
@@ -844,11 +1117,12 @@ void AgentApp::cleanupParts(const std::string& dir, time_t cutoff) {
     while ((e = readdir(d)) != NULL) {
         if (e->d_name[0] == '.') continue;
         std::string p = dir + "/" + e->d_name;
-        struct stat st{};
+        struct stat st {};
         if (stat(p.c_str(), &st) != 0) continue;
         if (S_ISDIR(st.st_mode)) {
             cleanupParts(p, cutoff);
-        } else if (st.st_mtime < cutoff) {
+        }
+        else if (st.st_mtime < cutoff) {
             size_t n = strlen(e->d_name);
             if (n > 5 && strcmp(e->d_name + n - 5, ".part") == 0) unlink(p.c_str());
         }
@@ -872,7 +1146,11 @@ bool AgentApp::otaProbe(const std::string& path, const std::string& expect, std:
     int pfd[2];
     if (pipe(pfd) != 0) return false;
     pid_t pid = fork();
-    if (pid < 0) { close(pfd[0]); close(pfd[1]); return false; }
+    if (pid < 0) {
+        close(pfd[0]);
+        close(pfd[1]);
+        return false;
+    }
     if (pid == 0) {
         close(pfd[0]);
         dup2(pfd[1], 1);
@@ -888,7 +1166,10 @@ bool AgentApp::otaProbe(const std::string& path, const std::string& expect, std:
     bool exited = false;
     for (int i = 0; i < 200; ++i) {
         pid_t r = waitpid(pid, &status, WNOHANG);
-        if (r == pid) { exited = true; break; }
+        if (r == pid) {
+            exited = true;
+            break;
+        }
         if (r < 0) break;
         usleep(10000);
     }
@@ -911,19 +1192,34 @@ bool AgentApp::otaProbe(const std::string& path, const std::string& expect, std:
 
 static bool otaCopyFile(const std::string& src, const std::string& dst, mode_t mode, std::string& err) {
     int in = open(src.c_str(), O_RDONLY);
-    if (in < 0) { err = "open source failed"; return false; }
+    if (in < 0) {
+        err = "open source failed";
+        return false;
+    }
     int out = open(dst.c_str(), O_WRONLY | O_CREAT | O_TRUNC, mode);
-    if (out < 0) { close(in); err = "open target failed"; return false; }
+    if (out < 0) {
+        close(in);
+        err = "open target failed";
+        return false;
+    }
     char buf[64 * 1024];
     bool ok = true;
     for (;;) {
         ssize_t n = read(in, buf, sizeof(buf));
         if (n == 0) break;
-        if (n < 0) { if (errno == EINTR) continue; ok = false; break; }
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            ok = false;
+            break;
+        }
         ssize_t off = 0;
         while (off < n) {
             ssize_t w = write(out, buf + off, (size_t)(n - off));
-            if (w <= 0) { if (w < 0 && errno == EINTR) continue; ok = false; break; }
+            if (w <= 0) {
+                if (w < 0 && errno == EINTR) continue;
+                ok = false;
+                break;
+            }
             off += w;
         }
         if (!ok) break;
@@ -932,7 +1228,10 @@ static bool otaCopyFile(const std::string& src, const std::string& dst, mode_t m
     if (ok && fchmod(out, mode) != 0) ok = false;
     close(out);
     close(in);
-    if (!ok) { unlink(dst.c_str()); err = "copy failed"; }
+    if (!ok) {
+        unlink(dst.c_str());
+        err = "copy failed";
+    }
     return ok;
 }
 
@@ -944,19 +1243,29 @@ void AgentApp::handleOtaApply(const rtnp::Frame* f) {
         if (!err.empty()) j["error"] = err;
         if (!ok) logf_("[agent] ota: %s", err.c_str());
         std::string s = j.dump();
-        rtnp::Writer w; w.str(s.c_str());
+        rtnp::Writer w;
+        w.str(s.c_str());
         rtnp::send(io, rtnp::OTA_APPLY_ACK, f->sid, w.data, (uint16_t)w.len);
     };
 
-    if (f->type == rtnp::OTA_CANCEL) return;   // 安装在同步流程里完成，收到时已无法中止
-    if (!allow_ota) { ack(false, NULL, "ota disabled"); return; }
-    if (strncmp(devid, "a:", 2) == 0) { ack(false, NULL, "on-demand agent"); return; }
+    if (f->type == rtnp::OTA_CANCEL) return; // 安装在同步流程里完成，收到时已无法中止
+    if (!allow_ota) {
+        ack(false, NULL, "ota disabled");
+        return;
+    }
+    if (strncmp(devid, "a:", 2) == 0) {
+        ack(false, NULL, "on-demand agent");
+        return;
+    }
 
     rtnp::Reader r(f->payload, f->len);
     static char body[4096];
     r.str(body, sizeof(body));
     auto j = nlohmann::json::parse(r.err ? std::string() : std::string(body), nullptr, false);
-    if (j.is_discarded() || !j.is_object()) { ack(false, NULL, "bad json"); return; }
+    if (j.is_discarded() || !j.is_object()) {
+        ack(false, NULL, "bad json");
+        return;
+    }
     std::string path = j.value("path", "");
     std::string version = j.value("version", "");
     uint64_t size = j.value("size", (uint64_t)0);
@@ -967,22 +1276,30 @@ void AgentApp::handleOtaApply(const rtnp::Frame* f) {
     }
     std::string base = file_dir;
     while (base.size() > 1 && base.back() == '/') base.pop_back();
-    if (path.size() <= base.size() || path.compare(0, base.size(), base) != 0 ||
-        path[base.size()] != '/' || path.find("..") != std::string::npos) {
+    if (path.size() <= base.size() || path.compare(0, base.size(), base) != 0 || path[base.size()] != '/' || path.find("..") != std::string::npos) {
         ack(false, NULL, "path outside file_dir");
         return;
     }
-    struct stat st{};
+    struct stat st {};
     if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode) || (uint64_t)st.st_size != size) {
         ack(false, NULL, "file missing or size mismatch");
         return;
     }
-    if (self_path.empty()) { ack(false, NULL, "self path unknown"); return; }
+    if (self_path.empty()) {
+        ack(false, NULL, "self path unknown");
+        return;
+    }
     // 分发通道落盘是 0644，自检前先补可执行位
-    if (chmod(path.c_str(), 0755) != 0) { ack(false, NULL, "chmod failed"); return; }
+    if (chmod(path.c_str(), 0755) != 0) {
+        ack(false, NULL, "chmod failed");
+        return;
+    }
 
     std::string sha_got = sha256File(path);
-    if (sha_got.empty() || sha_got != sha) { ack(false, NULL, "sha256 mismatch"); return; }
+    if (sha_got.empty() || sha_got != sha) {
+        ack(false, NULL, "sha256 mismatch");
+        return;
+    }
 
     std::string probe;
     if (!otaProbe(path, version, probe)) {
@@ -997,7 +1314,10 @@ void AgentApp::handleOtaApply(const rtnp::Frame* f) {
     if (stat(self_path.c_str(), &st) == 0) mode = st.st_mode & 07777;
     std::string newp = self_path + ".new";
     std::string err;
-    if (!otaCopyFile(path, newp, mode, err)) { ack(false, NULL, err); return; }
+    if (!otaCopyFile(path, newp, mode, err)) {
+        ack(false, NULL, err);
+        return;
+    }
 
     std::string prev = self_path + ".prev";
     unlink(prev.c_str());
@@ -1015,28 +1335,32 @@ void AgentApp::handleOtaApply(const rtnp::Frame* f) {
     logf_("[agent] ota installed %s, restarting", version.c_str());
     ack(true, "installed", "");
     ota_restart_sid_ = f->sid;
-    htimer_t* t = htimer_add(loop, [](htimer_t* tm) {
-        auto* app = (AgentApp*)hevent_userdata(tm);
-        // 所有 fd 置 CLOEXEC：新进程要重新建立 relay 连接，不能继承旧 socket
-        for (int fd = 3; fd < 1024; ++fd) fcntl(fd, F_SETFD, FD_CLOEXEC);
-        std::vector<char*> av;
-        for (auto& s : app->saved_argv) av.push_back(const_cast<char*>(s.c_str()));
-        av.push_back(NULL);
-        execv(app->self_path.c_str(), av.data());
-        // exec 失败：回滚二进制，连接还在，回报错误后继续以旧进程运行
-        int e = errno;
-        std::string prev = app->self_path + ".prev";
-        unlink(app->self_path.c_str());
-        rename(prev.c_str(), app->self_path.c_str());
-        logf_("[agent] ota restart failed: %s", strerror(e));
-        nlohmann::json rj;
-        rj["ok"] = false;
-        rj["phase"] = "installed";
-        rj["error"] = std::string("restart failed: ") + strerror(e);
-        std::string s = rj.dump();
-        rtnp::Writer w; w.str(s.c_str());
-        rtnp::send(app->io, rtnp::OTA_APPLY_ACK, app->ota_restart_sid_, w.data, (uint16_t)w.len);
-    }, 300, 1);
+    htimer_t* t = htimer_add(
+        loop,
+        [](htimer_t* tm) {
+            auto* app = (AgentApp*)hevent_userdata(tm);
+            // 所有 fd 置 CLOEXEC：新进程要重新建立 relay 连接，不能继承旧 socket
+            for (int fd = 3; fd < 1024; ++fd) fcntl(fd, F_SETFD, FD_CLOEXEC);
+            std::vector<char*> av;
+            for (auto& s : app->saved_argv) av.push_back(const_cast<char*>(s.c_str()));
+            av.push_back(NULL);
+            execv(app->self_path.c_str(), av.data());
+            // exec 失败：回滚二进制，连接还在，回报错误后继续以旧进程运行
+            int e = errno;
+            std::string prev = app->self_path + ".prev";
+            unlink(app->self_path.c_str());
+            rename(prev.c_str(), app->self_path.c_str());
+            logf_("[agent] ota restart failed: %s", strerror(e));
+            nlohmann::json rj;
+            rj["ok"] = false;
+            rj["phase"] = "installed";
+            rj["error"] = std::string("restart failed: ") + strerror(e);
+            std::string s = rj.dump();
+            rtnp::Writer w;
+            w.str(s.c_str());
+            rtnp::send(app->io, rtnp::OTA_APPLY_ACK, app->ota_restart_sid_, w.data, (uint16_t)w.len);
+        },
+        300, 1);
     hevent_set_userdata(t, this);
 }
 
@@ -1045,7 +1369,8 @@ static bool readTtyCounters(const std::string& want, unsigned long long& rx, uns
     int port = -1;
     if (want.size() > 6 && want.compare(0, 6, "ttySTM") == 0) {
         port = atoi(want.c_str() + 6);
-    } else if (want.size() > 4 && want.compare(0, 4, "ttyS") == 0) {
+    }
+    else if (want.size() > 4 && want.compare(0, 4, "ttyS") == 0) {
         port = atoi(want.c_str() + 4);
     }
     DIR* d = opendir("/proc/tty/driver");
@@ -1061,7 +1386,8 @@ static bool readTtyCounters(const std::string& want, unsigned long long& rx, uns
             if (port >= 0) {
                 int n = -1;
                 if (sscanf(line.c_str(), "%d:", &n) == 1 && n == port) match = true;
-            } else if (line.find(want) != std::string::npos) {
+            }
+            else if (line.find(want) != std::string::npos) {
                 match = true;
             }
             if (!match) continue;
@@ -1080,40 +1406,50 @@ void AgentApp::sampleSeries(const std::string& name, const SeriesCfg& cfg) {
     j["ts"] = (long long)time(NULL) * 1000;
     if (name == "cpu") {
         j["v"] = cpu_usage;
-    } else if (name == "mem") {
+    }
+    else if (name == "mem") {
         std::ifstream mf("/proc/meminfo");
         std::string line;
         long long total = 0, avail = 0, free_kb = 0;
         while (std::getline(mf, line)) {
             long long v = 0;
-            if (sscanf(line.c_str(), "MemTotal: %lld", &v) == 1) total = v;
-            else if (sscanf(line.c_str(), "MemAvailable: %lld", &v) == 1) avail = v;
-            else if (sscanf(line.c_str(), "MemFree: %lld", &v) == 1) free_kb = v;
+            if (sscanf(line.c_str(), "MemTotal: %lld", &v) == 1)
+                total = v;
+            else if (sscanf(line.c_str(), "MemAvailable: %lld", &v) == 1)
+                avail = v;
+            else if (sscanf(line.c_str(), "MemFree: %lld", &v) == 1)
+                free_kb = v;
         }
         if (avail <= 0) avail = free_kb;
         j["v"] = total > 0 ? (double)(total - avail) * 100.0 / total : 0.0;
-    } else if (name == "load") {
+    }
+    else if (name == "load") {
         double la[3] = {0, 0, 0};
         getloadavg(la, 3);
         j["v"] = la[0];
         j["load5"] = la[1];
         j["load15"] = la[2];
-    } else if (name.rfind("net:", 0) == 0) {
+    }
+    else if (name.rfind("net:", 0) == 0) {
         std::string ifn = name.substr(4);
         auto rd = [&](const char* f) -> unsigned long long {
             std::ifstream in(std::string("/sys/class/net/") + ifn + "/statistics/" + f);
-            unsigned long long v = 0; in >> v; return v;
+            unsigned long long v = 0;
+            in >> v;
+            return v;
         };
         j["rx"] = rd("rx_bytes");
         j["tx"] = rd("tx_bytes");
         j["v"] = 0;
-    } else if (name.rfind("serial:", 0) == 0) {
+    }
+    else if (name.rfind("serial:", 0) == 0) {
         unsigned long long rx = 0, tx = 0;
         readTtyCounters(name.substr(7), rx, tx);
         j["rx"] = rx;
         j["tx"] = tx;
         j["v"] = 0;
-    } else {
+    }
+    else {
         return;
     }
     std::string line = j.dump();
@@ -1134,7 +1470,7 @@ void AgentApp::seriesTick() {
     }
 }
 
-void AgentApp::sendSysinfo(int mode) {
+nlohmann::json AgentApp::buildSysinfo() {
     using nlohmann::json;
     json j;
     j["version"] = hv_version();
@@ -1147,7 +1483,11 @@ void AgentApp::sendSysinfo(int mode) {
     }
     {
         std::ifstream f("/proc/device-tree/model");
-        if (f) { std::string m; std::getline(f, m); j["board"] = m; }
+        if (f) {
+            std::string m;
+            std::getline(f, m);
+            j["board"] = m;
+        }
     }
     {
         std::ifstream f("/proc/cpuinfo");
@@ -1167,14 +1507,23 @@ void AgentApp::sendSysinfo(int mode) {
     {
         std::ifstream f("/proc/meminfo");
         std::string line;
-        unsigned long long total = 0, swap_total = 0, swap_free = 0;
+        unsigned long long total = 0, avail = 0, free_kb = 0, swap_total = 0, swap_free = 0;
         while (std::getline(f, line)) {
             unsigned long long v = 0;
-            if (sscanf(line.c_str(), "MemTotal: %llu kB", &v) == 1) total = v;
-            else if (sscanf(line.c_str(), "SwapTotal: %llu kB", &v) == 1) swap_total = v;
-            else if (sscanf(line.c_str(), "SwapFree: %llu kB", &v) == 1) swap_free = v;
+            if (sscanf(line.c_str(), "MemTotal: %llu kB", &v) == 1)
+                total = v;
+            else if (sscanf(line.c_str(), "MemAvailable: %llu kB", &v) == 1)
+                avail = v;
+            else if (sscanf(line.c_str(), "MemFree: %llu kB", &v) == 1)
+                free_kb = v;
+            else if (sscanf(line.c_str(), "SwapTotal: %llu kB", &v) == 1)
+                swap_total = v;
+            else if (sscanf(line.c_str(), "SwapFree: %llu kB", &v) == 1)
+                swap_free = v;
         }
         j["mem_total_kb"] = total;
+        j["mem_free_kb"] = free_kb;
+        j["mem_available_kb"] = avail ? avail : free_kb;
         j["swap_total_kb"] = swap_total;
         j["swap_free_kb"] = swap_free;
     }
@@ -1187,14 +1536,11 @@ void AgentApp::sendSysinfo(int mode) {
             std::istringstream is(line);
             std::string dev, mnt, fstype;
             if (!(is >> dev >> mnt >> fstype)) continue;
-            if (fstype == "squashfs" || (fstype == "overlay" && mnt != "/") ||
-                mnt.rfind("/run", 0) == 0 || mnt.rfind("/dev/shm", 0) == 0 ||
-                mnt.rfind("/sys", 0) == 0 ||
-                fstype == "proc" || fstype == "sysfs" || fstype == "devtmpfs" ||
-                fstype == "devpts" || fstype.rfind("cgroup", 0) == 0 ||
-                fstype == "pstore" || fstype == "debugfs" || fstype == "securityfs" ||
-                fstype == "tracefs" || fstype == "configfs" || fstype == "mqueue" ||
-                fstype == "hugetlbfs" || fstype == "fusectl" || fstype == "binfmt_misc") continue;
+            if (fstype == "squashfs" || (fstype == "overlay" && mnt != "/") || mnt.rfind("/run", 0) == 0 || mnt.rfind("/dev/shm", 0) == 0 ||
+                mnt.rfind("/sys", 0) == 0 || fstype == "proc" || fstype == "sysfs" || fstype == "devtmpfs" || fstype == "devpts" ||
+                fstype.rfind("cgroup", 0) == 0 || fstype == "pstore" || fstype == "debugfs" || fstype == "securityfs" || fstype == "tracefs" ||
+                fstype == "configfs" || fstype == "mqueue" || fstype == "hugetlbfs" || fstype == "fusectl" || fstype == "binfmt_misc")
+                continue;
             struct statvfs vfs;
             if (statvfs(mnt.c_str(), &vfs) != 0) continue;
             unsigned long long total = (unsigned long long)vfs.f_blocks * vfs.f_frsize / 1024;
@@ -1241,8 +1587,7 @@ void AgentApp::sendSysinfo(int mode) {
             struct dirent* e;
             while ((e = readdir(d)) != NULL) {
                 std::string n = e->d_name;
-                if (n.rfind("ttyS", 0) != 0 && n.rfind("ttyUSB", 0) != 0 &&
-                    n.rfind("ttyACM", 0) != 0 && n.rfind("ttySTM", 0) != 0) continue;
+                if (n.rfind("ttyS", 0) != 0 && n.rfind("ttyUSB", 0) != 0 && n.rfind("ttyACM", 0) != 0 && n.rfind("ttySTM", 0) != 0) continue;
                 paths.insert("/dev/" + n);
             }
             closedir(d);
@@ -1256,17 +1601,27 @@ void AgentApp::sendSysinfo(int mode) {
                 std::string r = rp;
                 size_t p = r.find_last_of('/');
                 if (p != std::string::npos) base = r.substr(p + 1);
-            } else {
+            }
+            else {
                 size_t p = base.find_last_of('/');
                 if (p != std::string::npos) base = base.substr(p + 1);
             }
             bool found = readTtyCounters(base, rx, tx);
-            bool configured = tty_cfgs_.count(path) > 0;
+            auto cfg = tty_cfgs_.find(path);
+            bool configured = cfg != tty_cfgs_.end();
             if (!found && !configured) continue;
             nlohmann::json sj;
             sj["path"] = path;
             sj["rx"] = rx;
             sj["tx"] = tx;
+            sj["configured"] = configured;
+            if (configured) {
+                sj["enabled"] = cfg->second.enabled != 0;
+                sj["baud"] = cfg->second.baud;
+                sj["data_bits"] = cfg->second.data_bits;
+                sj["parity"] = std::string(1, cfg->second.parity);
+                sj["stop_bits"] = cfg->second.stop_bits;
+            }
             serial.push_back(sj);
         }
         j["serial"] = serial;
@@ -1280,6 +1635,11 @@ void AgentApp::sendSysinfo(int mode) {
         caps["sysinfo"] = true;
         caps["mtls"] = (tls_cert[0] != '\0');
         caps["file_dir"] = file_dir;
+        caps["fs"] = file_enabled && fs_.ready();
+        caps["fs_rw"] = file_rw != 0;
+        caps["fs_root"] = file_root.empty() ? file_dir : file_root;
+        caps["fs_token"] = fs_.tokenRequired();
+        caps["fs_max_mb"] = file_max_mb;
         caps["ota"] = allow_ota != 0;
         caps["version"] = hv_version();
         j["caps"] = caps;
@@ -1305,9 +1665,51 @@ void AgentApp::sendSysinfo(int mode) {
     }
 #endif
 
+    j["devid"] = devid;
+    j["online"] = ready();
+    if (!endpoints.empty()) {
+        const TunnelEndpoint& ep = currentEndpoint();
+        j["relay"] = ep.host + ":" + std::to_string(ep.port);
+        j["relay_index"] = (int)endpointIndex();
+        j["relay_count"] = (int)endpoints.size();
+    }
+    j["cpu_usage"] = cpu_usage;
+    j["cpu_cores"] = cpu_cores;
+    {
+        double la[3] = {0, 0, 0};
+        if (getloadavg(la, 3) == 3) j["loadavg"] = json::array({la[0], la[1], la[2]});
+    }
+    {
+        std::ifstream uf("/proc/uptime");
+        double up = 0;
+        if (uf >> up) j["uptime_sec"] = (long long)up;
+    }
+    j["agent_uptime_sec"] = (long long)((agentMonotonicMs() - started_ms_) / 1000);
+    return j;
+}
+
+void AgentApp::refreshWebSnapshot() {
+    nlohmann::json j = buildSysinfo();
+    j["ok"] = true;
+    j["ts"] = (long long)time(NULL) * 1000;
+    j["web"] = {{"listen", web_listen}, {"interval_ms", 2000}};
+    std::string body = j.dump();
+    std::lock_guard<std::mutex> lk(web_mu_);
+    web_body_.swap(body);
+}
+
+std::string AgentApp::webSnapshot() {
+    std::lock_guard<std::mutex> lk(web_mu_);
+    if (web_body_.empty()) return "{\"ok\":false,\"error\":\"snapshot not ready\"}";
+    return web_body_;
+}
+
+void AgentApp::sendSysinfo(int mode) {
+    using nlohmann::json;
+    json j = buildSysinfo();
+
     nlohmann::json sig;
-    for (const char* k : {"version", "machine", "kernel", "cpu_model", "cpu_count", "board",
-                          "mem_total_kb", "swap_total_kb", "caps", "mtls", "cert_serial"}) {
+    for (const char* k : {"version", "machine", "kernel", "cpu_model", "cpu_count", "board", "mem_total_kb", "swap_total_kb", "caps", "mtls", "cert_serial"}) {
         if (j.contains(k)) sig[k] = j[k];
     }
     sig["mounts"] = nlohmann::json::array();
@@ -1325,7 +1727,8 @@ void AgentApp::sendSysinfo(int mode) {
         out["nics"] = nlohmann::json::array();
         for (auto& n : j["nics"]) out["nics"].push_back({{"name", n["name"]}, {"ip", n["ip"]}, {"up", n["up"]}});
         out["serial"] = j["serial"];
-    } else {
+    }
+    else {
         sysinfo_sig = sigs;
         j["full"] = true;
         out = j;
@@ -1340,22 +1743,19 @@ void AgentApp::onFrame(rtnp::Frame* f) {
     switch (f->type) {
     case rtnp::SYSINFO_REQ: {
         int mode = 0;
-        if (f->len > 0) { rtnp::Reader r(f->payload, f->len); mode = r.u8(); }
+        if (f->len > 0) {
+            rtnp::Reader r(f->payload, f->len);
+            mode = r.u8();
+        }
         sendSysinfo(mode);
         return;
     }
-    case rtnp::CONFIG_SET:
-        handleConfigSet(f);
-        return;
+    case rtnp::CONFIG_SET: handleConfigSet(f); return;
     case rtnp::FILE_BEGIN:
     case rtnp::FILE_DATA:
-    case rtnp::FILE_END:
-        handleFileFrame(f);
-        return;
+    case rtnp::FILE_END: handleFileFrame(f); return;
     case rtnp::OTA_APPLY:
-    case rtnp::OTA_CANCEL:
-        handleOtaApply(f);
-        return;
+    case rtnp::OTA_CANCEL: handleOtaApply(f); return;
     case rtnp::TTY_LIST_REQ: {
         nlohmann::json arr = nlohmann::json::array();
         DIR* d = opendir("/dev");
@@ -1363,8 +1763,7 @@ void AgentApp::onFrame(rtnp::Frame* f) {
             struct dirent* e;
             while ((e = readdir(d)) != NULL) {
                 std::string n = e->d_name;
-                if (n.rfind("ttyUSB", 0) != 0 && n.rfind("ttyACM", 0) != 0 &&
-                    n.rfind("ttyS", 0) != 0 && n.rfind("ttySTM", 0) != 0) continue;
+                if (n.rfind("ttyUSB", 0) != 0 && n.rfind("ttyACM", 0) != 0 && n.rfind("ttyS", 0) != 0 && n.rfind("ttySTM", 0) != 0) continue;
                 nlohmann::json j;
                 j["path"] = "/dev/" + n;
                 arr.push_back(j);
@@ -1384,7 +1783,8 @@ void AgentApp::onFrame(rtnp::Frame* f) {
             closedir(b);
         }
         std::string out = arr.dump();
-        rtnp::Writer w; w.str(out.c_str());
+        rtnp::Writer w;
+        w.str(out.c_str());
         rtnp::send(io, rtnp::TTY_LIST_ACK, f->sid, w.data, (uint16_t)w.len);
         return;
     }
@@ -1445,7 +1845,8 @@ void AgentApp::onFrame(rtnp::Frame* f) {
         st["revision"] = series_revision;
         st["series"] = (int)series_cfgs.size();
         std::string s2 = st.dump();
-        rtnp::Writer sw; sw.str(s2.c_str());
+        rtnp::Writer sw;
+        sw.str(s2.c_str());
         rtnp::send(io, rtnp::METRICS_STATUS, 0, sw.data, (uint16_t)sw.len);
         return;
     }
@@ -1481,12 +1882,16 @@ void AgentApp::onFrame(rtnp::Frame* f) {
         std::string os = out.dump();
         if (since == 0) {
             std::string gz;
-            if (gzipCompress(os, gz)) os = std::string(1, '\1') + gz;
-            else os = std::string(1, '\0') + os;
-        } else {
+            if (gzipCompress(os, gz))
+                os = std::string(1, '\1') + gz;
+            else
+                os = std::string(1, '\0') + os;
+        }
+        else {
             os = std::string(1, '\0') + os;
         }
-        rtnp::Writer ow; ow.strn(os.data(), os.size());
+        rtnp::Writer ow;
+        ow.strn(os.data(), os.size());
         rtnp::send(io, rtnp::METRICS_DATA, f->sid, ow.data, (uint16_t)ow.len);
         return;
     }
@@ -1502,25 +1907,41 @@ void AgentApp::onFrame(rtnp::Frame* f) {
         std::string target = file_dir;
         if (dir[0]) target += "/" + std::string(dir);
         std::string path = target + "/" + name;
-        bool ok = !r.err && name[0] && !strstr(name, "..") && !strchr(name, '/') &&
-                  !strstr(dir, "..") && dir[0] != '/';
-        struct stat st{};
+        bool ok = !r.err && name[0] && !strstr(name, "..") && !strchr(name, '/') && !strstr(dir, "..") && dir[0] != '/';
+        struct stat st {};
         if (ok && stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
             j["exists"] = true;
             j["size"] = (long long)st.st_size;
             j["sha256"] = sha256File(path);
         }
         std::string out = j.dump();
-        rtnp::Writer w; w.str(out.c_str());
+        rtnp::Writer w;
+        w.str(out.c_str());
         rtnp::send(io, rtnp::FILE_CHECK_ACK, f->sid, w.data, (uint16_t)w.len);
         return;
     }
-    case rtnp::OPEN:
-        handleOpen(f);
-        return;
+    case rtnp::OPEN: handleOpen(f); return;
     case rtnp::DATA: {
         LocalStream* s = streamFind(f->sid);
-        if (s == NULL || s->local == NULL) return;
+        if (s == NULL) return;
+        if (s->is_fs) {
+            if (f->len > 0 && s->fs_session) {
+                bool binary = f->payload[0] != 0;
+                std::string msg((const char*)f->payload + 1, (size_t)f->len - 1);
+                if (binary)
+                    s->fs_session->onBinary(msg);
+                else
+                    s->fs_session->onText(msg);
+            }
+            // 请求都很小，收到即回窗口
+            if (io && state == 2 && f->len > 0) {
+                rtnp::Writer w;
+                w.u32(f->len);
+                rtnp::send(io, rtnp::WINDOW, s->sid, w.data, (uint16_t)w.len);
+            }
+            return;
+        }
+        if (s->local == NULL) return;
         if (f->len > 0) {
             hio_write(s->local, f->payload, f->len);
             s->unacked += f->len;
@@ -1535,6 +1956,10 @@ void AgentApp::onFrame(rtnp::Frame* f) {
         rtnp::Reader r(f->payload, f->len);
         uint32_t inc = r.u32();
         if (r.err) return;
+        if (s->is_fs) {
+            if (s->fs_session) s->fs_session->addCredit(inc);
+            return;
+        }
         s->credit += inc;
         if (s->credit > rtnp::DEFAULT_CREDIT) s->credit = rtnp::DEFAULT_CREDIT;
         flushPending(s);
@@ -1543,19 +1968,31 @@ void AgentApp::onFrame(rtnp::Frame* f) {
     case rtnp::CLOSE: {
         LocalStream* s = streamFind(f->sid);
         if (s == NULL) return;
+        if (s->is_fs) {
+            // 回 CLOSE，让 relay 把这条会话从 c/a 两侧的流表移除
+            if (io && state == 2 && !hio_is_closed(io)) {
+                rtnp::send(io, rtnp::CLOSE, s->sid, NULL, 0);
+            }
+            streamFree(s);
+            return;
+        }
         s->remote_closed = 1;
         if (s->is_shell) {
             // pty 无 SHUT_WR 语义：对端 EOF = 结束 shell 子进程
             killShellChild(s);
-        } else if (s->local && hio_write_is_complete(s->local)) {
+        }
+        else if (s->local && hio_write_is_complete(s->local)) {
             shutdown(hio_fd(s->local), SHUT_WR);
             s->want_shutdown = 0;
-        } else {
+        }
+        else {
             s->want_shutdown = 1;
             if (s->local) hio_setcb_write(s->local, localWriteCb);
         }
-        if (s->local_eof) streamFree(s);
-        else armCloseTimer(s);
+        if (s->local_eof)
+            streamFree(s);
+        else
+            armCloseTimer(s);
         return;
     }
     case rtnp::RESIZE: {
@@ -1574,8 +2011,7 @@ void AgentApp::onFrame(rtnp::Frame* f) {
         if (s) streamFree(s);
         return;
     }
-    default:
-        return;
+    default: return;
     }
 }
 
@@ -1585,6 +2021,10 @@ void AgentApp::onLinkDown() {
         LocalStream* s = streams;
         streams = s->next;
         if (s->close_timer) htimer_del(s->close_timer);
+        if (s->fs_session) {
+            s->fs_session->onClose();
+            delete s->fs_session;
+        }
         if (s->local && !hio_is_closed(s->local)) hio_close(s->local);
         delete s;
     }
@@ -1593,6 +2033,7 @@ void AgentApp::onLinkDown() {
 // ---------------------------------------------------------------- 入口
 
 int AgentApp::run(int argc, char** argv) {
+    started_ms_ = agentMonotonicMs();
     for (int i = 0; i < argc; ++i) {
         if (i) args_line += " ";
         args_line += argv[i];
@@ -1601,17 +2042,23 @@ int AgentApp::run(int argc, char** argv) {
     {
         char buf[4096];
         ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-        if (n > 0) { buf[n] = '\0'; self_path = buf; }
+        if (n > 0) {
+            buf[n] = '\0';
+            self_path = buf;
+        }
     }
     std::vector<std::string> servers;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--server") == 0 && i + 1 < argc) {
             servers.push_back(argv[++i]);
-        } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             port = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--devid") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argv[i], "--devid") == 0 && i + 1 < argc) {
             snprintf(devid, sizeof(devid), "%s", argv[++i]);
-        } else if (strcmp(argv[i], "--allow") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argv[i], "--allow") == 0 && i + 1 < argc) {
             char buf[256];
             snprintf(buf, sizeof(buf), "%s", argv[++i]);
             char* save = NULL;
@@ -1620,39 +2067,84 @@ int AgentApp::run(int argc, char** argv) {
                     allow_ports[nallow++] = atoi(p);
                 }
             }
-        } else if (strcmp(argv[i], "--allow-all") == 0) {
+        }
+        else if (strcmp(argv[i], "--allow-all") == 0) {
             allow_all = 1;
-        } else if (strcmp(argv[i], "--config-file") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argv[i], "--config-file") == 0 && i + 1 < argc) {
             config_file = argv[++i];
-        } else if (strcmp(argv[i], "--file-dir") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argv[i], "--file-dir") == 0 && i + 1 < argc) {
             file_dir = argv[++i];
-        } else if (strcmp(argv[i], "--allow-tty") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argv[i], "--allow-tty") == 0 && i + 1 < argc) {
             snprintf(allow_tty, sizeof(allow_tty), "%s", argv[++i]);
-        } else if (strcmp(argv[i], "--allow-shell") == 0) {
+        }
+        else if (strcmp(argv[i], "--allow-shell") == 0) {
             allow_shell = 1;
-        } else if (strcmp(argv[i], "--allow-ota") == 0) {
+        }
+        else if (strcmp(argv[i], "--allow-ota") == 0) {
             allow_ota = 1;
-        } else if (strcmp(argv[i], "--version") == 0) {
+        }
+        else if (strcmp(argv[i], "--local-web") == 0) {
+#ifdef RTUNNEL_AGENT_WEB
+            if (i + 1 < argc && argv[i + 1][0] != '-')
+                web_listen = argv[++i];
+            else
+                web_listen = "127.0.0.1:8080";
+            web_enabled = 1;
+#else
+            fprintf(stderr, "本二进制未编译本地 Web；请使用带 Web 的构建，或去掉 --local-web\n");
+            return 1;
+#endif
+        }
+        else if (strcmp(argv[i], "--file-root") == 0 && i + 1 < argc) {
+            file_root = argv[++i];
+        }
+        else if (strcmp(argv[i], "--file-rw") == 0) {
+            file_rw = 1;
+        }
+        else if (strcmp(argv[i], "--file-ro") == 0) {
+            file_rw = 0;
+        }
+        else if (strcmp(argv[i], "--file-max-mb") == 0 && i + 1 < argc) {
+            file_max_mb = atoi(argv[++i]);
+        }
+        else if (strcmp(argv[i], "--file-token") == 0 && i + 1 < argc) {
+            file_token = argv[++i];
+        }
+        else if (strcmp(argv[i], "--version") == 0) {
             printf("%s\n", hv_version());
             return 0;
-        } else if (strcmp(argv[i], "--max-idle") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argv[i], "--max-idle") == 0 && i + 1 < argc) {
             max_idle = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--tls-ca") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argv[i], "--tls-ca") == 0 && i + 1 < argc) {
             snprintf(tls_ca, sizeof(tls_ca), "%s", argv[++i]);
-        } else if (strcmp(argv[i], "--tls-cert") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argv[i], "--tls-cert") == 0 && i + 1 < argc) {
             snprintf(tls_cert, sizeof(tls_cert), "%s", argv[++i]);
-        } else if (strcmp(argv[i], "--tls-key") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argv[i], "--tls-key") == 0 && i + 1 < argc) {
             snprintf(tls_key, sizeof(tls_key), "%s", argv[++i]);
-        } else if (strcmp(argv[i], "--tls-sni") == 0 && i + 1 < argc) {
+        }
+        else if (strcmp(argv[i], "--tls-sni") == 0 && i + 1 < argc) {
             snprintf(tls_sni, sizeof(tls_sni), "%s", argv[++i]);
-        } else if (strcmp(argv[i], "--verbose") == 0) {
+        }
+        else if (strcmp(argv[i], "--verbose") == 0) {
             verbose = 1;
-        } else {
+        }
+        else {
             fprintf(stderr,
-                "Usage: %s --devid ID [--server H[:P] ...] [--port P] [--allow 22,80] [--allow-all]\n"
-                "          [--allow-shell [--max-idle SEC]] [--allow-ota] [--verbose]\n"
-                "       --server 可重复或逗号分隔，故障时按顺序自动切换（最多 8 个）\n",
-                argv[0]);
+                    "Usage: %s --devid ID [--server H[:P] ...] [--port P] [--allow 22,80] [--allow-all]\n"
+                    "          [--allow-shell [--max-idle SEC]] [--allow-ota] [--verbose]\n"
+#ifdef RTUNNEL_AGENT_WEB
+                    "          [--local-web [ADDR:]PORT]\n"
+#endif
+                    "          [--file-root DIR] [--file-rw|--file-ro] [--file-max-mb N] [--file-token T]\n"
+                    "       --server 可重复或逗号分隔，故障时按顺序自动切换（最多 8 个）\n",
+                    argv[0]);
             return 1;
         }
     }
@@ -1679,55 +2171,95 @@ int AgentApp::run(int argc, char** argv) {
     last_active_ms = hloop_now_ms(lp);
     if (max_idle > 0) {
         agentSampleCpu(this);
-        htimer_t* cpu_timer = htimer_add(lp, [](htimer_t* t) {
-            agentSampleCpu((AgentApp*)hevent_userdata(t));
-        }, 1000, INFINITE);
+        htimer_t* cpu_timer = htimer_add(
+            lp, [](htimer_t* t) { agentSampleCpu((AgentApp*)hevent_userdata(t)); }, 1000, INFINITE);
         hevent_set_userdata(cpu_timer, this);
-        htimer_t* idle_timer = htimer_add(lp, [](htimer_t* t) {
-            auto* app = (AgentApp*)hevent_userdata(t);
-            uint64_t now = hloop_now_ms(app->loop);
-            if (app->streams != NULL) {
-                app->last_active_ms = now;
-                app->had_stream = 1;
-                app->idle_since_ms = 0;
-                return;
-            }
-            if (app->had_stream) {
-                // 按需 agent：最后一个会话结束后 2s 退出
-                if (!app->idle_since_ms) app->idle_since_ms = now;
-                if (now - app->idle_since_ms >= 2000) {
-                    logf_("[agent] no sessions, exiting (on-demand agent)");
+        htimer_t* idle_timer = htimer_add(
+            lp,
+            [](htimer_t* t) {
+                auto* app = (AgentApp*)hevent_userdata(t);
+                uint64_t now = hloop_now_ms(app->loop);
+                if (app->streams != NULL) {
+                    app->last_active_ms = now;
+                    app->had_stream = 1;
+                    app->idle_since_ms = 0;
+                    return;
+                }
+                if (app->had_stream) {
+                    // 按需 agent：最后一个会话结束后 2s 退出
+                    if (!app->idle_since_ms) app->idle_since_ms = now;
+                    if (now - app->idle_since_ms >= 2000) {
+                        logf_("[agent] no sessions, exiting (on-demand agent)");
+                        hloop_stop(app->loop);
+                    }
+                    return;
+                }
+                if (now - app->last_active_ms >= (uint64_t)app->max_idle * 1000) {
+                    logf_("[agent] idle %ds, exiting (on-demand agent)", app->max_idle);
                     hloop_stop(app->loop);
                 }
-                return;
-            }
-            if (now - app->last_active_ms >= (uint64_t)app->max_idle * 1000) {
-                logf_("[agent] idle %ds, exiting (on-demand agent)", app->max_idle);
-                hloop_stop(app->loop);
-            }
-        }, 1000, INFINITE);
+            },
+            1000, INFINITE);
         hevent_set_userdata(idle_timer, this);
     }
-    htimer_t* part_timer = htimer_add(lp, [](htimer_t* t) {
-        auto* app = (AgentApp*)hevent_userdata(t);
-        app->cleanupParts(app->file_dir, time(NULL) - 24 * 3600);
-    }, 3600 * 1000, INFINITE);
+    htimer_t* part_timer = htimer_add(
+        lp,
+        [](htimer_t* t) {
+            auto* app = (AgentApp*)hevent_userdata(t);
+            app->cleanupParts(app->file_dir, time(NULL) - 24 * 3600);
+        },
+        3600 * 1000, INFINITE);
     hevent_set_userdata(part_timer, this);
     loadConfig();
+    {
+        std::string ferr;
+        int frc = applyFileConfig(file_root, file_rw, file_max_mb, file_enabled, ferr);
+        if (!file_enabled)
+            logf_("[agent] file service disabled by config");
+        else if (frc != 0)
+            logf_("[agent] file service disabled: %s", ferr.c_str());
+        else
+            logf_("[agent] file root %s (%s)", fs_.root().c_str(), fs_.writable() ? "rw" : "ro");
+    }
     init(lp);
+#ifdef RTUNNEL_AGENT_WEB
+    if (web_enabled) {
+        // 先产出一份快照再起 HTTP，避免首屏拿到 "not ready"
+        refreshWebSnapshot();
+        std::string werr;
+        if (agentWebStart(this, web_listen, werr) != 0) {
+            fprintf(stderr, "[agent] local web: %s\n", werr.c_str());
+            hloop_free(&lp);
+            return 1;
+        }
+        logf_("[agent] local web on %s", web_listen.c_str());
+        htimer_t* web_timer = htimer_add(
+            lp, [](htimer_t* t) { ((AgentApp*)hevent_userdata(t))->refreshWebSnapshot(); }, 2000, INFINITE);
+        hevent_set_userdata(web_timer, this);
+    }
+#endif
     if (series_cfgs.empty()) {
         SeriesCfg def;
-        def.enabled = 1; def.interval = 5; def.points = 720;
+        def.enabled = 1;
+        def.interval = 5;
+        def.points = 720;
         series_cfgs["cpu"] = def;
         series_cfgs["mem"] = def;
         series_cfgs["load"] = def;
     }
-    htimer_t* series_timer = htimer_add(lp, [](htimer_t* t) {
-        auto* app = (AgentApp*)hevent_userdata(t);
-        app->seriesTick();
-    }, 1000, INFINITE);
+    htimer_t* series_timer = htimer_add(
+        lp,
+        [](htimer_t* t) {
+            auto* app = (AgentApp*)hevent_userdata(t);
+            app->seriesTick();
+        },
+        1000, INFINITE);
     hevent_set_userdata(series_timer, this);
     hloop_run(lp);
+#ifdef RTUNNEL_AGENT_WEB
+    if (web_enabled) agentWebStop();
+#endif
+    fs_.close();
     hloop_free(&lp);
     return 0;
 }

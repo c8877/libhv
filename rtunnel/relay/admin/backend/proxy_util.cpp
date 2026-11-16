@@ -212,3 +212,35 @@ int openTtyStream(const AdminConfig& cfg, const std::string& devid, const std::s
     }
     return fd;
 }
+
+int openFsStream(const AdminConfig& cfg, const std::string& devid, bool rw, std::string& err) {
+    int fd = tcpConnect("127.0.0.1", cfg.shell_relay_port, 5000);
+    if (fd < 0) { err = "relay connect failed"; return -1; }
+    std::string hello;
+    hello.push_back(2);
+    hello.push_back(1);
+    hello += rtnpStr("admin-fs");
+    put32(hello, 0);
+    sendFrame(fd, 0x01, 0, hello);
+    uint8_t t; uint32_t sid; std::string p;
+    if (!recvFrame(fd, t, sid, p) || t != 0x02) { err = "no HELLO_ACK"; close(fd); return -1; }
+    std::string auth = rtnpStr(cfg.shell_user);
+    auth.push_back(cfg.shell_token.empty() ? 0 : 1);
+    auth += rtnpStr(cfg.shell_token);
+    sendFrame(fd, 0x03, 0, auth);
+    if (!recvFrame(fd, t, sid, p) || t != 0x04) { err = "auth failed"; close(fd); return -1; }
+
+    std::string op = rtnpStr(devid);
+    op.push_back((char)(rw ? 1 : 0));
+    op.push_back((char)1);   // trusted：relay 已完成用户认证
+    sendFrame(fd, 0x10, 1, op, 0x0010);   // OPEN_FS
+    if (!recvFrame(fd, t, sid, p) || t != 0x11) {
+        err = (t == 0x12 && p.size() > 2) ? ("open failed: " + p.substr(4)) : "open failed";
+        close(fd);
+        return -1;
+    }
+    // 文件会话可能长时间空闲，去掉握手阶段的 5s 读超时
+    struct timeval tv = {0, 0};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    return fd;
+}
