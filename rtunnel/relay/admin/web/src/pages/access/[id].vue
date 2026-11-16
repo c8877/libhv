@@ -199,7 +199,7 @@
     <el-dialog v-model="secretDlg" :title="secretTitle" width="560px">
       <div class="muted">只显示这一次，关闭后无法再次查看；丢失只能轮换。</div>
       <div class="secret mono">{{ secret }}</div>
-      <el-button size="small" @click="copy(secret)">复制 Token</el-button>
+      <el-button size="small" @click="copyText(secret)">复制 Token</el-button>
       <div class="muted mt10">客户端可直接用 Token 登录：</div>
       <div class="secret mono cmd">rtunnel-client --token {{ secret }} --socks5 127.0.0.1:1080</div>
       <template #footer>
@@ -214,7 +214,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Api } from '@/shared/api.js'
 import { canManage, roleOf } from '@/shared/store.js'
-import { bytes, time } from '@/shared/utils.js'
+import { bytes, copyText, time } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 
 const route = useRoute()
@@ -498,15 +498,6 @@ function showSecret(title, token) {
   secretTitle.value = title
   secret.value = token
   secretDlg.value = true
-}
-
-async function copy(text) {
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success('已复制')
-  } catch (e) {
-    ElMessage.warning('复制失败，请手动选择')
-  }
 }
 
 watch(id, () => { if (id.value) load() })

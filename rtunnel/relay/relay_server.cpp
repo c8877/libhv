@@ -4,6 +4,7 @@
 #include "common/sha256.hpp"
 #include "common/token_util.hpp"
 #include "relay/admin/backend/admin_server.hpp"
+#include "hsocket.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1653,6 +1654,8 @@ void RelayServer::onAccept(hio_t* io) {
     conns = c;
 
     hio_set_context(io, c);
+    // 同上：转发 RTNP 帧时避免 Nagle 与延时 ACK 叠加成每帧 40ms
+    tcp_nodelay(hio_fd(io), 1);
     hio_setcb_read(io, readCb);
     hio_setcb_close(io, closeCb);
     hio_set_max_write_bufsize(io, rtnp::CONN_INFLIGHT + rtnp::MAX_PAYLOAD);

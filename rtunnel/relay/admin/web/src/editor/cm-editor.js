@@ -1,6 +1,6 @@
 // CodeMirror 6 封装：只用于 shell / json 高亮，体积优先。
 // 由 vite.editor.config.js 打成 IIFE，本地 Web 与 relay-admin 共用同一份 cm-editor.js。
-import { Compartment, EditorState } from '@codemirror/state'
+import { EditorState } from '@codemirror/state'
 import {
   EditorView,
   keymap,
@@ -132,7 +132,6 @@ function languageFor(lang) {
 export function createEditor(host, opts) {
   opts = opts || {}
   const dark = prefersDark()
-  const langConf = new Compartment()
   const view = new EditorView({
     parent: host,
     state: EditorState.create({
@@ -154,7 +153,7 @@ export function createEditor(host, opts) {
         syntaxHighlighting(highlightFor(dark)),
         themeFor(dark),
         EditorView.contentAttributes.of({ spellcheck: 'false', autocapitalize: 'off' }),
-        langConf.of(languageFor(opts.language)),
+        languageFor(opts.language),
         keymap.of([
           {
             key: 'Mod-s',
@@ -183,9 +182,6 @@ export function createEditor(host, opts) {
   view.focus()
   return {
     getValue: () => view.state.doc.toString(),
-    setValue: (v) => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: v } }),
-    setLanguage: (lang) => view.dispatch({ effects: langConf.reconfigure(languageFor(lang)) }),
-    focus: () => view.focus(),
-    destroy: () => view.destroy()
+    destroy: () => view.destroy(),
   }
 }

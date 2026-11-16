@@ -51,7 +51,7 @@ function mix(hex, base, weight) {
   return '#' + c.map((v) => v.toString(16).padStart(2, '0')).join('')
 }
 
-export function applyTheme(mode, color) {
+function applyTheme(mode, color) {
   mode = mode === 'dark' ? 'dark' : mode === 'color' ? 'color' : 'light'
   const dark = mode === 'dark'
   document.documentElement.classList.toggle('dark', dark)
@@ -69,7 +69,7 @@ export function applyTheme(mode, color) {
   } catch (e) { /* 隐私模式 */ }
 }
 
-export function savedTheme() {
+function savedTheme() {
   try {
     const mode = localStorage.getItem('rt_theme')
     return {
@@ -136,7 +136,7 @@ export async function setup(token, username, password) {
   await reloadAuth()
 }
 
-export async function reloadAuth() {
+async function reloadAuth() {
   auth.ready = false
   auth.setupDone = true
   await ensureBoot()

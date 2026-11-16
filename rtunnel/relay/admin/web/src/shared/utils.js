@@ -1,6 +1,10 @@
-export function bytes(n) {
+import { ElMessage } from 'element-plus'
+
+export function bytes(n, iec = false) {
   n = Number(n) || 0
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+  const units = iec
+    ? ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB']
+    : ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
   let i = 0
   while (n >= 1024 && i < units.length - 1) {
     n /= 1024
@@ -63,11 +67,24 @@ export function kbPair(usedKb, totalKb) {
   return { used: f(usedKb), total: f(totalKb), unit }
 }
 
-export function downloadJson(name, data) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+export function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
+  a.href = url
   a.download = name
   a.click()
-  URL.revokeObjectURL(a.href)
+  URL.revokeObjectURL(url)
+}
+
+export function downloadJson(name, data) {
+  downloadBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), name)
+}
+
+export async function copyText(text, okMsg = '已复制') {
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success(okMsg)
+  } catch (e) {
+    ElMessage.warning('复制失败，请手动选择')
+  }
 }

@@ -168,9 +168,6 @@ header{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:
 header .t{font-weight:650;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 header .sub{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 header .grow{flex:1;min-width:0}
-.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#9aa4b2;margin-right:6px;vertical-align:1px}
-.dot.on{background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,.16)}
-.dot.off{background:#ef4444}
 .x{border:0;background:transparent;color:var(--muted);font-size:22px;line-height:1;cursor:pointer;padding:2px 8px;border-radius:8px}
 .x:hover{background:var(--hover);color:var(--fg)}
 .bar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
@@ -364,7 +361,6 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         this.wsUrl = opts.wsUrl || ((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/fs');
         this.token = opts.token || sessionStorage.getItem('rtfs.token:' + this.wsUrl) || '';
         this.title = opts.title || '文件管理';
-        this.subtitle = opts.subtitle || '';
         this.readonly = !!opts.readonly;
         this.inline = !!opts.inline;
         this.container = opts.container || null;
@@ -382,7 +378,6 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         this.seq = 1;
         this.cwd = '/';
         this.entries = [];
-        this.total = 0;
         this.sel = new Set();
         this.dirSizes = new Map();     // 勾选目录后递归统计的结果
         this.dirPending = new Map();
@@ -399,7 +394,6 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         this._editorLib = null;
         this.jvPath = '';
         this.jvText = '';
-        this.jvData = null;
         this.previewUrl = null;
         this.reconnectTimer = null;
         this.closedByUser = false;
@@ -476,7 +470,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
             if (!ed) return;
             var text = self.editorInst ? self.editorInst.getValue() : ed.text;
             self.closeEditor();
-            self.openJsonView(ed.path, text);
+            self.showJsonView(ed.path, text);
         });
         on('jvClose', 'click', function () { self.closeJsonView(); });
         on('jvExpand', 'click', function () { self.renderJsonView(64, 20000); });
@@ -544,7 +538,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         });
         this._docClick = function (e) {
             if (!self.q.rowmenu || self.q.rowmenu.hidden) return;
-            var path = e.composedPath ? e.composedPath() : [];
+            var path = e.composedPath();
             if (path.indexOf(self.q.rowmenu) < 0) self.closeRowMenu();
         };
         document.addEventListener('click', this._docClick);
@@ -579,7 +573,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         });
         this._keyHandler = function (e) {
             if (!self.visible) return;
-            var path = e.composedPath ? e.composedPath() : [e.target];
+            var path = e.composedPath();
             var t = path && path[0];
             if (t && (t.tagName === 'INPUT' || (t.closest && t.closest('.cm-editor')))) return;
             if (e.key === 'Escape') {
@@ -604,6 +598,15 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
     function parentOf(p) {
         var i = p.lastIndexOf('/');
         return i <= 0 ? '/' : p.slice(0, i);
+    }
+    function saveBlob(blob, name) {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = name || 'download';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 10000);
+        return a.download;
     }
 
     Manager.prototype.id = function () { return this.seq++; };
@@ -630,7 +633,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         var self = this;
         this.connect().then(function () {
             return self.load(self.cwd || '/');
-        }).catch(function (e) { self.setConn(false, e.message || '连接失败'); });
+        }).catch(function (e) { self.toast(e.message || '连接失败', true); });
     };
 
     Manager.prototype.close = function () {
@@ -650,7 +653,6 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         this.close();
         this.destroyed = true;
         this.closeInlineForm();
-        this.destroyEditorInst();
         if (this._keyHandler) document.removeEventListener('keydown', this._keyHandler);
         if (this._docClick) document.removeEventListener('click', this._docClick);
         if (this._closeMenu) {
@@ -671,17 +673,11 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         }
     };
 
-    Manager.prototype.setConn = function (on, text) {
-        this.connState = on;
-        this.connText = text || '';
-    };
-
     Manager.prototype.connect = function () {
         var self = this;
         if (this.ws && this.connected) return Promise.resolve(this.welcome);
         this._closeWs();
         var seq = this.connSeq;
-        this.setConn(false, '连接中');
         return new Promise(function (resolve, reject) {
             var ws;
             try { ws = new WebSocket(self.wsUrl); }
@@ -696,9 +692,8 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
                 self._hello().then(function (w) {
                     clearTimeout(timer);
                     self.connected = true;
-                    self.setConn(true, '已连接');
                     self.welcome = w;
-                    self.applyWelcome();
+                    self.applySpace(w);
                     resolve(w);
                 }).catch(function (e) {
                     clearTimeout(timer);
@@ -715,7 +710,6 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
                 clearTimeout(timer);
                 var was = self.connected;
                 self.connected = false;
-                self.setConn(false, '连接断开');
                 reject(new Error('连接断开'));
                 self._failAll(new Error('连接断开'));
                 if (was && !self.closedByUser && self.visible) self._scheduleReconnect();
@@ -753,19 +747,18 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         });
     };
 
-    Manager.prototype.applyWelcome = function () {
-        var w = this.welcome || {};
-        var rw = !!w.rw;
+    // welcome 与 list 都带空间信息：统一刷新根目录行和写权限
+    Manager.prototype.applySpace = function (w) {
+        var ro = this.readonly || !w.rw;
+        this.rw = !!w.rw;
         this.q.rootLine.textContent = '根目录: ' + (w.root || '/') + ' · 可用 ' + fmtSize(w.free_kb * 1024) +
-            ' / ' + fmtSize((w.total_kb || 0) * 1024);
-        this.rw = rw;
-        var ro = this.readonly || !rw;
+            ' / ' + fmtSize(w.total_kb * 1024) + (ro ? ' · 只读' : '');
         this.q.mkdir.disabled = ro;
         this.q.touch.disabled = ro;
         this.q.upload.disabled = ro;
         this.q.del.disabled = ro;
-        this.q.upcancel.disabled = false;
-        if (ro && w.root) this.q.rootLine.textContent += ' · 只读';
+        this.space = { root: w.root || '/', free_kb: w.free_kb, total_kb: w.total_kb };
+        if (this.onSpace) this.onSpace(this.space);
     };
 
     // ------------------------------------------------------------ WS 收发
@@ -859,7 +852,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         var id = dv.getUint32(0);
         var kind = dv.getUint8(4);
         var flags = dv.getUint8(5);
-        var off = Number(dv.getBigUint64 ? dv.getBigUint64(8) : 0);
+        var off = dv.getUint32(8) * 4294967296 + dv.getUint32(12);
         var payload = u8.slice(BIN_HEADER);
         var evt = { kind: kind, flags: flags, offset: off, data: payload };
         for (var i = 0; i < this.binWaiters.length; i++) {
@@ -962,17 +955,13 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
             .then(function (r) {
                 self.cwd = r.path || path;
                 self.entries = r.entries || [];
-                self.total = self.entries.length;
                 self.sel.clear();
                 self.dirSizes.clear();
                 self.dirPending.clear();
                 self.q.path.value = self.cwd;
                 self.renderCrumb();
+                self.applySpace(r);
                 self.render();
-                self.q.rootLine.textContent = '根目录: ' + (r.root || '/') + ' · 可用 ' + fmtSize(r.free_kb * 1024) +
-                    ' / ' + fmtSize(r.total_kb * 1024) + (r.rw ? '' : ' · 只读');
-                self.space = { root: r.root || '/', free_kb: r.free_kb, total_kb: r.total_kb };
-                if (self.onSpace) self.onSpace(self.space);
             })
             .catch(function (e) { if (self.visible) self.toast(e.message, true); });
     };
@@ -1165,7 +1154,6 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
     };
 
     Manager.prototype.selectAll = function (on) {
-        if (on === undefined) on = this.sel.size !== this.entries.length;
         this.sel.clear();
         if (on) {
             for (var i = 0; i < this.entries.length; i++) {
@@ -1212,24 +1200,21 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         else this.downloadToFile(join(this.cwd, name));
     };
 
-    Manager.prototype.mkdir = function () {
+    Manager.prototype.createEntry = function (op, label, defName) {
         var self = this;
-        var name = global.prompt('新建文件夹名称：', 'newdir');
+        var name = global.prompt(label, defName);
         if (!name) return;
-        var id = this.id();
-        this.request({ op: 'mkdir', id: id, path: join(this.cwd, name) }, 'mkdir')
+        this.request({ op: op, id: this.id(), path: join(this.cwd, name) }, op)
             .then(function () { self.load(self.cwd); })
             .catch(function (e) { self.toast(e.message, true); });
     };
 
+    Manager.prototype.mkdir = function () {
+        this.createEntry('mkdir', '新建文件夹名称：', 'newdir');
+    };
+
     Manager.prototype.touch = function () {
-        var self = this;
-        var name = global.prompt('新建文件名称：', 'new.txt');
-        if (!name) return;
-        var id = this.id();
-        this.request({ op: 'touch', id: id, path: join(this.cwd, name) }, 'touch')
-            .then(function () { self.load(self.cwd); })
-            .catch(function (e) { self.toast(e.message, true); });
+        this.createEntry('touch', '新建文件名称：', 'new.txt');
     };
 
     Manager.prototype.rowByName = function (name) {
@@ -1416,10 +1401,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
                         return step();
                     });
                 }
-                return step().then(function (r) {
-                    if (meta.size === 0) return { meta: meta, blob: new Blob([]) };
-                    return r;
-                });
+                return step();
             })
             .finally(function () { self._dlBusy = false; });
     };
@@ -1430,13 +1412,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         this.download(path, function (got, total) {
             self.q.summary.textContent = '下载中 ' + Math.floor(got * 100 / total) + '% (' + fmtSize(got) + ' / ' + fmtSize(total) + ')';
         }).then(function (r) {
-            var a = document.createElement('a');
-            a.href = URL.createObjectURL(r.blob);
-            a.download = r.meta.name || 'download';
-            document.body.appendChild(a);
-            a.click();
-            setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 10000);
-            self.toast('已下载 ' + a.download);
+            self.toast('已下载 ' + saveBlob(r.blob, r.meta.name));
         }).catch(function (e) { self.toast(e.message, true); })
           .finally(function () { self.render(); });
     };
@@ -1474,13 +1450,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
                     function finish() {
                         if (writable) return writable.close().then(function () { self.toast('已下载 ' + meta.name); });
                         var blob = new Blob(chunks, { type: 'application/gzip' });
-                        var a = document.createElement('a');
-                        a.href = URL.createObjectURL(blob);
-                        a.download = meta.name || (base + '.tar.gz');
-                        document.body.appendChild(a);
-                        a.click();
-                        setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 10000);
-                        self.toast('已下载 ' + a.download);
+                        self.toast('已下载 ' + saveBlob(blob, meta.name || (base + '.tar.gz')));
                     }
                     function step() {
                         return self.nextBinary(id).then(function (bin) {
@@ -1549,28 +1519,47 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
                 offset = r.offset || 0;
                 try { localStorage.setItem(upKey, uploadId); } catch (e) {}
                 var chunk = r.chunk || 30720;
-                function step() {
-                    if (self.uploadCancel) {
-                        return self.request({ op: 'upload_cancel', id: self.id(), upload_id: uploadId }, 'upload_cancelled')
-                            .then(function () {
-                                try { localStorage.removeItem(upKey); } catch (e) {}
-                                throw new Error('已取消');
-                            });
+                var win = r.inflight || 1;      // 旧 agent 不带该字段，退化为串行
+                var next = offset;
+                return new Promise(function (resolve, reject) {
+                    var inflight = 0, failed = false;
+                    function fail(e) {
+                        if (failed) return;
+                        failed = true;
+                        reject(e);
                     }
-                    if (offset >= file.size) return Promise.resolve();
-                    var end = Math.min(offset + chunk, file.size);
-                    return file.slice(offset, end).arrayBuffer().then(function (buf) {
-                        self.sendBinary(id, 2, offset, new Uint8Array(buf));
-                        return self.waitMsg(id, 'upload_ack').then(function (ack) {
-                            offset = ack.received;
-                            var pct = file.size ? Math.floor(offset * 100 / file.size) : 100;
-                            self.q.upbar.style.width = pct + '%';
-                            self.q.uppct.textContent = pct + '%';
-                            return step();
-                        });
-                    });
-                }
-                return step().then(function () {
+                    function pump() {
+                        if (failed) return;
+                        if (self.uploadCancel) {
+                            failed = true;
+                            self.request({ op: 'upload_cancel', id: self.id(), upload_id: uploadId }, 'upload_cancelled')
+                                .then(function () {
+                                    try { localStorage.removeItem(upKey); } catch (e) {}
+                                    reject(new Error('已取消'));
+                                }).catch(reject);
+                            return;
+                        }
+                        while (inflight < win && next < file.size) {
+                            (function (start, end) {
+                                next = end;
+                                inflight++;
+                                file.slice(start, end).arrayBuffer().then(function (buf) {
+                                    self.sendBinary(id, 2, start, new Uint8Array(buf));
+                                    return self.waitMsg(id, 'upload_ack');
+                                }).then(function (ack) {
+                                    inflight--;
+                                    offset = ack.received;
+                                    var pct = file.size ? Math.floor(offset * 100 / file.size) : 100;
+                                    self.q.upbar.style.width = pct + '%';
+                                    self.q.uppct.textContent = pct + '%';
+                                    pump();
+                                }).catch(fail);
+                            })(next, Math.min(next + chunk, file.size));
+                        }
+                        if (inflight === 0 && next >= file.size) resolve();
+                    }
+                    pump();
+                }).then(function () {
                     var fid = self.id();
                     return self.request({ op: 'upload_finish', id: fid, upload_id: uploadId, path: join(dir, file.name) }, 'upload_done');
                 });
@@ -1588,17 +1577,25 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
 
     // ------------------------------------------------------------ 编辑/预览
 
+    // 读取文本文件（限制 1 MiB），返回 { name, text }
+    Manager.prototype.readText = function (path) {
+        var self = this;
+        return this.request({ op: 'stat', id: this.id(), path: path }, 'stat').then(function (st) {
+            if (st.entry.size > 1024 * 1024) throw new Error('文件超过 1 MiB，请下载后查看');
+            return self.download(path).then(function (r) {
+                return r.blob.text().then(function (t) { return { name: r.meta.name, text: t }; });
+            });
+        });
+    };
+
     Manager.prototype.openEditor = function (path, text) {
         var self = this;
         var name = path.split('/').pop();
         if (text !== undefined) { this.showEditor(path, name, text); return; }
         this.toast('读取 ' + name + ' ...');
-        this.request({ op: 'stat', id: this.id(), path: path }, 'stat').then(function (st) {
-            if (st.entry.size > 1024 * 1024) throw new Error('文件超过 1 MiB，请下载后编辑');
-            return self.download(path).then(function (r) {
-                return r.blob.text().then(function (t) { self.showEditor(path, r.meta.name, t); });
-            });
-        }).catch(function (e) { self.toast(e.message, true); });
+        this.readText(path)
+            .then(function (r) { self.showEditor(path, r.name, r.text); })
+            .catch(function (e) { self.toast(e.message, true); });
     };
 
     Manager.prototype.showEditor = function (path, name, text) {
@@ -1679,19 +1676,6 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         }).finally(function () { self.q.edSave.disabled = false; });
     };
 
-    Manager.prototype.openJsonView = function (path, text) {
-        var self = this;
-        var name = path.split('/').pop();
-        if (text !== undefined) { this.showJsonView(path, text); return; }
-        this.toast('读取 ' + name + ' ...');
-        this.request({ op: 'stat', id: this.id(), path: path }, 'stat').then(function (st) {
-            if (st.entry.size > 1024 * 1024) throw new Error('文件超过 1 MiB，请下载后查看');
-            return self.download(path).then(function (r) {
-                return r.blob.text().then(function (t) { self.showJsonView(path, t); });
-            });
-        }).catch(function (e) { self.toast(e.message, true); });
-    };
-
     Manager.prototype.showJsonView = function (path, text) {
         this.jvPath = path;
         this.jvText = text;
@@ -1717,10 +1701,8 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
             tip.style.marginTop = '10px';
             tip.textContent = '可点「源码」切换到文本模式查看。';
             body.appendChild(tip);
-            this.jvData = null;
             return;
         }
-        this.jvData = data;
         body.appendChild(buildJsonTree(data, { expandDepth: expandDepth, budget: budget }));
     };
 
@@ -1729,15 +1711,10 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         while (this.q.jvBody.firstChild) this.q.jvBody.removeChild(this.q.jvBody.firstChild);
         this.jvPath = '';
         this.jvText = '';
-        this.jvData = null;
     };
 
     Manager.prototype.uploadBlob = function (blob, name, dir) {
-        var f;
-        try { f = new File([blob], name); } catch (e) {
-            f = blob; f.name = name;
-        }
-        return this.uploadOne(f, dir);
+        return this.uploadOne(new File([blob], name), dir);
     };
 
     Manager.prototype.openPreview = function (path) {
@@ -1767,10 +1744,6 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
     };
 
     global.RtunnelFs = {
-        version: 1,
-        Manager: Manager,
-        createManager: function (opts) { return new Manager(opts); },
-        fmtSize: fmtSize,
-        fmtTime: fmtTime
+        createManager: function (opts) { return new Manager(opts); }
     };
 })(window);

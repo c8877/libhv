@@ -333,7 +333,7 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { Api } from '@/shared/api.js'
 import { canManage, roleOf } from '@/shared/store.js'
-import { ago } from '@/shared/utils.js'
+import { ago, downloadBlob } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 
 const { isPhone } = useBreakpoint()
@@ -775,12 +775,7 @@ async function exportLegacy() {
 }
 
 function downloadLegacy() {
-  const blob = new Blob([legacyText.value], { type: 'text/plain' })
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = 'rtunnel-acl.txt'
-  a.click()
-  URL.revokeObjectURL(a.href)
+  downloadBlob(new Blob([legacyText.value], { type: 'text/plain' }), 'rtunnel-acl.txt')
 }
 
 async function importLegacy() {

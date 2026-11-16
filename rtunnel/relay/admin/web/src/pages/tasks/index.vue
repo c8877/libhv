@@ -64,8 +64,8 @@
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item command="detail">详情</el-dropdown-item>
-                <el-dropdown-item v-if="canRetry(row)" command="retry">重试</el-dropdown-item>
-                <el-dropdown-item v-if="canCancel(row)" command="cancel">取消</el-dropdown-item>
+                <el-dropdown-item v-if="canRetry(row.status, row.kind)" command="retry">重试</el-dropdown-item>
+                <el-dropdown-item v-if="canCancel(row.status)" command="cancel">取消</el-dropdown-item>
                 <el-dropdown-item v-if="row.status === 'timeout' && row.extend_count === 0" command="extend">延长</el-dropdown-item>
                 <el-dropdown-item v-if="row.kind !== 'ota' && row.status === 'conflict'" command="verify">校验</el-dropdown-item>
                 <el-dropdown-item v-if="row.kind !== 'ota' && row.status === 'conflict'" command="force">强制重发</el-dropdown-item>
@@ -74,8 +74,8 @@
           </el-dropdown>
           <template v-else>
             <el-button link type="primary" @click="$router.push('/tasks/' + row.id)">详情</el-button>
-            <el-button v-if="canRetry(row)" size="small" @click="retry(row)">重试</el-button>
-            <el-button v-if="canCancel(row)" size="small" @click="cancel(row)">取消</el-button>
+            <el-button v-if="canRetry(row.status, row.kind)" size="small" @click="retry(row)">重试</el-button>
+            <el-button v-if="canCancel(row.status)" size="small" @click="cancel(row)">取消</el-button>
             <el-button v-if="row.status === 'timeout' && row.extend_count === 0" size="small" @click="extend(row)">延长</el-button>
             <el-button v-if="row.kind !== 'ota' && row.status === 'conflict'" size="small" @click="check(row, 'verify')">校验</el-button>
             <el-button v-if="row.kind !== 'ota' && row.status === 'conflict'" size="small" @click="check(row, 'force')">强制重发</el-button>
@@ -98,6 +98,10 @@ import { useRoute, useRouter } from 'vue-router'
 import { Api } from '@/shared/api.js'
 import { bytes, time } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
+import {
+  askExtendDeadline, taskCanCancel as canCancel, taskCanRetry as canRetry,
+  taskStatusText as statusText, taskStatusType as statusType,
+} from '@/shared/tasks.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -111,7 +115,6 @@ const batch = ref(String(route.query.batch || ''))
 const items = ref([])
 const total = ref(0)
 const loading = ref(false)
-const counts = ref({})
 
 const tabs = ref([
   { key: 'all', label: '全部', count: 0 },
@@ -120,22 +123,6 @@ const tabs = ref([
   { key: 'failed_group', label: '失败', count: 0 },
   { key: 'conflict', label: '冲突', count: 0 },
 ])
-
-const STATUS = {
-  scheduled: ['等待开始', 'warning'], queued: ['排队中', 'warning'], running: ['传输中', 'warning'],
-  verifying: ['版本校验', 'warning'], installing: ['安装中', 'warning'], confirming: ['等待重启', 'warning'],
-  success: ['成功', 'success'], failed: ['失败', 'danger'], timeout: ['超时', 'danger'],
-  canceled: ['已取消', 'info'], conflict: ['冲突', 'warning'], unsupported: ['不支持 OTA', 'info'],
-}
-function canRetry(row) {
-  if (row.status === 'failed') return true
-  return row.kind === 'ota' && ['timeout', 'conflict', 'unsupported', 'canceled'].includes(row.status)
-}
-function canCancel(row) {
-  return ['scheduled', 'queued', 'running'].includes(row.status)
-}
-function statusText(s) { return (STATUS[s] || ['未知', 'warning'])[0] }
-function statusType(s) { return (STATUS[s] || ['未知', 'warning'])[1] }
 
 function progressText(t) {
   const size = Number(t.file_size) || 0
@@ -158,8 +145,6 @@ async function load(silent) {
     ])
     items.value = r.items || []
     total.value = r.total || 0
-    counts.value = sum || {}
-    counts.value.all = sum.all
     tabs.value = [
       { key: 'all', label: '全部', count: sum.all || 0 },
       { key: 'active', label: '进行中', count: sum.active || 0 },
@@ -205,20 +190,10 @@ async function cancel(row) {
 }
 
 async function extend(row) {
-  let hours
+  const deadline = await askExtendDeadline()
+  if (!deadline) return
   try {
-    const r = await ElMessageBox.prompt('新的截止时间 = 现在 + N 小时（最多 24）', '延长截止时间', {
-      inputValue: '24',
-      inputPattern: /^([1-9]|1[0-9]|2[0-4])$/,
-      inputErrorMessage: '请输入 1-24',
-      confirmButtonText: '延长',
-      cancelButtonText: '取消',
-    })
-    hours = Number(r.value)
-  } catch (e) { return }
-  try {
-    await Api.post('/api/v1/distributions/' + row.id + '/extend',
-      { deadline_at_ms: Date.now() + hours * 3600 * 1000 })
+    await Api.post('/api/v1/distributions/' + row.id + '/extend', { deadline_at_ms: deadline })
     ElMessage.success('已延长')
     await load(true)
   } catch (e) { ElMessage.error('延长失败：' + e.message) }

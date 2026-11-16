@@ -366,7 +366,7 @@
         <label class="check"><el-checkbox v-model="ttyEditing.enabled">启用</el-checkbox></label>
       </div>
       <div class="tty-form-extra">
-        <el-button v-if="!ttyEditing.isNew" size="small" @click="copyPath(ttyEditing.path)">复制路径</el-button>
+        <el-button v-if="!ttyEditing.isNew" size="small" @click="copyText(ttyEditing.path, '路径已复制')">复制路径</el-button>
         <el-button v-if="!ttyEditing.isNew && isAdmin" size="small" @click="takeoverTty(ttyEditing)">强制接管</el-button>
       </div>
       <template #footer>
@@ -384,13 +384,14 @@ import Chart from 'chart.js/auto'
 import { Api } from '@/shared/api.js'
 import { canManage, roleOf } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
-import { ago, bytes, downloadJson, kbPair, time } from '@/shared/utils.js'
+import { ago, bytes, copyText, downloadJson, kbPair, time } from '@/shared/utils.js'
 import FileManagerCard from '@/components/FileManagerCard.vue'
 
 const route = useRoute()
 const router = useRouter()
 const { isPhone, isTablet } = useBreakpoint()
 const devid = computed(() => decodeURIComponent(route.params.devid || ''))
+const agentBase = computed(() => '/api/v1/agents/' + encodeURIComponent(devid.value))
 const descCols = computed(() => (isPhone.value ? 1 : isTablet.value ? 2 : 4))
 const sysCols = computed(() => (isPhone.value ? 1 : 3))
 const canEdit = computed(() => canManage())
@@ -553,7 +554,7 @@ function mergeSysinfo(p) {
 async function loadSysinfo(silent) {
   try {
     const mode = sysFull ? 'inc' : 'full'
-    const r = await Api.get('/api/v1/agents/' + encodeURIComponent(devid.value) + '/sysinfo?mode=' + mode)
+    const r = await Api.get(agentBase.value + '/sysinfo?mode=' + mode)
     if (r.mode === 'inc') mergeSysinfo(r.sysinfo)
     else {
       sys.value = r.sysinfo
@@ -573,7 +574,7 @@ async function loadAll(opts = {}) {
   const { silent = false, notify = false } = opts
   if (!silent) loading.value = true
   try {
-    detail.value = await Api.get('/api/v1/agents/' + encodeURIComponent(devid.value))
+    detail.value = await Api.get(agentBase.value)
   } catch (e) {
     if (!silent) ElMessage.error('设备详情加载失败：' + e.message)
   }
@@ -585,7 +586,7 @@ async function loadAll(opts = {}) {
 
 async function fetchSeriesCfg() {
   try {
-    const list = await Api.get('/api/v1/agents/' + encodeURIComponent(devid.value) + '/metrics/series/config')
+    const list = await Api.get(agentBase.value + '/metrics/series/config')
     seriesCfg.value = Array.isArray(list) ? list : []
   } catch (e) {
     seriesCfg.value = []
@@ -633,7 +634,7 @@ async function pullSeriesNames(names, full) {
   await Promise.all(names.map(async (name) => {
     const since = full ? 0 : (lastTs[name] || 0)
     try {
-      const r = await Api.get('/api/v1/agents/' + encodeURIComponent(devid.value) +
+      const r = await Api.get(agentBase.value +
         '/metrics/series?series=' + encodeURIComponent(name) + '&since_ts=' + since)
       if (r.truncated && since) {
         lastTs[name] = 0
@@ -822,7 +823,7 @@ async function saveCaps() {
   }
   capsSaving.value = true
   try {
-    const r = await Api.put('/api/v1/agents/' + encodeURIComponent(devid.value) + '/caps', body)
+    const r = await Api.put(agentBase.value + '/caps', body)
     capsOpen.value = false
     const fsMissed = body.fs !== undefined &&
       !(typeof r.fs === 'boolean' && r.fs === body.fs && (!body.fs || r.fs_root === body.fs_root))
@@ -843,7 +844,7 @@ function onMetricRow(row) {
 
 async function saveMetricList(list) {
   try {
-    await Api.put('/api/v1/agents/' + encodeURIComponent(devid.value) + '/metrics/series/config',
+    await Api.put(agentBase.value + '/metrics/series/config',
       list.map((c) => ({
         series: c.series,
         enabled: !!c.enabled,
@@ -907,14 +908,14 @@ function ttyTx(path) {
 async function loadTtys(force) {
   if (ttyLoaded.value && !force) return
   try {
-    const list = await Api.get('/api/v1/agents/' + encodeURIComponent(devid.value) + '/ttys')
+    const list = await Api.get(agentBase.value + '/ttys')
     ttys.value = Array.isArray(list) ? list : []
   } catch (e) {
     ttys.value = []
   }
   if (canEdit.value) {
     try {
-      const d = await Api.get('/api/v1/agents/' + encodeURIComponent(devid.value) + '/ttys/discovered')
+      const d = await Api.get(agentBase.value + '/ttys/discovered')
       ttyDisc.value = Array.isArray(d) ? d : []
     } catch (e) {
       ttyDisc.value = []
@@ -955,7 +956,7 @@ async function saveTty() {
   }
   ttySaving.value = true
   try {
-    await Api.put('/api/v1/agents/' + encodeURIComponent(devid.value) + '/ttys', {
+    await Api.put(agentBase.value + '/ttys', {
       path,
       alias,
       enabled: ttyEditing.enabled,
@@ -982,7 +983,7 @@ async function deleteTty(row) {
     })
   } catch (e) { return }
   try {
-    await Api.del('/api/v1/agents/' + encodeURIComponent(devid.value) + '/ttys?path=' + encodeURIComponent(row.path))
+    await Api.del(agentBase.value + '/ttys?path=' + encodeURIComponent(row.path))
     await loadTtys(true)
     ElMessage.success('已删除')
   } catch (e) {
@@ -990,14 +991,6 @@ async function deleteTty(row) {
   }
 }
 
-async function copyPath(p) {
-  try {
-    await navigator.clipboard.writeText(p)
-    ElMessage.success('路径已复制')
-  } catch (e) {
-    ElMessage.warning('复制失败：' + p)
-  }
-}
 
 async function takeoverTty(row) {
   const name = row.alias || row.path

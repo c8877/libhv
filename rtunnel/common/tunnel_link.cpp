@@ -1,6 +1,7 @@
 #include "tunnel_link.hpp"
 #include "logging.hpp"
 #include "token_util.hpp"
+#include "hsocket.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -263,6 +264,8 @@ void TunnelLink::onReconnect() {
     const TunnelEndpoint& ep = endpoints[ep_index_];
     hio_t* nio = hloop_create_tcp_client(loop, ep.host.c_str(), ep.port, connectCb, tunnelCloseCb);
     if (nio == NULL) { scheduleReconnect(); return; }
+    // RTNP 帧按「16 字节头 + payload」两次写，开 Nagle 时小帧要等对端延时 ACK（40ms）
+    tcp_nodelay(hio_fd(nio), 1);
     if (tls_ca[0]) {
         hssl_ctx_opt_t opt;
         memset(&opt, 0, sizeof(opt));

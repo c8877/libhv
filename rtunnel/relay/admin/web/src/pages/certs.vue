@@ -92,6 +92,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Api } from '@/shared/api.js'
+import { downloadBlob } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 
 const { isPhone } = useBreakpoint()
@@ -143,12 +144,7 @@ async function load() {
 }
 
 function downloadPem(name, text) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'application/x-pem-file' }))
-  const a = document.createElement('a')
-  a.href = url
-  a.download = name
-  a.click()
-  URL.revokeObjectURL(url)
+  downloadBlob(new Blob([text], { type: 'application/x-pem-file' }), name)
 }
 
 async function doIssue() {

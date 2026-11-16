@@ -55,6 +55,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { downloadBlob } from '@/shared/utils.js'
 
 const route = useRoute()
 const devid = decodeURIComponent(route.params.devid || '')
@@ -201,12 +202,7 @@ function saveLog() {
     return '[' + new Date(e.ts).toISOString() + '] ' + e.dir.toUpperCase() + ' ' + e.hex
   })
   const safe = alias.replace(/[^A-Za-z0-9_.-]/g, '_')
-  const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = devid + '-' + safe + '-tty.log'
-  a.click()
-  URL.revokeObjectURL(a.href)
+  downloadBlob(new Blob([lines.join('\n')], { type: 'text/plain' }), devid + '-' + safe + '-tty.log')
 }
 
 onMounted(connect)

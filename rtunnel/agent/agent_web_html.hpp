@@ -157,18 +157,13 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 0 0}
     });
   }
   function toNum(v) { var n = Number(v); return isFinite(n) ? n : 0; }
-  function fmtKB(kb) {
-    var n = toNum(kb), u = ['KB', 'MB', 'GB', 'TB'], i = 0;
-    if (n <= 0) return '0 B';
-    while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-    return (i === 0 ? n.toFixed(0) : n.toFixed(n >= 100 ? 0 : 1)) + ' ' + u[i];
-  }
   function fmtBytes(b) {
     var n = toNum(b), u = ['B', 'KB', 'MB', 'GB', 'TB'], i = 0;
     if (n <= 0) return '0 B';
     while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
     return (i === 0 ? n.toFixed(0) : n.toFixed(n >= 100 ? 0 : 1)) + ' ' + u[i];
   }
+  function fmtKB(kb) { return fmtBytes(toNum(kb) * 1024); }
   function fmtDur(sec) {
     var s = Math.max(0, Math.floor(toNum(sec)));
     var d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
@@ -177,10 +172,12 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 0 0}
     if (m) return m + ' 分 ' + (s % 60) + ' 秒';
     return s + ' 秒';
   }
+  function memAvail(d) {
+    return d.mem_available_kb != null ? toNum(d.mem_available_kb) : toNum(d.mem_free_kb);
+  }
   function memPct(d) {
     var t = toNum(d.mem_total_kb);
-    var a = d.mem_available_kb != null ? toNum(d.mem_available_kb) : toNum(d.mem_free_kb);
-    return t > 0 ? Math.max(0, Math.min(100, (t - a) * 100 / t)) : 0;
+    return t > 0 ? Math.max(0, Math.min(100, (t - memAvail(d)) * 100 / t)) : 0;
   }
   function tone(p) { return p >= 85 ? 'bad' : p >= 70 ? 'warn' : ''; }
 
@@ -195,7 +192,7 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 0 0}
     st.className = 'tag ' + (on ? 'ok' : 'warn');
 
     var mp = memPct(d), la = Array.isArray(d.loadavg) ? d.loadavg : [];
-    var total = toNum(d.mem_total_kb), avail = d.mem_available_kb != null ? toNum(d.mem_available_kb) : toNum(d.mem_free_kb);
+    var total = toNum(d.mem_total_kb), avail = memAvail(d);
     var cards = [
       ['连接状态', on ? (d.relay || '已连接') : '未连接',
        on ? (toNum(d.relay_count) > 1 ? 'relay ' + (toNum(d.relay_index) + 1) + '/' + d.relay_count : '长连接正常')
@@ -421,7 +418,6 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 0 0}
         container: $('#fsHost'),
         wsUrl: (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/fs',
         title: '文件管理 - ' + (d.devid || '设备'),
-        subtitle: d.machine || '',
         onClose: function () { fsOpen = false; fsBtn.textContent = '打开文件管理'; },
         onSpace: function (s) { fsSpace = s; renderFsInfo(); }
       });

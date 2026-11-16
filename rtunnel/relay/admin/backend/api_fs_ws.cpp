@@ -77,7 +77,12 @@ bool AdminServer::handleFsWsOpen(const WebSocketChannelPtr& channel, const HttpR
         while (!s->closed.load()) {
             if (!recvFrame(s->fd, t, sid, p)) break;
             if (t == 0x13 && !p.empty()) {
-                sendWindow(s->fd, 1, (uint32_t)p.size());
+                // 与 handleFsWsMessage 的 sendData 同锁：一帧分两次 write，
+                // 两个线程同时写会把帧头和数据插花，relay 侧会判 bad frame 断链
+                {
+                    std::lock_guard<std::mutex> lk(s->io_mu);
+                    if (s->fd >= 0) sendWindow(s->fd, 1, (uint32_t)p.size());
+                }
                 bool binary = p[0] != 0;
                 if (channel->isConnected()) {
                     channel->send(p.data() + 1, (int)p.size() - 1, binary ? WS_OPCODE_BINARY : WS_OPCODE_TEXT);

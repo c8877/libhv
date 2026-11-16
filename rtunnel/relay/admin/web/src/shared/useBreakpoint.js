@@ -8,5 +8,5 @@ export function useBreakpoint() {
   onBeforeUnmount(() => window.removeEventListener('resize', onResize))
   const isPhone = computed(() => width.value < 600)
   const isTablet = computed(() => width.value < 960)
-  return { width, isPhone, isTablet }
+  return { isPhone, isTablet }
 }

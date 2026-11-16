@@ -12,6 +12,10 @@ const size_t Session::BIN_HEADER;
 
 namespace {
 
+// 下载/上传在途块数。传输信用 DEFAULT_CREDIT=128KB，30KB 一块正好 4 块；
+// 再大就可能把 relay 的写缓冲（CONN_INFLIGHT+MAX_PAYLOAD）顶满导致断链。
+constexpr int kPipelineWindow = 4;
+
 uint32_t rd32(const unsigned char* p) {
     return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
 }
@@ -117,7 +121,7 @@ void Session::cancelDownload() {
     if (dl_fd_ >= 0) Service::closeFd(dl_fd_);
     dl_archive_.reset();
     dl_active_ = false;
-    dl_wait_ack_ = false;
+    dl_inflight_ = 0;
     dl_id_ = 0;
     dl_off_ = dl_size_ = 0;
 }
@@ -460,7 +464,7 @@ void Session::handleDownloadOpen(const nlohmann::json& j, uint32_t id) {
         dl_off_ = 0;
         dl_size_ = size;
         dl_active_ = true;
-        dl_wait_ack_ = false;
+        dl_inflight_ = 0;
     }
     json m;
     m["op"] = "download_meta";
@@ -489,7 +493,7 @@ void Session::handleArchiveOpen(const nlohmann::json& j, uint32_t id) {
     dl_off_ = 0;
     dl_size_ = 0;
     dl_active_ = true;
-    dl_wait_ack_ = false;
+    dl_inflight_ = 0;
     json m;
     m["op"] = "archive_meta";
     m["id"] = id;
@@ -502,97 +506,102 @@ void Session::handleArchiveOpen(const nlohmann::json& j, uint32_t id) {
 }
 
 void Session::pumpDownload() {
-    if (!dl_active_ || dl_wait_ack_) return;
-    if (dl_archive_) {
+    // 允许 4 块在途：每块不再等一个 RTT，吞吐从 30KB/RTT 提升到 4*30KB/RTT
+    while (dl_active_ && dl_inflight_ < kPipelineWindow) {
+        if (dl_archive_) {
+            size_t want = svc_->config().chunk;
+            std::string chunk;
+            chunk.resize(BIN_HEADER + want);
+            size_t got = 0;
+            std::string err;
+            int rc = dl_archive_->read(&chunk[BIN_HEADER], want, got, err);
+            if (rc != OK) {
+                sendError(dl_id_, rc, err);
+                cancelDownload();
+                return;
+            }
+            uint64_t off = dl_off_;
+            unsigned char* h = (unsigned char*)&chunk[0];
+            h[0] = (unsigned char)(dl_id_ >> 24);
+            h[1] = (unsigned char)(dl_id_ >> 16);
+            h[2] = (unsigned char)(dl_id_ >> 8);
+            h[3] = (unsigned char)dl_id_;
+            h[4] = 1; // download
+            if (got == 0) {
+                h[5] = 1; // archive end
+                chunk.resize(BIN_HEADER);
+                dl_active_ = false;
+            } else {
+                h[5] = 0;
+                chunk.resize(BIN_HEADER + got);
+                dl_off_ += got;
+                ++dl_inflight_;
+            }
+            for (int i = 0; i < 8; ++i) h[8 + i] = (unsigned char)(off >> (8 * (7 - i)));
+            out_.push_back(Out{true, std::move(chunk)});
+            pump();
+            if (!dl_active_) {
+                cancelDownload();
+                return;
+            }
+            continue;
+        }
+        if (dl_fd_ < 0) {
+            dl_active_ = false;
+            return;
+        }
+        if (dl_off_ >= dl_size_) {
+            json e;
+            e["op"] = "download_end";
+            e["id"] = dl_id_;
+            e["size"] = dl_size_;
+            sendJson(e);
+            cancelDownload();
+            return;
+        }
         size_t want = svc_->config().chunk;
+        if (want > dl_size_ - dl_off_) want = (size_t)(dl_size_ - dl_off_);
         std::string chunk;
         chunk.resize(BIN_HEADER + want);
-        size_t got = 0;
         std::string err;
-        int rc = dl_archive_->read(&chunk[BIN_HEADER], want, got, err);
+        size_t got = 0;
+        int rc = Service::preadAt(dl_fd_, dl_off_, &chunk[BIN_HEADER], want, got, err);
         if (rc != OK) {
             sendError(dl_id_, rc, err);
             cancelDownload();
             return;
         }
-        uint64_t off = dl_off_;
+        if (got == 0) {
+            json e;
+            e["op"] = "download_end";
+            e["id"] = dl_id_;
+            e["size"] = dl_off_;
+            sendJson(e);
+            cancelDownload();
+            return;
+        }
+        chunk.resize(BIN_HEADER + got);
         unsigned char* h = (unsigned char*)&chunk[0];
         h[0] = (unsigned char)(dl_id_ >> 24);
         h[1] = (unsigned char)(dl_id_ >> 16);
         h[2] = (unsigned char)(dl_id_ >> 8);
         h[3] = (unsigned char)dl_id_;
         h[4] = 1; // download
-        if (got == 0) {
-            h[5] = 1; // archive end
-            chunk.resize(BIN_HEADER);
-            dl_active_ = false;
-        } else {
-            h[5] = 0;
-            chunk.resize(BIN_HEADER + got);
-            dl_off_ += got;
-            dl_wait_ack_ = true;
-        }
-        for (int i = 0; i < 8; ++i) h[8 + i] = (unsigned char)(off >> (8 * (7 - i)));
+        h[5] = 0;
+        h[6] = 0;
+        h[7] = 0;
+        for (int i = 0; i < 8; ++i) h[8 + i] = (unsigned char)(dl_off_ >> (8 * (7 - i)));
+        dl_off_ += got;
+        ++dl_inflight_;
         out_.push_back(Out{true, std::move(chunk)});
         pump();
-        if (!dl_active_) cancelDownload();
-        return;
     }
-    if (dl_fd_ < 0) {
-        dl_active_ = false;
-        return;
-    }
-    if (dl_off_ >= dl_size_) {
-        json e;
-        e["op"] = "download_end";
-        e["id"] = dl_id_;
-        e["size"] = dl_size_;
-        sendJson(e);
-        cancelDownload();
-        return;
-    }
-    size_t want = svc_->config().chunk;
-    if (want > dl_size_ - dl_off_) want = (size_t)(dl_size_ - dl_off_);
-    std::string chunk;
-    chunk.resize(BIN_HEADER + want);
-    std::string err;
-    size_t got = 0;
-    int rc = Service::preadAt(dl_fd_, dl_off_, &chunk[BIN_HEADER], want, got, err);
-    if (rc != OK) {
-        sendError(dl_id_, rc, err);
-        cancelDownload();
-        return;
-    }
-    if (got == 0) {
-        json e;
-        e["op"] = "download_end";
-        e["id"] = dl_id_;
-        e["size"] = dl_off_;
-        sendJson(e);
-        cancelDownload();
-        return;
-    }
-    chunk.resize(BIN_HEADER + got);
-    unsigned char* h = (unsigned char*)&chunk[0];
-    h[0] = (unsigned char)(dl_id_ >> 24);
-    h[1] = (unsigned char)(dl_id_ >> 16);
-    h[2] = (unsigned char)(dl_id_ >> 8);
-    h[3] = (unsigned char)dl_id_;
-    h[4] = 1; // download
-    h[5] = 0;
-    h[6] = 0;
-    h[7] = 0;
-    for (int i = 0; i < 8; ++i) h[8 + i] = (unsigned char)(dl_off_ >> (8 * (7 - i)));
-    dl_off_ += got;
-    dl_wait_ack_ = true;
-    out_.push_back(Out{true, std::move(chunk)});
-    pump();
 }
 
 void Session::handleDownloadAck(const nlohmann::json& j, uint32_t id) {
     if (!dl_active_ || id != dl_id_) return;
     (void)j;
-    dl_wait_ack_ = false;
+    if (dl_inflight_ > 0) --dl_inflight_;
     pumpDownload();
 }
 
@@ -637,6 +646,7 @@ void Session::handleUploadOpen(const nlohmann::json& j, uint32_t id) {
     o["upload_id"] = upid;
     o["offset"] = offset;
     o["chunk"] = svc_->config().chunk;
+    o["inflight"] = kPipelineWindow;
     sendJson(o);
 }
 

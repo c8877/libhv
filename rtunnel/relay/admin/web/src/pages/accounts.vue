@@ -147,17 +147,8 @@ const filtered = computed(() => {
 })
 
 const roleChoices = computed(() => {
-  if (roleOf() === 'admin') {
-    return [
-      { value: 'viewer', label: '浏览者' },
-      { value: 'operator', label: '操作员' },
-      { value: 'manager', label: '管理员' },
-    ]
-  }
-  return [
-    { value: 'viewer', label: '浏览者' },
-    { value: 'operator', label: '操作员' },
-  ]
+  const roles = roleOf() === 'admin' ? ['viewer', 'operator', 'manager'] : ['viewer', 'operator']
+  return roles.map((value) => ({ value, label: ROLE_NAMES[value] }))
 })
 
 function roleName(r) {

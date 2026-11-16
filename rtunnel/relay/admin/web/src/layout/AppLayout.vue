@@ -8,7 +8,7 @@
       <el-menu :default-active="active" router class="menu">
         <el-menu-item v-for="n in items" :key="n.path" :index="n.path">
           <el-icon><component :is="n.icon" /></el-icon>
-          <span>{{ n.title }}</span>
+          <span>{{ titleOf(n.path) }}</span>
         </el-menu-item>
       </el-menu>
       <div class="side-foot">
@@ -90,7 +90,6 @@ import {
 } from '@/shared/store.js'
 import { navFor } from '@/shared/nav.js'
 import { duration } from '@/shared/utils.js'
-import { titleFor } from '@/shared/pageTitle.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -100,7 +99,8 @@ const ov = ref(overview.data)
 
 const items = computed(() => navFor(roleOf()))
 const active = computed(() => route.path)
-const crumb = computed(() => route.meta.title || titleFor(route.path))
+const crumb = computed(() => route.meta.title || '')
+const titleOf = (path) => router.resolve(path).meta.title || path
 const title = computed(() => siteTitle())
 const name = computed(() => (auth.me && (auth.me.display_name || auth.me.username)) || '—')
 const initial = computed(() => String(name.value).slice(0, 1).toUpperCase())

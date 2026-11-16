@@ -11,7 +11,7 @@
         <el-select v-model="fileName" filterable placeholder="选择 rtunnel-agent 二进制" class="w260">
           <el-option v-for="f in files" :key="f.name" :label="f.name" :value="f.name">
             <span>{{ f.name }}</span>
-            <span class="muted" style="float:right">{{ bytes(f.size) }}</span>
+            <span class="muted" style="float:right">{{ bytes(f.size, true) }}</span>
           </el-option>
         </el-select>
       </label>
@@ -90,7 +90,7 @@
       </el-table-column>
       <el-table-column label="进度" width="150">
         <template #default="{ row }">
-          <el-progress :percentage="percent(row)" :stroke-width="6"
+          <el-progress :percentage="taskPercent(row)" :stroke-width="6"
                        :status="row.status === 'success' ? 'success' : (row.status === 'failed' || row.status === 'timeout' ? 'exception' : '')" />
         </template>
       </el-table-column>
@@ -102,8 +102,8 @@
       </el-table-column>
       <el-table-column label="操作" width="130" fixed="right">
         <template #default="{ row }">
-          <el-button v-if="canCancel(row)" link type="danger" size="small" @click="cancel(row)">取消</el-button>
-          <el-button v-if="canRetry(row)" link type="primary" size="small" @click="retry(row)">重试</el-button>
+          <el-button v-if="canCancel(row.status)" link type="danger" size="small" @click="cancel(row)">取消</el-button>
+          <el-button v-if="canRetry(row.status, row.kind)" link type="primary" size="small" @click="retry(row)">重试</el-button>
         </template>
       </el-table-column>
       <template #empty><el-empty description="暂无升级任务" :image-size="70" /></template>
@@ -118,6 +118,11 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Api } from '@/shared/api.js'
+import { bytes } from '@/shared/utils.js'
+import {
+  taskCanCancel as canCancel, taskCanRetry as canRetry, taskPercent,
+  taskStatusText as statusText, taskStatusType as statusType,
+} from '@/shared/tasks.js'
 
 const files = ref([])
 const devices = ref([])
@@ -149,49 +154,9 @@ const filtered = computed(() => {
 })
 const pageRows = computed(() => filtered.value.slice((page.value - 1) * per, page.value * per))
 
-function bytes(n) {
-  n = Number(n) || 0
-  if (n < 1024) return n + ' B'
-  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KiB'
-  return (n / 1024 / 1024).toFixed(1) + ' MiB'
-}
-
 function ts(ms) {
   if (!ms) return '—'
   return new Date(Number(ms)).toLocaleString()
-}
-
-function statusText(s) {
-  return {
-    scheduled: '等待开始', queued: '排队', running: '传输中', verifying: '版本校验',
-    installing: '安装中', confirming: '等待重启', success: '成功', failed: '失败',
-    timeout: '超时', conflict: '冲突', unsupported: '不支持 OTA', canceled: '已取消',
-  }[s] || s
-}
-
-function statusType(s) {
-  if (s === 'success') return 'success'
-  if (s === 'failed' || s === 'timeout') return 'danger'
-  if (s === 'running' || s === 'verifying' || s === 'installing' || s === 'confirming') return 'warning'
-  if (s === 'unsupported') return 'info'
-  return 'info'
-}
-
-function percent(row) {
-  const size = Number(row.file_size) || 0
-  const sent = Number(row.sent) || 0
-  if (row.status === 'success') return 100
-  if (['verifying', 'installing', 'confirming'].includes(row.status)) return 100
-  if (!size) return 0
-  return Math.min(100, Math.floor((sent * 100) / size))
-}
-
-function canCancel(row) {
-  return ['scheduled', 'queued', 'running'].includes(row.status)
-}
-
-function canRetry(row) {
-  return ['failed', 'timeout', 'unsupported', 'canceled', 'conflict'].includes(row.status)
 }
 
 function onSelect(rows) {

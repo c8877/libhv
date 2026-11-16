@@ -3,6 +3,7 @@
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -21,6 +22,9 @@ ProxyGuard::~ProxyGuard() { --g_proxy_active; }
 int tcpConnect(const char* host, int port, int timeout_ms) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return -1;
+    // 管理台到本机 relay 的这条连接也是「帧头 + 小 payload」两次写，必须关 Nagle
+    int one = 1;
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
     struct timeval tv = { timeout_ms / 1000, (timeout_ms % 1000) * 1000 };
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));

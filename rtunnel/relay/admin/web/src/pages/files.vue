@@ -38,7 +38,7 @@
         <el-table-column v-if="!isPhone" label="哈希" min-width="180">
           <template #default="{ row }">
             <code :title="row.sha256 || ''">{{ (row.sha256 || '').slice(0, 8) }}</code>
-            <el-button v-if="row.sha256" link type="primary" @click="copy(row.sha256)">复制</el-button>
+            <el-button v-if="row.sha256" link type="primary" @click="copyText(row.sha256, '哈希已复制')">复制</el-button>
           </template>
         </el-table-column>
         <el-table-column v-if="!isPhone" prop="mtime_ms" label="修改时间" min-width="170" sortable="custom">
@@ -74,7 +74,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Api } from '@/shared/api.js'
 import { auth, canManage } from '@/shared/store.js'
-import { bytes, time } from '@/shared/utils.js'
+import { bytes, copyText, downloadBlob, time } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 
 const router = useRouter()
@@ -197,12 +197,7 @@ async function download(row) {
   try {
     const r = await fetch('/api/v1/files/' + encodeURIComponent(row.name), { cache: 'no-store' })
     if (!r.ok) throw new Error('HTTP ' + r.status)
-    const blob = await r.blob()
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = row.name
-    a.click()
-    URL.revokeObjectURL(a.href)
+    downloadBlob(await r.blob(), row.name)
   } catch (e) {
     ElMessage.error('下载失败：' + e.message)
   }
@@ -223,15 +218,6 @@ async function remove(row) {
     await load()
   } catch (e) {
     ElMessage.error('删除失败：' + e.message)
-  }
-}
-
-async function copy(text) {
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success('哈希已复制')
-  } catch (e) {
-    ElMessage.warning('复制失败，请手动选择')
   }
 }
 

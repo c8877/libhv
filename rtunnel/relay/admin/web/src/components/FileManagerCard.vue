@@ -57,7 +57,6 @@ function ensureManager() {
     container: fsHost.value,
     wsUrl: proto + location.host + '/ws/fs/' + encodeURIComponent(props.devid),
     title: '文件管理 - ' + props.devid,
-    subtitle: (props.sys && props.sys.machine) || '',
     editorUrl,
     onClose: () => { expanded.value = false },
     onSpace: (s) => { space.value = s }

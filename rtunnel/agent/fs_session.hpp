@@ -93,7 +93,7 @@ private:
     uint64_t dl_off_ = 0;
     uint64_t dl_size_ = 0;
     bool dl_active_ = false;
-    bool dl_wait_ack_ = false;
+    int  dl_inflight_ = 0;   // 已入队未确认的下载块
     std::unique_ptr<ArchiveStream> dl_archive_;
 
     std::string up_id_;

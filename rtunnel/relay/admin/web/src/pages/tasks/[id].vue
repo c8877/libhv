@@ -12,8 +12,8 @@
         <h2>任务 #{{ t.id }}</h2>
         <el-tag :type="statusType(t.status)" size="small">{{ statusText(t.status) }}</el-tag>
         <span class="spacer" />
-        <el-button v-if="canRetry()" type="primary" @click="retry">重试</el-button>
-        <el-button v-if="canCancel()" @click="cancel">取消</el-button>
+        <el-button v-if="canRetry(t.status, t.kind)" type="primary" @click="retry">重试</el-button>
+        <el-button v-if="canCancel(t.status)" @click="cancel">取消</el-button>
         <el-button v-if="t.status === 'timeout' && t.extend_count === 0" @click="extend">延长截止</el-button>
         <el-button v-if="t.kind !== 'ota' && t.status === 'conflict'" @click="check('verify')">校验设备</el-button>
         <el-button v-if="t.kind !== 'ota' && t.status === 'conflict'" @click="check('force')">强制重发</el-button>
@@ -25,7 +25,7 @@
         <span class="muted">{{ bytes(t.file_size) }}</span>
         <template v-if="t.file_sha">
           <code class="mono">{{ t.file_sha }}</code>
-          <el-button link type="primary" @click="copy(t.file_sha)">复制哈希</el-button>
+          <el-button link type="primary" @click="copyText(t.file_sha, '哈希已复制')">复制哈希</el-button>
         </template>
       </div>
 
@@ -64,34 +64,16 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { Api } from '@/shared/api.js'
-import { bytes, time } from '@/shared/utils.js'
+import { bytes, copyText, time } from '@/shared/utils.js'
+import {
+  askExtendDeadline, taskCanCancel as canCancel, taskCanRetry as canRetry,
+  taskPercent, taskStatusText as statusText, taskStatusType as statusType,
+} from '@/shared/tasks.js'
 
 const route = useRoute()
 const t = ref(null)
 
-const STATUS = {
-  scheduled: ['等待开始', 'warning'], queued: ['排队中', 'warning'], running: ['传输中', 'warning'],
-  verifying: ['版本校验', 'warning'], installing: ['安装中', 'warning'], confirming: ['等待重启', 'warning'],
-  success: ['成功', 'success'], failed: ['失败', 'danger'], timeout: ['超时', 'danger'],
-  canceled: ['已取消', 'info'], conflict: ['冲突', 'warning'], unsupported: ['不支持 OTA', 'info'],
-}
-function canRetry() {
-  if (!t.value) return false
-  if (t.value.status === 'failed') return true
-  return t.value.kind === 'ota' && ['timeout', 'conflict', 'unsupported', 'canceled'].includes(t.value.status)
-}
-function canCancel() {
-  if (!t.value) return false
-  return ['scheduled', 'queued', 'running'].includes(t.value.status)
-}
-function statusText(s) { return (STATUS[s] || ['未知', 'warning'])[0] }
-function statusType(s) { return (STATUS[s] || ['未知', 'warning'])[1] }
-
-const pct = computed(() => {
-  const size = Number(t.value && t.value.file_size) || 0
-  const sent = Number(t.value && t.value.sent) || 0
-  return size ? Math.min(100, Math.floor((sent * 100) / size)) : 0
-})
+const pct = computed(() => (t.value ? taskPercent(t.value) : 0))
 const progressStatus = computed(() => {
   if (!t.value) return ''
   if (t.value.status === 'success') return 'success'
@@ -124,20 +106,10 @@ async function cancel() {
 }
 
 async function extend() {
-  let hours
+  const deadline = await askExtendDeadline()
+  if (!deadline) return
   try {
-    const r = await ElMessageBox.prompt('新的截止时间 = 现在 + N 小时（最多 24）', '延长截止时间', {
-      inputValue: '24',
-      inputPattern: /^([1-9]|1[0-9]|2[0-4])$/,
-      inputErrorMessage: '请输入 1-24',
-      confirmButtonText: '延长',
-      cancelButtonText: '取消',
-    })
-    hours = Number(r.value)
-  } catch (e) { return }
-  try {
-    await Api.post('/api/v1/distributions/' + route.params.id + '/extend',
-      { deadline_at_ms: Date.now() + hours * 3600 * 1000 })
+    await Api.post('/api/v1/distributions/' + route.params.id + '/extend', { deadline_at_ms: deadline })
     ElMessage.success('已延长')
     await load(true)
   } catch (e) { ElMessage.error('延长失败：' + e.message) }
@@ -151,12 +123,6 @@ async function check(api) {
   } catch (e) { ElMessage.error('操作失败：' + e.message) }
 }
 
-async function copy(text) {
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success('哈希已复制')
-  } catch (e) { ElMessage.warning('复制失败，请手动选择') }
-}
 
 let timer = null
 onMounted(() => {
