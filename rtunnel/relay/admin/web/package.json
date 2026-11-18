@@ -7,7 +7,8 @@
     "build": "npm run build:editor && vite build && node scripts/precompress.mjs dist",
     "build:editor": "vite build --config vite.editor.config.js",
     "preview": "vite preview",
-    "precompress": "node scripts/precompress.mjs dist"
+    "precompress": "node scripts/precompress.mjs dist",
+    "check:docs": "node scripts/check-api-docs.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",

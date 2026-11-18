@@ -23,8 +23,13 @@ int64_t tokenPeriodNextFrom(TokenPeriod p, int64_t period_start_ms);
 
 // 生成 rtk_<43 字符 base64url>；随机源不可用时返回空串
 std::string newClientToken();
-// 明文前缀，用于列表展示：rtk_ + 8 字符 + "…"
-std::string clientTokenPrefix(const std::string& token);
 bool isClientToken(const std::string& s);
+
+// 管理台 API Token：atk-<64 位十六进制>（32 字节随机数的 SHA-256）
+std::string newAdminToken();
+bool isAdminToken(const std::string& s);
+
+// 明文前缀，用于列表展示：前 12 字符 + "…"
+std::string tokenPrefix(const std::string& token);
 
 } // namespace rtutil

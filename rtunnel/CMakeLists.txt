@@ -44,7 +44,9 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
                relay/admin/backend/admin_db_permission.cpp
                relay/admin/backend/admin_db_dict.cpp
                relay/admin/backend/admin_db_accounts.cpp
+               relay/admin/backend/admin_db_admin_tokens.cpp
                relay/admin/backend/api_accounts.cpp
+               relay/admin/backend/api_admin_tokens.cpp
                relay/admin/backend/admin_db_dist.cpp
                relay/admin/backend/admin_db_tty.cpp
                relay/admin/backend/admin_db_metric_series.cpp
@@ -64,12 +66,19 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
 # 页面是内嵌单文件 HTML，无外部资源，适合离线设备。
 option(RTUNNEL_AGENT_WEB "rtunnel-agent 内置本地 Web 设备详情页" ON)
 set(RTUNNEL_AGENT_SOURCES agent/main.cpp agent/agent_app.cpp
-                           agent/fs_service.cpp agent/fs_session.cpp agent/fs_archive.cpp)
-# 共享文件管理前端：同一个 fs-ui.js 同时给本地 Web 和 relay-admin 使用。
+                           agent/fs_service.cpp agent/fs_session.cpp agent/fs_archive.cpp
+                           agent/svc_service.cpp agent/svc_session.cpp)
+# 共享前端：同一份 fs-ui.js / svc-ui.js / file-view.js 同时给本地 Web 和 relay-admin 使用。
 # 本地 Web 需要把 JS 嵌进二进制，这里在配置阶段生成头文件。
 set(RTUNNEL_FS_UI_JS "${CMAKE_CURRENT_SOURCE_DIR}/shared/web/fs-ui.js")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RTUNNEL_FS_UI_JS}")
 file(READ "${RTUNNEL_FS_UI_JS}" RTUNNEL_FS_UI_JS_CONTENT)
+set(RTUNNEL_SVC_UI_JS "${CMAKE_CURRENT_SOURCE_DIR}/shared/web/svc-ui.js")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RTUNNEL_SVC_UI_JS}")
+file(READ "${RTUNNEL_SVC_UI_JS}" RTUNNEL_SVC_UI_JS_CONTENT)
+set(RTUNNEL_FILE_VIEW_JS "${CMAKE_CURRENT_SOURCE_DIR}/shared/web/file-view.js")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RTUNNEL_FILE_VIEW_JS}")
+file(READ "${RTUNNEL_FILE_VIEW_JS}" RTUNNEL_FILE_VIEW_JS_CONTENT)
 # 编辑器组件（CodeMirror IIFE）：由 npm run build:editor 生成，缺失时本地页编辑功能不可用。
 set(RTUNNEL_CM_EDITOR_JS "${CMAKE_CURRENT_SOURCE_DIR}/shared/web/cm-editor.bundle.js")
 set(RTUNNEL_CM_EDITOR_JS_CONTENT "")
@@ -82,6 +91,10 @@ endif()
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/fs_ui_js.hpp"
     "#pragma once\n// 由 CMake 从 shared/web/fs-ui.js 生成，勿手改。\nstatic const char kFsUiJs[] = R\"RTFSJS(\n${RTUNNEL_FS_UI_JS_CONTENT}\n)RTFSJS\";\n")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/svc_ui_js.hpp"
+    "#pragma once\n// 由 CMake 从 shared/web/svc-ui.js 生成，勿手改。\nstatic const char kSvcUiJs[] = R\"RTSVCJS(\n${RTUNNEL_SVC_UI_JS_CONTENT}\n)RTSVCJS\";\n")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/file_view_js.hpp"
+    "#pragma once\n// 由 CMake 从 shared/web/file-view.js 生成，勿手改。\nstatic const char kFileViewJs[] = R\"RTFVJS(\n${RTUNNEL_FILE_VIEW_JS_CONTENT}\n)RTFVJS\";\n")
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/cm_editor_js.hpp"
     "#pragma once\n// 由 CMake 从 shared/web/cm-editor.bundle.js 生成，勿手改。\nstatic const char kCmEditorJs[] = R\"RTCMJS(\n${RTUNNEL_CM_EDITOR_JS_CONTENT}\n)RTCMJS\";\n")
 add_executable(rtunnel-agent ${RTUNNEL_AGENT_SOURCES})

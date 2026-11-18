@@ -1,4 +1,5 @@
 #include "token_util.hpp"
+#include "sha256.hpp"
 
 #include <stdio.h>
 #include <string.h>
@@ -42,6 +43,18 @@ int64_t monthStart(int64_t ms) {
     return utcOf(t.tm_year + 1900, t.tm_mon + 1, 1);
 }
 
+bool randomBytes(unsigned char* out, size_t len) {
+#if defined(WITH_OPENSSL)
+    return RAND_bytes(out, (int)len) == 1;
+#else
+    FILE* f = fopen("/dev/urandom", "rb");
+    if (f == NULL) return false;
+    size_t n = fread(out, 1, len, f);
+    fclose(f);
+    return n == len;
+#endif
+}
+
 } // namespace
 
 int64_t tokenPeriodStart(TokenPeriod p, int64_t now_ms) {
@@ -79,15 +92,7 @@ bool isClientToken(const std::string& s) {
 
 std::string newClientToken() {
     unsigned char raw[32];
-#if defined(WITH_OPENSSL)
-    if (RAND_bytes(raw, sizeof(raw)) != 1) return std::string();
-#else
-    FILE* f = fopen("/dev/urandom", "rb");
-    if (f == NULL) return std::string();
-    size_t n = fread(raw, 1, sizeof(raw), f);
-    fclose(f);
-    if (n != sizeof(raw)) return std::string();
-#endif
+    if (!randomBytes(raw, sizeof(raw))) return std::string();
     // base64url（无填充），自实现以免依赖 libhv 的 util 头路径
     static const char* tbl = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     std::string out = "rtk_";
@@ -115,9 +120,19 @@ std::string newClientToken() {
     return out;
 }
 
-std::string clientTokenPrefix(const std::string& token) {
+std::string tokenPrefix(const std::string& token) {
     if (token.size() <= 12) return token;
     return token.substr(0, 12) + "…";
+}
+
+bool isAdminToken(const std::string& s) {
+    return s.size() > 4 && s.compare(0, 4, "atk-") == 0;
+}
+
+std::string newAdminToken() {
+    unsigned char raw[32];
+    if (!randomBytes(raw, sizeof(raw))) return std::string();
+    return "atk-" + sha256Hex(raw, sizeof(raw));
 }
 
 } // namespace rtutil
