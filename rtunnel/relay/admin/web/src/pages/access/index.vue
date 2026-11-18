@@ -51,7 +51,7 @@
           <el-input v-model="form.note" maxlength="256" placeholder="可选" />
         </el-form-item>
       </el-form>
-      <div class="muted">账号创建后在「权限」页加入客户端分组才会获得设备权限。</div>
+      <div class="muted">账号创建后加入权限组并授权设备资源，才会获得对应访问权限。</div>
       <template #footer>
         <el-button @click="dlg = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="create">创建</el-button>

@@ -7,7 +7,7 @@
         <span class="spacer" />
         <el-button @click="openEffective">有效权限</el-button>
         <el-button v-if="canManage()" @click="openLegacy">旧 ACL</el-button>
-        <el-button v-if="canManage()" @click="openDict">字典管理</el-button>
+        <el-button v-if="can('dict.read')" @click="$router.push('/dicts')">字典库</el-button>
         <el-button v-if="canManage()" type="primary" @click="newGroup">+ 新建分组</el-button>
       </div>
 
@@ -332,7 +332,7 @@
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { Api } from '@/shared/api.js'
-import { canManage, roleOf } from '@/shared/store.js'
+import { can, canManage, roleOf } from '@/shared/store.js'
 import { ago, downloadBlob } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 

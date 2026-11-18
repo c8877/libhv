@@ -17,7 +17,7 @@ void sendData(int fd, uint32_t sid, const std::string& p);
 void sendWindow(int fd, uint32_t sid, uint32_t n);
 bool recvFrame(int fd, uint8_t& type, uint32_t& sid, std::string& payload);
 std::string rtnpStr(const std::string& s);
-std::string proxyUrlDecode(const std::string& in);
+std::string urlDecode(const std::string& in);
 std::string lower(std::string s);
 std::string trim(const std::string& s);
 std::string replaceAll(std::string s, const std::string& from, const std::string& to);
@@ -27,3 +27,5 @@ int openTtyStream(const AdminConfig& cfg, const std::string& devid, const std::s
                   int baud, int data_bits, char parity, int stop_bits, uint16_t flags, std::string& err);
 // 打开设备文件管理流（OPEN_FS）。rw=false 时对方按只读处理。
 int openFsStream(const AdminConfig& cfg, const std::string& devid, bool rw, std::string& err);
+// 打开设备服务管理流（OPEN_SVC）
+int openSvcStream(const AdminConfig& cfg, const std::string& devid, std::string& err);

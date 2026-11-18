@@ -7,7 +7,7 @@
       <el-input v-model="q" placeholder="搜索用户名" clearable class="search">
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
-      <el-button type="primary" @click="openCreate">+ 新建账号</el-button>
+      <el-button v-if="can('account.write')" type="primary" @click="openCreate">+ 新建账号</el-button>
     </div>
 
     <el-table :data="filtered" v-loading="loading">
@@ -32,6 +32,13 @@
           <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
             {{ row.status === 'active' ? '启用' : '停用' }}
           </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="!isPhone" label="权限组" min-width="170">
+        <template #default="{ row }">
+          <span v-if="row.role === 'admin'" class="muted">全部（超级管理员）</span>
+          <span v-else-if="groupNames(row).length">{{ groupNames(row).join('、') }}</span>
+          <span v-else class="muted">未分配</span>
         </template>
       </el-table-column>
       <el-table-column v-if="!isPhone" label="创建时间" min-width="150">
@@ -109,6 +116,17 @@
                     placeholder="留空表示不修改，至少 8 位" />
         </el-form-item>
 
+        <el-form-item v-if="showPermGroups" label="权限组">
+          <div v-if="!edit.permGroups.length" class="muted">还没有权限组，先到「权限组」页创建。</div>
+          <el-checkbox-group v-else v-model="edit.permIds" class="scope">
+            <el-checkbox v-for="g in edit.permGroups" :key="g.id" :value="g.id" class="scope-item">
+              {{ g.name }}
+              <span class="muted">· {{ g.super ? '全部资源' : g.resources.length + ' 项' }}</span>
+              <el-tag v-if="g.builtin_key" size="small" effect="plain" class="ml6">预置</el-tag>
+            </el-checkbox>
+          </el-checkbox-group>
+        </el-form-item>
+
         <el-form-item v-if="showScope" label="设备范围">
           <div v-if="!edit.groups.length" class="muted">还没有设备分组，先到权限页创建。</div>
           <el-checkbox-group v-else v-model="edit.scope" class="scope">
@@ -130,7 +148,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Api } from '@/shared/api.js'
-import { auth, roleOf, ROLE_NAMES } from '@/shared/store.js'
+import { auth, roleOf, ROLE_NAMES, can } from '@/shared/store.js'
 import { time } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 
@@ -170,6 +188,8 @@ function canEdit(u) {
 
 const showScope = computed(() =>
   roleOf() === 'admin' && edit.user && edit.user.role !== 'admin')
+const showPermGroups = computed(() =>
+  can('account.write') && edit.user && edit.user.role !== 'admin')
 
 const createDlg = ref(false)
 const createForm = reactive({ username: '', password: '', role: 'viewer' })
@@ -178,12 +198,23 @@ const editDlg = ref(false)
 const edit = reactive({
   user: null, username: '', role: 'viewer', status: 'active',
   old_password: '', password: '', groups: [], scope: [], initialScope: '[]',
+  permGroups: [], permIds: [], initialPerm: '[]',
 })
+const allPermGroups = ref([])
+
+function groupNames(row) {
+  const ids = row.perm_groups || []
+  return ids.map((id) => {
+    const g = allPermGroups.value.find((x) => x.id === id)
+    return g ? g.name : ''
+  }).filter(Boolean)
+}
 
 async function load() {
   loading.value = true
   try {
     users.value = await Api.get('/api/v1/users')
+    allPermGroups.value = await Api.get('/api/v1/permission/groups').catch(() => [])
   } catch (e) {
     ElMessage.error('加载失败：' + e.message)
   } finally {
@@ -221,8 +252,19 @@ async function openEdit(u) {
   Object.assign(edit, {
     user: u, username: u.username, role: u.role, status: u.status,
     old_password: '', password: '', groups: [], scope: [], initialScope: '[]',
+    permGroups: [], permIds: (u.perm_groups || []).slice(), initialPerm: JSON.stringify((u.perm_groups || []).slice().sort()),
   })
   editDlg.value = true
+  if (showPermGroups.value) {
+    try {
+      const r = await Api.get('/api/v1/users/' + u.id + '/perm-groups')
+      edit.permGroups = r.groups || []
+      edit.permIds = (r.ids || []).slice()
+      edit.initialPerm = JSON.stringify((r.ids || []).slice().sort())
+    } catch (e) {
+      ElMessage.warning('权限组加载失败：' + e.message)
+    }
+  }
   if (showScope.value) {
     try {
       const r = await Api.get('/api/v1/users/' + u.id + '/groups')
@@ -249,6 +291,12 @@ async function saveUser() {
       const body = { new_password: edit.password }
       if (u.username === me.value.username) body.old_password = edit.old_password
       await Api.put('/api/v1/users/' + u.id + '/password', body)
+    }
+    if (showPermGroups.value) {
+      const ids = edit.permIds.slice().sort((a, b) => a - b)
+      if (JSON.stringify(ids) !== edit.initialPerm) {
+        await Api.put('/api/v1/users/' + u.id + '/perm-groups', { ids })
+      }
     }
     if (showScope.value) {
       const scope = edit.scope.slice().sort()

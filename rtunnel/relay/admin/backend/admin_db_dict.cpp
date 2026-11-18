@@ -299,3 +299,77 @@ bool AdminDb::dictBatchDelete(const std::string& kind, const std::vector<long lo
     json_out = out.dump();
     return true;
 }
+
+bool AdminDb::dictPage(const std::string& kind, const std::string& q, int page, int page_size,
+                       std::string& json_out) {
+    if (kind != "ports" && kind != "ttys") return false;
+    if (page < 1) page = 1;
+    if (page_size < 1) page_size = 10;
+    if (page_size > 200) page_size = 200;
+    const bool ports = kind == "ports";
+    std::lock_guard<std::mutex> lk(mu_);
+    std::string where;
+    if (!q.empty()) where = ports ? " WHERE CAST(port_start AS TEXT) LIKE ? OR name LIKE ?"
+                                  : " WHERE pattern LIKE ? OR name LIKE ?";
+
+    long long total = 0;
+    sqlite3_stmt* st = nullptr;
+    std::string csql = ports ? ("SELECT COUNT(*) FROM port_dict" + where)
+                             : ("SELECT COUNT(*) FROM tty_dict" + where);
+    if (sqlite3_prepare_v2(db_, csql.c_str(), -1, &st, nullptr) != SQLITE_OK) return false;
+    if (!q.empty()) {
+        std::string like = "%" + q + "%";
+        sqlite3_bind_text(st, 1, like.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 2, like.c_str(), -1, SQLITE_TRANSIENT);
+    }
+    if (sqlite3_step(st) == SQLITE_ROW) total = sqlite3_column_int64(st, 0);
+    sqlite3_finalize(st);
+
+    std::string sql = ports
+        ? ("SELECT id,port_start,port_end,name,description,enabled FROM port_dict" + where +
+           " ORDER BY port_start,port_end LIMIT ? OFFSET ?")
+        : ("SELECT id,pattern,name,description,kind,enabled FROM tty_dict" + where +
+           " ORDER BY pattern LIMIT ? OFFSET ?");
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return false;
+    int idx = 1;
+    if (!q.empty()) {
+        std::string like = "%" + q + "%";
+        sqlite3_bind_text(st, idx++, like.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, idx++, like.c_str(), -1, SQLITE_TRANSIENT);
+    }
+    sqlite3_bind_int(st, idx++, page_size);
+    sqlite3_bind_int(st, idx++, (page - 1) * page_size);
+
+    json items = json::array();
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        json j;
+        j["id"] = (long long)sqlite3_column_int64(st, 0);
+        if (ports) {
+            int lo = sqlite3_column_int(st, 1), hi = sqlite3_column_int(st, 2);
+            j["value"] = (lo == 1 && hi == 65535) ? "*"
+                : (lo == hi ? std::to_string(lo) : std::to_string(lo) + "-" + std::to_string(hi));
+            j["name"] = (const char*)sqlite3_column_text(st, 3);
+            j["description"] = (const char*)sqlite3_column_text(st, 4);
+            j["enabled"] = sqlite3_column_int(st, 5) != 0;
+            j["refs"] = portRefs(db_, j["id"].get<long long>());
+        } else {
+            j["value"] = (const char*)sqlite3_column_text(st, 1);
+            j["name"] = (const char*)sqlite3_column_text(st, 2);
+            j["description"] = (const char*)sqlite3_column_text(st, 3);
+            j["kind"] = (const char*)sqlite3_column_text(st, 4);
+            j["enabled"] = sqlite3_column_int(st, 5) != 0;
+            j["refs"] = ttyRefs(db_, j["id"].get<long long>());
+        }
+        items.push_back(j);
+    }
+    sqlite3_finalize(st);
+
+    json out;
+    out["kind"] = kind;
+    out["page"] = page;
+    out["page_size"] = page_size;
+    out["total"] = total;
+    out["items"] = items;
+    json_out = out.dump();
+    return true;
+}

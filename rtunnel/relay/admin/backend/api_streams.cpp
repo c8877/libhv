@@ -7,6 +7,24 @@
 
 using nlohmann::json;
 
+namespace {
+
+bool devAllowed(const std::vector<std::string>& mine, bool scoped, const char* devid) {
+    if (!scoped) return true;
+    return std::find(mine.begin(), mine.end(), std::string(devid ? devid : "")) != mine.end();
+}
+
+// 绑定了设备分组的 atk Token 只统计组内设备：agent 连接按 devid 过滤，
+// client 连接只有在与组内 agent 存在会话时才计入。
+bool clientRelevant(RelayConn* c, const std::vector<std::string>& mine, bool scoped) {
+    if (!scoped) return true;
+    for (RelayStream* s = c->streams; s; s = s->next_c)
+        if (s->a && devAllowed(mine, scoped, s->a->devid)) return true;
+    return false;
+}
+
+} // namespace
+
 void AdminServer::handleStreams(const HttpContextPtr& ctx) {
     bool all = !scopeRestricted();
     std::vector<std::string> mine = myDevids();
@@ -33,12 +51,17 @@ void AdminServer::handleStreams(const HttpContextPtr& ctx) {
 }
 
 void AdminServer::handleOverview(const HttpContextPtr& ctx) {
-    std::string body = callRelay([this]() {
+    // 只有“绑定分组的 Token”才收窄；普通账号仍看全局概览，保持原有观感
+    bool scoped = tokenScoped();
+    std::vector<std::string> mine = scoped ? myDevids() : std::vector<std::string>();
+    std::string body = callRelay([this, scoped, mine]() {
         json j;
         int nagent = 0, nclient = 0, nstream = 0;
         uint64_t in = 0, out = 0;
         for (RelayConn* c = relay_->conns; c; c = c->next_all) {
             if (!c->authed) continue;
+            if (c->role == rtnp::ROLE_AGENT && !devAllowed(mine, scoped, c->devid)) continue;
+            if (c->role == rtnp::ROLE_CLIENT && !clientRelevant(c, mine, scoped)) continue;
             if (c->role == rtnp::ROLE_AGENT) {
                 nagent++;
                 for (RelayStream* s = c->streams; s; s = s->next_c) nstream++;
@@ -57,6 +80,7 @@ void AdminServer::handleOverview(const HttpContextPtr& ctx) {
         j["version"] = hv_version();
         j["mtls"] = (bool)relay_->require_mtls;
         j["allow_all"] = (bool)relay_->allow_all;
+        j["scoped"] = scoped;
         return j.dump();
     });
     ctx->send(body);
@@ -64,11 +88,15 @@ void AdminServer::handleOverview(const HttpContextPtr& ctx) {
 
 // Prometheus 文本指标（text/plain）
 void AdminServer::handleMetrics(const HttpContextPtr& ctx) {
-    std::string body = callRelay([this]() {
+    bool scoped = tokenScoped();
+    std::vector<std::string> mine = scoped ? myDevids() : std::vector<std::string>();
+    std::string body = callRelay([this, scoped, mine]() {
         int nagent = 0, nclient = 0, nstream = 0;
         uint64_t in = 0, out = 0;
         for (RelayConn* c = relay_->conns; c; c = c->next_all) {
             if (!c->authed) continue;
+            if (c->role == rtnp::ROLE_AGENT && !devAllowed(mine, scoped, c->devid)) continue;
+            if (c->role == rtnp::ROLE_CLIENT && !clientRelevant(c, mine, scoped)) continue;
             if (c->role == rtnp::ROLE_AGENT) {
                 nagent++;
                 for (RelayStream* s = c->streams; s; s = s->next_c) nstream++;

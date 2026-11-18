@@ -1,5 +1,6 @@
 // 设备代理共用的 RTNP 帧工具
 #include "proxy_util.hpp"
+#include "rtnp/codec.hpp"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -97,7 +98,7 @@ std::string rtnpStr(const std::string& s) {
     return o;
 }
 
-std::string proxyUrlDecode(const std::string& in) {
+std::string urlDecode(const std::string& in) {
     std::string out;
     for (size_t i = 0; i < in.size(); ++i) {
         if (in[i] == '%' && i + 2 < in.size() && isxdigit((unsigned char)in[i + 1]) && isxdigit((unsigned char)in[i + 2])) {
@@ -217,13 +218,15 @@ int openTtyStream(const AdminConfig& cfg, const std::string& devid, const std::s
     return fd;
 }
 
-int openFsStream(const AdminConfig& cfg, const std::string& devid, bool rw, std::string& err) {
+// 打开设备内建服务流（OPEN_FS / OPEN_SVC）。payload 由调用方按各自协议拼好。
+static int openBuiltinStream(const AdminConfig& cfg, const std::string& devid, uint16_t flags,
+                             const std::string& payload, const char* tag, std::string& err) {
     int fd = tcpConnect("127.0.0.1", cfg.shell_relay_port, 5000);
     if (fd < 0) { err = "relay connect failed"; return -1; }
     std::string hello;
     hello.push_back(2);
     hello.push_back(1);
-    hello += rtnpStr("admin-fs");
+    hello += rtnpStr(tag);
     put32(hello, 0);
     sendFrame(fd, 0x01, 0, hello);
     uint8_t t; uint32_t sid; std::string p;
@@ -235,16 +238,28 @@ int openFsStream(const AdminConfig& cfg, const std::string& devid, bool rw, std:
     if (!recvFrame(fd, t, sid, p) || t != 0x04) { err = "auth failed"; close(fd); return -1; }
 
     std::string op = rtnpStr(devid);
-    op.push_back((char)(rw ? 1 : 0));
-    op.push_back((char)1);   // trusted：relay 已完成用户认证
-    sendFrame(fd, 0x10, 1, op, 0x0010);   // OPEN_FS
+    op += payload;
+    sendFrame(fd, 0x10, 1, op, flags);
     if (!recvFrame(fd, t, sid, p) || t != 0x11) {
         err = (t == 0x12 && p.size() > 2) ? ("open failed: " + p.substr(4)) : "open failed";
         close(fd);
         return -1;
     }
-    // 文件会话可能长时间空闲，去掉握手阶段的 5s 读超时
+    // 会话可能长时间空闲，去掉握手阶段的 5s 读超时
     struct timeval tv = {0, 0};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     return fd;
+}
+
+int openFsStream(const AdminConfig& cfg, const std::string& devid, bool rw, std::string& err) {
+    std::string op;
+    op.push_back((char)(rw ? 1 : 0));
+    op.push_back((char)1);   // trusted：relay 已完成用户认证
+    return openBuiltinStream(cfg, devid, rtnp::OPEN_FS, op, "admin-fs", err);
+}
+
+int openSvcStream(const AdminConfig& cfg, const std::string& devid, std::string& err) {
+    std::string op;
+    op.push_back((char)1);   // trusted：relay 已完成用户认证
+    return openBuiltinStream(cfg, devid, rtnp::OPEN_SVC, op, "admin-svc", err);
 }

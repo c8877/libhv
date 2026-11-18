@@ -1,6 +1,6 @@
 # 权限与分组详细设计
 
-状态：设计稿  
+状态：已实现（管理台页面设计见 `docs/admin/permission.md`）
 范围：管理台权限页、A 侧客户端 ACL、agent 资源分组  
 替代：原 `docs/acl.md`
 

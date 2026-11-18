@@ -1,6 +1,7 @@
 // 设备 WebSocket 代理
 #include "admin_server.hpp"
 #include "proxy_util.hpp"
+#include "util/base64.h"
 
 #include <memory>
 #include <mutex>
@@ -27,20 +28,6 @@ struct WsProxySession {
 
 std::mutex g_ws_mu;
 std::unordered_map<hv::WebSocketChannel*, std::shared_ptr<WsProxySession>> g_ws;
-
-std::string b64(const unsigned char* p, size_t n) {
-    static const char* t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string o;
-    for (size_t i = 0; i < n; i += 3) {
-        unsigned v = p[i] << 16;
-        if (i + 1 < n) v |= p[i + 1] << 8;
-        if (i + 2 < n) v |= p[i + 2];
-        o += t[(v >> 18) & 63]; o += t[(v >> 12) & 63];
-        o += (i + 1 < n) ? t[(v >> 6) & 63] : '=';
-        o += (i + 2 < n) ? t[v & 63] : '=';
-    }
-    return o;
-}
 
 std::string buildClientFrame(const std::string& payload, int opcode) {
     std::string f;
@@ -144,7 +131,7 @@ bool deviceWsHandshake(int fd, const std::string& devid, int port, const std::st
     for (int i = 0; i < 16; ++i) rnd[i] = (unsigned char)(rd() & 0xff);
     std::string req = "GET " + sub + " HTTP/1.1\r\nHost: " + devid + ":" + std::to_string(port) + "\r\n";
     req += "Upgrade: websocket\r\nConnection: Upgrade\r\n";
-    req += "Sec-WebSocket-Key: " + b64(rnd, 16) + "\r\nSec-WebSocket-Version: 13\r\n";
+    req += "Sec-WebSocket-Key: " + hv::Base64Encode(rnd, 16) + "\r\nSec-WebSocket-Version: 13\r\n";
     if (!proto.empty()) req += "Sec-WebSocket-Protocol: " + proto + "\r\n";
     if (!cookie.empty()) req += "Cookie: " + cookie + "\r\n";
     req += "\r\n";
@@ -169,7 +156,7 @@ void AdminServer::handleDeviceWsOpen(const WebSocketChannelPtr& channel, const H
     std::string rest = path.substr(8);
     size_t s1 = rest.find('/');
     if (s1 == std::string::npos) { channel->close(); return; }
-    std::string devid = proxyUrlDecode(rest.substr(0, s1));
+    std::string devid = urlDecode(rest.substr(0, s1));
     rest = rest.substr(s1 + 1);
     size_t s2 = rest.find('/');
     std::string port_s = (s2 == std::string::npos) ? rest : rest.substr(0, s2);
@@ -179,12 +166,12 @@ void AdminServer::handleDeviceWsOpen(const WebSocketChannelPtr& channel, const H
 
     std::string role;
     AdminActor actor;
-    if (!wsAuthorize(req, actor, role) ||
-        (role != "admin" && role != "manager" && role != "operator") || !ownsDevid(devid)) {
+    if (!wsAuthorize(req, actor, role) || !hasPerm("device.terminal") || !ownsDevid(devid)) {
         channel->close();
         return;
     }
 
+    audit(role, "proxy.open", devid + ":" + port_s);
     std::string err;
     int fd = openStream(cfg_, devid, port, err);
     if (fd < 0) { channel->close(); return; }

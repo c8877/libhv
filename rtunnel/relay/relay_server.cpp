@@ -186,11 +186,21 @@ void RelayServer::dropPendingFor(RelayConn* a) {
     }
 }
 
-void RelayServer::setGroupAcl(std::vector<GroupAclRule> rules, std::set<std::string> users) {
+void RelayServer::setGroupAcl(std::vector<GroupAclRule> rules, std::set<std::string> users,
+                              std::set<long long> scoped_tokens) {
     acl_groups = std::move(rules);
     acl_grouped_users = std::move(users);
-    if (verbose) logf_("[relay] group acl: %zu rules, %zu grouped users",
-                       acl_groups.size(), acl_grouped_users.size());
+    acl_scoped_tokens = std::move(scoped_tokens);
+    if (verbose) logf_("[relay] group acl: %zu rules, %zu grouped users, %zu scoped tokens",
+                       acl_groups.size(), acl_grouped_users.size(), acl_scoped_tokens.size());
+}
+
+// 规则是否适用于本次连接：配了 rtk 权限组的令牌只认令牌级规则（哪怕规则为空 = 拒绝），
+// 未配组的令牌用账号级规则（token_id=0）
+bool RelayServer::groupAclApplies(const GroupAclRule& r, const char* user, long long token_id) const {
+    if (r.user != user) return false;
+    if (token_id != 0 && acl_scoped_tokens.count(token_id)) return r.token_id == token_id;
+    return r.token_id == 0;
 }
 
 // ---------------------------------------------------------------- Token 运行时
@@ -445,23 +455,27 @@ static bool aclTtyAllowed(const std::string& ttys, const char* path) {
     return false;
 }
 
-bool RelayServer::groupAclDevice(const char* user, const char* devid) {
+bool RelayServer::groupAclDevice(const char* user, long long token_id, const char* devid) {
     for (auto& r : acl_groups) {
-        if (r.user != user) continue;
+        if (!groupAclApplies(r, user, token_id)) continue;
         if (pattern_match(r.devid.c_str(), devid)) return true;
     }
     return false;
 }
 
-bool RelayServer::groupAclCheck(const char* user, const char* devid, uint16_t port,
-                                int is_shell, const char* tty_path) {
+bool RelayServer::groupAclCheck(const char* user, long long token_id, const char* devid, uint16_t port,
+                                int is_shell, const char* tty_path, int is_fs, int fs_rw, int is_svc) {
     for (auto& r : acl_groups) {
-        if (r.user != user) continue;
+        if (!groupAclApplies(r, user, token_id)) continue;
         if (!pattern_match(r.devid.c_str(), devid)) continue;
         if (is_shell) {
             if (r.shell) return true;
         } else if (tty_path && tty_path[0]) {
             if (aclTtyAllowed(r.tty, tty_path)) return true;
+        } else if (is_fs) {
+            if (r.file >= (fs_rw ? 2 : 1)) return true;
+        } else if (is_svc) {
+            if (r.svc) return true;
         } else if (aclPortAllowed(r.ports, port)) {
             return true;
         }
@@ -1394,7 +1408,8 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         int online = 0;
         uint32_t active = 0;
         bool allowed = c->authed && c->role == rtnp::ROLE_CLIENT &&
-            (acl_grouped_users.count(c->user) ? groupAclDevice(c->user, devid) : aclCheck(c->user, devid));
+            (acl_grouped_users.count(c->user) ? groupAclDevice(c->user, c->token_id, devid)
+                                              : aclCheck(c->user, devid));
         // 查询限速：超限按离线处理，不返回 ERROR（客户端会把 ERROR 当作认证失败断链）
         if (!r.err && allowed && !tokenRateAllow(c, NULL)) allowed = false;
         if (!r.err && allowed) {
@@ -1427,16 +1442,18 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             rtnp::Reader r(f->payload, f->len);
             char devid[128] = {0};
             r.str(devid, sizeof(devid));
-            // OPEN_SHELL/OPEN_FS 无目标端口（设备侧内建服务），port=0 合法；普通 OPEN 必须非 0
+            // 内建服务（shell/tty/文件/服务管理）无目标端口，port=0 合法；普通 OPEN 必须非 0
             bool is_shell = (f->flags & rtnp::OPEN_SHELL) != 0;
             bool is_tty = (f->flags & rtnp::OPEN_TTY) != 0;
             bool is_fs = (f->flags & rtnp::OPEN_FS) != 0;
+            bool is_svc = (f->flags & rtnp::OPEN_SVC) != 0;
             uint16_t port = 0;
             uint8_t fs_rw = 0;
-            if (is_fs) {
-                fs_rw = r.u8();
+            if (is_fs || is_svc) {
+                if (is_fs) fs_rw = r.u8();
                 r.u8();   // trusted：客户端值忽略，relay 转发时重写
-            } else {
+            } else if (!is_tty) {
+                // OPEN_TTY 的 payload 是 devid + tty_devid + tty_path + termios，没有端口
                 port = r.u16();
             }
             char tty_path[256] = {0};
@@ -1445,7 +1462,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
                 r.str(tdev, sizeof(tdev));
                 r.str(tty_path, sizeof(tty_path));
             }
-            if (r.err || devid[0] == '\0' || (!is_shell && !is_tty && !is_fs && port == 0)) {
+            if (r.err || devid[0] == '\0' || (!is_shell && !is_tty && !is_fs && !is_svc && port == 0)) {
                 sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::PROTOCOL_ERROR, "bad open");
                 return;
             }
@@ -1476,10 +1493,9 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             }
             bool grouped = acl_grouped_users.count(c->user) != 0;
             bool acl_ok = grouped
-                ? groupAclCheck(c->user, devid, port, is_shell ? 1 : 0, tty_path)
+                ? groupAclCheck(c->user, c->token_id, devid, port, is_shell ? 1 : 0, tty_path,
+                                is_fs ? 1 : 0, (int)fs_rw, is_svc ? 1 : 0)
                 : aclCheck(c->user, devid);
-            // 文件管理是设备级能力，分组 ACL 没配端口时按设备级 ACL 放行
-            if (is_fs && !acl_ok) acl_ok = aclCheck(c->user, devid) != 0;
             if (!acl_ok) {
                 sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::ACL_DENIED, "acl denied");
                 return;
@@ -1518,6 +1534,10 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
                 // payload: u8 want_rw + u8 trusted。relay 已完成认证，trusted 由 relay 填写，
                 // agent 侧据此跳过本地 file-token 校验（本地 Web 入口仍会校验）。
                 char pl[2] = {(char)(fs_rw ? 1 : 0), 1};
+                rtnp::send(agent->io, rtnp::OPEN, s->c_sid, pl, sizeof(pl), f->flags);
+            } else if (is_svc) {
+                // payload: u8 trusted。是否可写由 agent 的 --svc-rw 决定
+                char pl[1] = {1};
                 rtnp::send(agent->io, rtnp::OPEN, s->c_sid, pl, sizeof(pl), f->flags);
             } else {
                 rtnp::Writer w;

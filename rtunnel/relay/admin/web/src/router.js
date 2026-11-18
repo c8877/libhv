@@ -1,5 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { auth, ensureBoot, roleOf } from './shared/store.js'
+import { auth, ensureBoot, roleOf, can } from './shared/store.js'
 import { canVisit } from './shared/nav.js'
 import { setUnauthorizedHandler } from './shared/api.js'
 
@@ -11,10 +11,15 @@ const routes = [
   { path: '/agents/:devid', component: () => import('./pages/agents/[devid].vue'), meta: { title: '设备详情' } },
   { path: '/terminal/:devid', component: () => import('./pages/terminal/[devid].vue'), meta: { title: '终端' } },
   { path: '/tty/:devid/:alias', component: () => import('./pages/tty/console.vue'), meta: { title: '串口调试' } },
-  { path: '/permission', component: () => import('./pages/permission.vue'), meta: { title: '权限' } },
+  { path: '/permission', redirect: '/groups' },
+  { path: '/groups', component: () => import('./pages/perm-groups.vue'), meta: { title: '权限组' } },
+  { path: '/subjects', component: () => import('./pages/subjects.vue'), meta: { title: '授权对象' } },
+  { path: '/dicts', component: () => import('./pages/dicts.vue'), meta: { title: '字典库' } },
   { path: '/clients', component: () => import('./pages/clients.vue'), meta: { title: '客户端 A' } },
   { path: '/access', component: () => import('./pages/access/index.vue'), meta: { title: '接入账号' } },
   { path: '/access/:id', component: () => import('./pages/access/[id].vue'), meta: { title: '接入账号详情' } },
+  { path: '/tokens', component: () => import('./pages/tokens.vue'), meta: { title: 'API Token' } },
+  { path: '/docs', component: () => import('./pages/docs.vue'), meta: { title: '接口文档' } },
   { path: '/streams', component: () => import('./pages/streams.vue'), meta: { title: '会话' } },
   { path: '/certs', component: () => import('./pages/certs.vue'), meta: { title: '证书' } },
   { path: '/accounts', component: () => import('./pages/accounts.vue'), meta: { title: '账号' } },
@@ -38,7 +43,7 @@ router.beforeEach(async (to) => {
   await ensureBoot()
   if (!to.meta.public && !auth.me) return { path: '/login', replace: true }
   if (to.path === '/login' && auth.me) return { path: '/', replace: true }
-  if (!to.meta.public && auth.me && !canVisit(to.path, roleOf())) return { path: '/overview', replace: true }
+  if (!to.meta.public && auth.me && !canVisit(to.path, roleOf(), can)) return { path: '/overview', replace: true }
   document.title = (to.meta.title ? to.meta.title + ' · ' : '') + 'rtunnel'
   return true
 })

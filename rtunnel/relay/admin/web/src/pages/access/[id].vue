@@ -47,6 +47,24 @@
 
     <div class="panel">
       <div class="panel-head">
+        <h2>资源权限组</h2>
+        <span class="muted">rtk Token 调用管理台 API 时按这些组的资源与设备鉴权；令牌权限不会超过所属接入账号</span>
+        <span class="spacer" />
+        <el-button v-if="can('account.write')" size="small" type="primary"
+                   :loading="permSaving" @click="savePermGroups">保存权限组</el-button>
+      </div>
+      <div v-if="!permGroups.length" class="muted empty-perm">暂无权限组，先到「权限组」页创建。</div>
+      <el-checkbox-group v-else v-model="permIds" :disabled="!can('account.write')" class="perm-grid">
+        <el-checkbox v-for="g in permGroups" :key="g.id" :value="g.id" class="perm-item">
+          <b>{{ g.name }}</b>
+          <span class="muted">{{ g.super ? '全部资源' : (g.resources || []).length + ' 项' }}</span>
+          <span v-if="g.builtin_key" class="muted">· 预置</span>
+        </el-checkbox>
+      </el-checkbox-group>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
         <h2>Token</h2>
         <span class="muted">共 {{ tokens.length }} 个</span>
         <span class="spacer" />
@@ -213,7 +231,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Api } from '@/shared/api.js'
-import { canManage, roleOf } from '@/shared/store.js'
+import { can, canManage, roleOf } from '@/shared/store.js'
 import { bytes, copyText, time } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 
@@ -231,6 +249,10 @@ const gone = ref(false)
 const loading = ref(false)
 const saving = ref(false)
 const filter = ref('all')
+
+const permGroups = ref([])
+const permIds = ref([])
+const permSaving = ref(false)
 
 const accDlg = ref(false)
 const accForm = reactive({ display_name: '', note: '' })
@@ -308,12 +330,27 @@ async function load() {
   } finally {
     loading.value = false
   }
-  const [tk, ef] = await Promise.all([
+  const [tk, ef, pg] = await Promise.all([
     Api.get('/api/v1/client-accounts/' + id.value + '/tokens').catch(() => []),
     Api.get('/api/v1/client-accounts/' + id.value + '/effective').catch(() => null),
+    Api.get('/api/v1/client-accounts/' + id.value + '/perm-groups').catch(() => null),
   ])
   tokens.value = Array.isArray(tk) ? tk : []
   eff.value = ef
+  permGroups.value = (pg && pg.groups) || []
+  permIds.value = (pg && pg.ids) || []
+}
+
+async function savePermGroups() {
+  permSaving.value = true
+  try {
+    await Api.put('/api/v1/client-accounts/' + id.value + '/perm-groups', { ids: permIds.value })
+    ElMessage.success('权限组已保存')
+  } catch (e) {
+    ElMessage.error('保存失败：' + e.message)
+  } finally {
+    permSaving.value = false
+  }
 }
 
 function openAccountEdit() {
@@ -539,5 +576,12 @@ onMounted(load)
 :deep(.el-table .cell) { white-space: normal; }
 @media (max-width: 599px) {
   .panel-head { flex-wrap: wrap; }
+}
+.perm-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 18px; }
+.perm-item { height: auto; margin: 0; padding: 4px 0; }
+.perm-item b { margin-right: 6px; }
+.empty-perm { padding: 10px 0; }
+@media (max-width: 599px) {
+  .perm-grid { grid-template-columns: 1fr; }
 }
 </style>

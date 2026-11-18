@@ -28,7 +28,8 @@ static void fillConnCommon(RelayConn* c, json& j) {
 void AdminServer::handleAgents(const HttpContextPtr& ctx) {
     bool all = !scopeRestricted();
     std::vector<std::string> mine = myDevids();
-    std::string body = callRelay([this, all, mine]() {
+    std::vector<std::tuple<std::string, std::string>> seen;
+    std::string body = callRelay([this, all, mine, &seen]() {
         json arr = json::array();
         for (RelayConn* c = relay_->conns; c; c = c->next_all) {
             if (c->role != rtnp::ROLE_AGENT || !c->authed) continue;
@@ -49,10 +50,21 @@ void AdminServer::handleAgents(const HttpContextPtr& ctx) {
                 j["version"] = vt == relay_->agent_versions.end() ? "" : vt->second;
             }
             fillConnCommon(c, j);
+            seen.emplace_back(c->devid, j.value("version", std::string()));
             arr.push_back(j);
         }
         return arr.dump();
     });
+    // 设备资源表跟随全量在线列表刷新；受限账号只看到部分设备，不能据此标记其它设备离线
+    if (all) {
+        std::vector<std::string> online;
+        long long now = AdminDb::nowMs();
+        for (auto& s : seen) {
+            db_.resDeviceSync(std::get<0>(s), "", std::get<1>(s), 1, now);
+            online.push_back(std::get<0>(s));
+        }
+        db_.resDevicesMarkOffline(online);
+    }
     ctx->send(body);
 }
 
@@ -117,14 +129,32 @@ void AdminServer::handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& a
     bool has_fs_root = req.contains("fs_root");
     bool has_fs_rw = req.contains("fs_rw");
     bool has_fs_max = req.contains("fs_max_mb");
-    if (!has_ports && !has_shell && !has_dir && !has_fs && !has_fs_root && !has_fs_rw && !has_fs_max) {
+    bool has_svc = req.contains("svc");
+    bool has_svc_rw = req.contains("svc_rw");
+    bool has_ota = req.contains("ota");
+    bool has_tty = req.contains("allow_tty");
+    if (!has_ports && !has_shell && !has_dir && !has_fs && !has_fs_root && !has_fs_rw && !has_fs_max &&
+        !has_svc && !has_svc_rw && !has_ota && !has_tty) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"nothing to update\"}");
         return;
     }
-    if ((has_fs || has_fs_root || has_fs_rw || has_fs_max) && (actor.role == "operator" || actor.role == "viewer")) {
+    // 每个字段组独立资源：能力配置 / OTA 开关 / 串口白名单
+    if ((has_ports || has_shell || has_dir || has_fs || has_fs_root || has_fs_rw || has_fs_max ||
+         has_svc || has_svc_rw) &&
+        !hasPerm("device.caps.write")) {
         ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
-        ctx->send("{\"error\":\"file capability requires manager\"}");
+        ctx->send("{\"error\":\"forbidden\",\"need\":\"device.caps.write\"}");
+        return;
+    }
+    if (has_ota && !hasPerm("device.ota.write")) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\",\"need\":\"device.ota.write\"}");
+        return;
+    }
+    if (has_tty && !hasPerm("device.tty.write")) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\",\"need\":\"device.tty.write\"}");
         return;
     }
     if (has_ports) {
@@ -209,12 +239,61 @@ void AdminServer::handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& a
         }
         out["fs_max_mb"] = v;
     }
-    if (has_shell) {
-        if (actor.role != "admin") {
-            ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
-            ctx->send("{\"error\":\"shell capability requires admin\"}");
+    if (has_svc) {
+        if (!req["svc"].is_boolean()) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"svc must be bool\"}");
             return;
         }
+        out["svc"] = req["svc"].get<bool>();
+    }
+    if (has_svc_rw) {
+        if (!req["svc_rw"].is_boolean()) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"svc_rw must be bool\"}");
+            return;
+        }
+        out["svc_rw"] = req["svc_rw"].get<bool>();
+    }
+    if (has_ota) {
+        if (!req["ota"].is_boolean()) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"ota must be bool\"}");
+            return;
+        }
+        out["ota"] = req["ota"].get<bool>();
+    }
+    if (has_tty) {
+        if (!req["allow_tty"].is_array() || req["allow_tty"].size() > 16) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"allow_tty must be array (max 16)\"}");
+            return;
+        }
+        nlohmann::json arr = nlohmann::json::array();
+        size_t total = 0;
+        for (auto& v : req["allow_tty"]) {
+            if (!v.is_string()) {
+                ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+                ctx->send("{\"error\":\"bad tty path\"}");
+                return;
+            }
+            std::string p = v.get<std::string>();
+            if (p.empty() || p[0] != '/' || p.size() > 200 || p.find("..") != std::string::npos) {
+                ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+                ctx->send("{\"error\":\"bad tty path\"}");
+                return;
+            }
+            total += p.size() + 1;
+            arr.push_back(p);
+        }
+        if (total > 500) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"allow_tty too long\"}");
+            return;
+        }
+        out["allow_tty"] = arr;
+    }
+    if (has_shell) {
         if (!req["shell"].is_boolean()) {
             ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
             ctx->send("{\"error\":\"shell must be bool\"}");

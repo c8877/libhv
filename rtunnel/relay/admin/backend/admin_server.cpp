@@ -1,6 +1,7 @@
 #include "admin_server.hpp"
 #include "admin_tls.hpp"
 #include "common/logging.hpp"
+#include "common/token_util.hpp"
 #include "cpputil/json.hpp"
 
 using nlohmann::json;
@@ -89,33 +90,66 @@ std::string AdminServer::roleOf(const HttpContextPtr& ctx) {
             tl_actor.id = u.id;
             tl_actor.username = u.username;
             tl_actor.role = u.role;
+            loadActorPerms();
             return u.role;
         }
     }
 
-    // 2) 首次初始化前，或显式配置了紧急 token 时，允许 Bearer
+    // 2) 管理台 API Token（atk-）：不受数据库初始化状态影响
     bool initialized = db_.ok() && db_.initialized();
-    if (!cfg_.token.empty()) {
-        std::string auth = ctx->header("Authorization");
-        const std::string prefix = "Bearer ";
-        if (auth.compare(0, prefix.size(), prefix) == 0) {
-            std::string tok = auth.substr(prefix.size());
-            if (!cfg_.token.empty() && tok == cfg_.token) {
-                bool allow = !initialized;
-                if (allow) {
-                    // 初始化前 token 只放行 setup 接口
-                    if (ctx->request->path.find("/api/v1/setup") != 0) allow = false;
-                }
-                if (allow) {
-                    tl_actor.username = "bootstrap";
-                    tl_actor.role = "admin";
-                    return "admin";
-                }
-            }
+    std::string auth = ctx->header("Authorization");
+    const std::string prefix = "Bearer ";
+    if (auth.compare(0, prefix.size(), prefix) != 0) return "";
+    std::string tok = auth.substr(prefix.size());
+
+    if (rtutil::isAdminToken(tok) && db_.ok()) {
+        DbUser u;
+        long long token_id = 0;
+        std::string err;
+        std::string ip = ctx->request ? ctx->request->client_addr.ip : "";
+        if (db_.adminTokenAuth(AdminDb::sha256Hex(tok), AdminDb::nowMs(), ip, u, token_id, err)) {
+            tl_actor.id = u.id;
+            tl_actor.username = u.username;
+            tl_actor.role = u.role;
+            tl_actor.token_id = token_id;
+            loadActorPerms();
+            return u.role;
         }
         return "";
     }
 
+    // 2b) 接入账号 Token（rtk_）：继承所在权限组的资源
+    if (rtutil::isClientToken(tok) && db_.ok()) {
+        long long account_id = 0, token_id = 0;
+        std::string uname, err;
+        std::string ip = ctx->request ? ctx->request->client_addr.ip : "";
+        if (db_.clientTokenAuth(AdminDb::sha256Hex(tok), AdminDb::nowMs(), ip, account_id, uname, token_id,
+                                err)) {
+            tl_actor.username = uname;
+            tl_actor.role = "client";
+            tl_actor.token_id = token_id;
+            tl_actor.is_client = true;
+            tl_actor.client_id = account_id;
+            loadActorPerms();
+            return "client";
+        }
+        return "";
+    }
+
+    // 3) 首次初始化前，或显式配置了紧急 token 时，允许 Bearer
+    if (!cfg_.token.empty() && tok == cfg_.token) {
+        bool allow = !initialized;
+        if (allow) {
+            // 初始化前 token 只放行 setup 接口
+            if (ctx->request->path.find("/api/v1/setup") != 0) allow = false;
+        }
+        if (allow) {
+            tl_actor.username = "bootstrap";
+            tl_actor.role = "admin";
+            tl_actor.super = true;
+            return "admin";
+        }
+    }
     return "";
 }
 
@@ -125,6 +159,54 @@ static int roleWeight(const std::string& role) {
     if (role == "operator") return ROLE_OPERATOR;
     if (role == "viewer") return ROLE_VIEWER;
     return 0;
+}
+
+void AdminServer::loadActorPerms() {
+    tl_actor.perms.clear();
+    tl_actor.devices.clear();
+    tl_actor.super = false;
+    tl_actor.all_devices = false;
+    tl_actor.token_scoped = false;
+    DbPermScope sc;
+    if (!db_.ok()) {
+        tl_actor.super = tl_actor.role == "admin";
+        return;
+    }
+    if (tl_actor.is_client) {
+        if (tl_actor.token_id > 0) db_.permScopeOfClientToken(tl_actor.token_id, tl_actor.client_id, sc);
+        else db_.permScopeOfClient(tl_actor.client_id, sc);
+    } else if (tl_actor.token_id > 0 && tl_actor.id > 0) {
+        db_.permScopeOfAdminToken(tl_actor.token_id, tl_actor.id, tl_actor.role, sc);
+    } else if (tl_actor.id > 0) {
+        db_.permScopeOfUser(tl_actor.id, tl_actor.role, sc);
+    } else {
+        tl_actor.super = tl_actor.role == "admin";
+        return;
+    }
+    tl_actor.super = sc.super;
+    tl_actor.all_devices = sc.all_devices;
+    tl_actor.token_scoped = sc.token_groups;
+    tl_actor.perms = sc.resources;
+    tl_actor.devices = sc.devices;
+}
+
+bool AdminServer::hasPerm(const std::string& key) const {
+    return tl_actor.super || tl_actor.perms.count(key) > 0;
+}
+
+int AdminServer::requirePerm(const HttpContextPtr& ctx, const std::string& need, std::string& role) {
+    role = roleOf(ctx);
+    if (role.empty()) {
+        ctx->response->status_code = HTTP_STATUS_UNAUTHORIZED;
+        ctx->response->content_type = APPLICATION_JSON;
+        ctx->response->body = "{\"error\":\"unauthorized\"}";
+        return 401;
+    }
+    if (need.empty() || need == "auth" || tl_actor.super || tl_actor.perms.count(need) > 0) return 0;
+    ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+    ctx->response->content_type = APPLICATION_JSON;
+    ctx->response->body = "{\"error\":\"forbidden\",\"need\":\"" + need + "\"}";
+    return 403;
 }
 
 int AdminServer::requireRole(const HttpContextPtr& ctx, int need, std::string& role) {
@@ -162,18 +244,63 @@ bool AdminServer::wsAuthorize(const HttpRequestPtr& req, AdminActor& actor, std:
         if (db_.getSession(AdminDb::sha256Hex(ck.value), u, AdminDb::nowMs())) {
             actor.id = u.id; actor.username = u.username; actor.role = u.role;
             role = u.role;
+            tl_actor = actor;   // 供随后的 ownsDevid() 使用，避免沿用上一个请求的身份
+            loadActorPerms();
+            actor = tl_actor;
             return true;
         }
     }
-    // 初始化前仅放行 /api/v1/setup*
+    // API Token：浏览器 WebSocket 不能自定义头，脚本可用 ?atk= 或 Authorization
+    std::vector<std::string> cand;
+    std::string qtok = req->GetParam("atk");
+    if (!qtok.empty()) cand.push_back(qtok);
     std::string auth = req->GetHeader("Authorization");
     const std::string prefix = "Bearer ";
+    if (auth.compare(0, prefix.size(), prefix) == 0) cand.push_back(auth.substr(prefix.size()));
+    for (const auto& tok : cand) {
+        if (rtutil::isAdminToken(tok) && db_.ok()) {
+            DbUser u;
+            long long token_id = 0;
+            std::string err;
+            std::string ip = req->client_addr.ip;
+            if (db_.adminTokenAuth(AdminDb::sha256Hex(tok), AdminDb::nowMs(), ip, u, token_id, err)) {
+                actor.id = u.id; actor.username = u.username; actor.role = u.role;
+                actor.token_id = token_id;
+                role = u.role;
+                tl_actor = actor;
+                loadActorPerms();
+                actor = tl_actor;
+                return true;
+            }
+            return false;
+        }
+        if (rtutil::isClientToken(tok) && db_.ok()) {
+            long long account_id = 0, token_id = 0;
+            std::string uname, err;
+            if (db_.clientTokenAuth(AdminDb::sha256Hex(tok), AdminDb::nowMs(), req->client_addr.ip,
+                                    account_id, uname, token_id, err)) {
+                actor.username = uname;
+                actor.role = "client";
+                actor.token_id = token_id;
+                actor.is_client = true;
+                actor.client_id = account_id;
+                role = "client";
+                tl_actor = actor;
+                loadActorPerms();
+                actor = tl_actor;
+                return true;
+            }
+            return false;
+        }
+    }
+    // 初始化前仅放行 /api/v1/setup*
     if (auth.compare(0, prefix.size(), prefix) == 0) {
         std::string tok = auth.substr(prefix.size());
         bool initialized = db_.ok() && db_.initialized();
         if (!cfg_.token.empty() && tok == cfg_.token && !initialized) {
             actor.id = 0; actor.username = "bootstrap"; actor.role = "admin";
             role = "admin";
+            tl_actor = actor;
             return true;
         }
     }
@@ -193,13 +320,16 @@ int AdminServer::serveFrontend(const HttpContextPtr& ctx, const char* name, cons
         return 404;
     }
     auto read_file = [](const std::string& path, std::string& body) -> bool {
+        // 目录也能 fopen 成功，且 ftell 返回 LONG_MAX；必须先确认是普通文件，
+        // 否则 body.resize() 会抛 length_error 把整个 relay 带崩（/assets/ 即可触发）。
+        struct stat st{};
+        if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) return false;
+        if (st.st_size <= 0 || st.st_size > 64 * 1024 * 1024) return false;
         FILE* fp = fopen(path.c_str(), "rb");
         if (!fp) return false;
-        fseek(fp, 0, SEEK_END);
-        long n = ftell(fp);
-        fseek(fp, 0, SEEK_SET);
-        body.resize(n > 0 ? n : 0);
-        bool ok = n > 0 && fread(&body[0], 1, n, fp) == (size_t)n;
+        long n = (long)st.st_size;
+        body.resize((size_t)n);
+        bool ok = fread(&body[0], 1, (size_t)n, fp) == (size_t)n;
         fclose(fp);
         if (!ok) body.clear();
         return ok;
@@ -276,6 +406,8 @@ int AdminServer::start(const AdminConfig& cfg) {
             loadSettings();
             db_.permMigrateLegacy();
             db_.permSyncDictIds();
+            db_.permSeed();
+            db_.permMigrateGroups();
             db_.distRecover();
             logf_("[admin] db: %s", cfg_.db_path.c_str());
         } else {

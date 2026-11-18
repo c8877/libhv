@@ -155,11 +155,16 @@ void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequest
         return;
     }
     if (req->path.compare(0, 8, "/ws/tty/") == 0) {
-        handleTtyWsOpen(channel, req);
+        // 缺少 /<alias> 时鉴权不会执行，必须显式断开，避免留下空连接
+        if (!handleTtyWsOpen(channel, req)) channel->close();
         return;
     }
     if (req->path.compare(0, 7, "/ws/fs/") == 0) {
         handleFsWsOpen(channel, req);
+        return;
+    }
+    if (req->path.compare(0, 8, "/ws/svc/") == 0) {
+        handleSvcWsOpen(channel, req);
         return;
     }
     // 权限：query 里的 token（浏览器 WebSocket 无法自定义 Authorization 头）
@@ -182,7 +187,7 @@ void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequest
             return;
         }
     }
-    if (role != "admin" && role != "manager" && role != "operator") {
+    if (!hasPerm("device.terminal")) {
         logf_("[terminal] reject: unauthorized (devid=%s)", devid.c_str());
         channel->close();
         return;
@@ -207,7 +212,7 @@ void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequest
 
 void AdminServer::onWsMessage(const WebSocketChannelPtr& channel, const std::string& msg) {
     if (handleTtyWsMessage(channel, msg)) return;
-    if (handleFsWsMessage(channel, msg)) return;
+    if (handleAgentWsMessage(channel, msg)) return;
     if (handleDeviceWsMessage(channel, msg)) return;
     auto it = terms_.find(channel.get());
     if (it == terms_.end()) return;
@@ -238,7 +243,7 @@ void AdminServer::onWsMessage(const WebSocketChannelPtr& channel, const std::str
 
 void AdminServer::onWsClose(const WebSocketChannelPtr& channel) {
     if (handleTtyWsClose(channel)) return;
-    if (handleFsWsClose(channel)) return;
+    if (handleAgentWsClose(channel)) return;
     if (handleDeviceWsClose(channel)) return;
     auto it = terms_.find(channel.get());
     if (it == terms_.end()) return;

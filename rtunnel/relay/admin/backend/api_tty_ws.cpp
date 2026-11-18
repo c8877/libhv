@@ -3,6 +3,7 @@
 #include "proxy_util.hpp"
 #include "cpputil/json.hpp"
 #include "common/logging.hpp"
+#include "util/base64.h"
 
 #include <atomic>
 #include <dirent.h>
@@ -32,41 +33,13 @@ struct TtyWsSession {
 std::mutex g_tty_mu;
 std::map<hv::WebSocketChannel*, std::shared_ptr<TtyWsSession>> g_tty_ws;
 
-std::string b64encode(const unsigned char* p, size_t n) {
-    static const char* tb = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string o;
-    for (size_t i = 0; i < n; i += 3) {
-        unsigned v = p[i] << 16;
-        if (i + 1 < n) v |= p[i + 1] << 8;
-        if (i + 2 < n) v |= p[i + 2];
-        o += tb[(v >> 18) & 63]; o += tb[(v >> 12) & 63];
-        o += (i + 1 < n) ? tb[(v >> 6) & 63] : '=';
-        o += (i + 2 < n) ? tb[v & 63] : '=';
-    }
-    return o;
-}
-
 void capWrite(TtyWsSession* s, const char* dir, const unsigned char* p, size_t n) {
     if (!s->cap) return;
     std::lock_guard<std::mutex> lk(s->cap_mu);
+    std::string data = hv::Base64Encode(p, (unsigned)n);
     fprintf(s->cap, "{\"ts\":%lld,\"dir\":\"%s\",\"len\":%zu,\"data\":\"%s\"}\n",
-            (long long)time(NULL) * 1000, dir, n, b64encode(p, n).c_str());
+            (long long)time(NULL) * 1000, dir, n, data.c_str());
     fflush(s->cap);
-}
-
-std::string b64decode(const std::string& in) {
-    static const std::string tb = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    int val = 0, bits = -8;
-    std::string out;
-    for (unsigned char c : in) {
-        if (c == '=') break;
-        size_t p = tb.find((char)c);
-        if (p == std::string::npos) continue;
-        val = (val << 6) + (int)p;
-        bits += 6;
-        if (bits >= 0) { out.push_back((char)((val >> bits) & 0xFF)); bits -= 8; }
-    }
-    return out;
 }
 
 } // namespace
@@ -76,13 +49,14 @@ bool AdminServer::handleTtyWsOpen(const WebSocketChannelPtr& channel, const Http
     std::string rest = req->path.substr(8);
     size_t s1 = rest.find('/');
     if (s1 == std::string::npos) return false;
-    std::string devid = proxyUrlDecode(rest.substr(0, s1));
-    std::string alias = proxyUrlDecode(rest.substr(s1 + 1));
+    std::string devid = urlDecode(rest.substr(0, s1));
+    std::string alias = urlDecode(rest.substr(s1 + 1));
     size_t q = alias.find('?');
     if (q != std::string::npos) alias = alias.substr(0, q);
     AdminActor actor;
     std::string role;
-    if (!wsAuthorize(req, actor, role) || (role != "admin" && role != "manager" && role != "operator")) {
+    if (!wsAuthorize(req, actor, role) ||
+        !(hasPerm("device.tty.read") || hasPerm("device.tty.write"))) {
         channel->close();
         return true;
     }
@@ -96,8 +70,8 @@ bool AdminServer::handleTtyWsOpen(const WebSocketChannelPtr& channel, const Http
     }
     bool monitor = req->GetParam("monitor") == "1";
     bool takeover = req->GetParam("takeover") == "1";
-    if (takeover && role != "admin") {
-        channel->send("{\"op\":\"error\",\"msg\":\"takeover requires admin\"}");
+    if (takeover && !hasPerm("device.tty.write")) {
+        channel->send("{\"op\":\"error\",\"msg\":\"takeover requires tty write\"}");
         channel->close();
         return true;
     }
@@ -166,7 +140,8 @@ bool AdminServer::handleTtyWsMessage(const WebSocketChannelPtr& channel, const s
     auto j = json::parse(msg, nullptr, false);
     if (j.is_discarded() || j.value("op", "") != "write") return true;
     if (s->readonly) return true;
-    std::string data = b64decode(j.value("data", ""));
+    std::string enc = j.value("data", "");
+    std::string data = hv::Base64Decode(enc.c_str(), (unsigned)enc.size());
     if (!data.empty() && !s->closed.load()) {
         sendData(s->fd, 1, data);
         capWrite(s.get(), "tx", (const unsigned char*)data.data(), data.size());

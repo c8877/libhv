@@ -136,6 +136,9 @@ struct GroupAclRule {
     std::string ports;
     std::string tty;
     bool        shell = false;
+    int         file = 0;    // 0 无 / 1 只读 / 2 读写
+    bool        svc = false;
+    long long   token_id = 0; // 0 = 账号级规则；>0 = 仅该 rtk 令牌
 };
 
 class RelayServer {
@@ -143,7 +146,8 @@ class RelayServer {
 
 public:
     int run(int argc, char** argv);
-    void setGroupAcl(std::vector<GroupAclRule> rules, std::set<std::string> users);
+    void setGroupAcl(std::vector<GroupAclRule> rules, std::set<std::string> users,
+                     std::set<long long> scoped_tokens);
     // 认证策略全量替换（relay 线程）；JSON 由 admin 的 clientAuthPolicies 生成
     void setAuthPolicies(const std::string& json);
     // 用量快照（relay 线程），JSON 数组
@@ -187,6 +191,7 @@ public:
     AclEntry*   acl_file = nullptr;   // --acl-file 文件条目（SIGHUP 热加载）
     std::vector<GroupAclRule> acl_groups;       // 管理台分组授权（relay 线程只读）
     std::set<std::string>     acl_grouped_users;
+    std::set<long long>       acl_scoped_tokens; // 配了 rtk 权限组的令牌：只认令牌级规则
     std::unordered_map<std::string, TokenPolicy> token_cache;  // sha256 hex -> policy
     std::unordered_map<std::string, int> account_active;       // username -> 1/0
     std::unordered_map<long long, TokenUsage>    token_usage;  // token id -> usage
@@ -200,9 +205,10 @@ public:
 
 private:
     int          aclCheck(const char* user, const char* devid);
-    bool         groupAclDevice(const char* user, const char* devid);
-    bool         groupAclCheck(const char* user, const char* devid, uint16_t port,
-                               int is_shell, const char* tty_path);
+    bool         groupAclDevice(const char* user, long long token_id, const char* devid);
+    bool         groupAclCheck(const char* user, long long token_id, const char* devid, uint16_t port,
+                               int is_shell, const char* tty_path, int is_fs, int fs_rw, int is_svc);
+    bool         groupAclApplies(const GroupAclRule& r, const char* user, long long token_id) const;
     bool         clientAuthEnabled() const { return !client_creds.empty() || !client_token.empty(); }
     bool         shellAllowed(const char* user) const;
     RelayConn*   findClientByUser(const char* user);

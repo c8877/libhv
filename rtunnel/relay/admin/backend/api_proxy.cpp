@@ -35,7 +35,7 @@ void AdminServer::handleDeviceProxy(const HttpContextPtr& ctx) {
     std::string rest = path.substr(8);
     size_t s1 = rest.find('/');
     if (s1 == std::string::npos) { ctx->response->status_code = HTTP_STATUS_BAD_REQUEST; ctx->send("bad device path"); return; }
-    std::string devid = proxyUrlDecode(rest.substr(0, s1));
+    std::string devid = urlDecode(rest.substr(0, s1));
     rest = rest.substr(s1 + 1);
     size_t s2 = rest.find('/');
     std::string port_s = (s2 == std::string::npos) ? rest : rest.substr(0, s2);
@@ -48,7 +48,7 @@ void AdminServer::handleDeviceProxy(const HttpContextPtr& ctx) {
     }
 
     std::string role;
-    if (requireRole(ctx, ROLE_OPERATOR, role)) return;
+    if (requirePerm(ctx, "device.terminal", role)) return;
     if (g_proxy_active.load() >= settingInt("proxy.max_concurrent", 32)) {
         ctx->response->status_code = HTTP_STATUS_SERVICE_UNAVAILABLE;
         ctx->send("{\"error\":\"too many concurrent proxy requests\"}");

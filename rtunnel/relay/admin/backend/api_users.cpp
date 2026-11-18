@@ -49,55 +49,57 @@ namespace {
 bool roleKnown(const std::string& r) {
     return r == "admin" || r == "manager" || r == "operator" || r == "viewer";
 }
-// actor 能管理的目标账号（admin 不可被管理）
+// actor 能管理的目标账号（admin 不可被管理）；有 account.write 资源即可管理非超管账号
 bool canManage(const AdminActor& a, const DbUser& t) {
     if (t.role == "admin") return false;
-    if (a.role == "admin") return roleKnown(t.role);
+    if (a.role == "admin" || a.super) return roleKnown(t.role);
+    if (a.perms.count("account.write")) return true;
     if (a.role == "manager") return t.role == "operator" || t.role == "viewer";
     return false;
 }
 bool canCreateRole(const AdminActor& a, const std::string& r) {
-    if (a.role == "admin") return r == "manager" || r == "operator" || r == "viewer";
+    if (r == "admin") return false;
+    if (a.role == "admin" || a.super) return true;
+    if (a.perms.count("account.write")) return r == "operator" || r == "viewer";
     if (a.role == "manager") return r == "operator" || r == "viewer";
     return false;
 }
 } // namespace
 
-bool AdminServer::scopeRestricted() {
-    if (tl_actor.role == "admin") return false;
-    if (db_.ok()) {
-        std::vector<std::string> v;
-        bool has_groups = false;
-        if (db_.groupSubjectDevids("admin", tl_actor.username, v, has_groups) && has_groups) return true;
+bool AdminServer::tokenGroupDevids(std::vector<std::string>& out) {
+    // 兼容旧调用：令牌组直接体现为 actor.token_scoped
+    if (!tl_actor.is_client && tl_actor.token_scoped) {
+        out.assign(tl_actor.devices.begin(), tl_actor.devices.end());
+        return true;
     }
-    if (tl_actor.role == "manager") return false;
-    return tl_actor.role == "operator" || tl_actor.role == "viewer";
+    return false;
+}
+
+bool AdminServer::clientGroupDevids(std::vector<std::string>& out) {
+    if (!tl_actor.is_client) return false;
+    out.assign(tl_actor.devices.begin(), tl_actor.devices.end());
+    return true;
+}
+
+bool AdminServer::tokenScoped() {
+    return tl_actor.token_scoped || (tl_actor.is_client && tl_actor.token_id > 0);
+}
+
+// 只按设备列表过滤（全部设备 / 超级权限不限制）
+bool AdminServer::scopeRestricted() {
+    return !(tl_actor.super || tl_actor.all_devices);
 }
 
 std::vector<std::string> AdminServer::myDevids() {
     std::vector<std::string> v;
-    if (tl_actor.role == "admin") return v;
-    if (db_.ok()) {
-        bool has_groups = false;
-        if (db_.groupSubjectDevids("admin", tl_actor.username, v, has_groups) && has_groups) return v;
-    }
-    if ((tl_actor.role == "operator" || tl_actor.role == "viewer") && db_.ok())
-        db_.ownedDevids(tl_actor.id, v);
+    if (tl_actor.super || tl_actor.all_devices) return v;
+    v.assign(tl_actor.devices.begin(), tl_actor.devices.end());
     return v;
 }
 
 bool AdminServer::ownsDevid(const std::string& devid) {
-    if (tl_actor.role == "admin") return true;
-    if (db_.ok()) {
-        std::vector<std::string> v;
-        bool has_groups = false;
-        if (db_.groupSubjectDevids("admin", tl_actor.username, v, has_groups) && has_groups)
-            return std::find(v.begin(), v.end(), devid) != v.end();
-    }
-    if (tl_actor.role == "manager") return true;
-    long long owner = 0;
-    if (!db_.ok() || !db_.deviceOwner(devid, owner)) return false;
-    return owner == tl_actor.id;
+    if (tl_actor.super || tl_actor.all_devices) return true;
+    return tl_actor.devices.count(devid) > 0;
 }
 
 void AdminServer::handleSetupStatus(const HttpContextPtr& ctx) {
@@ -217,11 +219,17 @@ void AdminServer::handleLogout(const HttpContextPtr& ctx) {
 
 void AdminServer::handleMe(const HttpContextPtr& ctx) {
     std::string role;
-    if (requireRole(ctx, ROLE_VIEWER, role)) return;
+    if (requirePerm(ctx, "auth", role)) return;
     json j;
     j["id"] = tl_actor.id;
     j["username"] = tl_actor.username;
     j["role"] = tl_actor.role.empty() ? role : tl_actor.role;
+    j["super"] = tl_actor.super;
+    {
+        nlohmann::json ps = nlohmann::json::array();
+        for (const auto& k : tl_actor.perms) ps.push_back(k);
+        j["perms"] = ps;
+    }
     {
         std::map<std::string, std::string> p;
         db_.getUserPrefs(tl_actor.id, p);
@@ -234,7 +242,7 @@ void AdminServer::handleMe(const HttpContextPtr& ctx) {
 
 void AdminServer::handleUsers(const HttpContextPtr& ctx) {
     std::string role;
-    if (requireRole(ctx, ROLE_OPERATOR, role)) return;
+    if (requirePerm(ctx, "account.read", role)) return;
     std::vector<DbUser> us;
     db_.listUsers(us);
     json arr = json::array();
@@ -246,6 +254,11 @@ void AdminServer::handleUsers(const HttpContextPtr& ctx) {
         j["role"] = u.role;
         j["status"] = u.status;
         j["created_ms"] = u.created_ms;
+        {
+            std::vector<long long> gids;
+            db_.permGroupsOfUser(u.id, gids);
+            j["perm_groups"] = gids;
+        }
         arr.push_back(j);
     }
     ctx->send(arr.dump());
@@ -296,8 +309,8 @@ void AdminServer::handleUserPassword(const HttpContextPtr& ctx, const AdminActor
             ctx->send("{\"error\":\"old password wrong\"}");
             return;
         }
-    } else if (canManage(actor, target)) {
-        // 上级可重置下级密码
+    } else if (hasPerm("account.write") && (tl_actor.super || target.role != "admin")) {
+        // 有账号写权限即可重置非超级管理员密码
     } else {
         ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
         ctx->send("{\"error\":\"forbidden\"}");
@@ -391,7 +404,7 @@ void AdminServer::handleUserRole(const HttpContextPtr& ctx, const AdminActor& ac
 
 void AdminServer::handleDeviceList(const HttpContextPtr& ctx) {
     std::string role;
-    if (requireRole(ctx, ROLE_OPERATOR, role)) return;
+    if (requirePerm(ctx, "device.view", role)) return;
     std::vector<std::pair<std::string, long long>> ds;
     db_.deviceList(ds);
     std::vector<DbUser> us;
@@ -410,11 +423,7 @@ void AdminServer::handleDeviceList(const HttpContextPtr& ctx) {
 }
 
 void AdminServer::handleDeviceBind(const HttpContextPtr& ctx, const AdminActor& actor) {
-    if (actor.role != "admin" && actor.role != "manager") {
-        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
-        ctx->send("{\"error\":\"forbidden\"}");
-        return;
-    }
+    // 路由已校验 device.bind
     std::string devid = ctx->param("devid");
     json req = json::parse(ctx->body(), nullptr, false);
     std::string owner = req.value("username", "");

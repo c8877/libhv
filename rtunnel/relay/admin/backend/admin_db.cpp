@@ -50,6 +50,13 @@ const int KEY_LEN = 32;
 
 } // namespace
 
+std::string dbColText(sqlite3_stmt* st, int col) {
+    const unsigned char* p = sqlite3_column_text(st, col);
+    return p ? (const char*)p : "";
+}
+
+long long dbColInt(sqlite3_stmt* st, int col) { return sqlite3_column_int64(st, col); }
+
 AdminDb::~AdminDb() {
     if (db_) { sqlite3_close(db_); db_ = nullptr; }
 }
@@ -156,6 +163,7 @@ bool AdminDb::migrate(std::string& err) {
         " pass_hash TEXT NOT NULL,"
         " role TEXT NOT NULL,"
         " status TEXT NOT NULL DEFAULT 'active',"
+        " perm_explicit INTEGER NOT NULL DEFAULT 0,"
         " created_ms INTEGER NOT NULL);"
         "CREATE TABLE IF NOT EXISTS sessions("
         " sid_hash TEXT PRIMARY KEY,"
@@ -331,6 +339,54 @@ bool AdminDb::migrate(std::string& err) {
         " added_ms INTEGER NOT NULL,"
         " PRIMARY KEY(subject_type, subject_id, group_id));"
         "CREATE INDEX IF NOT EXISTS idx_subject_groups ON subject_groups(subject_type, subject_id);"
+        // 资源权限：资源字典 + 权限组 + 组成员。管理台所有动作按资源键鉴权。
+        "CREATE TABLE IF NOT EXISTS perm_resources("
+        " key TEXT PRIMARY KEY,"
+        " category TEXT NOT NULL DEFAULT '',"
+        " name TEXT NOT NULL DEFAULT '',"
+        " description TEXT NOT NULL DEFAULT '',"
+        " sort INTEGER NOT NULL DEFAULT 0,"
+        " enabled INTEGER NOT NULL DEFAULT 1,"
+        " updated_ms INTEGER NOT NULL DEFAULT 0);"
+        "CREATE TABLE IF NOT EXISTS perm_groups("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " name TEXT NOT NULL UNIQUE,"
+        " description TEXT NOT NULL DEFAULT '',"
+        " builtin_key TEXT NOT NULL DEFAULT '',"
+        " super INTEGER NOT NULL DEFAULT 0,"
+        " seeded INTEGER NOT NULL DEFAULT 0,"
+        " all_devices INTEGER NOT NULL DEFAULT 0,"
+        " ports TEXT NOT NULL DEFAULT '*',"
+        " created_ms INTEGER NOT NULL,"
+        " updated_ms INTEGER NOT NULL);"
+        "CREATE TABLE IF NOT EXISTS perm_group_resources("
+        " group_id INTEGER NOT NULL,"
+        " resource_key TEXT NOT NULL,"
+        " allowed INTEGER NOT NULL DEFAULT 1,"
+        " PRIMARY KEY(group_id,resource_key));"
+        "CREATE TABLE IF NOT EXISTS perm_group_members("
+        " group_id INTEGER NOT NULL,"
+        " subject_type TEXT NOT NULL DEFAULT 'user',"
+        " subject_id TEXT NOT NULL,"
+        " added_ms INTEGER NOT NULL,"
+        " PRIMARY KEY(group_id,subject_type,subject_id));"
+        "CREATE INDEX IF NOT EXISTS idx_perm_member_subject ON perm_group_members(subject_type,subject_id);"
+        // 设备资源：agent 上线时自动 upsert，权限组按 devid 授予
+        "CREATE TABLE IF NOT EXISTS res_devices("
+        " devid TEXT PRIMARY KEY,"
+        " name TEXT NOT NULL DEFAULT '',"
+        " version TEXT NOT NULL DEFAULT '',"
+        " online INTEGER NOT NULL DEFAULT 0,"
+        " last_seen_ms INTEGER NOT NULL DEFAULT 0,"
+        " enabled INTEGER NOT NULL DEFAULT 1,"
+        " source TEXT NOT NULL DEFAULT 'agent',"
+        " updated_ms INTEGER NOT NULL DEFAULT 0);"
+        "CREATE TABLE IF NOT EXISTS perm_group_devices("
+        " group_id INTEGER NOT NULL,"
+        " devid TEXT NOT NULL,"
+        " added_ms INTEGER NOT NULL,"
+        " PRIMARY KEY(group_id,devid));"
+        "CREATE INDEX IF NOT EXISTS idx_perm_gdev ON perm_group_devices(devid);"
         "CREATE TABLE IF NOT EXISTS user_prefs("
         " user_id INTEGER NOT NULL,"
         " key TEXT NOT NULL,"
@@ -368,6 +424,23 @@ bool AdminDb::migrate(std::string& err) {
         " last_used_ip TEXT NOT NULL DEFAULT '',"
         " revoked_ms INTEGER NOT NULL DEFAULT 0);"
         "CREATE INDEX IF NOT EXISTS idx_client_token_account ON client_tokens(account_id);"
+        // 管理台账号 API Token（atk-）。归属账号，最终角色取 users.role；
+        // 设备范围通过 subject_groups(subject_type='atk') 绑定设备分组。
+        "CREATE TABLE IF NOT EXISTS admin_tokens("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " user_id INTEGER NOT NULL,"
+        " username TEXT NOT NULL,"
+        " name TEXT NOT NULL DEFAULT '',"
+        " token_hash TEXT NOT NULL UNIQUE,"
+        " token_prefix TEXT NOT NULL,"
+        " status TEXT NOT NULL DEFAULT 'active',"
+        " expires_at_ms INTEGER NOT NULL DEFAULT 0,"
+        " created_by TEXT NOT NULL DEFAULT '',"
+        " created_ms INTEGER NOT NULL,"
+        " last_used_ms INTEGER NOT NULL DEFAULT 0,"
+        " last_used_ip TEXT NOT NULL DEFAULT '',"
+        " revoked_ms INTEGER NOT NULL DEFAULT 0);"
+        "CREATE INDEX IF NOT EXISTS idx_admin_token_user ON admin_tokens(user_id);"
         "UPDATE users SET role='admin' WHERE role='superadmin';"
         "UPDATE users SET role='viewer' WHERE role='user';",
         err)) return false;
@@ -393,6 +466,18 @@ bool AdminDb::migrate(std::string& err) {
         if (!exec("ALTER TABLE distribution_tasks ADD COLUMN target_version TEXT NOT NULL DEFAULT ''", err)) return false;
     }
     exec("CREATE INDEX IF NOT EXISTS idx_dist_kind ON distribution_tasks(kind, status)", err);
+    if (!hasColumn("users", "perm_explicit")) {
+        if (!exec("ALTER TABLE users ADD COLUMN perm_explicit INTEGER NOT NULL DEFAULT 0", err)) return false;
+    }
+    if (!hasColumn("perm_groups", "seeded")) {
+        if (!exec("ALTER TABLE perm_groups ADD COLUMN seeded INTEGER NOT NULL DEFAULT 0", err)) return false;
+    }
+    if (!hasColumn("perm_groups", "all_devices")) {
+        if (!exec("ALTER TABLE perm_groups ADD COLUMN all_devices INTEGER NOT NULL DEFAULT 0", err)) return false;
+    }
+    if (!hasColumn("perm_groups", "ports")) {
+        if (!exec("ALTER TABLE perm_groups ADD COLUMN ports TEXT NOT NULL DEFAULT '*'", err)) return false;
+    }
     return true;
 }
 
@@ -498,7 +583,10 @@ bool AdminDb::createUser(const std::string& user, const std::string& pass,
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
     if (rc != SQLITE_DONE) { err = (rc == SQLITE_CONSTRAINT) ? "username exists" : sqlite3_errmsg(db_); return false; }
-    if (out_id) *out_id = sqlite3_last_insert_rowid(db_);
+    long long uid = sqlite3_last_insert_rowid(db_);
+    if (out_id) *out_id = uid;
+    // 不自动入组：未分配权限组前按 role 预置组 + 归属设备回落，
+    // 管理员显式分配权限组后（perm_explicit=1）只认组。
     return true;
 }
 
@@ -580,12 +668,22 @@ bool AdminDb::setRole(long long id, const std::string& role) {
     sqlite3_bind_int64(st, 2, id);
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
-    return rc == SQLITE_DONE;
+    if (rc != SQLITE_DONE) return false;
+    // 角色只决定未显式分配权限组时的回落基线；已入组的账号不受影响
+    return true;
 }
 
 bool AdminDb::removeUser(long long id) {
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_,
+            "DELETE FROM perm_group_members WHERE subject_type='user' AND subject_id=?", -1, &st, nullptr) ==
+        SQLITE_OK) {
+        std::string sid = std::to_string(id);
+        sqlite3_bind_text(st, 1, sid.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_step(st);
+    }
+    sqlite3_finalize(st);
     if (sqlite3_prepare_v2(db_, "DELETE FROM users WHERE id=?", -1, &st, nullptr) != SQLITE_OK) return false;
     sqlite3_bind_int64(st, 1, id);
     int rc = sqlite3_step(st);
@@ -598,6 +696,28 @@ bool AdminDb::removeUser(long long id) {
     sqlite3_prepare_v2(db_, "UPDATE devices SET owner_id=NULL,bound_ms=0 WHERE owner_id=?", -1, &st, nullptr);
     sqlite3_bind_int64(st, 1, id);
     sqlite3_step(st);
+    sqlite3_finalize(st);
+
+    // 删除账号时一并清理其 API Token 与分组绑定，避免留下可用凭据
+    std::vector<long long> tids;
+    if (sqlite3_prepare_v2(db_, "SELECT id FROM admin_tokens WHERE user_id=?", -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, id);
+        while (sqlite3_step(st) == SQLITE_ROW) tids.push_back(sqlite3_column_int64(st, 0));
+    }
+    sqlite3_finalize(st);
+    for (long long tid : tids) {
+        std::string sid = std::to_string(tid);
+        if (sqlite3_prepare_v2(db_, "DELETE FROM subject_groups WHERE subject_type='atk' AND subject_id=?",
+                               -1, &st, nullptr) == SQLITE_OK) {
+            sqlite3_bind_text(st, 1, sid.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step(st);
+        }
+        sqlite3_finalize(st);
+    }
+    if (sqlite3_prepare_v2(db_, "DELETE FROM admin_tokens WHERE user_id=?", -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, id);
+        sqlite3_step(st);
+    }
     sqlite3_finalize(st);
     return true;
 }

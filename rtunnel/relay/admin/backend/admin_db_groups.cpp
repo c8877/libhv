@@ -91,7 +91,7 @@ bool AdminDb::groupDelete(long long id, std::string& err) {
         sqlite3_bind_int64(st, 1, id);
         if (sqlite3_step(st) == SQLITE_ROW && sqlite3_column_int64(st, 0) > 0) {
             sqlite3_finalize(st);
-            err = "group has subjects";
+            err = "分组仍绑定账号或 API Token，请先解绑";
             return false;
         }
     }

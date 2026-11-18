@@ -14,13 +14,6 @@ using nlohmann::json;
 
 namespace {
 
-std::string colText(sqlite3_stmt* st, int col) {
-    const unsigned char* p = sqlite3_column_text(st, col);
-    return p ? (const char*)p : "";
-}
-
-int64_t colInt(sqlite3_stmt* st, int col) { return sqlite3_column_int64(st, col); }
-
 bool validName(const std::string& s, size_t maxlen) {
     if (s.empty() || s.size() > maxlen) return false;
     for (unsigned char c : s) {
@@ -31,26 +24,26 @@ bool validName(const std::string& s, size_t maxlen) {
 
 json tokenJson(sqlite3_stmt* st, bool with_secret_fields = false) {
     json t;
-    t["id"] = colInt(st, 0);
-    t["account_id"] = colInt(st, 1);
-    t["name"] = colText(st, 2);
-    t["token_prefix"] = colText(st, 3);
-    t["status"] = colText(st, 4);
-    t["expires_at_ms"] = colInt(st, 5);
-    t["quota_bytes"] = colInt(st, 6);
-    t["quota_period"] = colText(st, 7);
-    t["period_start_ms"] = colInt(st, 8);
-    t["used_bytes"] = colInt(st, 9);
-    t["rate_per_min"] = (int)colInt(st, 10);
-    t["burst"] = (int)colInt(st, 11);
-    t["max_sessions"] = (int)colInt(st, 12);
-    t["quota_action"] = colText(st, 13);
-    t["created_by"] = colText(st, 14);
-    t["created_ms"] = colInt(st, 15);
-    t["last_used_ms"] = colInt(st, 16);
-    t["last_used_ip"] = colText(st, 17);
-    t["revoked_ms"] = colInt(st, 18);
-    if (with_secret_fields) t["token_hash"] = colText(st, 19);
+    t["id"] = dbColInt(st, 0);
+    t["account_id"] = dbColInt(st, 1);
+    t["name"] = dbColText(st, 2);
+    t["token_prefix"] = dbColText(st, 3);
+    t["status"] = dbColText(st, 4);
+    t["expires_at_ms"] = dbColInt(st, 5);
+    t["quota_bytes"] = dbColInt(st, 6);
+    t["quota_period"] = dbColText(st, 7);
+    t["period_start_ms"] = dbColInt(st, 8);
+    t["used_bytes"] = dbColInt(st, 9);
+    t["rate_per_min"] = (int)dbColInt(st, 10);
+    t["burst"] = (int)dbColInt(st, 11);
+    t["max_sessions"] = (int)dbColInt(st, 12);
+    t["quota_action"] = dbColText(st, 13);
+    t["created_by"] = dbColText(st, 14);
+    t["created_ms"] = dbColInt(st, 15);
+    t["last_used_ms"] = dbColInt(st, 16);
+    t["last_used_ip"] = dbColText(st, 17);
+    t["revoked_ms"] = dbColInt(st, 18);
+    if (with_secret_fields) t["token_hash"] = dbColText(st, 19);
     return t;
 }
 
@@ -80,16 +73,16 @@ bool AdminDb::clientAccountList(const std::string& q, std::string& json_out) {
     }
     while (sqlite3_step(st) == SQLITE_ROW) {
         json a;
-        a["id"] = colInt(st, 0);
-        a["username"] = colText(st, 1);
-        a["display_name"] = colText(st, 2);
-        a["status"] = colText(st, 3);
-        a["note"] = colText(st, 4);
-        a["created_by"] = colText(st, 5);
-        a["created_ms"] = colInt(st, 6);
-        a["updated_ms"] = colInt(st, 7);
-        a["token_count"] = colInt(st, 8);
-        a["last_used_ms"] = colInt(st, 9);
+        a["id"] = dbColInt(st, 0);
+        a["username"] = dbColText(st, 1);
+        a["display_name"] = dbColText(st, 2);
+        a["status"] = dbColText(st, 3);
+        a["note"] = dbColText(st, 4);
+        a["created_by"] = dbColText(st, 5);
+        a["created_ms"] = dbColInt(st, 6);
+        a["updated_ms"] = dbColInt(st, 7);
+        a["token_count"] = dbColInt(st, 8);
+        a["last_used_ms"] = dbColInt(st, 9);
         arr.push_back(a);
     }
     sqlite3_finalize(st);
@@ -122,21 +115,21 @@ bool AdminDb::clientAccountGet(long long id, std::string& json_out, std::string&
         return false;
     }
     json a;
-    a["id"] = colInt(st, 0);
-    a["username"] = colText(st, 1);
-    a["display_name"] = colText(st, 2);
-    a["status"] = colText(st, 3);
-    a["note"] = colText(st, 4);
-    a["created_by"] = colText(st, 5);
-    a["created_ms"] = colInt(st, 6);
-    a["updated_ms"] = colInt(st, 7);
-    a["token_count"] = colInt(st, 8);
-    a["token_active"] = colInt(st, 9);
-    a["token_disabled"] = colInt(st, 10);
-    a["token_revoked"] = colInt(st, 11);
-    a["last_used_ms"] = colInt(st, 12);
-    a["last_used_ip"] = colText(st, 13);
-    a["group_count"] = colInt(st, 14);
+    a["id"] = dbColInt(st, 0);
+    a["username"] = dbColText(st, 1);
+    a["display_name"] = dbColText(st, 2);
+    a["status"] = dbColText(st, 3);
+    a["note"] = dbColText(st, 4);
+    a["created_by"] = dbColText(st, 5);
+    a["created_ms"] = dbColInt(st, 6);
+    a["updated_ms"] = dbColInt(st, 7);
+    a["token_count"] = dbColInt(st, 8);
+    a["token_active"] = dbColInt(st, 9);
+    a["token_disabled"] = dbColInt(st, 10);
+    a["token_revoked"] = dbColInt(st, 11);
+    a["last_used_ms"] = dbColInt(st, 12);
+    a["last_used_ip"] = dbColText(st, 13);
+    a["group_count"] = dbColInt(st, 14);
     sqlite3_finalize(st);
     json_out = a.dump();
     return true;
@@ -202,7 +195,7 @@ bool AdminDb::clientAccountDelete(long long id, std::string& err) {
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, "SELECT username FROM client_accounts WHERE id=?", -1, &st, nullptr) == SQLITE_OK) {
         sqlite3_bind_int64(st, 1, id);
-        if (sqlite3_step(st) == SQLITE_ROW) username = colText(st, 0);
+        if (sqlite3_step(st) == SQLITE_ROW) username = dbColText(st, 0);
     }
     sqlite3_finalize(st);
     if (username.empty()) { exec("ROLLBACK", e); err = "account not found"; return false; }
@@ -215,6 +208,15 @@ bool AdminDb::clientAccountDelete(long long id, std::string& err) {
             ok = sqlite3_step(d) == SQLITE_DONE;
             sqlite3_finalize(d);
         }
+    }
+    // 资源权限组也按 account id 记录，删除账号时一并清理
+    sqlite3_stmt* pg = nullptr;
+    if (sqlite3_prepare_v2(db_,
+            "DELETE FROM perm_group_members WHERE subject_type='client' AND subject_id=?", -1, &pg,
+            nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(pg, 1, sid.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_step(pg);
+        sqlite3_finalize(pg);
     }
     ok = ok && exec(("DELETE FROM client_accounts WHERE id=" + sid).c_str(), e);
     exec(ok ? "COMMIT" : "ROLLBACK", e);
@@ -242,7 +244,7 @@ bool AdminDb::clientTokenCreate(long long account_id, const DbTokenSpec& spec, c
     plain_out = rtutil::newClientToken();
     if (plain_out.empty()) { err = "随机数不可用"; return false; }
     std::string hash = rtutil::sha256Hex(plain_out);
-    std::string prefix = rtutil::clientTokenPrefix(plain_out);
+    std::string prefix = rtutil::tokenPrefix(plain_out);
 
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
@@ -258,7 +260,7 @@ bool AdminDb::clientTokenCreate(long long account_id, const DbTokenSpec& spec, c
     if (sqlite3_prepare_v2(db_, "SELECT COUNT(*) FROM client_tokens WHERE account_id=? AND status!='revoked'",
                            -1, &st, nullptr) == SQLITE_OK) {
         sqlite3_bind_int64(st, 1, account_id);
-        if (sqlite3_step(st) == SQLITE_ROW) n = (int)colInt(st, 0);
+        if (sqlite3_step(st) == SQLITE_ROW) n = (int)dbColInt(st, 0);
     }
     sqlite3_finalize(st);
     if (max_per_account > 0 && n >= max_per_account) {
@@ -312,16 +314,16 @@ bool AdminDb::clientTokenSpec(long long id, DbTokenSpec& spec, long long& accoun
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
     sqlite3_bind_int64(st, 1, id);
     if (sqlite3_step(st) != SQLITE_ROW) { sqlite3_finalize(st); err = "token not found"; return false; }
-    account_id = colInt(st, 0);
-    spec.name = colText(st, 1);
-    spec.expires_at_ms = colInt(st, 2);
-    spec.quota_bytes = colInt(st, 3);
-    spec.quota_period = colText(st, 4);
-    spec.rate_per_min = (int)colInt(st, 5);
-    spec.burst = (int)colInt(st, 6);
-    spec.max_sessions = (int)colInt(st, 7);
-    spec.quota_action = colText(st, 8);
-    if (status != nullptr) *status = colText(st, 9);
+    account_id = dbColInt(st, 0);
+    spec.name = dbColText(st, 1);
+    spec.expires_at_ms = dbColInt(st, 2);
+    spec.quota_bytes = dbColInt(st, 3);
+    spec.quota_period = dbColText(st, 4);
+    spec.rate_per_min = (int)dbColInt(st, 5);
+    spec.burst = (int)dbColInt(st, 6);
+    spec.max_sessions = (int)dbColInt(st, 7);
+    spec.quota_action = dbColText(st, 8);
+    if (status != nullptr) *status = dbColText(st, 9);
     sqlite3_finalize(st);
     return true;
 }
@@ -374,7 +376,7 @@ bool AdminDb::clientTokenRotate(long long id, std::string& plain_out, std::strin
     plain_out = rtutil::newClientToken();
     if (plain_out.empty()) { err = "随机数不可用"; return false; }
     std::string hash = rtutil::sha256Hex(plain_out);
-    std::string prefix = rtutil::clientTokenPrefix(plain_out);
+    std::string prefix = rtutil::tokenPrefix(plain_out);
 
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
@@ -385,7 +387,7 @@ bool AdminDb::clientTokenRotate(long long id, std::string& plain_out, std::strin
     }
     sqlite3_bind_int64(st, 1, id);
     if (sqlite3_step(st) != SQLITE_ROW) { sqlite3_finalize(st); err = "token not found"; return false; }
-    per = colText(st, 0);
+    per = dbColText(st, 0);
     sqlite3_finalize(st);
 
     long long period_start = rtutil::tokenPeriodStart(rtutil::tokenPeriodFromName(per), nowMs());
@@ -433,7 +435,7 @@ bool AdminDb::clientAuthPolicies(std::string& json_out) {
     json accounts = json::object();
     sqlite3_stmt* ast = nullptr;
     if (sqlite3_prepare_v2(db_, "SELECT username,status FROM client_accounts", -1, &ast, nullptr) == SQLITE_OK) {
-        while (sqlite3_step(ast) == SQLITE_ROW) accounts[colText(ast, 0)] = colText(ast, 1);
+        while (sqlite3_step(ast) == SQLITE_ROW) accounts[dbColText(ast, 0)] = dbColText(ast, 1);
     }
     sqlite3_finalize(ast);
     const char* sql =
@@ -447,23 +449,23 @@ bool AdminDb::clientAuthPolicies(std::string& json_out) {
     json arr = json::array();
     while (sqlite3_step(st) == SQLITE_ROW) {
         json t;
-        t["id"] = colInt(st, 0);
-        t["account_id"] = colInt(st, 1);
-        t["username"] = colText(st, 2);
-        t["hash"] = colText(st, 3);
-        t["prefix"] = colText(st, 4);
-        t["name"] = colText(st, 5);
-        t["status"] = colText(st, 6);
-        t["expires_at_ms"] = colInt(st, 7);
-        t["quota_bytes"] = colInt(st, 8);
-        t["quota_period"] = colText(st, 9);
-        t["period_start_ms"] = colInt(st, 10);
-        t["used_bytes"] = colInt(st, 11);
-        t["rate_per_min"] = (int)colInt(st, 12);
-        t["burst"] = (int)colInt(st, 13);
-        t["max_sessions"] = (int)colInt(st, 14);
-        t["quota_action"] = colText(st, 15);
-        t["account_status"] = colText(st, 16);
+        t["id"] = dbColInt(st, 0);
+        t["account_id"] = dbColInt(st, 1);
+        t["username"] = dbColText(st, 2);
+        t["hash"] = dbColText(st, 3);
+        t["prefix"] = dbColText(st, 4);
+        t["name"] = dbColText(st, 5);
+        t["status"] = dbColText(st, 6);
+        t["expires_at_ms"] = dbColInt(st, 7);
+        t["quota_bytes"] = dbColInt(st, 8);
+        t["quota_period"] = dbColText(st, 9);
+        t["period_start_ms"] = dbColInt(st, 10);
+        t["used_bytes"] = dbColInt(st, 11);
+        t["rate_per_min"] = (int)dbColInt(st, 12);
+        t["burst"] = (int)dbColInt(st, 13);
+        t["max_sessions"] = (int)dbColInt(st, 14);
+        t["quota_action"] = dbColText(st, 15);
+        t["account_status"] = dbColText(st, 16);
         arr.push_back(t);
     }
     sqlite3_finalize(st);
@@ -495,5 +497,50 @@ bool AdminDb::clientTokenUsageApply(const std::string& json_in, std::string& err
         sqlite3_step(st);
     }
     sqlite3_finalize(st);
+    return true;
+}
+
+bool AdminDb::clientTokenAuth(const std::string& hash, long long now_ms, const std::string& ip,
+                              long long& account_id, std::string& username, long long& token_id,
+                              std::string& err) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    const char* sql =
+        "SELECT t.id,t.status,t.expires_at_ms,t.revoked_ms,t.last_used_ms,"
+        "a.id,a.username,a.status "
+        "FROM client_tokens t JOIN client_accounts a ON a.id=t.account_id WHERE t.token_hash=?";
+    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
+    sqlite3_bind_text(st, 1, hash.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(st) != SQLITE_ROW) {
+        sqlite3_finalize(st);
+        err = "token not found";
+        return false;
+    }
+    long long id = dbColInt(st, 0);
+    std::string tstatus = dbColText(st, 1);
+    long long expires = dbColInt(st, 2);
+    long long revoked = dbColInt(st, 3);
+    long long last_used = dbColInt(st, 4);
+    account_id = dbColInt(st, 5);
+    username = dbColText(st, 6);
+    std::string astatus = dbColText(st, 7);
+    sqlite3_finalize(st);
+
+    if (tstatus != "active" || revoked != 0) { err = "token disabled"; return false; }
+    if (expires > 0 && now_ms >= expires) { err = "token expired"; return false; }
+    if (astatus != "active") { err = "account disabled"; return false; }
+
+    if (now_ms - last_used > 30000) {
+        sqlite3_stmt* u = nullptr;
+        if (sqlite3_prepare_v2(db_, "UPDATE client_tokens SET last_used_ms=?,last_used_ip=? WHERE id=?",
+                               -1, &u, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int64(u, 1, now_ms);
+            sqlite3_bind_text(u, 2, ip.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int64(u, 3, id);
+            sqlite3_step(u);
+            sqlite3_finalize(u);
+        }
+    }
+    token_id = id;
     return true;
 }

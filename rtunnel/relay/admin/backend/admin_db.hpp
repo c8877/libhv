@@ -4,10 +4,14 @@
 #include <vector>
 #include <map>
 #include <set>
-#include <string>
 #include <mutex>
 
 struct sqlite3;
+struct sqlite3_stmt;
+
+// SQLite 列读取（定义在 admin_db.cpp）：NULL 文本按空串处理。
+std::string dbColText(sqlite3_stmt* st, int col);
+long long   dbColInt(sqlite3_stmt* st, int col);
 
 struct DbPermAcl {
     long long agent_group_id = 0;
@@ -27,6 +31,20 @@ struct DbGroupAclRule {
     std::string ports;
     std::string tty;
     bool shell = false;
+    int  file = 0;      // 0 无 / 1 只读 / 2 读写
+    bool svc = false;
+    long long token_id = 0;  // 0 = 账号级；>0 = 仅该 rtk 令牌
+};
+
+// 一次请求的有效授权：功能资源 + 设备范围
+struct DbPermScope {
+    bool super = false;         // 超级组：全部资源、全部设备
+    bool all_devices = false;   // 组勾了「全部设备」
+    bool has_groups = false;    // 是否加入过权限组
+    bool explicit_perm = false; // 是否被显式分配过（false 才按 role 回落）
+    bool token_groups = false;   // 令牌自身是否配置了权限组（true 时取交集）
+    std::set<std::string> resources;
+    std::set<std::string> devices;
 };
 
 // Token 的可配置限额（创建与更新共用）
@@ -128,10 +146,66 @@ public:
                        std::string& json_out, std::string& err);
     bool permExportAcl(std::string& json_out);
     bool permMigrateLegacy();
-    bool permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::string>& users);
+    bool permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::string>& users,
+                         std::set<long long>& scoped_tokens);
     bool permSyncDictIds();
     bool permAgentCandidates(long long group_id, std::string& json_out);
     bool permAgentAddDevices(long long group_id, const std::vector<std::string>& devids, std::string& err);
+
+    // ---- 资源权限：资源字典 + 权限组 ----
+    bool permSeed();                        // 幂等：补资源、预置权限组
+    bool permMigrateGroups();               // 一次性：旧客户端分组/设备分组 -> 权限组
+    bool permResources(std::string& json_out);
+    bool permResourceUpdate(const std::string& key, const std::string& name,
+                            const std::string& desc, int enabled, std::string& err);
+    bool permGroups(std::string& json_out);
+    bool permGroupDetail(long long id, std::string& json_out, std::string& err);
+    // resources/devices/all_devices/ports 任一为空表示不改；members 为空表示不改成员
+    bool permGroupSave(long long id, const std::string& name, const std::string& desc,
+                       const std::vector<std::string>& resources,
+                       const std::vector<std::string>& devices,
+                       int all_devices, const std::string& ports,
+                       long long& out_id, std::string& err);
+    bool permGroupSaveAll(long long id, const std::string& name, const std::string& desc,
+                          const std::vector<std::string>& resources,
+                          const std::vector<std::string>& devices,
+                          int all_devices, const std::string& ports, bool set_members,
+                          const std::vector<std::pair<std::string, std::string>>& members,
+                          long long& out_id, std::string& err);
+    bool permGroupDelete(long long id, std::string& err);
+    bool permGroupMembers(long long id, std::string& json_out, std::string& err);
+    bool permGroupSetMembers(long long id,
+                             const std::vector<std::pair<std::string, std::string>>& members,
+                             std::string& err);
+    bool permGroupsOfUser(long long user_id, std::vector<long long>& ids);
+    bool permGroupsOfSubject(const std::string& type, const std::string& id, std::vector<long long>& ids);
+    bool permSetSubjectGroups(const std::string& type, const std::string& id,
+                              const std::vector<long long>& ids, std::string& err);
+    // 接入账号（subject_type='client'）的权限组
+    bool permGroupsOfClient(long long account_id, std::vector<long long>& ids);
+    bool permSetClientGroups(long long account_id, const std::vector<long long>& ids, std::string& err);
+    bool clientPermsOf(long long account_id, std::set<std::string>& out, bool& super);
+    bool permSetUserGroups(long long user_id, const std::string& role,
+                           const std::vector<long long>& ids, std::string& err);
+    // 有效授权：账号（role 用于未显式分配时的回落）
+    bool permsOf(long long user_id, const std::string& role,
+                 std::set<std::string>& out, bool& super);
+    bool permScopeOfUser(long long user_id, const std::string& role, DbPermScope& out);
+    // 令牌：归属主体授权 ∩ 令牌组授权（令牌组只能收窄）
+    bool permScopeOfAdminToken(long long token_id, long long user_id, const std::string& role,
+                               DbPermScope& out);
+    bool permScopeOfClientToken(long long token_id, long long account_id, DbPermScope& out);
+    bool permScopeOfClient(long long account_id, DbPermScope& out);
+    // 字典/授权对象页面用
+    bool permResourcesPage(const std::string& q, int page, int page_size, std::string& json_out);
+    bool resDevicesPage(const std::string& q, int page, int page_size, std::string& json_out);
+    bool resDeviceUpdate(const std::string& devid, const std::string& name, int enabled, std::string& err);
+    bool resDeviceSync(const std::string& devid, const std::string& name, const std::string& version,
+                       int online, long long seen_ms);
+    bool resDevicesMarkOffline(const std::vector<std::string>& online);
+    bool permSubjects(std::string& json_out);
+    bool permMembersOfGroup(long long gid, std::string& json_out);
+    std::string permMembersOfGroupLocked(long long gid);
 
     bool dictPorts(const std::string& q, std::string& json_out);
     bool dictPortAdd(const std::string& value, const std::string& name, const std::string& desc,
@@ -161,7 +235,34 @@ public:
     // relay 用量快照落库，period_start_ms 作为乐观锁
     bool clientTokenUsageApply(const std::string& json, std::string& err);
 
+    // 管理台账号 API Token（atk-）
+    bool adminTokenList(long long user_id, const std::string& q, std::string& json_out);
+    bool adminTokenCreate(long long user_id, const std::string& username, const DbTokenSpec& spec,
+                          const std::string& by, int max_per_user, std::string& plain_out,
+                          std::string& json_out, std::string& err);
+    bool adminTokenSpec(long long id, DbTokenSpec& spec, long long& user_id, std::string& username,
+                        std::string* status, std::string& err);
+    bool adminTokenUpdate(long long id, const DbTokenSpec& spec, const std::string& status,
+                          std::string& err);
+    bool adminTokenRotate(long long id, std::string& plain_out, std::string& json_out,
+                          std::string& err);
+    bool adminTokenDelete(long long id, std::string& err);
+    // Bearer atk- 鉴权：校验 Token + 归属账号状态，更新最近使用
+    bool adminTokenAuth(const std::string& hash, long long now_ms, const std::string& ip,
+                        DbUser& user, long long& token_id, std::string& err);
+    // Bearer rtk_ 鉴权：接入账号 Token，返回账号与 Token id
+    bool clientTokenAuth(const std::string& hash, long long now_ms, const std::string& ip,
+                         long long& account_id, std::string& username, long long& token_id,
+                         std::string& err);
+    // 令牌绑定的设备分组（复用 subject_groups，subject_type='atk'）
+    bool adminTokenGroups(long long token_id, std::string& json_out);
+    bool adminTokenSetGroups(long long token_id, const std::vector<long long>& ids,
+                             std::string& err);
+
     bool dictTtys(const std::string& q, std::string& json_out);
+    // 字典分页：kind = ports | ttys
+    bool dictPage(const std::string& kind, const std::string& q, int page, int page_size,
+                  std::string& json_out);
     bool dictTtyAdd(const std::string& pattern, const std::string& name, const std::string& desc,
                     long long& out_id, std::string& err);
     bool dictBatchAdd(const std::string& kind, const std::vector<std::string>& values,

@@ -22,11 +22,37 @@ export function roleOf() {
   return (auth.me && auth.me.role) || 'viewer'
 }
 
+// 资源权限：/me 返回 super + perms，菜单与按钮都按资源键判断
+export function permsOf() {
+  return new Set((auth.me && auth.me.perms) || [])
+}
+
+export function isSuper() {
+  return !!(auth.me && auth.me.super)
+}
+
+export function can(key) {
+  if (!key || key === 'auth') return !!auth.me
+  if (isSuper()) return true
+  return !!(auth.me && Array.isArray(auth.me.perms) && auth.me.perms.includes(key))
+}
+
+export function canAny(...keys) {
+  return keys.some((k) => can(k))
+}
+
+// 权限组生效后以资源为准；未拿到 perms（老接口/登录中）才退回角色
 export function canOperate() {
+  if (auth.me && Array.isArray(auth.me.perms)) {
+    return isSuper() || canAny('device.terminal', 'file.write', 'file.read', 'device.tty.read')
+  }
   return ['admin', 'manager', 'operator'].includes(roleOf())
 }
 
 export function canManage() {
+  if (auth.me && Array.isArray(auth.me.perms)) {
+    return isSuper() || canAny('device.caps.write', 'dist.write', 'dict.write', 'account.write', 'file.write', 'device.tty.write')
+  }
   return ['admin', 'manager'].includes(roleOf())
 }
 

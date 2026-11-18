@@ -51,6 +51,14 @@ struct AdminActor {
     long long   id = 0;          // 0 = bootstrap token
     std::string username;
     std::string role;            // superadmin / admin / user / token-role
+    long long   token_id = 0;    // >0 表示本次请求由 atk- Token 鉴权
+    bool        super = false;   // 超级权限组：跳过资源校验
+    std::set<std::string> perms; // 有效资源键（权限组并集）
+    bool        is_client = false;   // 本次请求来自 rtk_ 接入账号 Token
+    long long   client_id = 0;       // 接入账号 id（client_accounts.id）
+    bool        all_devices = false; // 有效授权包含全部设备
+    bool        token_scoped = false;// 令牌自带权限组（设备范围需按令牌收窄）
+    std::set<std::string> devices;   // 有效设备列表（all_devices 时为空）
 };
 
 // 一条待发告警：由采集线程入队，通知线程发送
@@ -82,11 +90,19 @@ public:
 private:
     std::string callRelay(std::function<std::string()> fn);
     std::string roleOf(const HttpContextPtr& ctx);          // "" = 未授权
+    void        loadActorPerms();
     int         requireRole(const HttpContextPtr& ctx, int need, std::string& role);
+    // 资源鉴权：need 为 perm_resources.key（"auth" 表示只要求登录）
+    int         requirePerm(const HttpContextPtr& ctx, const std::string& need, std::string& role);
+    bool        hasPerm(const std::string& key) const;
     AdminActor  currentActor() const;
     std::vector<std::string> myDevids();
     bool        ownsDevid(const std::string& devid);
+    bool        clientGroupDevids(std::vector<std::string>& out);
     bool        scopeRestricted();
+    bool        tokenScoped();   // 仅当本次请求由绑定了设备分组的 atk Token 发起
+    // atk Token 绑定的设备分组内设备；未绑定分组时返回 false
+    bool        tokenGroupDevids(std::vector<std::string>& out);
     // WebSocket 握手鉴权（浏览器自动带 Cookie）
     bool        wsAuthorize(const HttpRequestPtr& req, AdminActor& actor, std::string& role);
     void        audit(const std::string& role, const std::string& action, const std::string& detail);
@@ -147,6 +163,23 @@ private:
     void handleKickAgent(const HttpContextPtr& ctx, const std::string& role);
     // api_groups.cpp
     void handleGroupDeviceMap(const HttpContextPtr& ctx);
+    void handlePermissionDicts(const HttpContextPtr& ctx);
+    void handlePermResources(const HttpContextPtr& ctx);
+    void handlePermGroupDetail(const HttpContextPtr& ctx);
+    void handlePermSubjects(const HttpContextPtr& ctx);
+    void handleResDeviceUpdate(const HttpContextPtr& ctx, const std::string& role);
+    void handleSubjectGroups(const HttpContextPtr& ctx);
+    void handleSubjectGroupsSave(const HttpContextPtr& ctx, const std::string& role);
+    void handlePermResourceUpdate(const HttpContextPtr& ctx, const std::string& role);
+    void handlePermGroups(const HttpContextPtr& ctx);
+    void handlePermGroupSave(const HttpContextPtr& ctx, const std::string& role);
+    void handlePermGroupDelete(const HttpContextPtr& ctx, const std::string& role);
+    void handlePermGroupMembers(const HttpContextPtr& ctx);
+    void handlePermGroupMembersSave(const HttpContextPtr& ctx, const std::string& role);
+    void handleClientPermGroups(const HttpContextPtr& ctx);
+    void handleClientPermGroupsSave(const HttpContextPtr& ctx, const std::string& role);
+    void handleUserPermGroups(const HttpContextPtr& ctx);
+    void handleUserPermGroupsSave(const HttpContextPtr& ctx, const std::string& role);
     void handlePermOverview(const HttpContextPtr& ctx);
     void handlePermClientGet(const HttpContextPtr& ctx);
     void handlePermClientSave(const HttpContextPtr& ctx, const std::string& role);
@@ -203,6 +236,14 @@ private:
     void handleClientTokenUpdate(const HttpContextPtr& ctx, const std::string& role);
     void handleClientTokenRotate(const HttpContextPtr& ctx, const std::string& role);
     void handleClientTokenDelete(const HttpContextPtr& ctx, const std::string& role);
+    // 管理台账号 API Token（api_admin_tokens.cpp）
+    void handleAdminTokens(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleAdminTokenCreate(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleAdminTokenUpdate(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleAdminTokenRotate(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleAdminTokenDelete(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleAdminTokenGroups(const HttpContextPtr& ctx, const AdminActor& actor);
+    void handleAdminTokenGroupsSave(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleUserGroups(const HttpContextPtr& ctx);
     void handleUserGroupsSave(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleDeviceList(const HttpContextPtr& ctx);
@@ -213,10 +254,13 @@ private:
     bool handleTtyWsOpen(const WebSocketChannelPtr& channel, const HttpRequestPtr& req);
     bool handleTtyWsMessage(const WebSocketChannelPtr& channel, const std::string& msg);
     bool handleTtyWsClose(const WebSocketChannelPtr& channel);
-    // api_fs_ws.cpp
+    // api_fs_ws.cpp：文件管理 / 服务管理共用的设备内建通道桥
     bool handleFsWsOpen(const WebSocketChannelPtr& channel, const HttpRequestPtr& req);
-    bool handleFsWsMessage(const WebSocketChannelPtr& channel, const std::string& msg);
-    bool handleFsWsClose(const WebSocketChannelPtr& channel);
+    bool handleSvcWsOpen(const WebSocketChannelPtr& channel, const HttpRequestPtr& req);
+    bool handleAgentWsOpen(const WebSocketChannelPtr& channel, const HttpRequestPtr& req,
+                           uint16_t flags, const std::string& prefix, const char* tag);
+    bool handleAgentWsMessage(const WebSocketChannelPtr& channel, const std::string& msg);
+    bool handleAgentWsClose(const WebSocketChannelPtr& channel);
     void handleTtyLogDownload(const HttpContextPtr& ctx);
     void cleanupTtyLogs();
     bool handleDeviceWsMessage(const WebSocketChannelPtr& channel, const std::string& msg);
@@ -225,6 +269,9 @@ private:
     void handleFiles(const HttpContextPtr& ctx);
     void handleFileDownload(const HttpContextPtr& ctx);
     void handleFileUpload(const HttpContextPtr& ctx, const std::string& role);
+    void handleFileMkdir(const HttpContextPtr& ctx, const std::string& role);
+    void handleFileMove(const HttpContextPtr& ctx, const std::string& role);
+    void handleFilePut(const HttpContextPtr& ctx, const std::string& role);
     void handleUploadStatus(const HttpContextPtr& ctx);
     void handleFileDelete(const HttpContextPtr& ctx, const std::string& role);
 

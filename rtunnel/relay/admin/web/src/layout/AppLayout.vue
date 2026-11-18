@@ -5,11 +5,15 @@
         <span class="mark">◈</span>
         <span class="name">{{ title }}</span>
       </div>
-      <el-menu :default-active="active" router class="menu">
-        <el-menu-item v-for="n in items" :key="n.path" :index="n.path">
-          <el-icon><component :is="n.icon" /></el-icon>
-          <span>{{ titleOf(n.path) }}</span>
-        </el-menu-item>
+      <el-menu ref="menuRef" :default-active="active" :default-openeds="initialOpen"
+               :unique-opened="true" router class="menu">
+        <el-sub-menu v-for="g in items" :key="g.key" :index="g.key">
+          <template #title><span class="nav-group-title">{{ g.label }}</span></template>
+          <el-menu-item v-for="n in g.items" :key="n.path" :index="n.path">
+            <el-icon><component :is="iconOf(n.icon)" /></el-icon>
+            <span>{{ n.label || titleOf(n.path) }}</span>
+          </el-menu-item>
+        </el-sub-menu>
       </el-menu>
       <div class="side-foot">
         <template v-if="ov">
@@ -82,23 +86,34 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Api } from '@/shared/api.js'
 import {
-  auth, avatarColor, logout, roleOf, ROLE_NAMES, saveTheme, siteTitle, overview,
+  auth, avatarColor, logout, roleOf, ROLE_NAMES, saveTheme, siteTitle, overview, can,
 } from '@/shared/store.js'
 import { navFor } from '@/shared/nav.js'
+import { iconOf } from '@/shared/icons.js'
 import { duration } from '@/shared/utils.js'
 
 const route = useRoute()
 const router = useRouter()
 const navOpen = ref(false)
 const themePop = ref(null)
+const menuRef = ref(null)
 const ov = ref(overview.data)
 
-const items = computed(() => navFor(roleOf()))
+const items = computed(() => navFor(roleOf(), can))
 const active = computed(() => route.path)
+const activeGroup = computed(() => {
+  const p = route.path
+  for (const g of items.value) {
+    if (g.items.some((n) => p === n.path || p.startsWith(n.path + '/'))) return g.key
+  }
+  return ''
+})
+// 只在首次挂载时生效；之后靠 watch 调 menuRef.open()
+const initialOpen = activeGroup.value ? [activeGroup.value] : []
 const crumb = computed(() => route.meta.title || '')
 const titleOf = (path) => router.resolve(path).meta.title || path
 const title = computed(() => siteTitle())
@@ -115,7 +130,13 @@ const swatches = ['#3b82f6', '#57ab5a', '#f5a623', '#e5534b', '#b083f0', '#39c5c
 const mode = ref('light')
 const color = ref('#3b82f6')
 
-watch(() => route.path, () => { navOpen.value = false })
+watch(() => route.path, async () => {
+  navOpen.value = false
+  const g = activeGroup.value
+  if (!g) return
+  await nextTick()
+  if (menuRef.value) menuRef.value.open(g)   // unique-opened 会自动收起其它组
+})
 
 function syncTheme() {
   const p = auth.profile || {}
@@ -208,17 +229,42 @@ html.dark .side {
   --el-menu-hover-bg-color: rgba(148, 163, 184, 0.1);
   --el-menu-hover-text-color: #fff;
   --el-menu-active-color: #fff;
-  --el-menu-item-height: 40px;
+  --el-menu-item-height: 38px;
   border-right: 0;
   flex: 1;
   padding: 4px 0;
   overflow-y: auto;
 }
+.menu :deep(.el-sub-menu__title) {
+  height: 34px;
+  line-height: 34px;
+  margin: 2px 10px 0;
+  padding: 0 10px !important;
+  border-radius: 8px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: rgba(148, 163, 184, 0.55);
+}
+.menu :deep(.el-sub-menu:first-child > .el-sub-menu__title) {
+  margin-top: 0;
+}
+.menu :deep(.el-sub-menu__title:hover) {
+  color: #e2e8f0;
+  background: rgba(148, 163, 184, 0.07);
+}
+.menu :deep(.el-sub-menu__icon-arrow) {
+  right: 10px;
+  margin-top: -5px;
+  font-size: 11px;
+}
+.menu :deep(.el-sub-menu .el-menu-item) {
+  padding-left: 30px !important;
+}
 .menu :deep(.el-menu-item) {
   position: relative;
-  height: 40px;
-  line-height: 40px;
-  margin: 2px 10px;
+  height: 38px;
+  line-height: 38px;
+  margin: 1px 10px;
   border-radius: 8px;
   font-size: 13.5px;
 }
