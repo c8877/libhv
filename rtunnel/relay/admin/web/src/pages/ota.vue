@@ -7,13 +7,19 @@
     </div>
 
     <div class="cfg">
-      <label class="cfg-item">升级包（文件库）
-        <el-select v-model="fileName" filterable placeholder="选择 rtunnel-agent 二进制" class="w260">
-          <el-option v-for="f in files" :key="f.name" :label="f.name" :value="f.name">
-            <span>{{ f.name }}</span>
-            <span class="muted" style="float:right">{{ bytes(f.size, true) }}</span>
-          </el-option>
-        </el-select>
+      <label class="cfg-item">升级包（文件库 agent/）
+        <div class="pick">
+          <el-select v-model="fileName" filterable placeholder="选择 rtunnel-agent 二进制" class="w260"
+                     @change="onFilePick">
+            <el-option v-for="f in files" :key="f.name" :label="f.name" :value="f.name">
+              <span>{{ f.name }}</span>
+              <el-tag v-if="variantOf(f.name)" size="small" class="vt">{{ variantOf(f.name) }}</el-tag>
+              <span class="muted" style="float:right">{{ bytes(f.size, true) }}</span>
+            </el-option>
+            <template #empty><span class="muted">agent 目录暂无升级包</span></template>
+          </el-select>
+          <el-button link type="primary" :loading="fileLoading" @click="loadFiles">刷新</el-button>
+        </div>
       </label>
       <label class="cfg-item">目标版本
         <el-input v-model="version" placeholder="如 1.3.307" class="w160" />
@@ -27,7 +33,12 @@
       <label class="cfg-item">强制重装
         <el-switch v-model="force" />
       </label>
-      <el-button link type="primary" @click="$router.push('/files')">上传新文件 →</el-button>
+      <el-button link type="primary" @click="$router.push('/files')">上传新版本 →</el-button>
+    </div>
+    <div class="hint muted">
+      升级包放在文件库 <code>agent/</code> 目录，用 gzip 压缩后上传，命名
+      <code>rtunnel-agent-lite-&lt;版本&gt;.gz</code> / <code>rtunnel-agent-web-&lt;版本&gt;.gz</code>；
+      选择后会自动填入版本号，设备侧自动解压安装。
     </div>
 
     <el-alert type="warning" :closable="false" show-icon
@@ -71,7 +82,7 @@
     <div class="panel-head">
       <h2>升级任务</h2>
       <span class="spacer" />
-      <el-select v-model="taskStatus" class="w140" @change="loadTasks">
+      <el-select v-model="taskStatus" class="w140" placeholder="全部" @change="loadTasks">
         <el-option label="全部" value="" />
         <el-option label="进行中" value="active" />
         <el-option label="成功" value="done" />
@@ -125,6 +136,8 @@ import {
 } from '@/shared/tasks.js'
 
 const files = ref([])
+const fileLoading = ref(false)
+let autoVersion = ''
 const devices = ref([])
 const loading = ref(false)
 const saving = ref(false)
@@ -165,15 +178,48 @@ function onSelect(rows) {
   rows.forEach((r) => selected.value.add(r.devid))
 }
 
+async function loadFiles() {
+  fileLoading.value = true
+  try {
+    const fl = await Api.get('/api/v1/files?dir=agent').catch(() => [])
+    const list = (fl || []).filter((f) => !f.type || f.type === 'file')
+    files.value = list
+    if (!list.some((f) => f.name === fileName.value)) {
+      fileName.value = list.length ? list[0].name : ''
+      onFilePick(fileName.value)
+    }
+  } finally {
+    fileLoading.value = false
+  }
+}
+
+// 从文件名末尾取版本号，例如 rtunnel-agent-lite-1.4.3.gz
+function versionOf(name) {
+  const base = String(name || '').replace(/\.gz$/i, '')
+  const m = base.match(/(\d+\.\d+\.\d+(?:[-+][\w.]+)?)$/)
+  return m ? m[1] : ''
+}
+
+function variantOf(name) {
+  const n = String(name || '')
+  if (n.includes('-web-') || n.endsWith('-web')) return 'web'
+  if (n.includes('-lite-') || n.endsWith('-lite')) return 'lite'
+  return ''
+}
+
+function onFilePick(name) {
+  const v = versionOf(name)
+  if (v && (!version.value || version.value === autoVersion)) version.value = v
+  autoVersion = v
+}
+
 async function load() {
   loading.value = true
   try {
-    const [fl, ag] = await Promise.all([
-      Api.get('/api/v1/files').catch(() => []),
+    const [ag] = await Promise.all([
       Api.get('/api/v1/agents').catch(() => []),
     ])
-    files.value = fl || []
-    if (!fileName.value && files.value.length) fileName.value = files.value[0].name
+    await loadFiles()
     devices.value = (ag || []).map((a) => ({
       devid: a.devid,
       online: true,
@@ -213,14 +259,14 @@ async function submit() {
   try {
     const r = await Api.post('/api/v1/distributions', {
       kind: 'ota',
-      file: fileName.value,
+      file: 'agent/' + fileName.value,
       version: version.value.trim(),
       devids: Array.from(selected.value),
       deadline_at_ms: end,
       max_retries: Number(maxRetries.value) || 0,
       force: force.value,
     })
-    if (r.unsupported) ElMessage.warning('部分设备未开启 OTA：' + r.unsupported)
+    if (r.unsupported && r.unsupported.length) ElMessage.warning('部分设备未开启 OTA：' + r.unsupported)
     ElMessage.success('已创建 ' + r.tasks.length + ' 条升级任务')
     selected.value = new Set()
     taskPage.value = 1
@@ -265,6 +311,10 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 
 <style scoped>
 .cfg { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; margin-bottom: 12px; }
+.pick { display: flex; align-items: center; gap: 4px; }
+.pick .vt { margin-left: 6px; }
+.hint { margin: -4px 0 12px; font-size: 12px; }
+.hint code { padding: 1px 4px; border-radius: 4px; background: var(--el-fill-color-light); }
 .cfg-item { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--el-text-color-secondary); }
 .w160 { width: 150px; }
 .w200 { width: 200px; }

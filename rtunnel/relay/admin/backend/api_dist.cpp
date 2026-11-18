@@ -53,7 +53,7 @@ void AdminServer::handleDistCreate(const HttpContextPtr& ctx, const AdminActor& 
         ctx->send("{\"error\":\"bad version\"}");
         return;
     }
-    if (file.empty() || file.find("..") != std::string::npos || file.find('/') != std::string::npos ||
+    if (file.empty() || !adminValidRepoPath(file) ||
         sub.size() > 128 || sub.find("..") != std::string::npos || (!sub.empty() && sub[0] == '/')) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"bad file or dir\"}");
@@ -74,9 +74,10 @@ void AdminServer::handleDistCreate(const HttpContextPtr& ctx, const AdminActor& 
         ctx->send("{\"error\":\"max_retries 0-10\"}");
         return;
     }
-    std::string path = cfg_.file_dir + "/" + file;
+    std::string path;
     struct stat st{};
-    if (cfg_.file_dir.empty() || stat(path.c_str(), &st) != 0 || st.st_size <= 0) {
+    if (cfg_.file_dir.empty() || !adminRepoPath(cfg_.file_dir, file, path) ||
+        stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0) {
         ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
         ctx->send("{\"error\":\"file not found\"}");
         return;
@@ -87,6 +88,9 @@ void AdminServer::handleDistCreate(const HttpContextPtr& ctx, const AdminActor& 
         return;
     }
     std::string sha = adminSha256File(path);
+    // 仓库路径可能带子目录（如 agent/xxx.gz）：传输只带文件名，子目录作为设备侧目标目录
+    size_t slash = file.rfind('/');
+    if (slash != std::string::npos && sub.empty()) sub = file.substr(0, slash);
     std::string batch = (kind == "ota" ? "o" : "b") + std::to_string(now) + "-" + AdminDb::randomHex(3);
     std::vector<long long> ids;
     std::string bad;

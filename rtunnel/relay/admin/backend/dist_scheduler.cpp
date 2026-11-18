@@ -64,13 +64,18 @@ void AdminServer::distTick() {
         }
     };
 
+    // 仓库文件可能带子目录，传输名只用最后一段
+    auto baseOfPath = [](const std::string& p) {
+        size_t i = p.rfind('/');
+        return i == std::string::npos ? p : p.substr(i + 1);
+    };
     // 设备侧文件绝对路径：分发目标目录 + 文件名
-    auto devicePath = [](const json& j) {
+    auto devicePath = [&](const json& j) {
         std::string dir = j.value("target_path", std::string());
         std::string sub = j.value("sub_dir", std::string());
         if (dir.empty()) dir = "/" + sub;
         if (dir.size() > 1 && dir.back() == '/') dir.pop_back();
-        return dir + "/" + j.value("file_name", std::string());
+        return dir + "/" + baseOfPath(j.value("file_name", std::string()));
     };
 
     for (auto& j : arr) {
@@ -249,13 +254,18 @@ void AdminServer::distTick() {
                 continue;
             }
 
-            std::string path = cfg_.file_dir + "/" + j.value("file_name", std::string());
+            std::string path;
+            if (!adminRepoPath(cfg_.file_dir, j.value("file_name", std::string()), path)) {
+                finishRetry(j, "bad repo file path", sent, "failed");
+                continue;
+            }
             std::string sub = j.value("sub_dir", std::string());
             uint32_t tid = 0;
             std::string err;
-            std::string ok = callRelay([this, &devid, &path, &sub, &j, &err, &tid]() {
+            std::string ok = callRelay([this, &devid, &path, &sub, &j, &err, &tid, &baseOfPath]() {
+                std::string fname = baseOfPath(j.value("file_name", std::string()));
                 return relay_->startFilePush(devid.c_str(), path.c_str(), sub.c_str(),
-                        j.value("file_name", std::string()).c_str(),
+                        fname.c_str(),
                         (uint64_t)j.value("file_size", 0LL), j.value("file_sha", std::string()),
                         err, tid) ? "1" : "0";
             });
