@@ -61,6 +61,8 @@
 
     <FileManagerCard :devid="devid" :sys="sys" :can-edit="canEdit" />
 
+    <SvcManagerCard :devid="devid" :sys="sys" :can-edit="canEdit" />
+
     <div class="panel">
       <div class="panel-head"><h2>系统信息</h2></div>
       <el-descriptions v-if="sys" :column="sysCols" size="small" border>
@@ -76,59 +78,155 @@
     </div>
 
     <div class="panel">
-      <div class="panel-head">
-        <h2>能力配置</h2>
-        <span class="spacer" />
-        <el-button v-if="sys && canEdit" size="small" @click="toggleCaps">{{ capsOpen ? '收起' : '编辑' }}</el-button>
-      </div>
+      <div class="panel-head"><h2>能力配置</h2></div>
       <div v-if="sys" class="kv-rows">
         <div class="kv-row">
+          <span class="caret" />
           <span class="k">agent 版本</span>
           <span class="v mono">{{ sys.version || '—' }}</span>
         </div>
         <div class="kv-row">
+          <span class="caret" />
+          <span class="k">启动参数</span>
+          <span class="v"><code class="args">{{ sys.args || '—' }}</code></span>
+        </div>
+        <div class="kv-row caps-toggle"
+             :class="{ clickable: canOpenCaps, open: capsOpen }"
+             :role="canOpenCaps ? 'button' : null"
+             :tabindex="canOpenCaps ? 0 : null"
+             :aria-expanded="canOpenCaps ? String(capsOpen) : null"
+             @click="onCapsToggle"
+             @keydown.enter.prevent="onCapsToggle"
+             @keydown.space.prevent="onCapsToggle">
+          <span class="caret">
+            <el-icon v-if="canOpenCaps" :class="{ open: capsOpen }"><ArrowRight /></el-icon>
+          </span>
           <span class="k">能力</span>
           <span class="v chips">
             <el-tag v-for="c in capsChips" :key="c" size="small" effect="plain">{{ c }}</el-tag>
             <span v-if="!capsChips.length" class="muted">—</span>
           </span>
+          <span v-if="canOpenCaps" class="caps-hint">{{ capsOpen ? '点击收起' : '点击配置' }}</span>
         </div>
-        <div class="kv-row">
-          <span class="k">启动参数</span>
-          <span class="v"><code class="args">{{ sys.args || '—' }}</code></span>
-        </div>
+        <el-collapse-transition>
+          <div v-if="capsOpen && sys" class="caps-edit">
+            <div class="caps-runtime">
+              <span class="muted">运行时配置</span>
+              <code class="mono">{{ (sys.caps && sys.caps.config_file) || '—' }}</code>
+              <el-tag v-if="!sys.caps || !sys.caps.config_file" size="small" type="info" effect="plain">agent 未上报</el-tag>
+              <el-tag v-else-if="sys.caps.config_loaded" size="small" type="success" effect="plain">已从文件加载</el-tag>
+              <el-tag v-else size="small" type="warning" effect="plain">使用命令行参数</el-tag>
+              <span class="muted">agent {{ (sys.caps && sys.caps.version) || '—' }}</span>
+              <span class="spacer" />
+              <el-button link size="small" :loading="capsRefreshing" @click="refreshCaps">刷新运行时</el-button>
+            </div>
+            <div class="caps-form">
+              <div class="caps-grid">
+                <div class="vform-section span2">访问控制</div>
+                <div class="vform-row span2">
+                  <span class="vlabel">转发端口</span>
+                  <div class="vcontrol">
+                    <el-input v-model="capsForm.ports" size="small" :disabled="!canCaps" placeholder="22, 8080, 8099" />
+                  </div>
+                </div>
+                <div class="vform-row">
+                  <span class="vlabel">允许 Shell</span>
+                  <div class="vcontrol">
+                    <el-checkbox v-model="capsForm.shell" :disabled="!canCaps">允许</el-checkbox>
+                  </div>
+                </div>
+                <div class="vform-row">
+                  <span class="vlabel">OTA 升级</span>
+                  <div class="vcontrol">
+                    <el-switch v-model="capsForm.ota" :disabled="!canOta" />
+                    <span class="muted">接收升级包</span>
+                  </div>
+                </div>
+
+                <div class="vform-section span2">文件与数据</div>
+                <div class="vform-row span2">
+                  <span class="vlabel">数据目录</span>
+                  <div class="vcontrol stacked">
+                    <el-input v-model="capsForm.file_dir" size="small" :disabled="!canCaps" placeholder="/opt/data/files" />
+                    <div class="vform-note">升级包存放目录；文件根目录留空时也用它</div>
+                  </div>
+                </div>
+                <template v-if="capsForm.fsSupported">
+                  <div class="vform-row">
+                    <span class="vlabel">启用文件管理</span>
+                    <div class="vcontrol">
+                      <el-checkbox v-model="capsForm.fs" :disabled="!canCaps">启用</el-checkbox>
+                    </div>
+                  </div>
+                  <div class="vform-row">
+                    <span class="vlabel">允许写入</span>
+                    <div class="vcontrol">
+                      <el-switch v-model="capsForm.fs_rw" :disabled="!canCaps || !capsForm.fs" />
+                      <span class="muted">关闭后只读</span>
+                    </div>
+                  </div>
+                  <div class="vform-row span2">
+                    <span class="vlabel">文件根目录</span>
+                    <div class="vcontrol">
+                      <el-input v-model="capsForm.fs_root" size="small" :disabled="!canCaps || !capsForm.fs"
+                                placeholder="/opt/data/files" />
+                    </div>
+                  </div>
+                  <div class="vform-row">
+                    <span class="vlabel">单文件上限</span>
+                    <div class="vcontrol">
+                      <el-input-number v-model="capsForm.fs_max_mb" :min="1" :max="10240"
+                                       :disabled="!canCaps || !capsForm.fs" size="small" />
+                      <span class="vunit">MB</span>
+                    </div>
+                  </div>
+                </template>
+                <div v-else class="vform-note muted span2">当前 agent 版本不支持文件管理配置，升级 agent 后可在此开启</div>
+
+                <div class="vform-section span2">服务管理</div>
+                <template v-if="capsForm.svcSupported">
+                  <div class="vform-row">
+                    <span class="vlabel">启用服务管理</span>
+                    <div class="vcontrol">
+                      <el-checkbox v-model="capsForm.svc" :disabled="!canCaps">启用</el-checkbox>
+                      <span class="muted">systemd 状态与日志</span>
+                    </div>
+                  </div>
+                  <div class="vform-row">
+                    <span class="vlabel">允许控制</span>
+                    <div class="vcontrol">
+                      <el-switch v-model="capsForm.svc_rw" :disabled="!canCaps || !capsForm.svc" />
+                      <span class="muted">关闭后只读</span>
+                    </div>
+                  </div>
+                </template>
+                <div v-else class="vform-note muted span2">当前 agent 版本不支持服务管理配置</div>
+
+                <div class="vform-section span2">串口白名单</div>
+                <div class="vform-row span2">
+                  <span class="vlabel">允许串口</span>
+                  <div class="vcontrol tty-allow">
+                    <el-tag v-for="(p, i) in capsForm.allow_tty" :key="p" size="small"
+                            :closable="canTty" @close="removeAllowTty(i)">{{ p }}</el-tag>
+                    <el-input v-if="allowTtyOpen" v-model="allowTtyInput" size="small" class="allow-input"
+                              placeholder="/dev/ttyS2" @keyup.enter="addAllowTty" @blur="addAllowTty" />
+                    <el-button v-else size="small" :disabled="!canTty" @click="allowTtyOpen = true">+ 添加</el-button>
+                    <div class="vform-note">留空时只允许串口配置里启用的设备</div>
+                  </div>
+                </div>
+              </div>
+              <div class="form-actions">
+                <span v-if="!canCaps && !canOta && !canTty" class="muted">没有修改能力配置的权限</span>
+                <span class="spacer" />
+                <el-button size="small" @click="capsOpen = false">取消</el-button>
+                <el-button size="small" type="primary" :loading="capsSaving"
+                           :disabled="!canCaps && !canOta && !canTty" @click="saveCaps">保存并下发</el-button>
+              </div>
+            </div>
+          </div>
+        </el-collapse-transition>
       </div>
       <el-skeleton v-else :rows="3" animated />
-      <div v-if="capsOpen && sys" class="caps-edit">
-        <div class="form-grid">
-          <label>转发端口<el-input v-model="capsForm.ports" size="small" placeholder="22, 8080, 8099" /></label>
-          <label>OTA 文件目录<el-input v-model="capsForm.file_dir" size="small" placeholder="/opt/data/files" /></label>
-          <label class="check">
-            <el-checkbox v-model="capsForm.shell" :disabled="!isAdmin">允许 Shell</el-checkbox>
-          </label>
-        </div>
-        <div v-if="capsForm.fsSupported" class="fs-caps">
-          <div class="fs-caps-head">
-            <el-checkbox v-model="capsForm.fs">启用文件管理</el-checkbox>
-            <span class="muted">设备侧文件浏览、上传、下载与编辑</span>
-          </div>
-          <div class="form-grid">
-            <label>文件根目录<el-input v-model="capsForm.fs_root" size="small" :disabled="!capsForm.fs" placeholder="/opt/data/files" /></label>
-            <label>单文件上限 (MB)<el-input-number v-model="capsForm.fs_max_mb" :min="1" :max="10240" :disabled="!capsForm.fs" size="small" /></label>
-            <label class="check">
-              <el-switch v-model="capsForm.fs_rw" :disabled="!capsForm.fs" />
-              <span>允许写入（关闭为只读）</span>
-            </label>
-          </div>
-        </div>
-        <div v-else class="fs-caps muted">当前 agent 版本不支持文件管理配置，升级 agent 后可在此开启</div>
-        <div class="form-actions">
-          <span v-if="!isAdmin" class="muted">仅 admin 可修改 Shell</span>
-          <span class="spacer" />
-          <el-button size="small" @click="capsOpen = false">取消</el-button>
-          <el-button size="small" type="primary" :loading="capsSaving" @click="saveCaps">保存并下发</el-button>
-        </div>
-      </div>
     </div>
 
     <div class="panel">
@@ -148,17 +246,45 @@
     </div>
 
     <div class="panel">
-      <div class="panel-head">
+      <div class="panel-head series-head">
         <h2>采样曲线</h2>
         <span class="spacer" />
         <el-switch v-model="sampleAuto" active-text="自动采集" @change="onSampleAuto" />
         <el-button size="small" @click="selectAllSeries">全选</el-button>
         <el-button size="small" @click="clearSeries">清空</el-button>
         <el-button size="small" @click="pullSeries(true)">全量</el-button>
-        <el-select v-model="selected" multiple collapse-tags class="series-pick"
-                   placeholder="选择指标" @change="onSeriesPick">
-          <el-option v-for="c in enabledCfg" :key="c.series" :label="c.series" :value="c.series" />
-        </el-select>
+      </div>
+      <div class="series-bar">
+        <span class="series-label">指标</span>
+        <el-popover v-model:visible="seriesPopOpen" placement="bottom-start" :width="250" trigger="click">
+          <template #reference>
+            <div ref="seriesWrapEl" class="series-select" role="button" tabindex="0"
+                 :aria-expanded="String(seriesPopOpen)"
+                 @keydown.enter.prevent="seriesPopOpen = !seriesPopOpen"
+                 @keydown.space.prevent="seriesPopOpen = !seriesPopOpen">
+              <template v-if="selected.length">
+                <span v-for="(s, i) in selected" v-show="isPhone || i < seriesVisible" :key="s" class="series-chip">
+                  {{ s }}<button class="chip-x" aria-label="移除" @click.stop="removeSeries(s)">×</button>
+                </span>
+                <span v-if="seriesHidden" class="series-more">+{{ seriesHidden }}<span class="more-caret">▾</span></span>
+              </template>
+              <span v-else class="series-empty">选择指标</span>
+              <div v-if="!isPhone" ref="seriesMeasureEl" class="series-measure" aria-hidden="true">
+                <span v-for="s in selected" :key="'m-' + s" class="series-chip">{{ s }}<span class="chip-x">×</span></span>
+              </div>
+            </div>
+          </template>
+          <div class="series-pop">
+            <div class="series-pop-head">已选 {{ selected.length }} / {{ enabledCfg.length }}</div>
+            <el-checkbox-group v-model="selected" class="series-options" @change="onSeriesPick">
+              <el-checkbox v-for="c in enabledCfg" :key="c.series" :value="c.series">{{ c.series }}</el-checkbox>
+            </el-checkbox-group>
+            <div class="series-pop-actions">
+              <el-button size="small" text @click="selectAllSeries">全选</el-button>
+              <el-button size="small" text @click="clearSeries">清空</el-button>
+            </div>
+          </div>
+        </el-popover>
       </div>
       <div v-if="!enabledCfg.length" class="muted">该设备还没有启用的采样指标，可在下方「采样配置」中添加</div>
       <template v-else>
@@ -184,46 +310,82 @@
         <span class="spacer" />
         <el-button v-if="canEdit" size="small" @click="openAddMetric">+ 添加指标</el-button>
       </div>
-      <el-table ref="metricTable" :data="seriesCfg" size="small" row-key="series" @row-click="onMetricRow">
+      <el-table ref="metricTable" class="row-edit-table" :data="seriesCfg" size="small" row-key="series" :show-header="!isPhone" @row-click="onMetricRow">
         <el-table-column type="expand">
           <template #default="{ row }">
             <div class="metric-edit" @click.stop>
-              <div class="form-grid">
-                <label>间隔（秒）<el-input-number v-model="row.interval_sec" :min="1" :max="300" size="small" /></label>
-                <label>保留点数<el-input-number v-model="row.points" :min="60" :max="86400" size="small" /></label>
-                <div class="readonly">预计保留 <b>{{ dur(row) }}</b></div>
-              </div>
-              <div class="form-actions">
-                <span class="muted">{{ metricHint(row) }}</span>
-                <span class="spacer" />
-                <el-button v-if="canEdit" size="small" type="danger" plain @click="deleteMetric(row)">删除</el-button>
-                <el-button size="small" @click="cancelMetric">取消</el-button>
-                <el-button v-if="canEdit" size="small" type="primary" @click="saveMetricRow(row)">保存并下发</el-button>
+              <div class="vform metric-form">
+                <div class="vform-row">
+                  <span class="vlabel">采样间隔</span>
+                  <div class="vcontrol">
+                    <el-input-number v-model="row.interval_sec" :min="1" :max="300" :disabled="!canEdit" size="small" />
+                    <span class="vunit">秒</span>
+                  </div>
+                </div>
+                <div class="vform-row">
+                  <span class="vlabel">保留点数</span>
+                  <div class="vcontrol">
+                    <el-input-number v-model="row.points" :min="60" :max="86400" :disabled="!canEdit" size="small" />
+                    <span class="vunit">点</span>
+                  </div>
+                </div>
+                <div class="vform-row">
+                  <span class="vlabel">预计保留</span>
+                  <div class="vcontrol"><span class="vreadonly num">{{ dur(row) }}</span></div>
+                </div>
+                <div class="vform-row">
+                  <span class="vlabel">同步状态</span>
+                  <div class="vcontrol"><span class="muted">{{ metricHint(row) }}</span></div>
+                </div>
+                <div class="vform-actions">
+                  <span class="spacer" />
+                  <el-button v-if="canEdit" size="small" type="danger" plain @click="deleteMetric(row)">删除</el-button>
+                  <el-button size="small" @click="cancelMetric">取消</el-button>
+                  <el-button v-if="canEdit" size="small" type="primary" @click="saveMetricRow(row)">保存并下发</el-button>
+                </div>
               </div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="指标" min-width="150">
+        <el-table-column v-if="isPhone" min-width="0">
+          <template #default="{ row }">
+            <div class="metric-card">
+              <div class="metric-card-top">
+                <b>{{ row.series }}</b><span class="sub">{{ unitLabel(row.series) }}</span>
+                <span class="grow" />
+                <el-switch :model-value="row.enabled" :disabled="!canEdit" @click.stop @change="(v) => toggleMetric(row, v)" />
+              </div>
+              <div class="metric-card-meta metric-card-sub">
+                <span class="num">{{ row.interval_sec }} s · {{ row.points }} 点 · {{ dur(row) }}</span>
+                <span class="grow" />
+                <span class="sync" :class="row.enabled ? (row.synced ? 'ok' : 'warn') : 'off'">
+                  {{ row.enabled ? (row.synced ? '已同步' : '未同步') : '禁用' }}
+                </span>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="!isPhone" label="指标" min-width="150">
           <template #default="{ row }">
             <b>{{ row.series }}</b><span class="sub">{{ unitLabel(row.series) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="间隔" width="90">
+        <el-table-column v-if="!isPhone" label="间隔" width="90">
           <template #default="{ row }"><span class="num">{{ row.interval_sec }} s</span></template>
         </el-table-column>
-        <el-table-column label="保留" min-width="130">
+        <el-table-column v-if="!isPhone" label="保留" min-width="130">
           <template #default="{ row }">
             <span class="num">{{ row.points }} 点</span><span class="sub">· {{ dur(row) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="同步" width="110">
+        <el-table-column v-if="!isPhone" label="同步" width="110">
           <template #default="{ row }">
             <span class="sync" :class="row.enabled ? (row.synced ? 'ok' : 'warn') : 'off'">
               {{ row.enabled ? (row.synced ? '已同步' : '未同步') : '禁用' }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="启用" width="80">
+        <el-table-column v-if="!isPhone" label="启用" width="80">
           <template #default="{ row }">
             <el-switch :model-value="row.enabled" :disabled="!canEdit" @click.stop @change="(v) => toggleMetric(row, v)" />
           </template>
@@ -242,58 +404,234 @@
       </div>
       <el-tabs v-model="ttyTab">
         <el-tab-pane :label="'已配置 (' + ttys.length + ')'" name="config">
-          <el-table :data="filteredTtys" size="small" row-key="path">
-            <el-table-column label="设备" min-width="180">
+          <el-table ref="ttyTable" class="row-edit-table" :data="filteredTtys" size="small" row-key="path" :show-header="!isPhone"
+                    @row-click="onTtyRow" @expand-change="onTtyExpand">
+            <el-table-column type="expand">
+              <template #default="{ row }">
+                <div v-if="ttyExpandedPath === row.path" class="tty-edit" @click.stop>
+                  <div class="vform tty-vform">
+                    <div class="tty-grid">
+                      <div class="vform-row">
+                        <span class="vlabel">别名</span>
+                        <div class="vcontrol"><el-input v-model="ttyEditing.alias" size="small" :disabled="!canEdit" placeholder="设备内唯一，可留空" /></div>
+                      </div>
+                      <div class="vform-row">
+                        <span class="vlabel">启用</span>
+                        <div class="vcontrol">
+                          <el-switch v-model="ttyEditing.enabled" :disabled="!canEdit" />
+                          <span class="muted">{{ ttyEditing.enabled ? '启用' : '禁用' }}</span>
+                        </div>
+                      </div>
+                      <div class="vform-row span2">
+                        <span class="vlabel">路径</span>
+                        <div class="vcontrol path-line">
+                          <span class="vreadonly mono">{{ row.path }}</span>
+                          <el-button size="small" text @click="copyText(row.path, '路径已复制')">复制路径</el-button>
+                          <el-button v-if="canTty" size="small" text @click="takeoverTty(row)">强制接管</el-button>
+                        </div>
+                      </div>
+                    <div class="vform-row">
+                      <span class="vlabel">别名</span>
+                      <div class="vcontrol"><el-input v-model="ttyEditing.alias" size="small" :disabled="!canEdit" placeholder="设备内唯一，可留空" /></div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">启用</span>
+                      <div class="vcontrol">
+                        <el-switch v-model="ttyEditing.enabled" :disabled="!canEdit" />
+                        <span class="muted">{{ ttyEditing.enabled ? '启用' : '禁用' }}</span>
+                      </div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">波特率</span>
+                      <div class="vcontrol">
+                        <el-select v-model="ttyEditing.baud" size="small" :disabled="!canEdit">
+                          <el-option v-for="b in bauds" :key="b" :label="b" :value="b" />
+                        </el-select>
+                      </div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">数据位</span>
+                      <div class="vcontrol">
+                        <el-select v-model="ttyEditing.data_bits" size="small" :disabled="!canEdit">
+                          <el-option v-for="b in [5, 6, 7, 8]" :key="b" :label="b" :value="b" />
+                        </el-select>
+                      </div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">校验</span>
+                      <div class="vcontrol">
+                        <el-select v-model="ttyEditing.parity" size="small" :disabled="!canEdit">
+                          <el-option label="无 (N)" value="N" />
+                          <el-option label="偶 (E)" value="E" />
+                          <el-option label="奇 (O)" value="O" />
+                        </el-select>
+                      </div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">停止位</span>
+                      <div class="vcontrol">
+                        <el-select v-model="ttyEditing.stop_bits" size="small" :disabled="!canEdit">
+                          <el-option :label="1" :value="1" />
+                          <el-option :label="2" :value="2" />
+                        </el-select>
+                      </div>
+                    </div>
+                    </div>
+                    <div class="vform-actions">
+                      <span class="grow" />
+                      <el-button v-if="canEdit" size="small" type="danger" plain @click="deleteTty(row)">删除</el-button>
+                      <el-button size="small" @click="collapseTtyRow">取消</el-button>
+                      <el-button v-if="canEdit" size="small" type="primary" :loading="ttySaving" @click="saveTtyRow">保存并下发</el-button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column v-if="isPhone" min-width="0">
+              <template #default="{ row }">
+                <div class="tty-card">
+                  <div class="tty-card-top">
+                    <b>{{ row.alias || '未命名' }}</b>
+                    <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '禁用' }}</el-tag>
+                    <span class="grow" />
+                    <el-button size="small" type="primary" link @click.stop="openTtyConsole(row)">调试</el-button>
+                  </div>
+                  <div class="path" :title="row.path">{{ row.path }}</div>
+                  <div class="tty-card-meta">
+                    <span>{{ row.baud }} · {{ row.data_bits }}{{ row.parity }}{{ row.stop_bits }}</span>
+                    <span class="num">RX {{ ttyRx(row.path) }}</span>
+                    <span class="num">TX {{ ttyTx(row.path) }}</span>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column v-if="!isPhone" label="设备" min-width="180">
               <template #default="{ row }">
                 <b>{{ row.alias || '—' }}</b>
                 <div class="path" :title="row.path">{{ row.path }}</div>
               </template>
             </el-table-column>
-            <el-table-column label="状态" width="90">
+            <el-table-column v-if="!isPhone" label="状态" width="80">
               <template #default="{ row }">
                 <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '禁用' }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="参数" min-width="120">
+            <el-table-column v-if="!isPhone" label="参数" min-width="120">
               <template #default="{ row }">{{ row.baud }} · {{ row.data_bits }}{{ row.parity }}{{ row.stop_bits }}</template>
             </el-table-column>
-            <el-table-column label="RX" width="90">
+            <el-table-column v-if="!isPhone" label="RX" width="90">
               <template #default="{ row }"><span class="num">{{ ttyRx(row.path) }}</span></template>
             </el-table-column>
-            <el-table-column label="TX" width="90">
+            <el-table-column v-if="!isPhone" label="TX" width="90">
               <template #default="{ row }"><span class="num">{{ ttyTx(row.path) }}</span></template>
             </el-table-column>
-            <el-table-column label="操作" :width="canEdit ? 190 : 90" fixed="right">
+            <el-table-column v-if="!isPhone" label="调试" width="70">
               <template #default="{ row }">
-                <el-button size="small" type="primary" link @click="openTtyConsole(row)">调试</el-button>
-                <el-button v-if="canEdit" size="small" link @click="openTtyDialog(row, false)">编辑</el-button>
-                <el-button v-if="canEdit" size="small" type="danger" link @click="deleteTty(row)">删除</el-button>
+                <el-button size="small" type="primary" link @click.stop="openTtyConsole(row)">调试</el-button>
               </template>
             </el-table-column>
             <template #empty><div class="muted">暂无已配置串口</div></template>
           </el-table>
         </el-tab-pane>
         <el-tab-pane :label="'未配置 (' + unconfigured.length + ')'" name="unconfig">
-          <el-table :data="filteredUnconfigured" size="small" row-key="path">
-            <el-table-column label="设备" min-width="180">
+          <el-table ref="ttyAddTable" class="row-edit-table" :data="filteredUnconfigured" size="small" row-key="path" :show-header="!isPhone"
+                    @row-click="onTtyAddRow" @expand-change="onTtyAddExpand">
+            <el-table-column type="expand">
               <template #default="{ row }">
-                <b>未配置</b>
+                <div v-if="ttyAddPath === row.path" class="tty-edit" @click.stop>
+                  <div class="vform tty-vform">
+                    <div class="tty-grid">
+                      <div class="vform-row span2">
+                        <span class="vlabel">路径</span>
+                        <div class="vcontrol"><span class="vreadonly mono">{{ row.path }}</span></div>
+                      </div>
+                    <div class="vform-row">
+                      <span class="vlabel">别名</span>
+                      <div class="vcontrol"><el-input v-model="ttyAddForm.alias" size="small" :disabled="!canEdit" placeholder="设备内唯一，可留空" /></div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">启用</span>
+                      <div class="vcontrol">
+                        <el-switch v-model="ttyAddForm.enabled" :disabled="!canEdit" />
+                        <span class="muted">{{ ttyAddForm.enabled ? '启用' : '禁用' }}</span>
+                      </div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">波特率</span>
+                      <div class="vcontrol">
+                        <el-select v-model="ttyAddForm.baud" size="small" :disabled="!canEdit">
+                          <el-option v-for="b in bauds" :key="b" :label="b" :value="b" />
+                        </el-select>
+                      </div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">数据位</span>
+                      <div class="vcontrol">
+                        <el-select v-model="ttyAddForm.data_bits" size="small" :disabled="!canEdit">
+                          <el-option v-for="b in [5, 6, 7, 8]" :key="b" :label="b" :value="b" />
+                        </el-select>
+                      </div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">校验</span>
+                      <div class="vcontrol">
+                        <el-select v-model="ttyAddForm.parity" size="small" :disabled="!canEdit">
+                          <el-option label="无 (N)" value="N" />
+                          <el-option label="偶 (E)" value="E" />
+                          <el-option label="奇 (O)" value="O" />
+                        </el-select>
+                      </div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">停止位</span>
+                      <div class="vcontrol">
+                        <el-select v-model="ttyAddForm.stop_bits" size="small" :disabled="!canEdit">
+                          <el-option :label="1" :value="1" />
+                          <el-option :label="2" :value="2" />
+                        </el-select>
+                      </div>
+                    </div>
+                    </div>
+                    <div class="vform-actions">
+                      <span class="grow" />
+                      <el-button size="small" @click="collapseTtyAddRow">取消</el-button>
+                      <el-button size="small" type="primary" :loading="ttySaving" @click="saveTtyAdd">添加</el-button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column v-if="isPhone" min-width="0">
+              <template #default="{ row }">
+                <div class="tty-card">
+                  <div class="tty-card-top">
+                    <b class="muted">未配置</b>
+                    <span class="grow" />
+                    <span class="muted">{{ canEdit ? '点击添加' : '—' }}</span>
+                  </div>
+                  <div class="path" :title="row.path">{{ row.path }}</div>
+                  <div class="tty-card-meta">
+                    <span class="num">RX {{ ttyRx(row.path) }}</span>
+                    <span class="num">TX {{ ttyTx(row.path) }}</span>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column v-if="!isPhone" label="设备" min-width="180">
+              <template #default="{ row }">
+                <b class="muted">未配置</b>
                 <div class="path" :title="row.path">{{ row.path }}</div>
               </template>
             </el-table-column>
-            <el-table-column label="状态" width="90"><span class="muted">未配置</span></el-table-column>
-            <el-table-column label="参数" min-width="120"><span class="muted">—</span></el-table-column>
-            <el-table-column label="RX" width="90">
+            <el-table-column v-if="!isPhone" label="状态" width="80"><span class="muted">未配置</span></el-table-column>
+            <el-table-column v-if="!isPhone" label="RX" width="90">
               <template #default="{ row }"><span class="num">{{ ttyRx(row.path) }}</span></template>
             </el-table-column>
-            <el-table-column label="TX" width="90">
+            <el-table-column v-if="!isPhone" label="TX" width="90">
               <template #default="{ row }"><span class="num">{{ ttyTx(row.path) }}</span></template>
             </el-table-column>
-            <el-table-column label="操作" width="100" fixed="right">
-              <template #default="{ row }">
-                <el-button v-if="canEdit" size="small" type="primary" link @click="openTtyDialog(row, true)">添加</el-button>
-                <span v-else class="muted">—</span>
-              </template>
+            <el-table-column v-if="!isPhone" label="配置" width="90">
+              <template #default="{ row }"><span class="muted">{{ canEdit ? '点击添加' : '—' }}</span></template>
             </el-table-column>
             <template #empty><div class="muted">{{ ttyQuery ? '没有匹配的串口' : '没有未配置的串口' }}</div></template>
           </el-table>
@@ -367,7 +705,7 @@
       </div>
       <div class="tty-form-extra">
         <el-button v-if="!ttyEditing.isNew" size="small" @click="copyText(ttyEditing.path, '路径已复制')">复制路径</el-button>
-        <el-button v-if="!ttyEditing.isNew && isAdmin" size="small" @click="takeoverTty(ttyEditing)">强制接管</el-button>
+        <el-button v-if="!ttyEditing.isNew && canTty" size="small" @click="takeoverTty(ttyEditing)">强制接管</el-button>
       </div>
       <template #footer>
         <el-button @click="ttyDialog = false">取消</el-button>
@@ -381,11 +719,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Chart from 'chart.js/auto'
+import { ArrowRight } from '@element-plus/icons-vue'
 import { Api } from '@/shared/api.js'
-import { canManage, roleOf } from '@/shared/store.js'
+import { can, canManage } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import { ago, bytes, copyText, downloadJson, kbPair, time } from '@/shared/utils.js'
 import FileManagerCard from '@/components/FileManagerCard.vue'
+import SvcManagerCard from '@/components/SvcManagerCard.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -395,7 +735,10 @@ const agentBase = computed(() => '/api/v1/agents/' + encodeURIComponent(devid.va
 const descCols = computed(() => (isPhone.value ? 1 : isTablet.value ? 2 : 4))
 const sysCols = computed(() => (isPhone.value ? 1 : 3))
 const canEdit = computed(() => canManage())
-const isAdmin = computed(() => roleOf() === 'admin')
+const canCaps = computed(() => can('device.caps.write'))
+const canOta = computed(() => can('device.ota.write'))
+const canTty = computed(() => can('device.tty.write'))
+const canOpenCaps = computed(() => canCaps.value || canOta.value || canTty.value)
 
 const detail = ref(null)
 const sys = ref(null)
@@ -411,6 +754,11 @@ const seriesCfg = ref([])
 const enabledCfg = computed(() => seriesCfg.value.filter((c) => c.enabled))
 const unsyncedCount = computed(() => seriesCfg.value.filter((c) => c.enabled && !c.synced).length)
 const selected = ref([])
+const seriesWrapEl = ref(null)
+const seriesMeasureEl = ref(null)
+const seriesVisible = ref(999)
+const seriesPopOpen = ref(false)
+const seriesHidden = computed(() => (isPhone.value ? 0 : Math.max(0, selected.value.length - seriesVisible.value)))
 const cache = reactive({})
 const lastTs = reactive({})
 const pullAt = reactive({})
@@ -425,7 +773,14 @@ const charts = {}
 
 const capsOpen = ref(false)
 const capsSaving = ref(false)
-const capsForm = reactive({ ports: '', file_dir: '', shell: false, fsSupported: false, fs: false, fs_root: '', fs_rw: false, fs_max_mb: 512 })
+const capsForm = reactive({
+  ports: '', file_dir: '', shell: false, ota: false, allow_tty: [],
+  fsSupported: false, fs: false, fs_root: '', fs_rw: false, fs_max_mb: 512,
+  svcSupported: false, svc: false, svc_rw: false,
+})
+const allowTtyOpen = ref(false)
+const allowTtyInput = ref('')
+const capsRefreshing = ref(false)
 
 const addMetricOpen = ref(false)
 const addMetricPick = ref([])
@@ -437,10 +792,17 @@ const ttyTab = ref('config')
 const ttyQuery = ref('')
 const ttyDialog = ref(false)
 const ttySaving = ref(false)
+const ttyTable = ref(null)
+const ttyAddTable = ref(null)
+const ttyExpandedPath = ref('')
+const ttyAddPath = ref('')
 const bauds = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
 const ttyEditing = reactive({
   isNew: true, path: '', alias: '', baud: 115200, data_bits: 8,
   parity: 'N', stop_bits: 1, enabled: true, roles: 'operator,manager,admin',
+})
+const ttyAddForm = reactive({
+  alias: '', baud: 115200, data_bits: 8, parity: 'N', stop_bits: 1, enabled: true,
 })
 
 const disks = computed(() => {
@@ -469,8 +831,10 @@ const capsChips = computed(() => {
   ;(c.ports || []).forEach((p) => out.push('TCP ' + p))
   if (c.shell) out.push('Shell')
   if (c.sysinfo) out.push('SYSINFO')
-  if (c.file_dir) out.push('OTA ' + c.file_dir)
+  if (c.ota) out.push('OTA 升级')
+  if ((c.allow_tty || []).length) out.push('串口 ' + c.allow_tty.join(' '))
   if (c.fs) out.push('文件管理 ' + (c.fs_root || '') + (c.fs_rw ? ' (读写)' : ' (只读)'))
+  if (c.svc) out.push('服务管理' + (c.svc_rw ? ' (可控制)' : ' (只读)'))
   out.push(c.mtls ? 'mTLS' : 'mTLS 未启用')
   return out
 })
@@ -665,6 +1029,42 @@ async function onSeriesPick() {
   await pullSeries(true)
 }
 
+function removeSeries(name) {
+  selected.value = selected.value.filter((s) => s !== name)
+  pullSeries(true)
+}
+
+// 桌面单行铺开：按容器宽度算出能放下几个 chip，剩余收进 +N；手机不限行数
+function measureSeries() {
+  const n = selected.value.length
+  if (isPhone.value || !seriesWrapEl.value || !seriesMeasureEl.value) {
+    seriesVisible.value = n
+    return
+  }
+  const chips = Array.from(seriesMeasureEl.value.children)
+  if (!chips.length) {
+    seriesVisible.value = 0
+    return
+  }
+  const avail = seriesWrapEl.value.clientWidth - 16
+  const gap = 8
+  const total = chips.reduce((a, c) => a + c.offsetWidth, 0) + gap * (chips.length - 1)
+  if (total <= avail) {
+    seriesVisible.value = chips.length
+    return
+  }
+  const reserve = 52
+  let used = 0
+  let fit = 0
+  for (const c of chips) {
+    const add = (fit ? gap : 0) + c.offsetWidth
+    if (used + add > avail - reserve) break
+    used += add
+    fit++
+  }
+  seriesVisible.value = Math.max(1, fit)
+}
+
 function selectAllSeries() {
   selected.value = enabledCfg.value.map((c) => c.series)
   pullSeries(true)
@@ -775,33 +1175,83 @@ function renderCharts() {
   }
 }
 
+function onCapsToggle() {
+  if (!canOpenCaps.value) return
+  toggleCaps()
+}
+
+function addAllowTty() {
+  const v = allowTtyInput.value.trim()
+  allowTtyOpen.value = false
+  allowTtyInput.value = ''
+  if (!v) return
+  if (v[0] !== '/' || v.includes('..')) {
+    ElMessage.error('串口路径必须以 / 开头且不能包含 ..')
+    return
+  }
+  if (!capsForm.allow_tty.includes(v)) capsForm.allow_tty.push(v)
+}
+
+function removeAllowTty(i) {
+  capsForm.allow_tty.splice(i, 1)
+}
+
+function fillCapsFromSys() {
+  if (!sys.value) return
+  const c = sys.value.caps || {}
+  capsForm.ports = (c.ports || []).join(', ')
+  capsForm.file_dir = c.file_dir || ''
+  capsForm.shell = !!c.shell
+  capsForm.ota = !!c.ota
+  capsForm.allow_tty = Array.isArray(c.allow_tty) ? c.allow_tty.slice() : []
+  allowTtyOpen.value = false
+  allowTtyInput.value = ''
+  capsForm.fsSupported = Object.prototype.hasOwnProperty.call(c, 'fs')
+  capsForm.fs = !!c.fs
+  capsForm.fs_root = c.fs_root || c.file_dir || ''
+  capsForm.fs_rw = !!c.fs_rw
+  capsForm.fs_max_mb = Number(c.fs_max_mb) || 512
+  capsForm.svcSupported = Object.prototype.hasOwnProperty.call(c, 'svc')
+  capsForm.svc = !!c.svc
+  capsForm.svc_rw = !!c.svc_rw
+}
+
 function toggleCaps() {
   capsOpen.value = !capsOpen.value
-  if (capsOpen.value && sys.value) {
-    const c = sys.value.caps || {}
-    capsForm.ports = (c.ports || []).join(', ')
-    capsForm.file_dir = c.file_dir || ''
-    capsForm.shell = !!c.shell
-    capsForm.fsSupported = Object.prototype.hasOwnProperty.call(c, 'fs')
-    capsForm.fs = !!c.fs
-    capsForm.fs_root = c.fs_root || c.file_dir || ''
-    capsForm.fs_rw = !!c.fs_rw
-    capsForm.fs_max_mb = Number(c.fs_max_mb) || 512
+  if (capsOpen.value) fillCapsFromSys()
+}
+
+// 能力配置以 agent 的 sysinfo 为准：强制拉全量后重新填充
+async function refreshCaps() {
+  capsRefreshing.value = true
+  try {
+    sysFull = false
+    await loadSysinfo(true)
+    fillCapsFromSys()
+  } finally {
+    capsRefreshing.value = false
   }
 }
 
 async function saveCaps() {
-  const raw = capsForm.ports.trim()
+  const raw = canCaps.value ? capsForm.ports.trim() : ''
   const ports = raw ? raw.split(/[,\s]+/).filter(Boolean).map(Number) : []
-  if (ports.some((x) => !Number.isInteger(x) || x <= 0 || x > 65535)) {
+  if (canCaps.value && ports.some((x) => !Number.isInteger(x) || x <= 0 || x > 65535)) {
     ElMessage.error('端口必须是 1–65535 的整数')
     return
   }
-  const body = { ports }
-  const dir = capsForm.file_dir.trim()
-  if (dir) body.file_dir = dir
-  if (isAdmin.value) body.shell = capsForm.shell
-  if (capsForm.fsSupported) {
+  const body = {}
+  if (canCaps.value) {
+    body.ports = ports
+    const dir = capsForm.file_dir.trim()
+    if (dir) body.file_dir = dir
+    body.shell = capsForm.shell
+  }
+  if (canOta.value) body.ota = !!capsForm.ota
+  if (canTty.value) body.allow_tty = capsForm.allow_tty.slice()
+  if (!canCaps.value) {
+    // 只改 OTA / 串口白名单时不动其它能力
+  } else if (capsForm.fsSupported) {
     if (capsForm.fs) {
       const root = capsForm.fs_root.trim()
       if (!root || root[0] !== '/' || root.includes('..')) {
@@ -821,15 +1271,33 @@ async function saveCaps() {
       body.fs = false
     }
   }
+  if (canCaps.value && capsForm.svcSupported) {
+    body.svc = !!capsForm.svc
+    if (capsForm.svc) body.svc_rw = !!capsForm.svc_rw
+  }
+  if (!Object.keys(body).length) {
+    ElMessage.warning('没有可提交的修改')
+    return
+  }
   capsSaving.value = true
   try {
     const r = await Api.put(agentBase.value + '/caps', body)
     capsOpen.value = false
     const fsMissed = body.fs !== undefined &&
       !(typeof r.fs === 'boolean' && r.fs === body.fs && (!body.fs || r.fs_root === body.fs_root))
-    if (fsMissed) ElMessage.warning('设备未应用文件管理配置：请确认 agent 已升级')
+    const svcMissed = body.svc !== undefined &&
+      !(typeof r.svc === 'boolean' && r.svc === body.svc && (!body.svc || r.svc_rw === body.svc_rw))
+    const otaMissed = body.ota !== undefined && (typeof r.ota !== 'boolean' || r.ota !== body.ota)
+    const ttyMissed = body.allow_tty !== undefined &&
+      !(Array.isArray(r.allow_tty) && JSON.stringify(r.allow_tty) === JSON.stringify(body.allow_tty))
+    if (otaMissed) ElMessage.warning('设备未应用 OTA 开关：请确认 agent 已升级到支持该配置的版本')
+    else if (ttyMissed) ElMessage.warning('设备未应用串口白名单：请确认 agent 已升级到支持该配置的版本')
+    else if (fsMissed) ElMessage.warning('设备未应用文件管理配置：请确认 agent 已升级')
+    else if (svcMissed) ElMessage.warning('设备未应用服务管理配置：请确认 agent 已升级')
     else if (r && r.persisted === false) ElMessage.warning('已生效，但未能写入配置文件，重启后会丢失')
     else ElMessage.success('能力已更新')
+    // 能力位不在增量 sysinfo 里，强制拉一次全量，卡片/入口立即跟着变
+    sysFull = false
     await loadAll({ silent: true })
   } catch (e) {
     ElMessage.error('失败：' + e.message)
@@ -906,6 +1374,10 @@ function ttyTx(path) {
 }
 
 async function loadTtys(force) {
+  if (force) {
+    ttyExpandedPath.value = ''
+    ttyAddPath.value = ''
+  }
   if (ttyLoaded.value && !force) return
   try {
     const list = await Api.get(agentBase.value + '/ttys')
@@ -926,54 +1398,138 @@ async function loadTtys(force) {
   ttyLoaded.value = true
 }
 
-function openTtyDialog(row, isNew) {
-  ttyEditing.isNew = !!isNew
+function fillTtyEditing(row) {
+  ttyEditing.isNew = false
   ttyEditing.path = row.path || ''
-  ttyEditing.alias = isNew ? '' : (row.alias || '')
-  ttyEditing.baud = isNew ? 115200 : (Number(row.baud) || 115200)
-  ttyEditing.data_bits = isNew ? 8 : (Number(row.data_bits) || 8)
-  ttyEditing.parity = isNew ? 'N' : (row.parity || 'N')
-  ttyEditing.stop_bits = isNew ? 1 : (Number(row.stop_bits) || 1)
-  ttyEditing.enabled = isNew ? true : !!row.enabled
-  ttyEditing.roles = (row.roles || 'operator,manager,admin')
-  ttyDialog.value = true
+  ttyEditing.alias = row.alias || ''
+  ttyEditing.baud = Number(row.baud) || 115200
+  ttyEditing.data_bits = Number(row.data_bits) || 8
+  ttyEditing.parity = row.parity || 'N'
+  ttyEditing.stop_bits = Number(row.stop_bits) || 1
+  ttyEditing.enabled = !!row.enabled
+  ttyEditing.roles = row.roles || 'operator,manager,admin'
+}
+
+function onTtyRow(row) {
+  if (ttyTable.value) ttyTable.value.toggleRowExpansion(row)
+}
+
+// 同时只展开一行，展开时把该行复制到 ttyEditing，取消不会改到列表数据
+function onTtyExpand(row, expanded) {
+  const open = (expanded || []).some((r) => r.path === row.path)
+  if (!open) {
+    if (ttyExpandedPath.value === row.path) ttyExpandedPath.value = ''
+    return
+  }
+  for (const r of expanded || []) {
+    if (r.path !== row.path && ttyTable.value) ttyTable.value.toggleRowExpansion(r, false)
+  }
+  ttyExpandedPath.value = row.path
+  fillTtyEditing(row)
+}
+
+function collapseTtyRow() {
+  const row = filteredTtys.value.find((r) => r.path === ttyExpandedPath.value)
+  if (row && ttyTable.value) ttyTable.value.toggleRowExpansion(row, false)
+  ttyExpandedPath.value = ''
+}
+
+function resetTtyAdd() {
+  ttyAddForm.alias = ''
+  ttyAddForm.baud = 115200
+  ttyAddForm.data_bits = 8
+  ttyAddForm.parity = 'N'
+  ttyAddForm.stop_bits = 1
+  ttyAddForm.enabled = true
+}
+
+function onTtyAddRow(row) {
+  if (ttyAddTable.value) ttyAddTable.value.toggleRowExpansion(row)
+}
+
+function onTtyAddExpand(row, expanded) {
+  const open = (expanded || []).some((r) => r.path === row.path)
+  if (!open) {
+    if (ttyAddPath.value === row.path) ttyAddPath.value = ''
+    return
+  }
+  for (const r of expanded || []) {
+    if (r.path !== row.path && ttyAddTable.value) ttyAddTable.value.toggleRowExpansion(r, false)
+  }
+  ttyAddPath.value = row.path
+  resetTtyAdd()
+}
+
+function collapseTtyAddRow() {
+  const row = filteredUnconfigured.value.find((r) => r.path === ttyAddPath.value)
+  if (row && ttyAddTable.value) ttyAddTable.value.toggleRowExpansion(row, false)
+  ttyAddPath.value = ''
 }
 
 function manualAddTty() {
-  openTtyDialog({ path: '' }, true)
+  collapseTtyRow()
+  collapseTtyAddRow()
+  ttyEditing.isNew = true
+  ttyEditing.path = ''
+  ttyEditing.alias = ''
+  ttyEditing.baud = 115200
+  ttyEditing.data_bits = 8
+  ttyEditing.parity = 'N'
+  ttyEditing.stop_bits = 1
+  ttyEditing.enabled = true
+  ttyEditing.roles = 'operator,manager,admin'
+  ttyDialog.value = true
 }
 
-async function saveTty() {
-  const path = ttyEditing.path.trim()
-  const alias = ttyEditing.alias.trim()
+async function putTty(cfg) {
+  const path = String(cfg.path || '').trim()
+  const alias = String(cfg.alias || '').trim()
   if (!path || path[0] !== '/') {
     ElMessage.error('路径必须以 / 开头')
-    return
+    return false
   }
   if (alias && !/^[A-Za-z0-9_-]{1,32}$/.test(alias)) {
     ElMessage.error('别名只能包含字母、数字、下划线和短横线')
-    return
+    return false
   }
   ttySaving.value = true
   try {
     await Api.put(agentBase.value + '/ttys', {
       path,
       alias,
-      enabled: ttyEditing.enabled,
-      baud: ttyEditing.baud,
-      data_bits: ttyEditing.data_bits,
-      parity: ttyEditing.parity,
-      stop_bits: ttyEditing.stop_bits,
-      roles: ttyEditing.roles,
+      enabled: !!cfg.enabled,
+      baud: cfg.baud,
+      data_bits: cfg.data_bits,
+      parity: cfg.parity,
+      stop_bits: cfg.stop_bits,
+      roles: cfg.roles || 'operator,manager,admin',
     })
-    ttyDialog.value = false
-    await loadTtys(true)
     ElMessage.success('串口配置已下发')
+    return true
   } catch (e) {
     ElMessage.error('保存失败：' + e.message)
+    return false
   } finally {
     ttySaving.value = false
   }
+}
+
+async function saveTtyRow() {
+  if (!(await putTty(ttyEditing))) return
+  collapseTtyRow()
+  await loadTtys(true)
+}
+
+async function saveTtyAdd() {
+  if (!(await putTty(Object.assign({ path: ttyAddPath.value }, ttyAddForm)))) return
+  collapseTtyAddRow()
+  await loadTtys(true)
+}
+
+async function saveTty() {
+  if (!(await putTty(ttyEditing))) return
+  ttyDialog.value = false
+  await loadTtys(true)
 }
 
 async function deleteTty(row) {
@@ -984,6 +1540,7 @@ async function deleteTty(row) {
   } catch (e) { return }
   try {
     await Api.del(agentBase.value + '/ttys?path=' + encodeURIComponent(row.path))
+    if (ttyExpandedPath.value === row.path) collapseTtyRow()
     await loadTtys(true)
     ElMessage.success('已删除')
   } catch (e) {
@@ -1047,8 +1604,11 @@ async function init() {
   ttyDisc.value = []
   ttyLoaded.value = false
   ttyTab.value = 'config'
+  ttyExpandedPath.value = ''
+  ttyAddPath.value = ''
   addMetricOpen.value = false
   capsOpen.value = false
+  seriesPopOpen.value = false
   if (sysRetry) { clearTimeout(sysRetry); sysRetry = null }
   Object.keys(cache).forEach((k) => delete cache[k])
   Object.keys(lastTs).forEach((k) => delete lastTs[k])
@@ -1060,10 +1620,20 @@ async function init() {
 }
 
 watch(() => route.params.devid, (v) => { if (v) init() })
-onMounted(init)
+watch([selected, isPhone, () => enabledCfg.value.length], () => nextTick(measureSeries), { deep: true })
+
+let seriesRO = null
+onMounted(() => {
+  init()
+  if (window.ResizeObserver) {
+    seriesRO = new ResizeObserver(() => measureSeries())
+    nextTick(() => { if (seriesWrapEl.value) seriesRO.observe(seriesWrapEl.value) })
+  }
+})
 onBeforeUnmount(() => {
   stopTimer()
   stopSample()
+  if (seriesRO) { seriesRO.disconnect(); seriesRO = null }
   if (sysRetry) { clearTimeout(sysRetry); sysRetry = null }
   Object.values(charts).forEach((c) => { try { c.destroy() } catch (e) { /* 已销毁 */ } })
 })
@@ -1089,34 +1659,106 @@ onBeforeUnmount(() => {
 .size { margin-top: 3px; font-size: 11px; color: var(--el-text-color-secondary); }
 .chart-box { margin-top: 8px; height: 190px; position: relative; }
 .chart-title { font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 4px; }
-.series-pick { width: 230px; }
+.series-bar { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 12px; }
+.series-label { flex: none; font-size: 12px; line-height: 30px; color: var(--el-text-color-secondary); }
+.series-select {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 2px 8px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 6px;
+  background: var(--el-bg-color);
+  cursor: pointer;
+  overflow: hidden;
+}
+.series-select:hover, .series-select:focus-visible { border-color: var(--el-color-primary); outline: none; }
+.series-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 4px 0 8px;
+  border-radius: 4px;
+  background: var(--el-fill-color);
+  font-size: 12px;
+  line-height: 22px;
+  color: var(--el-text-color-regular);
+}
+.series-chip .chip-x {
+  border: 0;
+  background: transparent;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--el-text-color-secondary);
+  cursor: pointer;
+}
+.series-chip .chip-x:hover { color: var(--el-color-danger); }
+.series-more { flex: none; display: inline-flex; align-items: center; gap: 2px; padding: 0 6px; font-size: 12px; color: var(--el-text-color-secondary); }
+.series-select:hover .series-more { color: var(--el-color-primary); }
+.more-caret { font-size: 9px; line-height: 1; }
+.series-empty { font-size: 12px; color: var(--el-text-color-placeholder); }
+.series-measure { position: absolute; left: 0; top: 0; display: flex; gap: 8px; width: max-content; visibility: hidden; pointer-events: none; }
+.series-pop-head { margin-bottom: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
+.series-options { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
+.series-options :deep(.el-checkbox) { height: 24px; margin-right: 0; }
+.series-pop-actions { display: flex; justify-content: flex-end; gap: 4px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--el-border-color-lighter); }
 
 .kv-rows { border: 1px solid var(--el-border-color-lighter); border-radius: 8px; overflow: hidden; }
 .kv-row { display: flex; align-items: flex-start; gap: 12px; padding: 9px 12px; border-bottom: 1px solid var(--el-border-color-lighter); }
 .kv-row:last-child { border-bottom: 0; }
+.kv-row .caret { flex: none; display: flex; align-items: center; justify-content: center; width: 16px; height: 24px; color: var(--el-text-color-secondary); }
+.kv-row .caret .el-icon { font-size: 12px; transition: transform 0.15s ease; }
+.kv-row .caret .el-icon.open { transform: rotate(90deg); }
 .kv-row .k { flex: none; width: 92px; color: var(--el-text-color-secondary); font-size: 12px; line-height: 24px; }
 .kv-row .v { min-width: 0; font-size: 13px; word-break: break-all; }
-.kv-row .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.kv-row .chips { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 1px; }
+.caps-toggle.clickable { cursor: pointer; }
+.caps-toggle.clickable:hover { background: var(--el-fill-color-light); }
+.caps-toggle.clickable:focus-visible { outline: 2px solid var(--el-color-primary-light-5); outline-offset: -2px; }
+.caps-hint { flex: none; margin-left: auto; font-size: 12px; line-height: 24px; color: var(--el-text-color-secondary); }
 .args { font-size: 12px; color: var(--el-text-color-regular); white-space: pre-wrap; word-break: break-all; }
 .caps-edit {
-  margin-top: 12px;
-  padding: 12px;
+  padding: 12px 12px 14px;
   background: var(--el-fill-color-lighter);
-  border-radius: 8px;
+  border-top: 1px solid var(--el-border-color-lighter);
 }
-.form-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 10px 14px;
-  align-items: end;
-}
-.form-grid > label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--el-text-color-secondary); }
-.form-grid > label.check { flex-direction: row; align-items: center; }
-.form-grid .readonly { font-size: 12px; color: var(--el-text-color-secondary); }
-.fs-caps { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--el-border-color-lighter); }
-.fs-caps-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 12px; }
-.form-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
-.form-actions .spacer { flex: 1; }
+.caps-form { max-width: 100%; }
+.caps-runtime { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; font-size: 12px; }
+.caps-runtime code { padding: 1px 6px; border-radius: 4px; background: var(--el-fill-color-light); }
+.caps-runtime .spacer { flex: 1; }
+.caps-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 28px; align-items: start; }
+.caps-grid .span2 { grid-column: 1 / -1; }
+.caps-grid .vform-row + .vform-row { margin-top: 0; }
+.caps-grid .vform-section { grid-column: 1 / -1; margin: 8px 0 2px; }
+.caps-grid .vform-section:first-child { margin-top: 0; }
+.caps-grid .vform-note { margin: 2px 0 0; font-size: 12px; color: var(--el-text-color-secondary); }
+.caps-grid .vcontrol.stacked { flex-direction: column; align-items: stretch; gap: 2px; }
+.tty-allow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tty-allow .allow-input { width: 180px; }
+.vform-row { display: flex; align-items: center; gap: 0; }
+.vform-row + .vform-row { margin-top: 10px; }
+.vform-row .vlabel { flex: none; width: 104px; padding-right: 14px; text-align: right; font-size: 12px; line-height: 24px; color: var(--el-text-color-secondary); }
+.vform-row .vcontrol { flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.vform-row .vcontrol > .el-input { width: 420px; max-width: 100%; }
+.caps-grid .vcontrol > .el-input { width: 100%; }
+.vform-row .vcontrol > .el-input-number { width: 140px; }
+.vform-row .vcontrol > .el-checkbox { margin-right: 0; }
+.vunit { flex: none; font-size: 12px; color: var(--el-text-color-secondary); }
+.vreadonly { font-size: 13px; }
+.vform-section { display: flex; align-items: center; gap: 10px; margin: 16px 0 10px; font-size: 12px; color: var(--el-text-color-secondary); }
+.vform-section::before, .vform-section::after { content: ''; flex: 1; height: 1px; background: var(--el-border-color-lighter); }
+.vform-note { margin: 12px 0 0 104px; font-size: 12px; }
+.vform-actions { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--el-border-color-lighter); }
+.vform-actions .spacer, .form-actions .spacer { flex: 1; }
+.form-actions { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--el-border-color-lighter); }
 
 .sub { margin-left: 6px; font-size: 11px; color: var(--el-text-color-secondary); }
 .num { font-variant-numeric: tabular-nums; }
@@ -1135,6 +1777,28 @@ onBeforeUnmount(() => {
 .sync.warn::before { background: var(--el-color-warning); }
 .sync.off::before { background: var(--el-text-color-placeholder); }
 .metric-edit { padding: 6px 12px 12px 42px; }
+.metric-form { max-width: 560px; }
+.metric-form .vlabel { width: 96px; }
+.metric-card { padding: 2px 0; }
+.metric-card-top { display: flex; align-items: center; gap: 6px; }
+.metric-card-meta { margin-top: 3px; font-size: 12px; color: var(--el-text-color-secondary); }
+.metric-card-sub { display: flex; align-items: center; gap: 8px; }
+.metric-card-sub .sync { flex: none; }
+.grow { flex: 1; }
+
+.tty-edit { padding: 6px 12px 12px 42px; }
+.tty-vform { max-width: 100%; }
+.tty-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 28px; align-items: start; }
+.tty-grid .span2 { grid-column: 1 / -1; }
+.tty-grid .vform-row + .vform-row { margin-top: 0; }
+.tty-grid .path-line { flex-wrap: wrap; }
+.tty-vform .vcontrol > .el-select { width: 200px; max-width: 100%; }
+.path-line { flex-wrap: wrap; gap: 2px 8px; }
+.path-line .el-button + .el-button { margin-left: 0; }
+.tty-card { padding: 2px 0; }
+.tty-card-top { display: flex; align-items: center; gap: 8px; }
+.tty-card-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 3px; font-size: 12px; color: var(--el-text-color-secondary); }
+.vform-actions .el-button + .el-button, .form-actions .el-button + .el-button { margin-left: 0; }
 
 .tty-search { width: 190px; }
 .path { font-size: 11px; color: var(--el-text-color-secondary); overflow: hidden; text-overflow: ellipsis; }
@@ -1144,12 +1808,37 @@ onBeforeUnmount(() => {
 .tty-form > label.check { flex-direction: row; align-items: center; }
 .tty-form-extra { display: flex; gap: 8px; margin-top: 12px; }
 
+@media (max-width: 899px) {
+  .caps-grid, .tty-grid { grid-template-columns: 1fr; }
+  .caps-grid .span2, .caps-grid .vform-section, .tty-grid .span2 { grid-column: auto; }
+}
 @media (max-width: 599px) {
   .period { width: 76px; }
-  .series-pick { width: 100%; }
   .panel-head { flex-wrap: wrap; }
   .tty-search { width: 100%; }
   .tty-form { grid-template-columns: 1fr; }
-  .metric-edit { padding-left: 12px; }
+  .metric-edit, .tty-edit { padding-left: 12px; }
+  .caps-hint { display: none; }
+  .kv-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 8px; row-gap: 2px; align-items: start; }
+  .kv-row .caret { grid-column: 1; grid-row: 1; height: 20px; }
+  .kv-row .k { grid-column: 2; grid-row: 1; width: auto; line-height: 20px; }
+  .kv-row .v { grid-column: 2; grid-row: 2; }
+  .kv-row .chips { gap: 4px; }
+  .kv-row .chips :deep(.el-tag) { height: 20px; padding: 0 5px; font-size: 11px; }
+  .vform-row { flex-direction: column; align-items: stretch; gap: 5px; }
+  .vform-row .vlabel { width: auto; padding-right: 0; text-align: left; }
+  .vform-row .vcontrol > .el-input { width: 100%; }
+  .vform-note { margin-left: 0; }
+  .form-actions, .vform-actions { flex-wrap: wrap; }
+  .series-head h2 { flex: 0 0 100%; }
+  .series-bar { gap: 8px; }
+  .series-label { line-height: 28px; }
+  .series-select { flex-wrap: wrap; overflow: visible; padding: 4px 8px; }
+  .series-chip { height: 24px; }
+  .row-edit-table :deep(.el-table__body colgroup col:first-child),
+  .row-edit-table :deep(.el-table__header colgroup col:first-child) { width: 30px !important; }
+  .row-edit-table :deep(.el-table__expand-column) { width: 30px !important; padding: 0 !important; vertical-align: top; }
+  .row-edit-table :deep(.el-table__expand-column .cell) { display: flex; align-items: flex-start; justify-content: center; width: 30px; padding: 8px 0 0; }
+  .row-edit-table :deep(.el-table__expand-icon) { margin-top: 0; }
 }
 </style>
