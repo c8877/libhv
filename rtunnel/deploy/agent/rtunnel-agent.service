@@ -1,8 +1,9 @@
 [Unit]
 Description=rtunnel agent
 # lite/web 共用同一个 unit：变体只由 bin/rtunnel-agent 软链指向哪个版本决定。
-After=network-online.target
-Wants=network-online.target
+# 设备离线时 agent 会自己重连，不需要等 network-online（部分板子的
+# systemd-networkd-wait-online 会一直卡住，导致服务永远起不来）。
+After=network.target
 # OTA 重启会占用一次启动额度，给 boot-check 留出回滚次数
 StartLimitBurst=10
 StartLimitIntervalSec=120
