@@ -483,6 +483,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         this.cwd = '/';
         this.entries = [];
         this.sel = new Set();          // 选中项的绝对路径
+        this.selAll = new Set();       // 整棵子树都选中的目录（含尚未加载的子项）
         this.dirSizes = new Map();     // path -> 递归统计结果
         this.dirPending = new Map();
         this.sortKey = 'name';
@@ -796,8 +797,9 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
                 e.preventDefault();
             }
             else if (e.key === 'Delete') { self.removeSelected(); e.preventDefault(); }
-            else if (e.key === 'F2' && self.sel.size === 1) {
-                self.rename(Array.from(self.sel)[0]); e.preventDefault();
+            else if (e.key === 'F2') {
+                var roots = self.selectedRoots();
+                if (roots.length === 1) { self.rename(roots[0]); e.preventDefault(); }
             }
             else if (e.key === 'Backspace' && self.cwd !== '/') { self.load(parentOf(self.cwd)); e.preventDefault(); }
         };
@@ -1312,6 +1314,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
                 self.cwd = next;
                 self.entries = r.entries || [];
                 self.sel.clear();
+                self.selAll.clear();
                 self.dirSizes.clear();
                 self.dirPending.clear();
                 if (!sameRoot) {
@@ -1348,7 +1351,12 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         if (!quiet) this.render();
         return this.listDir(path).then(function (r) {
             self.loadingKids.delete(path);
-            self.kids.set(path, r.entries || []);
+            var es = r.entries || [];
+            self.kids.set(path, es);
+            // 父目录是整棵选中的，加载出来的子项同步选中
+            if (self.selAll.has(path)) {
+                for (var i = 0; i < es.length; i++) self.markSubtree(join(path, es[i].name), true);
+            }
             if (!quiet) self.render();
         }).catch(function (e) {
             self.loadingKids.delete(path);
@@ -1413,8 +1421,9 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
     };
 
     Manager.prototype.targetDir = function () {
-        if (this.sel.size === 1) {
-            var p = Array.from(this.sel)[0];
+        var roots = this.selectedRoots();
+        if (roots.length === 1) {
+            var p = roots[0];
             var e = this.entryOf(p);
             if (e && e.type === 'dir') return p;
             if (e) return parentOf(p);
@@ -1546,6 +1555,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         var cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.checked = this.sel.has(path);
+        if (!cb.checked && this._partial && this._partial.has(path)) cb.indeterminate = true;
         td0.appendChild(cb);
         tr.appendChild(td0);
 
@@ -1659,6 +1669,8 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
             if (wrapW > 0 && wrapW < 560) this._opSlots = 1;
         }
         var count = 0;
+        // 有后代被选中、但自身未选中的目录 → 半选状态
+        this._partial = this.partialDirs();
         if (tree) {
             var nodes = this.treeNodes();
             for (var i = 0; i < nodes.length; i++) {
@@ -1709,10 +1721,13 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
             (selCount ? ' · 已选 ' + selCount + ' 项' +
                 (selHasDir ? '' : ' (' + fmtSize(selSize) + (sizePending ? '，统计中…' : '') + ')') : '');
         var allOn = this._rowItems.length > 0;
+        var anyOn = false;
         for (var ri = 0; ri < this._rowItems.length; ri++) {
-            if (!this.sel.has(this._rowItems[ri])) { allOn = false; break; }
+            if (this.sel.has(this._rowItems[ri])) anyOn = true;
+            else allOn = false;
         }
         this.q.all.checked = allOn;
+        this.q.all.indeterminate = anyOn && !allOn;
         this.q.del.disabled = this.readonly || !this.rw || !this.caps.del || !selCount;
         this.q.pack.disabled = !selCount;
         this.q.meta.textContent = this._searchHits
@@ -1851,12 +1866,74 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         return ds ? ds.bytes : null;
     };
 
+    // 递归标记/取消目录及其已加载的子项；selAll 同时记录「整棵子树选中」，
+    // 这样之后展开才加载出来的子项也会自动选中。
+    Manager.prototype.markSubtree = function (path, on) {
+        var e = this.entryOf(path);
+        var isDir = !!(e && e.type === 'dir');
+        if (on) {
+            this.sel.add(path);
+            if (isDir) this.selAll.add(path);
+        }
+        else {
+            this.sel.delete(path);
+            this.selAll.delete(path);
+        }
+        if (!isDir) return;
+        var kids = this.kids.get(path) || [];
+        for (var i = 0; i < kids.length; i++) this.markSubtree(join(path, kids[i].name), on);
+    };
+
+    // 取消某个子项后，祖先都变成部分选中（不进入 sel，界面显示 indeterminate）
+    Manager.prototype.unmarkAncestors = function (path) {
+        var a = parentOf(path);
+        while (a && a.length >= this.cwd.length) {
+            this.sel.delete(a);
+            this.selAll.delete(a);
+            if (a === this.cwd) break;
+            a = parentOf(a);
+        }
+    };
+
+    // 选中集合的顶层路径：祖先已选中时忽略后代，避免删除/移动重复处理
+    Manager.prototype.selectedRoots = function () {
+        var self = this, out = [];
+        this.sel.forEach(function (p) {
+            var a = parentOf(p);
+            while (a && a.length >= self.cwd.length) {
+                if (self.sel.has(a)) return;
+                if (a === self.cwd) break;
+                a = parentOf(a);
+            }
+            out.push(p);
+        });
+        return out;
+    };
+
+    // 当前选中集合的祖先目录里，自身没选中但下面有选中项的目录
+    Manager.prototype.partialDirs = function () {
+        var out = new Set();
+        var cwd = this.cwd;
+        var self = this;
+        this.sel.forEach(function (p) {
+            var a = parentOf(p);
+            while (a && a.length > cwd.length) {
+                if (!self.sel.has(a)) out.add(a);
+                a = parentOf(a);
+            }
+        });
+        return out;
+    };
+
     Manager.prototype.selectAll = function (on) {
         this.sel.clear();
+        this.selAll.clear();
         if (on) {
+            var tree = this.isTree();
             for (var i = 0; i < this._rowItems.length; i++) {
                 var p = this._rowItems[i];
-                this.sel.add(p);
+                if (tree) this.markSubtree(p, true);
+                else this.sel.add(p);
                 var e = this._entryByPath.get(p);
                 if (e && e.type === 'dir') this.fetchDirSize(p);
             }
@@ -1865,10 +1942,19 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
     };
 
     Manager.prototype.toggleSel = function (path, on) {
-        if (on) this.sel.add(path); else this.sel.delete(path);
-        if (on) {
-            var e = this._entryByPath.get(path) || this.findEntry(path);
-            if (e && e.type === 'dir') this.fetchDirSize(path);
+        var e = this.entryOf(path);
+        if (this.isTree() && e && e.type === 'dir') {
+            // 树形视图勾选目录：递归选中/取消整棵子树
+            this.markSubtree(path, on);
+            if (!on) this.unmarkAncestors(path);
+            if (on) this.fetchDirSize(path);
+        }
+        else {
+            if (on) this.sel.add(path);
+            else {
+                this.sel.delete(path);
+                this.unmarkAncestors(path);
+            }
         }
         this.render();
     };
@@ -2204,7 +2290,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         var self = this;
         if (this.readonly || !this.rw || !this.caps.del) return;
         if (!this.sel.size) { this.toast('请先选择文件'); return; }
-        var paths = Array.from(this.sel);
+        var paths = this.selectedRoots();
         var hasDir = paths.some(function (p) {
             var en = self._entryByPath.get(p) || self.findEntry(p);
             return !!(en && en.type === 'dir');
