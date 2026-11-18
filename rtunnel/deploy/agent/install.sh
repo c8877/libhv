@@ -98,8 +98,8 @@ got=$("$SRC" --version 2>/dev/null | tr -d '\r\n' || true)
 [ "$got" = "$VERSION" ] || { echo "版本自检失败: 期望 $VERSION，实际 ${got:-无法执行}" >&2; exit 4; }
 
 if [ "$START" = 1 ] && [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
-    if ! grep -q -- '--devid' /etc/rtunnel/agent.env 2>/dev/null; then
-        echo "请先在 /etc/rtunnel/agent.env 设置 AGENT_ARGS（至少包含 --devid 和 --server）" >&2
+    if ! grep -q -- '--devid' /opt/data/etc/rtunnel-agent.env 2>/dev/null; then
+        echo "请先在 /opt/data/etc/rtunnel-agent.env 设置 AGENT_ARGS（至少包含 --devid 和 --server）" >&2
         exit 5
     fi
 fi

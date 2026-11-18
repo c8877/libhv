@@ -10,10 +10,10 @@ StartLimitIntervalSec=120
 [Service]
 Type=simple
 WorkingDirectory=/opt/rtunnel/agent
-# 每台设备不同的身份与 relay 地址放在 /etc/rtunnel/agent.env：
+# 每台设备不同的身份与 relay 地址放在 /opt/data/etc/rtunnel-agent.env：
 #   AGENT_ARGS=--devid board01 --server 10.0.0.10:18443 --allow 22,8080
 # 能力开关在 /opt/data/etc/rtunnel-agent.json，不再写进 unit。
-EnvironmentFile=-/etc/rtunnel/agent.env
+EnvironmentFile=-/opt/data/etc/rtunnel-agent.env
 Environment=AGENT_ARGS=
 # OTA 启动计数：连续多次起不来时自动切回上一个版本
 ExecStartPre=-/opt/rtunnel/agent/bin/agent-boot-check.sh

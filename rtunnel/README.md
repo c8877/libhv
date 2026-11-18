@@ -343,8 +343,8 @@ OTA 只接受部署包（`.tar.gz`）。项目还在开发阶段，不提供旧�
 
 ```bash
 # 首次安装：先写身份与 relay 地址
-mkdir -p /etc/rtunnel
-cat > /etc/rtunnel/agent.env <<'EOF'
+mkdir -p /opt/data/etc
+cat > /opt/data/etc/rtunnel-agent.env <<'EOF'
 AGENT_ARGS=--devid board01 --server 10.0.0.10:18443 --allow 22
 EOF
 
@@ -356,7 +356,7 @@ sh rtunnel-agent-lite-<ver>-<arch>/install.sh \
 ```
 
 设备布局固定为 `/opt/rtunnel/agent`，unit 不解析额外参数：
-`/etc/rtunnel/agent.env` 只提供 `AGENT_ARGS`，能力开关在
+`/opt/data/etc/rtunnel-agent.env` 只提供 `AGENT_ARGS`，能力开关在
 `/opt/data/etc/rtunnel-agent.json`。
 
 ```bash
