@@ -60,6 +60,24 @@ private:
     uint32_t sid_;
 };
 
+// 服务管理流：文本 JSON 帧，同样加 1 字节 kind=0 复用 DATA 载荷
+class SvcTunnelSink : public rtvs::Sink {
+public:
+    SvcTunnelSink(AgentApp* app, uint32_t sid) : app_(app), sid_(sid) {}
+    void send(const std::string& msg) override {
+        if (!app_->ready()) return;
+        std::string p;
+        p.reserve(msg.size() + 1);
+        p.push_back((char)0);
+        p.append(msg);
+        rtnp::send(app_->io, rtnp::DATA, sid_, p.data(), (uint16_t)p.size());
+    }
+
+private:
+    AgentApp* app_;
+    uint32_t sid_;
+};
+
 } // namespace
 
 void AgentApp::localReadCb(hio_t* io, void* buf, int n) {
@@ -126,6 +144,11 @@ void AgentApp::streamFree(LocalStream* s) {
         s->fs_session->onClose();
         delete s->fs_session;
         s->fs_session = NULL;
+    }
+    if (s->svc_session) {
+        s->svc_session->onClose();
+        delete s->svc_session;
+        s->svc_session = NULL;
     }
     if (s->local && !hio_is_closed(s->local)) {
         hio_set_context(s->local, NULL);
@@ -312,6 +335,34 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
         w.u16(0);
         rtnp::send(io, rtnp::OPEN_OK, f->sid, w.data, (uint16_t)w.len);
         if (verbose) logf_("[agent] fs stream %u rw=%d trusted=%d", f->sid, (int)want_rw, (int)trusted);
+        return;
+    }
+    // OPEN_SVC：设备服务管理协议，payload = u8 trusted
+    if (f->flags & rtnp::OPEN_SVC) {
+        if (!svc_.ready()) {
+            sendOpenFail(f->sid, rtnp::TARGET_NOT_ALLOWED, svc_enabled == 0 ? "service manager disabled" : "systemd not available");
+            return;
+        }
+        if (streamFind(f->sid) != NULL) {
+            sendOpenFail(f->sid, rtnp::PROTOCOL_ERROR, "sid in use");
+            return;
+        }
+        bool trusted = f->len >= 1 && f->payload[0] != 0;
+        auto* s = new LocalStream{};
+        s->app = this;
+        s->sid = f->sid;
+        s->credit = rtnp::DEFAULT_CREDIT;
+        s->connected = 1;
+        s->is_svc = 1;
+        had_stream = 1;
+        s->next = streams;
+        streams = s;
+        s->svc_session = new rtvs::Session(&svc_, new SvcTunnelSink(this, f->sid), loop, devid, trusted, true);
+        rtnp::Writer w;
+        w.str("svc");
+        w.u16(0);
+        rtnp::send(io, rtnp::OPEN_OK, f->sid, w.data, (uint16_t)w.len);
+        if (verbose) logf_("[agent] svc stream %u trusted=%d", f->sid, (int)trusted);
         return;
     }
     // OPEN_SHELL：设备侧直接起 shell（forkpty），独立于端口白名单，须 --allow-shell 显式开启
@@ -603,7 +654,10 @@ static void agentSampleCpu(AgentApp* app) {
 void AgentApp::loadConfig() {
     if (config_file.empty()) return;
     FILE* fp = fopen(config_file.c_str(), "r");
-    if (!fp) return;
+    if (!fp) {
+        logf_("[agent] config file %s not found, using command line options", config_file.c_str());
+        return;
+    }
     std::string js;
     char buf[4096];
     size_t n;
@@ -611,6 +665,7 @@ void AgentApp::loadConfig() {
     fclose(fp);
     auto j = nlohmann::json::parse(js, nullptr, false);
     if (j.is_discarded() || !j.is_object()) return;
+    config_loaded = true;
     if (j.contains("allow") && j["allow"].is_array()) {
         int idx = 0;
         for (auto& v : j["allow"]) {
@@ -623,6 +678,18 @@ void AgentApp::loadConfig() {
     }
     if (j.contains("shell") && j["shell"].is_boolean()) allow_shell = j["shell"].get<bool>() ? 1 : 0;
     if (j.contains("ota") && j["ota"].is_boolean()) allow_ota = j["ota"].get<bool>() ? 1 : 0;
+    if (j.contains("allow_tty") && j["allow_tty"].is_array()) {
+        std::string joined;
+        for (auto& v : j["allow_tty"]) {
+            if (!v.is_string()) continue;
+            std::string one = v.get<std::string>();
+            if (one.empty() || one[0] != '/' || one.find("..") != std::string::npos) continue;
+            if (!joined.empty()) joined += ",";
+            joined += one;
+            if (joined.size() > sizeof(allow_tty) - 2) break;
+        }
+        snprintf(allow_tty, sizeof(allow_tty), "%s", joined.c_str());
+    }
     if (j.contains("metrics") && j["metrics"].is_object()) {
         auto& m = j["metrics"];
         if (m.contains("series") && m["series"].is_array()) {
@@ -648,6 +715,8 @@ void AgentApp::loadConfig() {
         if (!v.empty() && v[0] == '/' && v.find("..") == std::string::npos && v.size() <= 512) file_root = v;
     }
     if (j.contains("fs_rw") && j["fs_rw"].is_boolean()) file_rw = j["fs_rw"].get<bool>() ? 1 : 0;
+    if (j.contains("svc_enabled") && j["svc_enabled"].is_boolean()) svc_enabled = j["svc_enabled"].get<bool>() ? 1 : 0;
+    if (j.contains("svc_rw") && j["svc_rw"].is_boolean()) svc_rw = j["svc_rw"].get<bool>() ? 1 : 0;
     if (j.contains("fs_max_mb") && j["fs_max_mb"].is_number_integer()) {
         int v = j["fs_max_mb"].get<int>();
         if (v > 0 && v <= 10240) file_max_mb = v;
@@ -672,7 +741,34 @@ bool AgentApp::saveConfig() {
     j["fs_root"] = file_root.empty() ? file_dir : file_root;
     j["fs_rw"] = file_rw != 0;
     j["fs_max_mb"] = file_max_mb;
+    j["svc_enabled"] = svc_enabled != 0;
+    j["svc_rw"] = svc_rw != 0;
     j["ota"] = allow_ota != 0;
+    j["metrics"] = nlohmann::json::object();
+    {
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto& kv : series_cfgs) {
+            nlohmann::json r;
+            r["series"] = kv.first;
+            r["enabled"] = kv.second.enabled != 0;
+            r["interval_sec"] = kv.second.interval;
+            r["points"] = kv.second.points;
+            arr.push_back(r);
+        }
+        j["metrics"]["series"] = arr;
+    }
+    j["allow_tty"] = nlohmann::json::array();
+    {
+        std::string list = allow_tty;
+        size_t pos = 0;
+        while (pos <= list.size()) {
+            size_t comma = list.find(',', pos);
+            std::string one = list.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+            if (!one.empty()) j["allow_tty"].push_back(one);
+            if (comma == std::string::npos) break;
+            pos = comma + 1;
+        }
+    }
     std::string tmp = config_file + ".tmp";
     FILE* fp = fopen(tmp.c_str(), "w");
     if (!fp) return false;
@@ -683,7 +779,9 @@ bool AgentApp::saveConfig() {
         unlink(tmp.c_str());
         return false;
     }
-    return rename(tmp.c_str(), config_file.c_str()) == 0;
+    if (rename(tmp.c_str(), config_file.c_str()) != 0) return false;
+    config_loaded = true;
+    return true;
 }
 
 int AgentApp::applyFileConfig(const std::string& root, int rw, int max_mb, int enabled, std::string& err) {
@@ -853,6 +951,84 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
         new_fs_max = v;
         fs_set = true;
     }
+    bool svc_set = false;
+    int new_svc_enabled = svc_enabled;
+    int new_svc_rw = svc_rw;
+    if (r.contains("svc")) {
+        if (!r["svc"].is_boolean()) {
+            std::string e = "{\"ok\":false,\"error\":\"svc must be bool\"}";
+            rtnp::Writer w;
+            w.str(e.c_str());
+            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
+        new_svc_enabled = r["svc"].get<bool>() ? 1 : 0;
+        svc_set = true;
+    }
+    if (r.contains("svc_rw")) {
+        if (!r["svc_rw"].is_boolean()) {
+            std::string e = "{\"ok\":false,\"error\":\"svc_rw must be bool\"}";
+            rtnp::Writer w;
+            w.str(e.c_str());
+            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
+        new_svc_rw = r["svc_rw"].get<bool>() ? 1 : 0;
+        svc_set = true;
+    }
+    bool ota_set = false;
+    int new_ota = allow_ota;
+    if (r.contains("ota")) {
+        if (!r["ota"].is_boolean()) {
+            std::string e = "{\"ok\":false,\"error\":\"ota must be bool\"}";
+            rtnp::Writer w;
+            w.str(e.c_str());
+            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
+        new_ota = r["ota"].get<bool>() ? 1 : 0;
+        ota_set = true;
+    }
+    bool tty_set = false;
+    std::string new_allow_tty = allow_tty;
+    if (r.contains("allow_tty")) {
+        if (!r["allow_tty"].is_array()) {
+            std::string e = "{\"ok\":false,\"error\":\"allow_tty must be array\"}";
+            rtnp::Writer w;
+            w.str(e.c_str());
+            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
+        std::string joined;
+        for (auto& v : r["allow_tty"]) {
+            if (!v.is_string()) {
+                std::string e = "{\"ok\":false,\"error\":\"bad tty path\"}";
+                rtnp::Writer w;
+                w.str(e.c_str());
+                rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+                return;
+            }
+            std::string one = v.get<std::string>();
+            if (one.empty() || one[0] != '/' || one.size() > 200 || one.find("..") != std::string::npos) {
+                std::string e = "{\"ok\":false,\"error\":\"bad tty path\"}";
+                rtnp::Writer w;
+                w.str(e.c_str());
+                rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+                return;
+            }
+            if (!joined.empty()) joined += ",";
+            joined += one;
+            if (joined.size() > sizeof(allow_tty) - 2) {
+                std::string e = "{\"ok\":false,\"error\":\"too many tty\"}";
+                rtnp::Writer w;
+                w.str(e.c_str());
+                rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+                return;
+            }
+        }
+        new_allow_tty = joined;
+        tty_set = true;
+    }
     if (fs_set) {
         std::string ferr;
         if (applyFileConfig(new_fs_root, new_fs_rw, new_fs_max, new_fs_enabled, ferr) != 0) {
@@ -872,6 +1048,14 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
         while (nallow < 32 && allow_ports[nallow] > 0) nallow++;
     }
     if (shell_set) allow_shell = new_shell;
+    if (ota_set) allow_ota = new_ota;
+    if (tty_set) snprintf(allow_tty, sizeof(allow_tty), "%s", new_allow_tty.c_str());
+    if (svc_set) {
+        svc_enabled = new_svc_enabled;
+        svc_rw = new_svc_rw;
+        svc_.setEnabled(svc_enabled != 0);
+        svc_.setWritable(svc_rw != 0);
+    }
     file_dir = new_file_dir;
     bool persisted = saveConfig();
     nlohmann::json ack;
@@ -885,8 +1069,24 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     ack["fs_root"] = file_root.empty() ? file_dir : file_root;
     ack["fs_rw"] = file_rw != 0;
     ack["fs_max_mb"] = file_max_mb;
+    ack["svc"] = svc_.ready();
+    ack["svc_rw"] = svc_.ready() && svc_rw != 0;
+    ack["ota"] = allow_ota != 0;
+    ack["allow_tty"] = nlohmann::json::array();
+    {
+        std::string list = allow_tty;
+        size_t pos = 0;
+        while (pos <= list.size()) {
+            size_t comma = list.find(',', pos);
+            std::string one = list.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+            if (!one.empty()) ack["allow_tty"].push_back(one);
+            if (comma == std::string::npos) break;
+            pos = comma + 1;
+        }
+    }
     std::string body = ack.dump();
-    logf_("[agent] config set: ports=%d shell=%d fs=%d persisted=%d", allow_ports[0], allow_shell, file_enabled && fs_.ready(), (int)persisted);
+    logf_("[agent] config set: ports=%d shell=%d fs=%d svc=%d persisted=%d", allow_ports[0], allow_shell,
+          file_enabled && fs_.ready(), svc_.ready(), (int)persisted);
     rtnp::Writer w;
     w.str(body.c_str());
     rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
@@ -1190,6 +1390,31 @@ bool AgentApp::otaProbe(const std::string& path, const std::string& expect, std:
     return out == expect;
 }
 
+// 读入整个升级包（上限 64MB，与 relay 侧一致）
+static bool otaReadFile(const std::string& path, std::string& out) {
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) return false;
+    struct stat st {};
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0 ||
+        st.st_size > 64LL * 1024 * 1024) {
+        close(fd);
+        return false;
+    }
+    out.resize((size_t)st.st_size);
+    size_t off = 0;
+    while (off < out.size()) {
+        ssize_t n = read(fd, &out[off], out.size() - off);
+        if (n <= 0) {
+            if (n < 0 && errno == EINTR) continue;
+            close(fd);
+            return false;
+        }
+        off += (size_t)n;
+    }
+    close(fd);
+    return true;
+}
+
 static bool otaCopyFile(const std::string& src, const std::string& dst, mode_t mode, std::string& err) {
     int in = open(src.c_str(), O_RDONLY);
     if (in < 0) {
@@ -1301,8 +1526,52 @@ void AgentApp::handleOtaApply(const rtnp::Frame* f) {
         return;
     }
 
+    // 升级包可以是 gzip 压缩的裸二进制（.gz）：解压到同目录临时文件再校验安装
+    std::string payload = path;
+    std::string unpacked;
+    bool gz = path.size() > 3 && path.compare(path.size() - 3, 3, ".gz") == 0;
+    if (gz) {
+        std::string buf, raw;
+        if (!otaReadFile(path, buf)) {
+            ack(false, NULL, "read package failed");
+            return;
+        }
+        if (!gzipDecompress(buf.data(), buf.size(), raw, 128ULL * 1024 * 1024) || raw.empty()) {
+            ack(false, NULL, "gunzip failed");
+            return;
+        }
+        unpacked = path + ".bin-" + std::to_string((long)getpid());
+        int fd = open(unpacked.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0755);
+        bool wok = fd >= 0;
+        size_t off = 0;
+        while (wok && off < raw.size()) {
+            ssize_t n = write(fd, raw.data() + off, raw.size() - off);
+            if (n <= 0) {
+                if (n < 0 && errno == EINTR) continue;
+                wok = false;
+                break;
+            }
+            off += (size_t)n;
+        }
+        if (wok && fsync(fd) != 0) wok = false;
+        if (fd >= 0) close(fd);
+        if (!wok) {
+            unlink(unpacked.c_str());
+            ack(false, NULL, "unpack write failed");
+            return;
+        }
+        chmod(unpacked.c_str(), 0755);
+        payload = unpacked;
+        logf_("[agent] ota: gunzip %s -> %zu bytes", path.c_str(), raw.size());
+    }
+    // 无论成功失败，安装流程结束后删除解压出来的临时文件
+    struct UnpackGuard {
+        std::string p;
+        ~UnpackGuard() { if (!p.empty()) unlink(p.c_str()); }
+    } unpack_guard{unpacked};
+
     std::string probe;
-    if (!otaProbe(path, version, probe)) {
+    if (!otaProbe(payload, version, probe)) {
         std::string e = "version probe failed";
         if (!probe.empty()) e += ": " + probe;
         ack(false, NULL, e);
@@ -1314,7 +1583,7 @@ void AgentApp::handleOtaApply(const rtnp::Frame* f) {
     if (stat(self_path.c_str(), &st) == 0) mode = st.st_mode & 07777;
     std::string newp = self_path + ".new";
     std::string err;
-    if (!otaCopyFile(path, newp, mode, err)) {
+    if (!otaCopyFile(payload, newp, mode, err)) {
         ack(false, NULL, err);
         return;
     }
@@ -1640,8 +1909,38 @@ nlohmann::json AgentApp::buildSysinfo() {
         caps["fs_root"] = file_root.empty() ? file_dir : file_root;
         caps["fs_token"] = fs_.tokenRequired();
         caps["fs_max_mb"] = file_max_mb;
+        caps["svc"] = svc_.ready();
+        caps["svc_rw"] = svc_.ready() && svc_rw != 0;
+        caps["svc_token"] = svc_.tokenRequired();
         caps["ota"] = allow_ota != 0;
+        caps["allow_tty"] = nlohmann::json::array();
+        {
+            std::string list = allow_tty;
+            size_t pos = 0;
+            while (pos <= list.size()) {
+                size_t comma = list.find(',', pos);
+                std::string one = list.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+                if (!one.empty()) caps["allow_tty"].push_back(one);
+                if (comma == std::string::npos) break;
+                pos = comma + 1;
+            }
+        }
         caps["version"] = hv_version();
+        caps["config_file"] = config_file;
+        caps["config_loaded"] = config_loaded;
+        caps["metrics"] = nlohmann::json::object();
+        {
+            nlohmann::json arr = nlohmann::json::array();
+            for (const auto& kv : series_cfgs) {
+                nlohmann::json r;
+                r["series"] = kv.first;
+                r["enabled"] = kv.second.enabled != 0;
+                r["interval_sec"] = kv.second.interval;
+                r["points"] = kv.second.points;
+                arr.push_back(r);
+            }
+            caps["metrics"]["series"] = arr;
+        }
         j["caps"] = caps;
     }
 
@@ -1840,10 +2139,13 @@ void AgentApp::onFrame(rtnp::Frame* f) {
                 while ((int)it->second.size() > c.points) it->second.pop_front();
             }
         }
+        // 采样配置属于能力配置，改完立即落盘，重启后仍生效
+        bool persisted = saveConfig();
         nlohmann::json st;
         st["applied"] = true;
         st["revision"] = series_revision;
         st["series"] = (int)series_cfgs.size();
+        st["persisted"] = persisted;
         std::string s2 = st.dump();
         rtnp::Writer sw;
         sw.str(s2.c_str());
@@ -1924,6 +2226,12 @@ void AgentApp::onFrame(rtnp::Frame* f) {
     case rtnp::DATA: {
         LocalStream* s = streamFind(f->sid);
         if (s == NULL) return;
+        if (s->is_svc) {
+            if (f->len > 0 && s->svc_session) {
+                s->svc_session->onText(std::string((const char*)f->payload + 1, (size_t)f->len - 1));
+            }
+            return;
+        }
         if (s->is_fs) {
             if (f->len > 0 && s->fs_session) {
                 bool binary = f->payload[0] != 0;
@@ -1956,6 +2264,7 @@ void AgentApp::onFrame(rtnp::Frame* f) {
         rtnp::Reader r(f->payload, f->len);
         uint32_t inc = r.u32();
         if (r.err) return;
+        if (s->is_svc) return;   // 服务管理只有小 JSON，不做流控
         if (s->is_fs) {
             if (s->fs_session) s->fs_session->addCredit(inc);
             return;
@@ -2024,6 +2333,10 @@ void AgentApp::onLinkDown() {
         if (s->fs_session) {
             s->fs_session->onClose();
             delete s->fs_session;
+        }
+        if (s->svc_session) {
+            s->svc_session->onClose();
+            delete s->svc_session;
         }
         if (s->local && !hio_is_closed(s->local)) hio_close(s->local);
         delete s;
@@ -2113,6 +2426,18 @@ int AgentApp::run(int argc, char** argv) {
         else if (strcmp(argv[i], "--file-token") == 0 && i + 1 < argc) {
             file_token = argv[++i];
         }
+        else if (strcmp(argv[i], "--svc-rw") == 0) {
+            svc_rw = 1;
+        }
+        else if (strcmp(argv[i], "--svc-ro") == 0) {
+            svc_rw = 0;
+        }
+        else if (strcmp(argv[i], "--no-svc") == 0) {
+            svc_enabled = 0;
+        }
+        else if (strcmp(argv[i], "--svc-token") == 0 && i + 1 < argc) {
+            svc_token = argv[++i];
+        }
         else if (strcmp(argv[i], "--version") == 0) {
             printf("%s\n", hv_version());
             return 0;
@@ -2138,11 +2463,13 @@ int AgentApp::run(int argc, char** argv) {
         else {
             fprintf(stderr,
                     "Usage: %s --devid ID [--server H[:P] ...] [--port P] [--allow 22,80] [--allow-all]\n"
-                    "          [--allow-shell [--max-idle SEC]] [--allow-ota] [--verbose]\n"
+                    "          [--config-file FILE] [--allow-shell [--max-idle SEC]] [--allow-ota]\n"
+                    "          [--allow-tty /dev/ttyS0,/dev/ttyS1] [--verbose]\n"
 #ifdef RTUNNEL_AGENT_WEB
                     "          [--local-web [ADDR:]PORT]\n"
 #endif
-                    "          [--file-root DIR] [--file-rw|--file-ro] [--file-max-mb N] [--file-token T]\n"
+                    "          [--file-dir DIR] [--file-root DIR] [--file-rw|--file-ro] [--file-max-mb N] [--file-token T]\n"
+                    "          [--svc-rw|--svc-ro] [--no-svc] [--svc-token T]\n"
                     "       --server 可重复或逗号分隔，故障时按顺序自动切换（最多 8 个）\n",
                     argv[0]);
             return 1;
@@ -2221,6 +2548,15 @@ int AgentApp::run(int argc, char** argv) {
         else
             logf_("[agent] file root %s (%s)", fs_.root().c_str(), fs_.writable() ? "rw" : "ro");
     }
+    svc_.setEnabled(svc_enabled != 0);
+    svc_.setWritable(svc_rw != 0);
+    svc_.setToken(svc_token);
+    if (!svc_enabled)
+        logf_("[agent] service manager disabled");
+    else if (!svc_.systemd())
+        logf_("[agent] service manager disabled: systemd not running");
+    else
+        logf_("[agent] service manager ready (%s)", svc_.writable() ? "rw" : "ro");
     init(lp);
 #ifdef RTUNNEL_AGENT_WEB
     if (web_enabled) {

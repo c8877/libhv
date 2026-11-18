@@ -136,6 +136,19 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 0 0}
       <div id="fsHost" class="fsHost"></div>
     </section>
 
+    <section class="panel" id="svcPanel" hidden>
+      <div class="panel-head"><h2>服务管理</h2><span class="hint">启动、停止、自启与日志</span></div>
+      <div class="fsrow">
+        <div class="grow">
+          <div class="fsroot" id="svcSummary">systemd 服务管理</div>
+          <div class="muted" id="svcInfo" style="font-size:12px;margin-top:4px">systemd · 展开后读取服务列表</div>
+        </div>
+        <span class="tag" id="svcMode">只读</span>
+        <button class="btn" id="svcOpen">打开服务管理</button>
+      </div>
+      <div id="svcHost" class="fsHost"></div>
+    </section>
+
     <section class="panel"><div class="panel-head"><h2>系统信息</h2></div><div class="kv" id="sysinfo"></div></section>
     <section class="panel"><div class="panel-head"><h2>能力配置</h2></div><div class="chips" id="caps"></div><div class="args" id="args"></div></section>
     <section class="panel" id="certPanel" hidden><div class="panel-head"><h2>证书</h2></div><div class="kv" id="cert"></div></section>
@@ -145,6 +158,8 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 0 0}
   <footer id="foot">本地页面 · agent 采集</footer>
 </div>
 <script src="/assets/fs-ui.js"></script>
+<script src="/assets/svc-ui.js"></script>
+<script src="/assets/file-view.js"></script>
 <script>
 (function () {
   'use strict';
@@ -248,6 +263,7 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 0 0}
     chips.push(c.mtls ? 'mTLS' : 'mTLS 未启用');
     if (c.file_dir) chips.push('文件目录');
     if (c.fs) chips.push('文件管理' + (c.fs_rw ? '（读写）' : '（只读）'));
+    if (c.svc) chips.push('服务管理' + (c.svc_rw ? '（可控制）' : '（只读）'));
     $('#caps').innerHTML = chips.map(function (x) { return '<span class="chip">' + esc(x) + '</span>'; }).join('');
     $('#args').innerHTML = c.file_dir ? '<span class="muted">file_dir</span> <code>' + esc(c.file_dir) + '</code>' : '';
 
@@ -268,6 +284,18 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 0 0}
       fm.close();
       fsOpen = false;
       fsBtn.textContent = '打开文件管理';
+    }
+
+    $('#svcPanel').hidden = !c.svc;
+    if (c.svc) {
+      $('#svcSummary').textContent = 'systemd · ' + (c.svc_rw ? '可启停服务' : '只读浏览');
+      $('#svcMode').textContent = c.svc_rw ? '可控制' : '只读';
+      $('#svcMode').className = 'tag' + (c.svc_rw ? ' ok' : '');
+      $('#svcInfo').textContent = 'systemd 服务管理' + (c.svc_token ? ' · 需要 Token' : '');
+    } else if (svcOpen && sm) {
+      sm.close();
+      svcOpen = false;
+      $('#svcOpen').textContent = '打开服务管理';
     }
 
     if (d.mtls) {
@@ -400,6 +428,7 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 0 0}
   window.addEventListener('resize', drawChart);
 
   var fm = null, fsOpen = false, fsAutoOpened = false;
+  var sm = null, svcOpen = false;
   var fsBaseInfo = '', fsSpace = null;
   function renderFsInfo() {
     var txt = fsBaseInfo;
@@ -432,6 +461,31 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 0 0}
     fsBtn.textContent = '收起文件管理';
     fm.open();
     setTimeout(function () { $('#fsHost').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, 50);
+  });
+
+  var svcBtn = $('#svcOpen');
+  svcBtn.addEventListener('click', function () {
+    if (!window.RtunnelSvc) { alert('服务管理组件加载失败，请刷新页面'); return; }
+    var d = state.data || {};
+    if (!sm) {
+      sm = window.RtunnelSvc.createManager({
+        inline: true,
+        container: $('#svcHost'),
+        wsUrl: (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/svc',
+        title: '服务管理 - ' + (d.devid || '设备'),
+        onClose: function () { svcOpen = false; svcBtn.textContent = '打开服务管理'; }
+      });
+    }
+    if (svcOpen) {
+      sm.close();
+      svcOpen = false;
+      svcBtn.textContent = '打开服务管理';
+      return;
+    }
+    svcOpen = true;
+    svcBtn.textContent = '收起服务管理';
+    sm.open();
+    setTimeout(function () { $('#svcHost').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }, 50);
   });
 
   schedule();

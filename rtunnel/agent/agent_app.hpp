@@ -6,6 +6,7 @@
 
 #include "common/tunnel_link.hpp"
 #include "fs_service.hpp"
+#include "svc_session.hpp"
 #include <string>
 #include <vector>
 #include <map>
@@ -44,6 +45,8 @@ struct LocalStream {
     int is_shell = 0;                // OPEN_SHELL：pty 而非 TCP socket
     int is_fs = 0;                   // OPEN_FS：文件管理协议流
     rtfs::Session* fs_session = nullptr;
+    int is_svc = 0;                  // OPEN_SVC：服务管理协议流
+    rtvs::Session* svc_session = nullptr;
     std::string tty_path;    // TTY 流对应设备路径
     int is_monitor = 0;      // 只读监听流
     uint32_t monitor_of = 0; // 监听目标 sid
@@ -63,7 +66,8 @@ public:
     int allow_all = 0;
     int allow_shell = 0;
     char allow_tty[512] = {0}; // 逗号分隔的串口白名单   // 允许 OPEN_SHELL（forkpty 起 shell，默认禁用）
-    std::string config_file = "/opt/data/etc/agent.json";
+    std::string config_file = "/opt/data/etc/agent.json"; // --config-file 可覆盖
+    bool config_loaded = false;                          // 本次启动是否成功读取配置文件
     std::string file_dir = "/opt/data/files";
     double cpu_usage = 0;
     std::vector<double> cpu_cores;
@@ -84,9 +88,14 @@ public:
     int file_max_mb = 512;  // --file-max-mb
     int file_enabled = 1;   // 文件服务开关（可由 relay 配置关闭）
     std::string file_token; // --file-token
+    int svc_rw = 0;         // --svc-rw：允许启停/屏蔽服务
+    int svc_enabled = 1;    // --no-svc 关闭
+    std::string svc_token;  // --svc-token
 
     rtfs::Service& fsService() { return fs_; }
     bool fsReady() const { return fs_.ready(); }
+    rtvs::Service& svcService() { return svc_; }
+    bool svcReady() const { return svc_.ready(); }
 
     // 设备详情快照：只在 loop 线程采集，HTTP 线程读缓存字符串
     nlohmann::json buildSysinfo();
@@ -105,6 +114,7 @@ private:
     std::string web_body_;    // refreshWebSnapshot 生成，webSnapshot 复制
     uint64_t started_ms_ = 0; // loop 启动时刻（单调时钟，算 agent 运行时长）
     rtfs::Service fs_;
+    rtvs::Service svc_;
 
     int portAllowed(int port);
     LocalStream* streamFind(uint32_t sid);

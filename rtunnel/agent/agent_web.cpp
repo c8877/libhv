@@ -5,6 +5,9 @@
 #include "common/gzip_util.hpp"
 #include "fs_session.hpp"
 #include "fs_ui_js.hpp"
+#include "file_view_js.hpp"
+#include "svc_session.hpp"
+#include "svc_ui_js.hpp"
 
 #include "HttpServer.h"
 #include "HttpService.h"
@@ -45,6 +48,32 @@ struct LocalFsConn {
 
 std::mutex g_fs_mu;
 std::map<WebSocketChannel*, std::shared_ptr<LocalFsConn>> g_fs_conns;
+
+struct LocalSvcConn;
+
+class LocalSvcSink : public rtvs::Sink {
+public:
+    explicit LocalSvcSink(LocalSvcConn* c) : conn_(c) {}
+    void send(const std::string& msg) override;
+
+private:
+    LocalSvcConn* conn_;
+};
+
+struct LocalSvcConn {
+    WebSocketChannelPtr ws;
+    std::unique_ptr<LocalSvcSink> sink;
+    std::unique_ptr<rtvs::Session> session;
+};
+
+std::mutex g_svc_mu;
+std::map<WebSocketChannel*, std::shared_ptr<LocalSvcConn>> g_svc_conns;
+
+void LocalSvcSink::send(const std::string& msg) {
+    if (conn_ && conn_->ws && conn_->ws->isConnected()) {
+        conn_->ws->send(msg, WS_OPCODE_TEXT);
+    }
+}
 
 void LocalSink::send(bool binary, const std::string& msg) {
     if (conn_ && conn_->ws && conn_->ws->isConnected()) {
@@ -160,40 +189,38 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
     // 静态页面只压一次；JSON 快照每次请求再压（体积小，开销可忽略）
     auto html_gz = std::make_shared<std::string>();
     bool html_gz_ok = gzipCompress(kAgentWebHtml, *html_gz, 9);
-    auto js_gz = std::make_shared<std::string>();
-    bool js_gz_ok = gzipCompress(kFsUiJs, *js_gz, 9);
+    auto fs_gz = std::make_shared<std::string>();
+    bool fs_gz_ok = gzipCompress(kFsUiJs, *fs_gz, 9);
+    auto svc_gz = std::make_shared<std::string>();
+    bool svc_gz_ok = gzipCompress(kSvcUiJs, *svc_gz, 9);
+    auto fv_gz = std::make_shared<std::string>();
+    bool fv_gz_ok = gzipCompress(kFileViewJs, *fv_gz, 9);
     auto ed_gz = std::make_shared<std::string>();
     bool ed_gz_ok = gzipCompress(kCmEditorJs, *ed_gz, 9);
 
+    // 内嵌 JS 都走同一套响应头；gzip 版本在启动时压好
+    auto serveJs = [](std::shared_ptr<std::string> gz, bool gz_ok, const char* body) {
+        return [gz, gz_ok, body](HttpRequest* req, HttpResponse* resp) {
+            resp->content_type = APPLICATION_JAVASCRIPT;
+            resp->SetHeader("Cache-Control", "no-cache");
+            resp->SetHeader("X-Content-Type-Options", "nosniff");
+            resp->SetHeader("Vary", "Accept-Encoding");
+            if (gz_ok && acceptsGzip(req)) {
+                resp->SetHeader("Content-Encoding", "gzip");
+                resp->body = *gz;
+            }
+            else {
+                resp->body = body;
+            }
+            return 200;
+        };
+    };
+
     auto* service = new HttpService;
-    service->GET("/assets/cm-editor.js", [ed_gz, ed_gz_ok](HttpRequest* req, HttpResponse* resp) {
-        resp->content_type = APPLICATION_JAVASCRIPT;
-        resp->SetHeader("Cache-Control", "no-cache");
-        resp->SetHeader("X-Content-Type-Options", "nosniff");
-        resp->SetHeader("Vary", "Accept-Encoding");
-        if (ed_gz_ok && acceptsGzip(req)) {
-            resp->SetHeader("Content-Encoding", "gzip");
-            resp->body = *ed_gz;
-        }
-        else {
-            resp->body = kCmEditorJs;
-        }
-        return 200;
-    });
-    service->GET("/assets/fs-ui.js", [js_gz, js_gz_ok](HttpRequest* req, HttpResponse* resp) {
-        resp->content_type = APPLICATION_JAVASCRIPT;
-        resp->SetHeader("Cache-Control", "no-cache");
-        resp->SetHeader("X-Content-Type-Options", "nosniff");
-        resp->SetHeader("Vary", "Accept-Encoding");
-        if (js_gz_ok && acceptsGzip(req)) {
-            resp->SetHeader("Content-Encoding", "gzip");
-            resp->body = *js_gz;
-        }
-        else {
-            resp->body = kFsUiJs;
-        }
-        return 200;
-    });
+    service->GET("/assets/cm-editor.js", serveJs(ed_gz, ed_gz_ok, kCmEditorJs));
+    service->GET("/assets/fs-ui.js", serveJs(fs_gz, fs_gz_ok, kFsUiJs));
+    service->GET("/assets/svc-ui.js", serveJs(svc_gz, svc_gz_ok, kSvcUiJs));
+    service->GET("/assets/file-view.js", serveJs(fv_gz, fv_gz_ok, kFileViewJs));
     service->GET("/", [html_gz, html_gz_ok](HttpRequest* req, HttpResponse* resp) {
         setNoCacheHeaders(resp);
         resp->content_type = TEXT_HTML;
@@ -231,40 +258,89 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
 
     auto* ws = new WebSocketService;
     ws->onopen = [app](const WebSocketChannelPtr& ch, const HttpRequestPtr& req) {
-        if (req->path != "/ws/fs" || !sameOrigin(req.get()) || !app->fsReady()) {
+        if (!sameOrigin(req.get())) {
             ch->close();
             return;
         }
-        auto conn = std::make_shared<LocalFsConn>();
-        conn->ws = ch;
-        conn->sink.reset(new LocalSink(conn.get()));
-        conn->session.reset(new rtfs::Session(&app->fsService(), conn->sink.get(), app->devid, false, true));
-        conn->session->setUnlimited(true);
-        std::lock_guard<std::mutex> lk(g_fs_mu);
-        g_fs_conns[ch.get()] = conn;
+        if (req->path == "/ws/fs") {
+            if (!app->fsReady()) {
+                ch->close();
+                return;
+            }
+            auto conn = std::make_shared<LocalFsConn>();
+            conn->ws = ch;
+            conn->sink.reset(new LocalSink(conn.get()));
+            conn->session.reset(new rtfs::Session(&app->fsService(), conn->sink.get(), app->devid, false, true));
+            conn->session->setUnlimited(true);
+            std::lock_guard<std::mutex> lk(g_fs_mu);
+            g_fs_conns[ch.get()] = conn;
+            return;
+        }
+        if (req->path == "/ws/svc") {
+            if (!app->svcReady()) {
+                ch->close();
+                return;
+            }
+            auto conn = std::make_shared<LocalSvcConn>();
+            conn->ws = ch;
+            conn->sink.reset(new LocalSvcSink(conn.get()));
+            conn->session.reset(new rtvs::Session(&app->svcService(), conn->sink.get(), app->loop,
+                                                  app->devid, false));
+            std::lock_guard<std::mutex> lk(g_svc_mu);
+            g_svc_conns[ch.get()] = conn;
+            return;
+        }
+        ch->close();
     };
     ws->onmessage = [](const WebSocketChannelPtr& ch, const std::string& msg) {
-        std::shared_ptr<LocalFsConn> conn;
         {
-            std::lock_guard<std::mutex> lk(g_fs_mu);
-            auto it = g_fs_conns.find(ch.get());
-            if (it == g_fs_conns.end()) return;
+            std::shared_ptr<LocalFsConn> conn;
+            {
+                std::lock_guard<std::mutex> lk(g_fs_mu);
+                auto it = g_fs_conns.find(ch.get());
+                if (it != g_fs_conns.end()) conn = it->second;
+            }
+            if (conn) {
+                if (!conn->session) return;
+                if (ch->opcode == WS_OPCODE_BINARY)
+                    conn->session->onBinary(msg);
+                else
+                    conn->session->onText(msg);
+                return;
+            }
+        }
+        std::shared_ptr<LocalSvcConn> conn;
+        {
+            std::lock_guard<std::mutex> lk(g_svc_mu);
+            auto it = g_svc_conns.find(ch.get());
+            if (it == g_svc_conns.end()) return;
             conn = it->second;
         }
-        if (!conn->session) return;
-        if (ch->opcode == WS_OPCODE_BINARY)
-            conn->session->onBinary(msg);
-        else
-            conn->session->onText(msg);
+        if (conn->session) conn->session->onText(msg);
     };
     ws->onclose = [](const WebSocketChannelPtr& ch) {
-        std::shared_ptr<LocalFsConn> conn;
         {
-            std::lock_guard<std::mutex> lk(g_fs_mu);
-            auto it = g_fs_conns.find(ch.get());
-            if (it == g_fs_conns.end()) return;
+            std::shared_ptr<LocalFsConn> conn;
+            {
+                std::lock_guard<std::mutex> lk(g_fs_mu);
+                auto it = g_fs_conns.find(ch.get());
+                if (it != g_fs_conns.end()) {
+                    conn = it->second;
+                    g_fs_conns.erase(it);
+                }
+            }
+            if (conn) {
+                if (conn->session) conn->session->onClose();
+                return;
+            }
+        }
+        std::shared_ptr<LocalSvcConn> conn;
+        {
+            std::lock_guard<std::mutex> lk(g_svc_mu);
+            auto it = g_svc_conns.find(ch.get());
+            if (it == g_svc_conns.end()) return;
             conn = it->second;
-            g_fs_conns.erase(it);
+            g_svc_conns.erase(it);
         }
         if (conn->session) conn->session->onClose();
     };
@@ -296,6 +372,13 @@ void agentWebStop() {
             if (kv.second->session) kv.second->session->onClose();
         }
         g_fs_conns.clear();
+    }
+    {
+        std::lock_guard<std::mutex> lk(g_svc_mu);
+        for (auto& kv : g_svc_conns) {
+            if (kv.second->session) kv.second->session->onClose();
+        }
+        g_svc_conns.clear();
     }
     http_server_stop(g_server);
     delete g_server;
