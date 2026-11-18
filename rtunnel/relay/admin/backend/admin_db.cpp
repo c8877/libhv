@@ -832,7 +832,12 @@ bool AdminDb::deviceList(std::vector<std::pair<std::string, long long>>& out) {
     std::lock_guard<std::mutex> lk(mu_);
     out.clear();
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, "SELECT devid,COALESCE(owner_id,0) FROM devices ORDER BY devid", -1, &st, nullptr) != SQLITE_OK) return false;
+    if (sqlite3_prepare_v2(db_,
+            "SELECT devid,COALESCE(owner_id,0) FROM devices"
+            " UNION"
+            " SELECT devid,0 FROM res_devices WHERE devid NOT IN (SELECT devid FROM devices)"
+            " ORDER BY devid",
+            -1, &st, nullptr) != SQLITE_OK) return false;
     while (sqlite3_step(st) == SQLITE_ROW) {
         out.push_back({(const char*)sqlite3_column_text(st, 0), sqlite3_column_int64(st, 1)});
     }

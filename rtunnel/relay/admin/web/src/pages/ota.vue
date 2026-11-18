@@ -9,11 +9,12 @@
     <div class="cfg">
       <label class="cfg-item">升级包（文件库 agent/）
         <div class="pick">
-          <el-select v-model="fileName" filterable placeholder="选择 rtunnel-agent 二进制" class="w260"
+          <el-select v-model="fileName" filterable placeholder="选择 rtunnel-agent 部署包" class="w260"
                      @change="onFilePick">
             <el-option v-for="f in files" :key="f.name" :label="f.name" :value="f.name">
               <span>{{ f.name }}</span>
-              <el-tag v-if="variantOf(f.name)" size="small" class="vt">{{ variantOf(f.name) }}</el-tag>
+              <el-tag v-if="parsePkg(f.name)" size="small" class="vt">{{ parsePkg(f.name).variant }}</el-tag>
+              <el-tag v-if="parsePkg(f.name)" size="small" type="info" class="vt">{{ parsePkg(f.name).arch }}</el-tag>
               <span class="muted" style="float:right">{{ bytes(f.size, true) }}</span>
             </el-option>
             <template #empty><span class="muted">agent 目录暂无升级包</span></template>
@@ -37,19 +38,25 @@
     </div>
     <div class="hint muted">
       升级包放在文件库 <code>agent/</code> 目录，命名
-      <code>rtunnel-agent-lite-&lt;版本&gt;.tar.gz</code> / <code>rtunnel-agent-web-&lt;版本&gt;.tar.gz</code>
+      <code>rtunnel-agent-&lt;lite|web&gt;-&lt;版本&gt;-&lt;架构&gt;.tar.gz</code>
       （由 <code>deploy/package_agent.sh</code> 生成，含安装脚本和服务文件）；
-      选择后会自动填入版本号，设备侧解包、自检并切换软链。旧的裸二进制
-      <code>.gz</code> 仍可选中，只用于过渡期升级还没有安装器的设备。
+      选择后自动填入版本号，并按架构过滤设备。
     </div>
 
     <el-alert type="warning" :closable="false" show-icon
-              title="升级会让设备上的 agent 进程重新启动，正在进行的隧道会话会中断；仅支持开启 --allow-ota 的常驻 agent。"
+              title="升级会让设备上的 agent 进程重新启动，正在进行的隧道会话会中断；设备需在配置中开启 ota。"
               style="margin-bottom:12px" />
 
-    <el-table :data="pageRows" v-loading="loading" row-key="devid" @selection-change="onSelect">
-      <el-table-column type="selection" width="46" reserve-selection :selectable="(r) => r.caps_ota !== 0" />
+    <el-table ref="devTable" :data="pageRows" v-loading="loading" row-key="devid" @selection-change="onSelect">
+      <el-table-column type="selection" width="46" reserve-selection :selectable="selectable" />
       <el-table-column prop="devid" label="设备" min-width="150" />
+      <el-table-column label="架构" width="100">
+        <template #default="{ row }">
+          <span :class="{ archBad: pkgInfo && row.arch && row.arch !== pkgInfo.arch }">
+            {{ row.arch || '—' }}
+          </span>
+        </template>
+      </el-table-column>
       <el-table-column label="当前版本" width="120">
         <template #default="{ row }">{{ row.version || '—' }}</template>
       </el-table-column>
@@ -141,6 +148,7 @@ const files = ref([])
 const fileLoading = ref(false)
 let autoVersion = ''
 const devices = ref([])
+const devTable = ref(null)
 const loading = ref(false)
 const saving = ref(false)
 const fileName = ref('')
@@ -162,12 +170,20 @@ const taskTotal = ref(0)
 let timer = null
 
 const onlineCount = computed(() => devices.value.filter((d) => d.online).length)
+const pkgInfo = computed(() => parsePkg(fileName.value))
 const filtered = computed(() => {
   const k = q.value.trim().toLowerCase()
   if (!k) return devices.value
   return devices.value.filter((d) => String(d.devid).toLowerCase().includes(k))
 })
 const pageRows = computed(() => filtered.value.slice((page.value - 1) * per, page.value * per))
+
+function selectable(row) {
+  if (row.caps_ota === 0) return false
+  const p = pkgInfo.value
+  if (p && row.arch && row.arch !== p.arch) return false
+  return true
+}
 
 function ts(ms) {
   if (!ms) return '—'
@@ -184,7 +200,7 @@ async function loadFiles() {
   fileLoading.value = true
   try {
     const fl = await Api.get('/api/v1/files?dir=agent').catch(() => [])
-    const list = (fl || []).filter((f) => !f.type || f.type === 'file')
+    const list = (fl || []).filter((f) => (!f.type || f.type === 'file') && parsePkg(f.name))
     files.value = list
     if (!list.some((f) => f.name === fileName.value)) {
       fileName.value = list.length ? list[0].name : ''
@@ -195,39 +211,45 @@ async function loadFiles() {
   }
 }
 
-// 从文件名末尾取版本号，例如 rtunnel-agent-lite-1.4.3.tar.gz / .gz
-function versionOf(name) {
-  const base = String(name || '').replace(/\.tar\.gz$/i, '').replace(/\.gz$/i, '')
-  const m = base.match(/(\d+\.\d+\.\d+(?:[-+][\w.]+)?)$/)
-  return m ? m[1] : ''
-}
-
-function variantOf(name) {
-  const n = String(name || '')
-  if (n.includes('-web-') || n.endsWith('-web')) return 'web'
-  if (n.includes('-lite-') || n.endsWith('-lite')) return 'lite'
-  return ''
+// rtunnel-agent-<lite|web>-<版本>-<架构>.tar.gz
+function parsePkg(name) {
+  const m = String(name || '').match(
+    /^rtunnel-agent-(lite|web)-(\d+\.\d+\.\d+(?:[-+][\w.]+)?)-([A-Za-z0-9_]+)\.tar\.gz$/,
+  )
+  if (!m) return null
+  return { variant: m[1], version: m[2], arch: m[3] }
 }
 
 function onFilePick(name) {
-  const v = versionOf(name)
+  const p = parsePkg(name)
+  const v = p ? p.version : ''
   if (v && (!version.value || version.value === autoVersion)) version.value = v
   autoVersion = v
+  selected.value = new Set()
+  devTable.value?.clearSelection()
 }
 
 async function load() {
   loading.value = true
   try {
-    const [ag] = await Promise.all([
+    const [ag, dv] = await Promise.all([
       Api.get('/api/v1/agents').catch(() => []),
+      Api.get('/api/v1/devices').catch(() => []),
     ])
     await loadFiles()
-    devices.value = (ag || []).map((a) => ({
-      devid: a.devid,
-      online: true,
-      version: a.version || '',
-      caps_ota: typeof a.caps_ota === 'number' ? a.caps_ota : -1,
-    })).sort((a, b) => (a.devid < b.devid ? -1 : 1))
+    const byId = new Map()
+    for (const d of dv || []) {
+      byId.set(d.devid, { devid: d.devid, online: false, version: '', caps_ota: -1, arch: '' })
+    }
+    for (const a of ag || []) {
+      const cur = byId.get(a.devid) || { devid: a.devid }
+      cur.online = true
+      cur.version = a.version || ''
+      cur.caps_ota = typeof a.caps_ota === 'number' ? a.caps_ota : -1
+      cur.arch = a.caps_arch || ''
+      byId.set(a.devid, cur)
+    }
+    devices.value = Array.from(byId.values()).sort((a, b) => (a.devid < b.devid ? -1 : 1))
   } catch (e) {
     ElMessage.error('加载失败：' + e.message)
   } finally {
@@ -252,6 +274,25 @@ async function loadTasks() {
 
 async function submit() {
   if (!fileName.value || !version.value || !selected.value.size) return
+  const p = pkgInfo.value
+  if (!p) {
+    ElMessage.error('请选择 rtunnel-agent 部署包')
+    return
+  }
+  if (version.value.trim() !== p.version) {
+    ElMessage.error(`目标版本必须与包版本一致：${p.version}`)
+    return
+  }
+  const chosen = devices.value.filter((d) => selected.value.has(d.devid))
+  const bad = chosen.filter((d) => d.arch && d.arch !== p.arch)
+  if (bad.length) {
+    ElMessage.error(`架构不匹配：${bad.map((d) => `${d.devid}(${d.arch})`).join(', ')}，包是 ${p.arch}`)
+    return
+  }
+  const unknown = chosen.filter((d) => !d.arch).map((d) => d.devid)
+  if (unknown.length) {
+    ElMessage.warning(`架构未知，按 ${p.arch} 包下发：${unknown.join(', ')}`)
+  }
   const end = Number(deadline.value) || 0
   if (!end || end <= Date.now()) {
     ElMessage.warning('截止时间必须晚于当前时间')
@@ -315,6 +356,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 .cfg { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; margin-bottom: 12px; }
 .pick { display: flex; align-items: center; gap: 4px; }
 .pick .vt { margin-left: 6px; }
+.archBad { color: var(--el-color-danger); }
 .hint { margin: -4px 0 12px; font-size: 12px; }
 .hint code { padding: 1px 4px; border-radius: 4px; background: var(--el-fill-color-light); }
 .cfg-item { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--el-text-color-secondary); }

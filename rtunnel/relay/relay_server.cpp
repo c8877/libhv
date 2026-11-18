@@ -1024,6 +1024,20 @@ std::string RelayServer::agentVersion(const char* devid) {
     return std::string();
 }
 
+std::string RelayServer::agentArch(const char* devid) {
+    auto it = caps_arch.find(devid);
+    if (it != caps_arch.end()) return it->second;
+    auto si = sysinfo_cache.find(devid);
+    if (si != sysinfo_cache.end()) {
+        auto j = nlohmann::json::parse(si->second.json, nullptr, false);
+        if (!j.is_discarded() && j.contains("caps") && j["caps"].contains("arch") &&
+            j["caps"]["arch"].is_string()) {
+            return j["caps"]["arch"].get<std::string>();
+        }
+    }
+    return std::string();
+}
+
 int RelayServer::agentOtaCap(const char* devid) {
     auto it = caps_ota.find(devid);
     return it == caps_ota.end() ? -1 : it->second;
@@ -1196,6 +1210,9 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             if (!aj.is_discarded() && aj.contains("version")) {
                 agent_versions[c->devid] = aj["version"].get<std::string>();
             }
+            if (!aj.is_discarded() && aj.contains("arch") && aj["arch"].is_string()) {
+                caps_arch[c->devid] = aj["arch"].get<std::string>();
+            }
         }
         return;
     }
@@ -1261,6 +1278,10 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             }
             if (!sj.is_discarded() && sj.contains("version") && sj["version"].is_string()) {
                 agent_versions[c->devid] = sj["version"].get<std::string>();
+            }
+            if (!sj.is_discarded() && sj.contains("caps") && sj["caps"].contains("arch") &&
+                sj["caps"]["arch"].is_string()) {
+                caps_arch[c->devid] = sj["caps"]["arch"].get<std::string>();
             }
         }
         return;

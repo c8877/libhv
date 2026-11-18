@@ -407,6 +407,11 @@ void AdminServer::handleDeviceList(const HttpContextPtr& ctx) {
     if (requirePerm(ctx, "device.view", role)) return;
     std::vector<std::pair<std::string, long long>> ds;
     db_.deviceList(ds);
+    if (scopeRestricted()) {
+        std::vector<std::pair<std::string, long long>> mine;
+        for (auto& d : ds) if (ownsDevid(d.first)) mine.push_back(d);
+        ds.swap(mine);
+    }
     std::vector<DbUser> us;
     db_.listUsers(us);
     std::unordered_map<long long, std::string> names;
@@ -425,6 +430,11 @@ void AdminServer::handleDeviceList(const HttpContextPtr& ctx) {
 void AdminServer::handleDeviceBind(const HttpContextPtr& ctx, const AdminActor& actor) {
     // 路由已校验 device.bind
     std::string devid = ctx->param("devid");
+    if (!ownsDevid(devid)) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return;
+    }
     json req = json::parse(ctx->body(), nullptr, false);
     std::string owner = req.value("username", "");
     long long owner_id = 0;

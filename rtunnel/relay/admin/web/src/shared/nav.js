@@ -19,7 +19,7 @@ export const NAV_GROUPS = [
       { path: '/files', icon: 'FolderOpened', perm: 'file.read', roles: ['operator', 'manager', 'admin'] },
       { path: '/distribute', icon: 'Upload', label: '分发', perm: 'dist.write', roles: ['manager', 'admin'] },
       { path: '/tasks', icon: 'List', perm: 'dist.read', roles: ['manager', 'admin'] },
-      { path: '/ota', icon: 'Refresh', perm: 'dist.write', roles: ['manager', 'admin'] },
+      { path: '/ota', icon: 'Refresh', perm: ['dist.write', 'device.view'], roles: ['manager', 'admin'] },
     ],
   },
   {
@@ -53,15 +53,18 @@ export const NAV_GROUPS = [
   },
 ]
 
+// perm 可以是单个键或键数组；数组表示同时需要。
+function allowItem(item, role, can) {
+  const perms = Array.isArray(item.perm) ? item.perm : [item.perm]
+  if (perms.length === 1 && perms[0] === 'auth') return true
+  if (typeof can === 'function') return perms.every((p) => can(p))
+  return item.roles.includes(role)
+}
+
 // 返回 [{ key, label, items }]，优先按资源权限过滤，未拿到权限时退回角色
 export function navFor(role, can) {
-  const allow = (n) => {
-    if (n.perm === 'auth') return true
-    if (typeof can === 'function') return can(n.perm)
-    return n.roles.includes(role)
-  }
   return NAV_GROUPS
-    .map((g) => ({ ...g, items: g.items.filter(allow) }))
+    .map((g) => ({ ...g, items: g.items.filter((n) => allowItem(n, role, can)) }))
     .filter((g) => g.items.length)
 }
 
@@ -69,11 +72,7 @@ export function canVisit(path, role, can) {
   if (path === '/profile') return true
   for (const g of NAV_GROUPS) {
     const item = g.items.find((n) => path === n.path || (n.path !== '/' && path.startsWith(n.path + '/')))
-    if (item) {
-      if (item.perm === 'auth') return true
-      if (typeof can === 'function') return can(item.perm)
-      return item.roles.includes(role)
-    }
+    if (item) return allowItem(item, role, can)
   }
   return true
 }

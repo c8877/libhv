@@ -46,6 +46,7 @@ void AdminServer::handleAgents(const HttpContextPtr& ctx) {
             {
                 auto it = relay_->caps_ota.find(c->devid);
                 j["caps_ota"] = it == relay_->caps_ota.end() ? -1 : it->second;
+                j["caps_arch"] = relay_->agentArch(c->devid);
                 auto vt = relay_->agent_versions.find(c->devid);
                 j["version"] = vt == relay_->agent_versions.end() ? "" : vt->second;
             }

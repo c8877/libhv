@@ -106,6 +106,8 @@ RTUNNEL_UDS=1 make rtunnel_test          # 本地入口走 UDS（需要 -DENABLE
 
 python3 rtunnel/tests/e2e_failover.py    # 双 relay 故障切换
 python3 rtunnel/tests/e2e_alerts.py      # 告警（本地 webhook sink）
+bash rtunnel/tests/ota_e2e.sh            # OTA 安装/重启/版本确认 + 错误架构拒绝
+bash rtunnel/tests/dist_scope_e2e.sh     # 分发/OTA 的设备范围授权
 build/bin/rtunnel-endpoint-test          # --server 地址解析单测
 ```
 
@@ -297,23 +299,23 @@ OTA 不另建传输通道：部署包走「文件上传 + 文件分发」落到�
 分发完成后 relay 下发安装指令，统一记录在 `distribution_tasks`：
 
 1. `deploy/package_agent.sh` 生成两个部署包：
-   `rtunnel-agent-lite-<ver>.tar.gz` / `rtunnel-agent-web-<ver>.tar.gz`。
+   `rtunnel-agent-lite-<ver>-<arch>.tar.gz` / `rtunnel-agent-web-<ver>-<arch>.tar.gz`。
    包内是 `manifest.json`、`install.sh`、`bin/rtunnel-agent-<variant>-<ver>`、
    `bin/agent-boot-check.sh`、`etc/rtunnel-agent.json` 和 `service/rtunnel-agent.service`；
-   版本取二进制 `--version`，必须与文件名一致；
+   版本取二进制 `--version`，架构取 `uname -m`（交叉编译用 `RTUNNEL_ARCH` 指定）；
 2. `deploy/upload_agent.sh` 上传到文件仓库 `agent/`（需要 atk 令牌），
-   `/ota` 页从文件名解析 variant 和版本；
+   `/ota` 页从文件名解析 variant、版本和架构，并按架构过滤设备；
 3. 传输复用 `FILE_BEGIN/DATA/END`（0x1D-0x1F），落盘 `file_dir/agent/xxx.tar.gz`；
 4. relay 发 `OTA_APPLY`（0x30，JSON：path/version/size/sha256）：
-   agent 校验大小与 sha256 → 解包到 `.ota/`（拒绝 `..`、绝对路径、符号链接）→
-   manifest 与 `--version` 自检（`verifying`）→ ACK `verified`（`installing`）；
+   agent 校验大小与 sha256 → 解压 → 解包到 `.ota/`（拒绝 `..`、绝对路径、符号链接）→
+   manifest（版本/架构）与 `--version` 自检（`verifying`）→ ACK `verified`（`installing`）；
 5. agent 执行包内 `install.sh`：装版本化二进制和 boot-check、更新 unit、
-   配置不存在时安装默认配置（旧 `agent.json` 先迁移）、写 `state/previous` 与
-   `state/pending`，最后原子切换 `bin/rtunnel-agent -> rtunnel-agent-<variant>-<ver>`；
+   配置不存在时安装默认配置、写 `state/previous` 与 `state/pending`，
+   最后原子切换 `bin/rtunnel-agent -> rtunnel-agent-<variant>-<ver>`；
 6. ACK `installed`，等 ACK 写出后排队 `systemctl --no-block restart rtunnel-agent.service`
    并退出；unit 的 `Restart=always` 兜底（`confirming`）；
 7. 新 agent 启动时 `ExecStartPre=agent-boot-check.sh` 计数；AUTH_OK 后清 pending、
-   上报 SYSINFO（含版本），relay 在 `confirming` 阶段比对目标版本 → `success`。
+   上报 SYSINFO（含版本和 `caps.arch`），relay 在 `confirming` 阶段比对目标版本 → `success`。
 
 任务状态：`scheduled→queued→running→verifying→installing→confirming→success`；
 失败分支为 `failed / timeout / conflict / unsupported / canceled`，重试沿用分发任务的
@@ -334,28 +336,40 @@ OTA 不另建传输通道：部署包走「文件上传 + 文件分发」落到�
 - 只对常驻 agent 生效，按需 agent（`a:<user>`）拒绝；
 - `/opt/rtunnel/agent/bin` 和 `/opt/data/etc` 必须可写；
 - 升级会重启 agent，隧道/shell 会断开；
-- 旧布局（`bin/rtunnel-agent` 是真实文件）第一次升级会自动迁移为版本化文件 + 软链；
 - 版本确认超时 `ota.apply_timeout_s`（默认 180s）。
 
-迁移注意：合并后的 unit 不再引用 `AGENT_WEB` / `AGENT_FILE_*`，这些能力改由
-`rtunnel-agent.json` 控制；自定义过 `AGENT_WEB`（例如局域网访问本地页）的设备，
-升级后在配置里写 `"local_web": "0.0.0.0:8080"`。`/etc/rtunnel/agent.env` 只保留
-`AGENT_ARGS` 的身份与 relay 地址。
-
-过渡期：新 agent 只接受 `.tar.gz` 部署包，老 agent 不认。`upload_agent.sh` 加
-`LEGACY=1` 会额外上传裸二进制 `.gz`，让老设备先用旧包升到带安装器的新 agent。
+OTA 只接受部署包（`.tar.gz`）。项目还在开发阶段，不提供旧二进制/旧目录布局的自动迁移：
+设备统一按下面的布局安装，旧开发机直接重装即可。
 
 ```bash
-# 生成 lite + web 两个包（版本默认取部署二进制的 --version）
+# 首次安装：先写身份与 relay 地址
+mkdir -p /etc/rtunnel
+cat > /etc/rtunnel/agent.env <<'EOF'
+AGENT_ARGS=--devid board01 --server 10.0.0.10:18443 --allow 22
+EOF
+
+# 解包并安装（--start 首次安装会 enable --now）
+tar -xzf rtunnel-agent-lite-<ver>-<arch>.tar.gz
+sh rtunnel-agent-lite-<ver>-<arch>/install.sh \
+  --pkg-dir rtunnel-agent-lite-<ver>-<arch> \
+  --variant lite --version <ver> --start
+```
+
+设备布局固定为 `/opt/rtunnel/agent`，unit 不解析额外参数：
+`/etc/rtunnel/agent.env` 只提供 `AGENT_ARGS`，能力开关在
+`/opt/data/etc/rtunnel-agent.json`。
+
+```bash
+# 生成 lite + web 两个包（版本默认取部署二进制的 --version，架构默认 uname -m）
 ./deploy/package_agent.sh 1.4.9
 
-# 交叉编译（ARM）：用 qemu 跑目标二进制做 --version 自检
-RTUNNEL_DEPLOY_DIR=build/deploy_mp135 \
+# 交叉编译（ARM）：用 qemu 跑目标二进制做 --version 自检，并显式指定目标架构
+RTUNNEL_DEPLOY_DIR=build/deploy_mp135 RTUNNEL_ARCH=armv7l \
 RTUNNEL_PKG_RUNNER="qemu-arm-static -L /opt/st/.../sysroots/cortexa7t2hf-neon-vfpv4-ostl-linux-gnueabi" \
 ./deploy/package_agent.sh 1.4.9
 
-# 上传（加 LEGACY=1 同时上传旧 .gz）
-RT=https://relay:9443 ATK=atk-xxxx ./deploy/upload_agent.sh 1.4.9
+# 上传（架构要与打包时一致）
+RT=https://relay:9443 ATK=atk-xxxx RTUNNEL_ARCH=armv7l ./deploy/upload_agent.sh 1.4.9
 ```
 
 容器或临时目录里试装时，可加 `RTUNNEL_INSTALL_NO_UNITS=1`（或 `--no-units`）

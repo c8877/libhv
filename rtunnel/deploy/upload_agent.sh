@@ -3,13 +3,14 @@
 #
 # 用法：
 #   RT=https://192.168.1.133:9443 ATK=atk-xxxx ./deploy/upload_agent.sh [版本]
-#   LEGACY=1 ...   # 额外上传旧的裸二进制 .gz，供尚未升级到新 agent 的设备使用
-#   INSECURE=1 ... # relay 使用自签证书时跳过校验
+#   RTUNNEL_ARCH=armv7l ...   # 交叉打包时指定包的目标架构，默认 uname -m
+#   INSECURE=1 ...            # relay 使用自签证书时跳过校验
 #
 # 环境变量：
 #   RT                  管理台地址，必填
 #   ATK                 管理台账号 API Token（atk- 开头），必填
 #   RTUNNEL_DEPLOY_DIR  部署目录，默认 build/deploy
+#   RTUNNEL_ARCH        包架构，默认 uname -m
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -17,7 +18,7 @@ DEPLOY="${RTUNNEL_DEPLOY_DIR:-$ROOT/build/deploy}"
 RT="${RT:?请设置 RT，例如 https://192.168.1.133:9443}"
 ATK="${ATK:?请设置 ATK（管理台账号 API Token，atk- 开头）}"
 LITE="$DEPLOY/agent/bin/rtunnel-agent"
-WEB="$DEPLOY/agent-web/bin/rtunnel-agent"
+ARCH="${RTUNNEL_ARCH:-$(uname -m)}"
 VER="${1:-}"
 
 if [ -z "$VER" ] && [ -x "$LITE" ]; then
@@ -39,9 +40,6 @@ case "$code" in
     *) echo "创建 agent/ 失败：HTTP $code" >&2; exit 1 ;;
 esac
 
-TMPDIR_UP="$(mktemp -d)"
-trap 'rm -rf "$TMPDIR_UP"' EXIT
-
 upload() {
     local src="$1" name="$2"
     [ -f "$src" ] || { echo "缺少 $src" >&2; exit 1; }
@@ -50,36 +48,17 @@ upload() {
     echo ok
 }
 
-# 新格式：package_agent.sh 已经压好的 tar.gz，原样上传
 for v in lite web; do
-    pkg="$DEPLOY/packages/rtunnel-agent-$v-$VER.tar.gz"
+    name="rtunnel-agent-$v-$VER-$ARCH.tar.gz"
+    pkg="$DEPLOY/packages/$name"
     if [ -f "$pkg" ]; then
-        upload "$pkg" "rtunnel-agent-$v-$VER.tar.gz"
+        upload "$pkg" "$name"
     elif [ "$v" = lite ]; then
-        echo "缺少 $pkg，先执行：./deploy/package_agent.sh $VER" >&2
+        echo "缺少 $pkg，先执行：RTUNNEL_ARCH=$ARCH ./deploy/package_agent.sh $VER" >&2
         exit 1
     else
         echo "跳过 web 包（未构建）" >&2
     fi
 done
 
-# 旧格式：裸二进制 gzip，仅用于过渡期老 agent
-WITH_LEGACY=0
-if [ "${LEGACY:-0}" = "1" ]; then
-    WITH_LEGACY=1
-    upload_legacy() {
-        local src="$1" name="$2"
-        [ -x "$src" ] || return 0
-        local gz="$TMPDIR_UP/$name.gz"
-        gzip -9 -n -c "$src" > "$gz"
-        upload "$gz" "$name.gz"
-    }
-    upload_legacy "$LITE" "rtunnel-agent-lite-$VER"
-    upload_legacy "$WEB" "rtunnel-agent-web-$VER"
-fi
-
-if [ "$WITH_LEGACY" = 1 ]; then
-    echo "完成：版本 $VER（含 legacy .gz）"
-else
-    echo "完成：版本 $VER"
-fi
+echo "完成：版本 $VER ($ARCH)"

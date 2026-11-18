@@ -272,6 +272,7 @@ bool readManifest(const std::string& dir, Manifest& m, std::string& err) {
     m.name = j.value("name", std::string());
     m.variant = j.value("variant", std::string());
     m.version = j.value("version", std::string());
+    m.arch = j.value("arch", std::string());
     m.binary = j.value("binary", std::string());
     if (m.name != "rtunnel-agent") {
         err = "manifest name mismatch";
@@ -284,6 +285,16 @@ bool readManifest(const std::string& dir, Manifest& m, std::string& err) {
     if (!versionOk(m.version)) {
         err = "manifest version invalid";
         return false;
+    }
+    if (m.arch.empty() || m.arch.size() > 32) {
+        err = "manifest arch invalid";
+        return false;
+    }
+    for (char c : m.arch) {
+        if (!(isalnum((unsigned char)c) || c == '.' || c == '_' || c == '-')) {
+            err = "manifest arch invalid";
+            return false;
+        }
     }
     std::string want = "bin/rtunnel-agent-" + m.variant + "-" + m.version;
     if (m.binary != want) {

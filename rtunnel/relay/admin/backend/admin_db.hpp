@@ -106,12 +106,13 @@ public:
                     long long next_retry_ms, int retry_count);
     bool distProgress(long long id, long long sent);
     bool distExtend(long long id, long long deadline_ms);
+    // devids 为空表示不按设备过滤；受限账号必须传入自己的设备集
     bool distList(const std::string& status, const std::string& q, const std::string& batch,
-                  const std::string& kind, int page, int per_page,
-                  std::string& json_out, int& total);
+                  const std::string& kind, const std::vector<std::string>& devids,
+                  int page, int per_page, std::string& json_out, int& total);
     bool distGet(long long id, std::string& json_out);
     bool distDue(std::string& json_out);   // status/start/deadline/retry 字段列表
-    bool distSummary(std::string& json_out);
+    bool distSummary(const std::vector<std::string>& devids, std::string& json_out);
     bool fileMetaGet(const std::string& name, long long size, long long mtime_ms, std::string& sha);
     bool fileMetaPut(const std::string& name, long long size, long long mtime_ms, const std::string& sha);
     bool distAlreadyPushed(const std::string& devid, const std::string& sha);

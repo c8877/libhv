@@ -133,9 +133,21 @@ bool AdminDb::distGet(long long id, std::string& json_out) {
     return ok;
 }
 
+static void appendDevidFilter(std::string& where, std::vector<std::string>& args,
+                              const std::vector<std::string>& devids) {
+    if (devids.empty()) return;
+    where += " AND devid IN (";
+    for (size_t i = 0; i < devids.size(); ++i) {
+        if (i) where += ",";
+        where += "?";
+    }
+    where += ")";
+    args.insert(args.end(), devids.begin(), devids.end());
+}
+
 bool AdminDb::distList(const std::string& status, const std::string& q, const std::string& batch,
-                       const std::string& kind, int page, int per_page,
-                       std::string& json_out, int& total) {
+                       const std::string& kind, const std::vector<std::string>& devids,
+                       int page, int per_page, std::string& json_out, int& total) {
     std::lock_guard<std::mutex> lk(mu_);
     std::string where = " WHERE 1=1";
     std::vector<std::string> args;
@@ -162,6 +174,7 @@ bool AdminDb::distList(const std::string& status, const std::string& q, const st
         args.push_back("%" + q + "%");
         args.push_back("%" + q + "%");
     }
+    appendDevidFilter(where, args, devids);
     std::string countSql = "SELECT COUNT(*) FROM distribution_tasks" + where;
     sqlite3_stmt* st = nullptr;
     total = 0;
@@ -211,11 +224,17 @@ bool AdminDb::distDue(std::string& json_out) {
     return true;
 }
 
-bool AdminDb::distSummary(std::string& json_out) {
+bool AdminDb::distSummary(const std::vector<std::string>& devids, std::string& json_out) {
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, "SELECT status,COUNT(*) FROM distribution_tasks GROUP BY status",
-                           -1, &st, nullptr) != SQLITE_OK) return false;
+    std::string where;
+    std::vector<std::string> args;
+    appendDevidFilter(where, args, devids);
+    if (!where.empty()) where = " WHERE 1=1" + where;
+    std::string sql = "SELECT status,COUNT(*) FROM distribution_tasks" + where + " GROUP BY status";
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return false;
+    for (size_t i = 0; i < args.size(); ++i)
+        sqlite3_bind_text(st, (int)i + 1, args[i].c_str(), -1, SQLITE_TRANSIENT);
     long long all = 0, active = 0, done = 0, failed = 0, conflict = 0;
     while (sqlite3_step(st) == SQLITE_ROW) {
         std::string s = (const char*)sqlite3_column_text(st, 0);

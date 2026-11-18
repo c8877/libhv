@@ -11,9 +11,7 @@ set -eu
 PREFIX=/opt/rtunnel/agent
 CONF_DIR=${RTUNNEL_CONF_DIR:-/opt/data/etc}
 CONF=rtunnel-agent.json
-LEGACY_CONF=agent.json
 UNIT=rtunnel-agent.service
-LEGACY_WEB_UNIT=rtunnel-agent-web.service
 
 PKG_DIR=
 VARIANT=
@@ -111,21 +109,6 @@ mkdir -p "$BIN" "$STATE" "$PREFIX/service"
 OLD_TARGET=$(readlink "$BIN/rtunnel-agent" 2>/dev/null || true)
 OLD_TARGET=${OLD_TARGET##*/}
 
-# 同版本强制重装：覆盖前先留一份可回滚的副本
-if [ "$OLD_TARGET" = "$NEW_TARGET" ] && [ -f "$BIN/$NEW_TARGET" ]; then
-    cp -p "$BIN/$NEW_TARGET" "$BIN/$NEW_TARGET.prev"
-    OLD_TARGET=$NEW_TARGET.prev
-fi
-
-# 老布局迁移：bin/rtunnel-agent 是真实文件时，先留一份 legacy 版本用于回滚
-if [ -e "$BIN/rtunnel-agent" ] && [ ! -L "$BIN/rtunnel-agent" ]; then
-    oldver=$("$BIN/rtunnel-agent" --version 2>/dev/null | tr -d '\r\n' || true)
-    if [ -n "$oldver" ]; then
-        cp -p "$BIN/rtunnel-agent" "$BIN/rtunnel-agent-legacy-$oldver"
-        OLD_TARGET=rtunnel-agent-legacy-$oldver
-    fi
-fi
-
 # 1. 版本化二进制：先写临时名再 rename，绝不覆盖正在执行的 inode
 tmp=$BIN/.$NEW_TARGET.tmp.$$
 cp "$SRC" "$tmp"
@@ -138,16 +121,11 @@ chmod 0755 "$BIN/agent-boot-check.sh"
 cp "$PKG_DIR/install.sh" "$PREFIX/install.sh"
 chmod 0755 "$PREFIX/install.sh"
 
-# 3. 配置：不存在才装；老 agent.json 优先迁移，避免把已有设置重置成默认值
+# 3. 配置：不存在才装，已有配置不覆盖
 mkdir -p "$CONF_DIR"
 if [ ! -f "$CONF_DIR/$CONF" ]; then
-    if [ -f "$CONF_DIR/$LEGACY_CONF" ]; then
-        cp -p "$CONF_DIR/$LEGACY_CONF" "$CONF_DIR/$CONF"
-        echo "配置已迁移: $CONF_DIR/$LEGACY_CONF -> $CONF_DIR/$CONF"
-    else
-        cp "$PKG_DIR/etc/$CONF" "$CONF_DIR/$CONF"
-        echo "配置已安装: $CONF_DIR/$CONF"
-    fi
+    cp "$PKG_DIR/etc/$CONF" "$CONF_DIR/$CONF"
+    echo "配置已安装: $CONF_DIR/$CONF"
 fi
 # 参考副本，便于以后对比新增键，不参与运行
 cp "$PKG_DIR/etc/$CONF" "$CONF_DIR/$CONF.dist"
@@ -160,10 +138,6 @@ if [ "$UNITS" = 1 ] && [ -d /run/systemd/system ] && command -v systemctl >/dev/
         systemctl daemon-reload >/dev/null 2>&1 || true
     fi
     systemctl enable "$UNIT" >/dev/null 2>&1 || true
-    if systemctl is-enabled --quiet "$LEGACY_WEB_UNIT" 2>/dev/null; then
-        systemctl disable "$LEGACY_WEB_UNIT" >/dev/null 2>&1 || true
-        echo "旧服务已停用: $LEGACY_WEB_UNIT"
-    fi
 fi
 
 # 5. 状态：pending 先落盘，symlink 是事务提交点

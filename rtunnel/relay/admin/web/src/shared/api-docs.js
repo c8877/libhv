@@ -144,7 +144,7 @@ export const DOCS = [
     ],
     note: '需要 relay 启动参数 --admin-file-dir；recursive 模式不返回 sha256',
     curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/files?dir=agent"\ncurl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/files?dir=agent&recursive=1&q=lite"`,
-    resp: `[{ "name": "rtunnel-agent-lite-1.4.3.gz", "type": "file", "size": 240372, "mtime_ms": 1763340000000, "sha256": "9f2c…" }]`,
+    resp: `[{ "name": "rtunnel-agent-lite-1.4.3-x86_64.tar.gz", "type": "file", "size": 240372, "mtime_ms": 1763340000000, "sha256": "9f2c…" }]`,
   },
   {
     group: 'fs', method: 'GET', path: '/api/v1/files/:name', minRole: 'operator',
@@ -171,7 +171,7 @@ export const DOCS = [
       { name: 'finalize', in: 'query', desc: '=1 落盘并计算 sha256' },
     ],
     note: '默认上限 file.max_upload_mb=32；分片 offset 不匹配返回 409；目录已存在时 mkdir 返回 409',
-    curl: `# 整包（gzip 后上传到 agent/）\ngzip -9 -n -c agent.bin > /tmp/agent.bin.gz\ncurl -sS -X POST -H "Authorization: Bearer $ATK" --data-binary @/tmp/agent.bin.gz \\\n  "$RT/api/v1/files/rtunnel-agent-lite-1.4.3.gz?dir=agent"\n\n# 建目录\ncurl -sS -X POST -H "Authorization: Bearer $ATK" "$RT/api/v1/files/agent?action=mkdir"\n\n# 移动 / 改名：agent/a.bin -> agent/old/a.bin\ncurl -sS -X POST -H "Authorization: Bearer $ATK" \\\n  "$RT/api/v1/files/a.bin?action=move&dir=agent&to=agent/old/a.bin"\n\n# 分片\ncurl -sS -X POST -H "Authorization: Bearer $ATK" --data-binary @c0 \\\n  "$RT/api/v1/files/fw.bin?dir=firmware&upload=u1&append=1&offset=0"\ncurl -sS -X POST -H "Authorization: Bearer $ATK" --data-binary @c1 \\\n  "$RT/api/v1/files/fw.bin?dir=firmware&upload=u1&append=1&offset=1048576"\ncurl -sS -X POST -H "Authorization: Bearer $ATK" \\\n  "$RT/api/v1/files/fw.bin?dir=firmware&upload=u1&finalize=1"`,
+    curl: `# 整包上传到 agent/\ncurl -sS -X POST -H "Authorization: Bearer $ATK" --data-binary @rtunnel-agent-lite-1.4.3-x86_64.tar.gz \\\n  "$RT/api/v1/files/rtunnel-agent-lite-1.4.3-x86_64.tar.gz?dir=agent"\n\n# 建目录\ncurl -sS -X POST -H "Authorization: Bearer $ATK" "$RT/api/v1/files/agent?action=mkdir"\n\n# 移动 / 改名：agent/a.bin -> agent/old/a.bin\ncurl -sS -X POST -H "Authorization: Bearer $ATK" \\\n  "$RT/api/v1/files/a.bin?action=move&dir=agent&to=agent/old/a.bin"\n\n# 分片\ncurl -sS -X POST -H "Authorization: Bearer $ATK" --data-binary @c0 \\\n  "$RT/api/v1/files/fw.bin?dir=firmware&upload=u1&append=1&offset=0"\ncurl -sS -X POST -H "Authorization: Bearer $ATK" --data-binary @c1 \\\n  "$RT/api/v1/files/fw.bin?dir=firmware&upload=u1&append=1&offset=1048576"\ncurl -sS -X POST -H "Authorization: Bearer $ATK" \\\n  "$RT/api/v1/files/fw.bin?dir=firmware&upload=u1&finalize=1"`,
   },
   {
     group: 'fs', method: 'GET', path: '/api/v1/uploads/:name', minRole: 'operator',
@@ -211,7 +211,7 @@ export const DOCS = [
     group: 'dist', method: 'POST', path: '/api/v1/distributions', minRole: 'manager',
     summary: '创建分发任务（普通文件或 OTA）',
     note: 'devids 1..200；file 跳过离线设备，ota 可排队；时间窗最长 30 天',
-    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"file":"fw.bin","devids":["mp135","mp136"],"dir":"firmware",\n       "kind":"file","force":false,"max_retries":3}' \\\n  "$RT/api/v1/distributions"\n\n# OTA（升级包放在 agent/ 目录）\ncurl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"file":"agent/rtunnel-agent-lite-1.4.3.gz","devids":["mp135"],"kind":"ota","version":"1.4.3"}' \\\n  "$RT/api/v1/distributions"`,
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"file":"fw.bin","devids":["mp135","mp136"],"dir":"firmware",\n       "kind":"file","force":false,"max_retries":3}' \\\n  "$RT/api/v1/distributions"\n\n# OTA（升级包放在 agent/ 目录，文件名带架构）\ncurl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"file":"agent/rtunnel-agent-lite-1.4.3-x86_64.tar.gz","devids":["mp135"],"kind":"ota","version":"1.4.3"}' \\\n  "$RT/api/v1/distributions"`,
   },
   {
     group: 'dist', method: 'GET', path: '/api/v1/distributions', minRole: 'manager',

@@ -64,6 +64,13 @@ void AdminServer::handleDistCreate(const HttpContextPtr& ctx, const AdminActor& 
         ctx->send("{\"error\":\"devids required (1-200)\"}");
         return;
     }
+    for (const auto& devid : devids) {
+        if (!ownsDevid(devid)) {
+            ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+            ctx->send("{\"error\":\"forbidden device: " + devid + "\"}");
+            return;
+        }
+    }
     if (deadline <= start || deadline - start > 30LL * 86400 * 1000) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"bad time window (max 30 days)\"}");
@@ -88,7 +95,7 @@ void AdminServer::handleDistCreate(const HttpContextPtr& ctx, const AdminActor& 
         return;
     }
     std::string sha = adminSha256File(path);
-    // 仓库路径可能带子目录（如 agent/xxx.gz）：传输只带文件名，子目录作为设备侧目标目录
+    // 仓库路径可能带子目录（如 agent/xxx.tar.gz）：传输只带文件名，子目录作为设备侧目标目录
     size_t slash = file.rfind('/');
     if (slash != std::string::npos && sub.empty()) sub = file.substr(0, slash);
     std::string batch = (kind == "ota" ? "o" : "b") + std::to_string(now) + "-" + AdminDb::randomHex(3);
@@ -180,14 +187,31 @@ void AdminServer::handleDistList(const HttpContextPtr& ctx) {
     if (per < 1 || per > 100) per = 20;
     std::string arr;
     int total = 0;
-    db_.distList(status, q, batch, kind, page, per, arr, total);
+    std::vector<std::string> devs;
+    if (scopeRestricted()) {
+        devs = myDevids();
+        if (devs.empty()) {
+            ctx->send("{\"total\":0,\"page\":" + std::to_string(page) +
+                      ",\"per_page\":" + std::to_string(per) + ",\"items\":[]}");
+            return;
+        }
+    }
+    db_.distList(status, q, batch, kind, devs, page, per, arr, total);
     ctx->send("{\"total\":" + std::to_string(total) + ",\"page\":" + std::to_string(page) +
               ",\"per_page\":" + std::to_string(per) + ",\"items\":" + arr + "}");
 }
 
 void AdminServer::handleDistSummary(const HttpContextPtr& ctx) {
+    std::vector<std::string> devs;
+    if (scopeRestricted()) {
+        devs = myDevids();
+        if (devs.empty()) {
+            ctx->send("{\"all\":0,\"active\":0,\"done\":0,\"failed\":0,\"conflict\":0}");
+            return;
+        }
+    }
     std::string j;
-    if (!db_.distSummary(j)) {
+    if (!db_.distSummary(devs, j)) {
         ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
         ctx->send("{\"error\":\"db error\"}");
         return;
@@ -203,6 +227,12 @@ void AdminServer::handleDistGet(const HttpContextPtr& ctx) {
         ctx->send("{\"error\":\"not found\"}");
         return;
     }
+    auto task = json::parse(j, nullptr, false);
+    if (task.is_discarded() || !ownsDevid(task.value("devid", std::string()))) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return;
+    }
     ctx->send(j);
 }
 
@@ -215,6 +245,11 @@ void AdminServer::handleDistRetry(const HttpContextPtr& ctx, const AdminActor& a
         return;
     }
     auto j = json::parse(js);
+    if (!ownsDevid(j.value("devid", std::string()))) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return;
+    }
     long long now = nowMs();
     std::string st = j.value("status", "");
     std::string kind = j.value("kind", std::string("file"));
@@ -246,6 +281,11 @@ void AdminServer::handleDistCancel(const HttpContextPtr& ctx, const AdminActor& 
         return;
     }
     auto j = json::parse(js);
+    if (!ownsDevid(j.value("devid", std::string()))) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return;
+    }
     std::string st = j.value("status", "");
     bool active = (st == "running");
     if (!active && st != "scheduled" && st != "queued") {
@@ -272,6 +312,11 @@ void AdminServer::handleDistVerify(const HttpContextPtr& ctx, const AdminActor& 
         return;
     }
     auto j = json::parse(js);
+    if (!ownsDevid(j.value("devid", std::string()))) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return;
+    }
     if (j.value("status", "") != "conflict") {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"only conflict tasks can verify/force\"}");
@@ -329,6 +374,11 @@ void AdminServer::handleDistExtend(const HttpContextPtr& ctx, const AdminActor& 
         return;
     }
     auto j = json::parse(js);
+    if (!ownsDevid(j.value("devid", std::string()))) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return;
+    }
     auto req = json::parse(ctx->body(), nullptr, false);
     long long nd = req.is_discarded() ? 0 : req.value("deadline_at_ms", 0LL);
     long long now = nowMs();

@@ -1454,56 +1454,6 @@ static bool otaReadFile(const std::string& path, std::string& out) {
     return true;
 }
 
-static bool otaCopyFile(const std::string& src, const std::string& dst, mode_t mode, std::string& err) {
-    int in = open(src.c_str(), O_RDONLY);
-    if (in < 0) {
-        err = "open source failed";
-        return false;
-    }
-    int out = open(dst.c_str(), O_WRONLY | O_CREAT | O_TRUNC, mode);
-    if (out < 0) {
-        close(in);
-        err = "open target failed";
-        return false;
-    }
-    char buf[64 * 1024];
-    bool ok = true;
-    for (;;) {
-        ssize_t n = read(in, buf, sizeof(buf));
-        if (n == 0) break;
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            ok = false;
-            break;
-        }
-        ssize_t off = 0;
-        while (off < n) {
-            ssize_t w = write(out, buf + off, (size_t)(n - off));
-            if (w <= 0) {
-                if (w < 0 && errno == EINTR) continue;
-                ok = false;
-                break;
-            }
-            off += w;
-        }
-        if (!ok) break;
-    }
-    if (ok && fsync(out) != 0) ok = false;
-    if (ok && fchmod(out, mode) != 0) ok = false;
-    close(out);
-    close(in);
-    if (!ok) {
-        unlink(dst.c_str());
-        err = "copy failed";
-    }
-    return ok;
-}
-
-static std::string otaDirName(const std::string& p) {
-    size_t s = p.find_last_of('/');
-    return s == std::string::npos ? std::string() : p.substr(0, s);
-}
-
 static std::string otaBaseName(const std::string& p) {
     size_t s = p.find_last_of('/');
     return s == std::string::npos ? p : p.substr(s + 1);
@@ -1512,6 +1462,12 @@ static std::string otaBaseName(const std::string& p) {
 static bool otaUnderSystemd() {
     const char* inv = getenv("INVOCATION_ID");
     return inv && inv[0] && access("/run/systemd/system", F_OK) == 0;
+}
+
+static std::string otaHostArch() {
+    struct utsname u {};
+    if (uname(&u) == 0 && u.machine[0]) return u.machine;
+    return std::string();
 }
 
 static std::string otaTail(const std::string& path, size_t max) {
@@ -1750,8 +1706,11 @@ void AgentApp::handleOtaApply(const rtnp::Frame* f) {
     }
 
     std::string raw;
-    bool gz = path.size() > 3 && path.compare(path.size() - 3, 3, ".gz") == 0;
-    if (gz) {
+    if (path.size() < 8 || path.compare(path.size() - 7, 7, ".tar.gz") != 0) {
+        ack(false, NULL, "not a .tar.gz package");
+        return;
+    }
+    {
         std::string buf;
         if (!otaReadFile(path, buf)) {
             ack(false, NULL, "read package failed");
@@ -1763,13 +1722,12 @@ void AgentApp::handleOtaApply(const rtnp::Frame* f) {
         }
         logf_("[agent] ota: gunzip %s -> %zu bytes", path.c_str(), raw.size());
     }
-    else if (!otaReadFile(path, raw)) {
-        ack(false, NULL, "read package failed");
+    if (!rtopkg::isTar(raw)) {
+        ack(false, NULL, "package is not a tar archive");
         return;
     }
 
-    // ---- 新格式：tar.gz 部署包 ----
-    if (rtopkg::isTar(raw)) {
+    {
         if (app_prefix_.empty()) {
             ack(false, NULL, "unexpected install layout");
             return;
@@ -1798,6 +1756,10 @@ void AgentApp::handleOtaApply(const rtnp::Frame* f) {
         }
         if (m.version != version) {
             ack(false, NULL, "manifest version mismatch");
+            return;
+        }
+        if (m.arch != otaHostArch()) {
+            ack(false, NULL, "arch mismatch: package " + m.arch + ", host " + otaHostArch());
             return;
         }
         std::string pkgbin = pkgroot + "/" + m.binary;
@@ -1838,76 +1800,6 @@ void AgentApp::handleOtaApply(const rtnp::Frame* f) {
         scheduleAgentRestart(f->sid, installed);
         return;
     }
-
-    // ---- 旧格式：裸二进制。只支持老布局（bin/rtunnel-agent 是真实文件）----
-    if (otaBaseName(self_path) != "rtunnel-agent") {
-        ack(false, NULL, "legacy package on versioned layout; use .tar.gz");
-        return;
-    }
-    std::string payload = path;
-    std::string unpacked;
-    if (gz) {
-        unpacked = path + ".bin-" + std::to_string((long)getpid());
-        int fd = open(unpacked.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0755);
-        bool wok = fd >= 0;
-        size_t off = 0;
-        while (wok && off < raw.size()) {
-            ssize_t n = write(fd, raw.data() + off, raw.size() - off);
-            if (n <= 0) {
-                if (n < 0 && errno == EINTR) continue;
-                wok = false;
-                break;
-            }
-            off += (size_t)n;
-        }
-        if (wok && fsync(fd) != 0) wok = false;
-        if (fd >= 0) close(fd);
-        if (!wok) {
-            unlink(unpacked.c_str());
-            ack(false, NULL, "unpack write failed");
-            return;
-        }
-        chmod(unpacked.c_str(), 0755);
-        payload = unpacked;
-    }
-    struct UnpackGuard {
-        std::string p;
-        ~UnpackGuard() { if (!p.empty()) unlink(p.c_str()); }
-    } unpack_guard{unpacked};
-
-    std::string probe;
-    if (!otaProbe(payload, version, probe)) {
-        std::string e = "version probe failed";
-        if (!probe.empty()) e += ": " + probe;
-        ack(false, NULL, e);
-        return;
-    }
-    ack(true, "verified", "");
-
-    mode_t mode = 0755;
-    if (stat(self_path.c_str(), &st) == 0) mode = st.st_mode & 07777;
-    std::string newp = self_path + ".new";
-    std::string err;
-    if (!otaCopyFile(payload, newp, mode, err)) {
-        ack(false, NULL, err);
-        return;
-    }
-    std::string prev = self_path + ".prev";
-    unlink(prev.c_str());
-    if (rename(self_path.c_str(), prev.c_str()) != 0) {
-        unlink(newp.c_str());
-        ack(false, NULL, "backup failed");
-        return;
-    }
-    if (rename(newp.c_str(), self_path.c_str()) != 0) {
-        rename(prev.c_str(), self_path.c_str());
-        unlink(newp.c_str());
-        ack(false, NULL, "install failed");
-        return;
-    }
-    logf_("[agent] ota installed %s, restarting", version.c_str());
-    ack(true, "installed", "");
-    scheduleAgentRestart(f->sid, self_path);
 }
 
 static bool readTtyCounters(const std::string& want, unsigned long long& rx, unsigned long long& tx) {
@@ -2204,6 +2096,7 @@ nlohmann::json AgentApp::buildSysinfo() {
             }
         }
         caps["version"] = hv_version();
+        caps["arch"] = otaHostArch();
 #ifdef RTUNNEL_AGENT_WEB
         caps["variant"] = "web";
         caps["local_web"] = web_enabled ? web_listen : std::string();
@@ -2652,8 +2545,8 @@ int AgentApp::run(int argc, char** argv) {
         }
     }
     {
-        std::string bin = otaDirName(self_path);
-        if (!bin.empty() && otaBaseName(bin) == "bin") app_prefix_ = otaDirName(bin);
+        const char* pfx = getenv("RTUNNEL_AGENT_PREFIX");
+        app_prefix_ = (pfx && pfx[0]) ? pfx : "/opt/rtunnel/agent";
     }
     std::vector<std::string> servers;
     for (int i = 1; i < argc; ++i) {
