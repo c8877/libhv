@@ -349,9 +349,17 @@ OTA 不另建传输通道：部署包走「文件上传 + 文件分发」落到�
 # 生成 lite + web 两个包（版本默认取部署二进制的 --version）
 ./deploy/package_agent.sh 1.4.9
 
+# 交叉编译（ARM）：用 qemu 跑目标二进制做 --version 自检
+RTUNNEL_DEPLOY_DIR=build/deploy_mp135 \
+RTUNNEL_PKG_RUNNER="qemu-arm-static -L /opt/st/.../sysroots/cortexa7t2hf-neon-vfpv4-ostl-linux-gnueabi" \
+./deploy/package_agent.sh 1.4.9
+
 # 上传（加 LEGACY=1 同时上传旧 .gz）
 RT=https://relay:9443 ATK=atk-xxxx ./deploy/upload_agent.sh 1.4.9
 ```
+
+容器或临时目录里试装时，可加 `RTUNNEL_INSTALL_NO_UNITS=1`（或 `--no-units`）
+让 `install.sh` 完全不碰 `/etc/systemd/system` 和 `systemctl`。
 
 API：`POST /api/v1/distributions` 增加 `kind: "ota"` 与 `version`、`force` 字段；
 查询复用 `GET /api/v1/distributions?kind=ota` 与 `.../summary`，重试/取消复用

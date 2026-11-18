@@ -20,12 +20,24 @@ LITE="$DEPLOY/agent/bin/rtunnel-agent"
 WEB="$DEPLOY/agent-web/bin/rtunnel-agent"
 
 [ -x "$LITE" ] || { echo "缺少 $LITE，先构建 rtunnel-deploy" >&2; exit 1; }
-VER="${1:-$("$LITE" --version 2>/dev/null | tr -d '\r\n')}"
+
+# 交叉编译时用 qemu 跑目标二进制做版本自检，例如：
+#   RTUNNEL_PKG_RUNNER="qemu-arm-static -L /opt/st/.../sysroots/cortexa7t2hf-neon-vfpv4-ostl-linux-gnueabi"
+RUN=${RTUNNEL_PKG_RUNNER:-}
+run_bin() {
+    if [ -n "$RUN" ]; then
+        $RUN "$1" "${@:2}"
+    else
+        "$1" "${@:2}"
+    fi
+}
+
+VER="${1:-$(run_bin "$LITE" --version 2>/dev/null | tr -d '\r\n')}"
 [ -n "$VER" ] || { echo "无法获取版本，请显式传入：$0 1.4.9" >&2; exit 1; }
 case "$VER" in */*|*' '*) echo "版本号不合法: $VER" >&2; exit 1 ;; esac
 
 if [ -x "$WEB" ]; then
-    webver=$("$WEB" --version 2>/dev/null | tr -d '\r\n')
+    webver=$(run_bin "$WEB" --version 2>/dev/null | tr -d '\r\n')
     [ "$webver" = "$VER" ] || { echo "lite/web 版本不一致: $VER vs ${webver:-?}" >&2; exit 1; }
 fi
 

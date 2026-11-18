@@ -21,6 +21,8 @@ VERSION=
 ACTION=install
 START=0
 UNITS=1
+# 容器/临时前缀安装时可用环境变量彻底跳过 unit 操作
+[ "${RTUNNEL_INSTALL_NO_UNITS:-0}" = "1" ] && UNITS=0
 
 usage() {
     cat <<'EOF'
