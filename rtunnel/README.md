@@ -17,11 +17,14 @@
 - 设计文档：`docs/design/rtunnel.md`
 - 全部拓扑/流程/时序/状态图（Mermaid + ASCII）与协议/配置/状态/参数表：
   `docs/design/rtunnel-diagrams.md`
+- 权限与分组：`docs/permission.md`；权限页设计：`docs/admin/permission.md`
+- 接入账号与 Token：`docs/design/account-token.md`；账号详情页：`docs/design/account-detail.md`
 
 ## 构建
 
 ```bash
-./enp_build.sh --static --shared            # 产物在 build/bin/rtunnel-*
+# 在仓库根目录（libhv/）执行；产物在 build/bin/rtunnel-*
+./enp_build.sh --static --shared
 # 需要 TLS 时：
 ./enp_build.sh --static --shared --with-openssl
 ```
@@ -129,8 +132,15 @@ build/bin/rtunnel-endpoint-test          # --server 地址解析单测
 
 relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，独立 worker 线程）：
 
-- 能力：概览、设备/会话、踢会话/下线、权限（分组 / 有效权限 / 旧 ACL 导入导出）、接入账号与 Token（时效 / 流量 / 频率 / 并发）、证书签发/吊销、文件、审计、系统设置
-- API 与权限矩阵：见 `docs/design/rtunnel.md` §13.3
+- 能力：概览、设备/会话、踢会话/下线、权限（分组 / 有效权限 / 旧 ACL 导入导出）、接入账号与 Token（时效 / 流量 / 频率 / 并发）、设备文件与服务管理、证书签发/吊销、文件仓库、分发与 OTA、审计、系统设置
+- 侧栏按用途分 5 组，组可折叠（默认只展开当前页所在组，空白组按角色隐藏）：
+  监控（概览/设备/会话）、运维（文件/分发/任务/Agent 升级）、
+  权限（权限/接入账号/客户端/账号）、开放接口（API Token/接口文档）、
+  系统（证书/审计/设置）
+- 接口文档：`#/docs` 按当前角色列出可调用接口，支持搜索与「只显示我可调用」，
+  并给出 curl / WebSocket 示例；`cd relay/admin/web && npm run check:docs`
+  会校验文档与 `admin_routes.cpp` 的路由是否对表
+- API 列表：见 `docs/design/rtunnel.md` §13.3；页面内 `#/docs` 会按角色列出可调用项
 - 文件分发：文件页「分发」→ 选择设备/时间窗/重试 → 每设备一条任务；
   `POST /api/v1/distributions` 创建，`GET /api/v1/distributions` 查询，
   任务页支持状态过滤、重试、取消、超时延长
@@ -163,18 +173,97 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 - **首次部署**：浏览器打开管理台 → 初始化页输入 `--admin-token` + 管理员用户名/密码 → 创建 admin；
   初始化前 token 只能访问 `/api/v1/setup*`
 - **之后登录**：用户名 + 密码，服务端会话（HttpOnly Cookie，默认 12h，可在设置中调整），不再用 token
-- **角色**（admin 唯一，其余可多个）：
-  | 角色 | 权限 |
-  |---|---|
-  | admin | 全部权限；创建/切换 manager、operator、viewer |
-  | manager | 绑定设备；创建 operator/viewer；切换其角色；设备与文件全部操作 |
-  | operator | 设备 Shell / Web 代理；文件上传、下载；查看会话 |
-  | viewer | 仅「概览」「设备列表」两个浏览页面 |
+### 资源权限与权限组
+
+管理台每个动作对应一个资源键（`perm_resources`，29 项），权限判断只认资源与设备：
+
+- **功能资源**：`perm_resources`（代码登记）+ `perm_group_resources`（组勾选）
+- **设备资源**：`res_devices`（agent 上线自动登记）+ `perm_group_devices`（组授权）
+- 权限组 `perm_groups` 额外有 `all_devices`（全部设备，含以后新增）和 `ports`（组级 TCP 端口范围）
+- 组成员 `perm_group_members.subject_type` 有四种：`user`（管理台账号）、`atk`（管理台 Token）、
+  `client`（接入账号）、`rtk`（接入 Token）
+- 账号 / 接入账号的有效权限 = 所属权限组的资源并集、设备并集
+- **令牌只能收窄**：atk / rtk 的有效权限 = 归属账号（或接入账号）∩ 令牌所属组；
+  令牌没有组时完全继承归属；令牌永远不能超过归属账号
+- `users.perm_explicit` 标记账号是否被显式分配过权限组：从未分配过（历史数据）才按
+  `users.role` 落到同名预置组并沿用归属设备；显式分配后即使清空全部组也不回落，删组不会提权
+- `users.role=admin` 始终保留超级权限（全部资源 + 全部设备），避免误操作锁死管理员
+- 预置 4 组：超级管理员（`super=1`）、管理员、操作员、观察者；首次启动写入一次，
+  后续勾选结果不会被重启覆盖
+- 资源分类：设备（查看/终端/端口转发/能力/OTA/串口/采样/断开/绑定）、文件（读/写/删除）、
+  分发（读/写）、权限（读/写）、账号（读/写/删除）、令牌（读/写/设备范围）、证书（读/写）、
+  审计、系统（读/写/关机）
+- API：
+  - `GET /api/v1/permission/resources`、`PUT /api/v1/permission/resources/{key}`
+  - `GET /api/v1/permission/groups`、`GET /api/v1/permission/groups/{id}`
+  - `POST /api/v1/permission/groups`、`PUT /api/v1/permission/groups/{id}`（资源/设备/成员一次保存）
+  - `GET/PUT /api/v1/permission/groups/{id}/members`
+  - `GET /api/v1/permission/subjects`、`GET/PUT /api/v1/permission/subjects/{type}/{id}/groups`
+  - `GET /api/v1/permission/dicts?kind=resources|devices|ports|ttys`（分页 5/10/20/50，默认 10）
+  - `PUT /api/v1/permission/devices/{devid}`（改名 / 临时停用）
+- 页面：「权限组」用成员/功能资源/设备资源三个 tab；功能资源是分组矩阵，成员与设备用穿梭框；
+  「授权对象」按账号/atk/接入账号/rtk 查看并分配权限组；「字典库」管理四类字典
+- 菜单与按钮按 `/api/v1/me` 返回的 `perms`/`super` 显示，服务端始终二次校验
+- **旧 ACL 迁移**：首次启动时把 `client_groups` + `client_group_acl` 自动转成
+  「接入:<原组名>」权限组（能力映射为资源、设备取设备组并集、端口并入组级范围），
+  把 `subject_groups` 的 admin/atk 设备范围转成「设备范围:<主体>」组；迁移只执行一次
+  （`settings.perm.groups_migrated`），旧表保留只读
+
+**atk 与 rtk 的区别**（两者都是令牌，但不是同一种身份）：
+
+| | atk（管理台 API Token） | rtk（接入 Token） |
+|---|---|---|
+| 归属 | `users` 管理台账号 | `client_accounts` 接入账号 |
+| 使用场景 | 管理台 HTTP `Authorization: Bearer atk-…` | relay 客户端；也可调管理台 HTTP |
+| 权限公式 | 归属账号 ∩ 令牌组 | 接入账号 ∩ 令牌组 |
+| 数据面 | 不参与 | 账号级规则 + 令牌级规则；令牌配了组就只认令牌规则（空组 = 拒绝） |
+| 创建/管理 | 「API Token」页 | 「接入账号」详情页 |
+| 授权 | 「授权对象 → atk 令牌」或权限组成员 | 「授权对象 → rtk 令牌」或权限组成员 |
+
+一句话：**atk 是“账号的管理台钥匙”，rtk 是“接入账号的设备钥匙”**；两者加入权限组都只能收窄，
+不能超过归属主体。
+
+`users.role` 仍保留，用于未显式分配时的回落（admin 唯一；manager/operator/viewer 可多个）：
+
+| 角色 | 设备范围（未入组时） | 预置组资源 |
+|---|---|---|
+| admin | 全部设备 | 全部资源（super） |
+| manager | 全部设备 | 除系统设置、关机、证书写、删账号、Token 设备范围外的全部资源 |
+| operator | 按归属设备 | 设备查看/终端/端口转发/串口读、文件读+写、权限读、账号读、设置读 |
+| viewer | 按归属设备 | 设备查看、串口读、设置读 |
 - **设备归属**：`PUT /api/v1/devices/{devid}/owner {"username":"alice"}`（空串=解绑）；
   operator/viewer 的设备与会话按归属过滤，未绑定设备仅 manager/admin 可见
 - **账号 API**：`GET/POST /api/v1/users`、`PUT /api/v1/users/{id}/password|status`、
   `DELETE /api/v1/users/{id}`；`POST /api/v1/login|logout`、`GET /api/v1/me`
 - 口令策略：默认最短 8 位、连续 5 次失败锁定 5 分钟（均可在「设置」调整）；改密/禁用会吊销全部会话
+
+### API Token（atk-）
+
+管理台账号可创建 API Token，用于脚本/CI 调用管理台 HTTP 接口，不必保存账号密码或会话 Cookie。
+
+- 格式 `atk-<64 位十六进制>`（32 字节随机数的 SHA-256）；库存 SHA-256 与前缀，
+  明文只在创建/轮换时返回一次，之后只能轮换
+- 请求头 `Authorization: Bearer atk-…`，与浏览器 Cookie 会话互不影响；Token 继承所属账号的权限组
+- 权限组：在「授权对象」页把 Token 加入权限组。有效权限 = 归属账号 ∩ Token 组，
+  令牌只能收窄不能放大；不加入任何组时完全继承归属账号
+- 管理台里 manager 只能管理自己的 Token，admin 可管理全部；只有 admin 能修改分组绑定
+- Token 不能管理 Token（避免凭据自我复制）；停用 Token、停用/删除归属账号或到期后立即失效；
+  轮换会替换哈希并让旧 Token 失效
+- API：`GET/POST /api/v1/admin-tokens`、`PUT /api/v1/admin-tokens/{id}`、
+  `POST /api/v1/admin-tokens/{id}/rotate`、`DELETE /api/v1/admin-tokens/{id}`；
+  权限组用 `GET/PUT /api/v1/permission/subjects/atk/{id}/groups`
+  （旧 `GET/PUT /api/v1/admin-tokens/{id}/groups` 是设备分组，已不参与鉴权）
+- 页面：「API Token」导航页（manager/admin）
+
+```bash
+# 创建后只显示一次的明文
+TOKEN=atk-...
+curl -H "Authorization: Bearer $TOKEN" https://relay:9443/api/v1/agents
+
+# 也可以直接上传文件到文件仓库（需要 operator 及以上角色）
+curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
+     "https://relay:9443/api/v1/files/app.tar.gz"
+```
 
 ## 设备系统信息与能力
 
@@ -188,8 +277,13 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 采集与配置：
 
 - `SYSINFO_REQ(0x19)` / `SYSINFO(0x1A)`：按需采集，relay 仅内存缓存，不落库
-- `CONFIG_SET(0x1B)` / `CONFIG_ACK(0x1C)`：在线修改端口与 Shell 能力，
-  agent 原子生效并写入 `--config-file`（默认 `/opt/data/etc/agent.json`），重启后保持
+- `CONFIG_SET(0x1B)` / `CONFIG_ACK(0x1C)`：在线修改端口、Shell、OTA、文件/服务能力与串口白名单，
+  agent 原子生效并写入配置文件，重启后保持
+- 能力配置加载顺序：`--config-file` 指定文件（默认 `/opt/data/etc/agent.json`）→
+  文件不存在时使用命令行参数；文件中未出现的字段沿用命令行值，文件中的值优先。
+  首次在线修改能力或采样配置时创建该文件；采样配置也随能力配置一起落盘
+- relay 通过 `SYSINFO` 的 `caps` 获取 agent 的**运行时**能力，设备详情页「能力」表格
+  直接展示该结果（含配置文件路径、是否从文件加载、端口/OTA/文件/服务/串口白名单）
 - API：`GET /api/v1/agents/{devid}/sysinfo?refresh=1`、`PUT /api/v1/agents/{devid}/caps`
 - 文件分发：文件页「分发」选择设备与时间窗，创建 `POST /api/v1/distributions`，
   `GET /api/v1/distributions` 查询进度；经 RTNP 推到设备 `--file-dir/dir`
@@ -202,12 +296,16 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 OTA 不另建传输通道：升级包走「文件上传 + 文件分发」已实现的能力落到设备 `--file-dir`，
 分发任务完成后由 relay 下发安装指令，按阶段推进并统一记录在 `distribution_tasks`：
 
-1. 文件页上传新二进制（或直接放入 `--admin-file-dir`）；
-2. `/ota` 选择升级包、目标版本（须与新二进制 `--version` 一致）、设备；
+1. 把新二进制 gzip 压缩后上传到文件仓库的 `agent/` 目录（或直接放入
+   `--admin-file-dir/agent/`）；lite / web 两个变体都上传，文件名带上版本，例如
+   `rtunnel-agent-lite-1.4.3.gz`、`rtunnel-agent-web-1.4.3.gz`；
+2. `/ota` 从 `agent/` 目录选择升级包（会自动带出文件名里的版本），
+   目标版本须与新二进制 `--version` 一致，再选设备；
 3. 传输阶段复用 `FILE_BEGIN/DATA/END`（0x1D-0x1F）：32KiB 分片、256KiB 窗口、
    sha256 校验、断点续传，任务状态 `running`；
 4. relay 发 `OTA_APPLY`（0x30，JSON：path/version/size/sha256）：
-   agent 校验文件大小与 sha256 → 执行 `--version` 自检（`verifying`）→
+   agent 校验文件大小与 sha256 → `.gz` 包先解压到同目录临时文件 → 执行 `--version`
+   自检（`verifying`）→
    校验通过后 ACK `verified`（`installing`）→ 复制到二进制目录、备份 `<self>.prev`、
    原子替换、ACK `installed` 并 `execv` 重启（`confirming`）；
 5. agent 以新版本重连并上报 SYSINFO，relay 比对目标版本 → `success`。
@@ -233,6 +331,19 @@ API：`POST /api/v1/distributions` 增加 `kind: "ota"` 与 `version`、`force` 
 查询复用 `GET /api/v1/distributions?kind=ota` 与 `.../summary`，重试/取消复用
 `POST /api/v1/distributions/:id/retry|cancel`。
 
+升级包上传用 HTTP 客户端 + 管理台 API Token（`atk-`），仓库的 `agent/` 目录可直接创建：
+
+```bash
+# lite + web 一起 gzip 并上传；版本默认取部署二进制的 --version
+RT=https://relay:9443 ATK=atk-xxxx ./deploy/upload_agent.sh 1.4.3
+
+# 等价 curl（单个包）：先压到临时文件再上传
+gzip -9 -n -c rtunnel-agent > /tmp/rtunnel-agent-lite-1.4.3.gz
+curl -sS -X POST -H "Authorization: Bearer $ATK" \
+  --data-binary @/tmp/rtunnel-agent-lite-1.4.3.gz \
+  "$RT/api/v1/files/rtunnel-agent-lite-1.4.3.gz?dir=agent"
+```
+
 ## Web 终端（免密）
 
 「设备 C」「客户端 A」列表的 Shell 入口：admin 作为 RTNP client 直连本机 relay，
@@ -254,7 +365,7 @@ client 加 `--allow-shell`（默认关）后：
 2. relay 发现 `a:<user>` 未注册且该 user 的 client 在线，向其下发 `SPAWN_AGENT`，并挂起 OPEN（10s 超时）；
 3. client 在本机 `fork/exec` 同目录的 `rtunnel-agent`（可用 `--agent-path` 指定），
    以 `a:<user>` 注册；relay 把挂起的 OPEN 继续转发给这个 agent；
-4. 无会话空闲 `--agent-idle` 秒（默认 60）后 agent 自行退出，client 退出时也会回收。
+4. 无会话空闲 `--agent-idle` 秒（默认 15）后 agent 自行退出，client 退出时也会回收。
 
 client 侧只做「拉起/回收」，shell 逻辑完全复用 agent；relay 侧只多一个挂起状态和新控制帧，
 不需要在 A-B 连接上叠双角色。
@@ -313,7 +424,7 @@ http://B:9443/device/<devid>/<port>/<path>
 | `--socks5 HOST:PORT` / `unix:PATH` | 本地 SOCKS5 入口；**可省略**，省略时只做 `--forward` / `shell`，不会再默认占用 1080 |
 | `--forward 127.0.0.1:16022=devid:22` | 本地端口映射，可多次 |
 | `--allow-shell` | 允许 B 通知本机按需拉起 agent（默认关） |
-| `--agent-path` / `--agent-idle` | agent 路径 / 空闲自退秒数（默认 60） |
+| `--agent-path` / `--agent-idle` | agent 路径 / 空闲自退秒数（默认 15） |
 | `--tls-ca/--tls-cert/--tls-key/--tls-sni` | TLS / mTLS |
 | `shell <devid>` | 本机终端直连设备免密 shell |
 
@@ -354,7 +465,9 @@ http://B:9443/device/<devid>/<port>/<path>
 - 两个构建变体：`rtunnel-agent`（带 Web）与 `rtunnel-agent-noweb`（纯隧道，体积更小）。
   `build/deploy/agent` / `build/deploy/agent-web` 是对应的两份部署目录，
   `deploy/package_agent.sh` 会打包为 `rtunnel-agent-lite-*.tar.gz` 与
-  `rtunnel-agent-web-*.tar.gz`（解压后都是 `agent/`，可直接替换）
+  `rtunnel-agent-web-*.tar.gz`（解压后都是 `agent/`，可直接替换）。
+  这两个 tar 包用于手工部署；OTA 用的是裸二进制再 gzip 压缩的 `.gz` 包，
+  由 `deploy/upload_agent.sh` 压缩并上传到文件仓库 `agent/` 目录
 
 ### 文件管理（WebSocket）
 
@@ -381,9 +494,10 @@ http://B:9443/device/<devid>/<port>/<path>
   由 agent 边遍历边打 tar + gzip 流式输出（保留符号链接、空目录和长文件名），
   前端优先用 File System Access API 边收边写盘
 - 路径栏为可点击面包屑，可直接跳到任意上级目录；「编辑」可切换为手动输入路径
-- 双击文件节点打开：文本进编辑器、图片进预览、其他类型直接下载；操作列只保留
-  下载/重命名/移动/删除，按可用宽度平铺，放不下的收进 `⋯` 菜单；
-  信息行显示根目录、单文件上限和分区已用/总容量
+- 双击文件行在下方展开详情卡片（类型、大小、修改时间、完整路径，附打开/编辑/Hex/
+  尾部/下载按钮），不再直接打开；打开改由卡片按钮、右键菜单或 `⋯` 菜单触发。
+  双击目录行仍进入目录；操作列只保留下载/重命名/移动/删除，按可用宽度平铺，
+  放不下的收进 `⋯` 菜单；信息行显示根目录、单文件上限和分区已用/总容量
 - 重命名和移动在列表内展开表单（回车确认、Esc 取消），不弹浏览器对话框
 - 文本编辑使用 CodeMirror 6（shell/json 语法高亮，Ctrl+S 保存、Esc 关闭），
   组件打包为 `shared/web/cm-editor.bundle.js`：管理台经 Vite 作为带 hash 的静态资源引入，
@@ -405,6 +519,81 @@ http://B:9443/device/<devid>/<port>/<path>
 ./rtunnel-agent --devid board01 --server 192.168.1.133 --port 18443 \
     --file-root /opt/data/files --file-rw \
     --local-web 0.0.0.0:8080 --file-token <token>
+```
+
+### 文件页：文件仓库
+
+导航「文件」页只有文件仓库（relay 本机的 `--admin-file-dir`）；设备文件仍然只在
+设备详情页的「文件管理」卡片里。两个页面挂载的是**同一个** `shared/web/fs-ui.js`：
+设备侧走 WebSocket，仓库侧给组件传一个 HTTP 后端（`relay/admin/web/src/shared/repo-backend.js`），
+表格、工具栏、行内表单、右键菜单、编辑器、Hex/尾部查看器全部复用，只是仓库是扁平目录，
+所以隐藏了路径栏、新建目录/文件和重命名/移动。
+
+- 仓库表格与设备管理器完全一致：勾选列、名称/大小/修改时间（可排序）、
+  搜索、底部汇总与批量操作；搜索按文件名过滤
+- 行操作通过 `⋯`、右键或触屏长按 500ms 打开同一套菜单：部署到设备、分发到多台设备、
+  下载、编辑（文本）、查看 Hex、查看尾部、复制 SHA-256、属性、删除
+- 批量操作：下载（逐个）、打包下载（浏览器内生成 tar，支持 gzip）、删除；
+  单行删除和批量删除都在页面内展开确认条，不使用弹窗
+- 「部署」用行内表单：目标设备只列在线设备，默认沿用上次部署成功的设备；
+  目标路径默认取该设备上次部署的目录 + 文件名，必须是绝对路径；
+  `push_open` 由 relay 单独开一条 `OPEN_FS` 流，把仓库文件直接推给设备，
+  浏览器只收 `push_progress/push_done`，不中转文件内容；目标已存在时默认不覆盖并
+  标记冲突，勾选「覆盖同名文件」后重试。目标目录必须已存在
+- 「分发到多台设备」跳到分发页（`/distribute?file=<name>`），沿用原有异步任务
+- 仓库文本编辑走 `PUT /api/v1/files/<name>`（manager+，原子写，默认上限
+  `file.max_edit_mb = 4` MiB）；保存后仓库哈希同步更新
+- Hex / 尾部查看器是 `shared/web/file-view.js`，本地页、设备详情页和文件页共用：
+  Hex 每页 4 KiB 按需读取（`download_open` 的 `offset/limit`），
+  尾部读取最后 64 KiB、可选每 2 秒跟随；仓库侧用 HTTP `Range` 读取，
+  设备侧用 WebSocket 范围下载，都不需要整文件下载
+- 窄屏隐藏修改时间列，工具栏换行，行操作只保留「下载」和 `⋯`
+
+### 服务管理（WebSocket）
+
+设备详情页的「服务管理」卡片读取 systemd 服务列表，支持启动、停止、重启、
+启用/禁用开机自启、屏蔽/解除屏蔽，并查看最近 200 行 journal 日志。
+本地页面与管理台共用同一份前端（`shared/web/svc-ui.js`），relay 只转发，不解析协议：
+
+```
+本地页面  ws://device:8080/ws/svc
+管理台    wss://relay/ws/svc/<devid>
+              |
+              v
+        RTNP OPEN_SVC + DATA(u8 kind=0 + JSON)
+              |
+              v
+        agent Service -> systemctl / journalctl
+```
+
+- 列表一次 `systemctl show '*.service'` 拿到已加载单元，再合并 `list-unit-files`，
+  保证停止且未启用的单元也能列出来（否则无法从界面重新启用/屏蔽）；
+  按「失败 → 启动/停止中 → 运行中 → 已停止」排序
+- 状态行显示 PID 和已运行时长（由 `ActiveEnterTimestampMonotonic` + `/proc/uptime` 计算，
+  不受设备时钟跳变影响）；单核设备上 `systemctl show` 约 1 秒，列表结果缓存 10 秒，
+  动作后立即失效，正常轮询基本不花时间
+- 表格分页显示（默认每页 10 条，可选 5/10/20/50/100），名称、状态、自启、内存、运行时长五列均可点击排序，
+  再次点击切换升/降序
+- 搜索框按服务名/描述过滤，「全部/运行中/失败/已停止」标签显示计数；列表每 5 秒刷新，
+  展开日志时每 2 秒刷新，页面不可见时暂停
+- 停止、重启、禁用、屏蔽在行内展开确认条，不弹对话框；启停用 `systemctl --no-block`
+  排队，界面随后刷新查看结果
+- 启动/停止/重启/启用/禁用/屏蔽/取消屏蔽 全部动作在 `⋯` 菜单中按当前状态置灰；
+  窄屏隐藏「自启/内存/运行时长」列，运行时长以紧凑形式显示在状态下方，
+  分页只保留「当前页/总页数」和上一页/下一页
+- 所有 `systemctl`/`journalctl` 调用在独立工作线程执行，不阻塞隧道和本地 Web 事件循环；
+  `journalctl` 输出限制 256 KiB
+- 默认只读：agent 加 `--svc-rw`（或配置 `svc_rw: true`）才允许控制；
+  `--svc-token` 可给本地 Web 写操作加令牌，`--no-svc` 完全关闭。
+  非 systemd 设备（无 `/run/systemd/system`）自动隐藏入口并上报 `caps.svc = false`
+- 管理台「能力配置」可启停服务管理、切换只读/可控制，热生效并写入 agent 配置文件
+- 管理台角色：`operator` 及以上可操作，`viewer` 不开放该通道；
+  实际能否写仍由 agent 的 `--svc-rw`（或配置 `svc_rw: true`）决定
+
+```bash
+# 本地页面 + 服务控制
+./rtunnel-agent --devid board01 --server 192.168.1.133 --port 18443 \
+    --svc-rw --local-web 127.0.0.1:8080
 ```
 
 ## 三机部署示例

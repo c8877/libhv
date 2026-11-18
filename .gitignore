@@ -109,3 +109,7 @@ __pycache__/
 
 # rtunnel 前端构建产物（CodeMirror 组件，由 npm run build:editor 生成）
 /rtunnel/shared/web/cm-editor.bundle.js
+
+# 本地工具与临时打包产物
+/.studio/
+/d.tar.gz

@@ -79,7 +79,7 @@ flowchart LR
 ```mermaid
 flowchart TB
     subgraph B[B 端]
-        UI[admin.js 前端]
+        UI[Vue 管理台<br/>Vite + Element Plus]
         API[AdminServer<br/>会话/角色/审计]
         PROXY[设备 Web 代理<br/>HTTP 流式 + WS]
         TERM[Web 终端<br/>xterm + WS]
@@ -121,7 +121,7 @@ flowchart TB
 
 ```
 ┌─────────────────────────────── B ────────────────────────────────┐
-│  admin.js ──► AdminServer ──► SQLite(users/sessions/devices)      │
+│  Vue 管理台 ──► AdminServer ──► SQLite(users/sessions/devices)     │
 │                  │  │                                             │
 │       ┌──────────┘  └────────────┐                                │
 │       ▼                          ▼                                │
@@ -356,7 +356,7 @@ stateDiagram-v2
 
 | type | 名称 | 方向 | payload |
 |---|---|---|---|
-| `0x10` | `OPEN` | A→B / B→C | `str devid + u16 port`（flags 0x0001=OPEN_SHELL） |
+| `0x10` | `OPEN` | A→B / B→C | 普通 TCP：`str devid + u16 port`；内建服务用 flags 区分（见下） |
 | `0x11` | `OPEN_OK` | C→B→A | `str host + u16 port` |
 | `0x12` | `OPEN_FAIL` | C/B→A | `u16 code + str msg` |
 | `0x13` | `DATA` | 双向 | 原始字节 |
@@ -364,6 +364,15 @@ stateDiagram-v2
 | `0x15` | `CLOSE` | 双向 | 空（本方向 EOF） |
 | `0x16` | `RESET` | 双向 | `u16 code` |
 | `0x17` | `RESIZE` | A→C | `u16 cols + u16 rows` |
+
+`OPEN` 的 flags：
+
+| flag | 名称 | payload |
+|---|---|---|
+| `0x0001` | `OPEN_SHELL` | `str devid` |
+| `0x0002` | `OPEN_TTY` | `str devid + str tty_devid + str tty_path + u32 baud + u8 data_bits + u8 parity + u8 stop_bits`（另可叠加 `0x0004` 只读监听 / `0x0008` 强制接管） |
+| `0x0010` | `OPEN_FS` | `str devid + u8 want_rw + u8 trusted` |
+| `0x0020` | `OPEN_SVC` | `str devid + u8 trusted` |
 
 ### 6.3 错误码
 
@@ -390,7 +399,7 @@ stateDiagram-v2
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
-| `--port` | 18443 | 隧道监听端口 |
+| `--port` | 8443 | 隧道监听端口 |
 | `--host` | 0.0.0.0 | 监听地址 |
 | `--acl` / `--acl-file` | — | `user=devid` 规则 |
 | `--client-users` | — | A 端 `user:token` 清单 |
@@ -402,6 +411,9 @@ stateDiagram-v2
 | `--admin-db` | rtunnel-admin.db | SQLite 账号库 |
 | `--admin-file-dir` | — | 文件管理根目录 |
 | `--admin-ca-cert/--admin-ca-key/--admin-cert-dir` | — | 证书签发与台账 |
+| `--admin-docroot` | — | 管理台前端目录（`web/dist`）；不传则页面不可用 |
+| `--admin-tls-cert/--admin-tls-key` | — | 管理台 HTTPS（已有证书） |
+| `--admin-tls-selfsigned` | 关 | 自签 HTTPS，目录默认 `admin-tls/`，不足 30 天自动重签 |
 | `--admin-shell-user/--admin-shell-token` | — | 管理台连本机 relay 的身份 |
 | `--drain-timeout` | 10000 | 优雅退出等待（ms） |
 
@@ -416,6 +428,10 @@ stateDiagram-v2
 | `--config-file` | `/opt/data/etc/agent.json` | 能力持久化文件（运行期修改） |
 | `--tls-ca/--tls-cert/--tls-key` | — | mTLS |
 | `--max-idle` | 0 | 按需 agent 未使用自退秒数 |
+| `--local-web` | 关 | 本地设备详情页，默认 `127.0.0.1:8080`（带 Web 构建） |
+| `--file-root` / `--file-rw` / `--file-max-mb` | 同 `--file-dir` / 关 / 512 | 文件管理根目录、写权限、单文件上限 |
+| `--svc-rw` | 关 | 允许服务控制（systemctl 写操作） |
+| `--svc-token` / `--no-svc` | — | 本地服务写操作令牌 / 完全关闭服务管理 |
 
 ### 7.3 client（A）
 
@@ -505,6 +521,8 @@ stateDiagram-v2
 | SYSINFO 等待 | 2s | 管理台 |
 | CONFIG_ACK 等待 | 2s | 管理台 |
 | sparkline 采样 | 5s × 60 点 | 前端 |
-| 文件上传上限 | 默认 32 MiB（可配置） | 管理台 |
+| 文件仓库上传上限 | 默认 32 MiB（可配置） | 管理台 |
+| 设备文件上传上限 | 默认 512 MiB（`--file-max-mb`） | agent |
+| 文件传输分块 | 30 KiB | 文件 WS |
 | 会话有效期 | 默认 12h（可配置） | 账号 |
 | 登录失败锁定 | 默认 5 次 / 5 分钟（可配置） | 账号 |

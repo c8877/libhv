@@ -505,16 +505,16 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 | 参数 | 说明 |
 |---|---|
 | `--admin ADDR` | 监听地址，如 `127.0.0.1:9443`；启动时不带凭据且非回环会被拒绝 |
-| `--admin-token T` | 单 token，全权（等价 admin 角色） |
+| `--admin-token T` | 首次初始化 admin 用；初始化完成后仅作紧急入口（仍只放行 setup） |
 | `--admin-docroot D` | 前端静态目录，指向 `web/dist`；未指定时管理台页面不可用 |
 | `--admin-ca-cert/--admin-ca-key/--admin-cert-dir` | 签发 CA 与台账目录 |
 | `--admin-file-dir D` | 文件管理根目录 |
 | `--admin-shell-user/--admin-shell-token` | Web 终端连本机 relay 的身份与凭证 |
-| `--admin-db PATH` | SQLite 库：管理台账号、设备、权限分组、接入账号与 Token；需 OpenSSL 构建（PBKDF2） |
+| `--admin-db PATH` | SQLite 库：管理台账号、会话、设备、权限分组、接入账号/Token、API Token；需 OpenSSL 构建（PBKDF2） |
 
 账号体系：首次用 `--admin-token` 初始化 admin，之后用户名+密码登录（HttpOnly Cookie 会话）。
 角色：admin（唯一，全部）/ manager（绑定设备、建 operator/viewer、设备与文件全部操作）/
-operator（Shell、Web、文件上传下载）/ viewer（仅概览与设备列表）。
+operator（Shell、Web、文件上传下载）/ viewer（概览、设备列表、接口文档，设备按归属过滤）。
 口令 PBKDF2-HMAC-SHA256；失败锁定与会话时长可配置（默认 5 次/5 分钟、12h）；改密/禁用吊销会话。
 
 ### 13.2 系统信息与能力配置
@@ -547,15 +547,19 @@ operator（Shell、Web、文件上传下载）/ viewer（仅概览与设备列�
 | POST/GET | `/api/v1/permission/import-acl`、`/export-acl` | 旧 ACL 导入导出（导入仅 admin） |
 | GET/POST/PUT/DELETE | `/api/v1/client-accounts[/{id}]` | 接入账号；含 `/effective`、`/{id}/tokens` |
 | PUT/POST/DELETE | `/api/v1/client-tokens/{id}`、`/rotate` | Token 限额、启停、轮换、吊销 |
+| GET/POST/PUT/DELETE | `/api/v1/admin-tokens[/{id}]`、`/{id}/rotate`、`/{id}/groups` | 管理台 API Token；manager 管自己的，admin 管全部，Token 不能管理 Token |
 | GET/PUT | `/api/v1/acl/file`、`POST /api/v1/acl/reload` | ACL 文件读写与热加载（兜底授权） |
 | GET/POST/PUT/DELETE | `/api/v1/users[/{id}]` | 管理台账号、角色、状态、密码、设备范围 |
 | GET/PUT | `/api/v1/settings` | 运行参数（上传上限、会话、锁定时长等） |
 | GET/POST | `/api/v1/distributions[/{id}]` | 文件分发任务与重试/取消/延长/校验 |
 | GET | `/api/v1/audit` | 审计（登录、OPEN、踢、证书、文件、终端、权限变更） |
 | GET/POST | `/api/v1/certs`、`/api/v1/certs/issue`、`/sign`、`/revoke` | 证书台账/签发/CSR 签名/吊销（admin） |
-| GET/POST/DELETE | `/api/v1/files[/{name}]` | 文件列表/上传/下载/删除（上限可配置，默认 32 MiB；文件名白名单） |
+| GET/POST/DELETE/PUT | `/api/v1/files[/{name}]` | 文件列表/上传/下载/删除/原子编辑（编辑需 manager+，上限可配置，默认 32 MiB；文件名白名单） |
+| GET | `/api/v1/uploads/{name}` | 分片上传状态与续传 |
+| GET/POST | `/api/v1/alerts/status`、`/api/v1/alerts/test` | 告警发送结果与测试 |
 | GET | `/metrics` | Prometheus 文本指标 |
-| WS | `/ws/shell?devid=..&token=..` | 浏览器终端（xterm.js） |
+| WS | `/ws/shell?devid=..&token=..`、`/ws/tty/{devid}/{alias}` | 浏览器终端、串口调试 |
+| WS | `/ws/fs/{devid}`、`/ws/svc/{devid}` | 设备文件/服务通道；atk 用 `?atk=`，Cookie 会话直接连 |
 | POST | `/api/v1/shutdown` | 优雅退出 |
 
 ### 13.4 Web 终端
@@ -621,34 +625,44 @@ queued/scheduled → canceled
 - 文件大小/哈希在创建时写入任务；执行前文件被替换会校验失败
 - 上传完成计算并缓存 sha256，文件列表显示前 8 位
 
-### 13.4 前端模块与按需加载
+### 13.7 文件与服务管理
 
-管理台前端全部编译期内嵌，浏览器侧只常驻两个文件：
+设备文件与服务管理复用同一条 RTNP 数据通道，relay 只转发，不解析应用层协议：
+
+| 能力 | 打开帧 | 设备侧 | 管理台路由 | 本地页路由 |
+|---|---|---|---|---|
+| 文件管理 | `OPEN_FS(0x10)`，payload `u8 want_rw + u8 trusted` | `agent/fs_session.*` + `fs_service.*`，根目录 `--file-root` | `/ws/fs/{devid}` | `/ws/fs` |
+| 服务管理 | `OPEN_SVC(0x20)`，payload `u8 trusted` | `agent/svc_session.*` + `svc_service.*`（systemctl/journalctl） | `/ws/svc/{devid}` | `/ws/svc` |
+
+- 前端是 `shared/web/fs-ui.js` / `svc-ui.js`，本地页由 CMake 嵌进二进制，
+  管理台直接 import 同一份文件；`shared/web/file-view.js` 提供 Hex/尾部只读查看器
+- 文件协议：文本帧 JSON 控制消息 + 16 字节头二进制数据帧，下载/上传按 30 KiB 分块，
+  上传写 `.rtunnel-upload/<id>.part` 后 `fsync + rename`；路径限制在 `--file-root` 内
+- 服务协议：JSON `hello/list/logs/action`；所有 systemctl/journalctl 在 agent 工作线程执行，
+  列表缓存 10 秒；默认只读，`--svc-rw` 才允许控制
+- 管理台走本机 relay 打开通道，需要 `--admin-shell-user/--admin-shell-token`
+  且该用户对目标设备有 ACL
+
+### 13.8 管理台前端
+
+前端是独立的 Vite + Vue 3 + Element Plus 工程：`relay/admin/web`，构建产物在 `web/dist`，
+relay 用 `--admin-docroot` 指向该目录提供静态文件（不传时页面 404，仅 API 可用）。
 
 ```
-admin_ui.js    UI 组件与助手（表格、表单、弹窗、状态、时间、容量）
-admin.js       Auth / Router / Page、概览、设备列表、管理台账号、个人设置
+relay/admin/web/src
+├── pages/           每个路由一个页面（概览/设备/权限/文件/分发/Token/文档/设置…）
+├── components/      FileManagerCard、SvcManagerCard、ApiDocPanel 等
+├── layout/          AppLayout：侧栏分组 + 顶栏
+└── shared/          api/store/nav/utils/api-docs
 ```
 
-其余按页面域拆成独立模块，由 `Router.lazy` 在首次进入对应路由时加载：
-
-| 模块 | 覆盖路由 |
-|---|---|
-| `admin_agent.js` | `#/agents/:devid`、`#/tty/:devid/:alias` |
-| `admin_permission.js` | `#/permission` |
-| `admin_terminal.js` | `#/terminal/:devid` |
-| `admin_pages.js` | `#/clients`、`#/streams`、`#/certs`、`#/files`、`#/audit`、`#/settings` |
-| `admin_accounts.js` | `#/access`、`#/access/:id` |
-| `admin_dist.js` | `#/tasks`、`#/tasks/:id`、`#/distribute` |
-
-```
-模块自己调用 Router.register；dispatch 未匹配到路由时按前缀加载一次
-loadScriptOnce 去重，同一模块只请求一次；Cache-Control: no-store
-模块加载失败显示错误与刷新入口，不静默 404
-dispatch 带序号，快速切换页面时丢弃过期的加载结果
-```
-
-xterm 与 Chart 仍由各自页面二次懒加载，只有终端/设备详情会请求。首屏 JS 从约 240 KB 降到 76 KB。
+- 路由使用 hash history（`#/overview`），`router.beforeEach` 先 `ensureBoot()` 再按
+  `nav.canVisit()` 做角色守卫；侧栏与守卫共用 `shared/nav.js` 的 `NAV_GROUPS`
+- 侧栏 5 组可折叠，默认只展开当前页所在组，空组自动隐藏
+- `shared/api-docs.js` 是 `/docs` 页面与 Token「用法」抽屉的唯一数据源，
+  `npm run check:docs` 与 `admin_routes.cpp` 对表
+- 构建：`cd relay/admin/web && npm install && npm run build`
+  （先构建 CodeMirror 编辑器 bundle，再构建页面并预压缩）
 
 ## 14. 备选方案与取舍
 
@@ -669,7 +683,7 @@ xterm 与 Chart 仍由各自页面二次懒加载，只有终端/设备详情会
 
 1. SOCKS5 只在 A 出现；B/C 不实现 SOCKS5。
 2. A 的 a_sid 只在本段有效；c_sid 由 B 分配；回程必须还原 id。
-3. OPEN 只带 `devid + port`，C 固定连 `127.0.0.1`。
+3. 普通 `OPEN` 只带 `devid + port`，C 固定连 `127.0.0.1`；内建服务用 `OPEN_SHELL/TTY/FS/SVC` 标志，不占端口。
 4. `initial_credit ≥ low_water + max_frame`；`Σ 在途 ≤ conn_inflight_max`。
 5. `hio_set_max_write_bufsize = conn_inflight_max + max_frame`，正常路径不触发。
 6. 只有写队列降到低水位才补 WINDOW；`hio_write()` 返回成功不算消费。

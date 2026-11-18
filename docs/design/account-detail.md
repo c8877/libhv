@@ -1,6 +1,7 @@
-# 接入账号详情页（设计稿）
+# 接入账号详情页（设计参考）
 
-状态：已实现；Token 配置为行内展开表单（§7.6），账号信息为表格原地转表单（§6.4）  
+状态：已实现；交互设计保留在本文，代码见 `rtunnel/relay/admin/web/src/pages/access/[id].vue`
+
 关联：`docs/design/account-token.md`、`docs/admin/permission.md`
 
 ---
@@ -610,208 +611,9 @@ if (!r.ok) {
 
 详情页据此显示 404 态或重试态。
 
-# 10. 前端实现
+# 10. 交互约定
 
-> 注：本节记录旧手写前端（已删除的 `admin/frontend/`）的实现；当前实现在
-> `rtunnel/relay/admin/web/src/pages/access/[id].vue`（Vue + Element Plus），
-> 交互与状态设计仍可参考。
-
-## 10.1 文件
-
-```
-admin_ui.js
-  UI.editTable                单条记录的表格，只读与编辑表单原地切换
-admin_accounts.js
-  AccessAccountsPage          列表：去掉 expandId / tokens / loadTokens / tokenPanel
-  AccessAccountDetailPage     详情页：账号字段只声明一次，两种形态由组件生成
-  Router.register(/^#\/access\/(\d+)$/, ...)
-```
-
-列表页净减约 90 行；详情页里账号信息表的读/写两套模板合并为一份字段声明。
-
-## 10.2 复用
-
-```
-UI.panel          两张卡片
-UI.editTable      账号信息表：原地切换只读与编辑（见 §10.6）
-UI.dataTable      Token 表格：列声明 + cells + expand 行内表单
-UI.status         Token / 账号状态（启用/停用共用 UI.STATUS_ACTIVE）
-UI.localInput     datetime-local 输入值
-UI.gb / gbValue   配额显示与编辑回填
-UI.actions        详情页除账号编辑外的 data-act
-UI.modal          新建 Token、轮换、吊销（账号与 Token 的编辑都不走弹窗）
-UI.pill           权限摘要里的分组标签
-UI.time           时间统一格式
-```
-
-账号信息表不再手写两套 HTML，字段只声明一次：
-
-```js
-UI.editTable(document.getElementById('acc-kv-host'), {
-  data: this.account,
-  cls: 'acc-kv',
-  fields: this.accountFields(),     // 每项 { key, label, view, edit, span }
-  actions: document.getElementById('acc-info-actions'),
-  renderActions: (editing, a) => editing
-    ? '<button data-edit-cancel>取消</button> <button data-edit-save>保存</button>'
-    : '<button data-edit-start>编辑资料</button> …',
-  hint: (v, d) => ({ text: '…', warn: false }),
-  save: v => Api.put('/api/v1/client-accounts/' + this.account.id, v),
-  onSaved: () => this.refresh(),
-});
-```
-
-## 10.3 样式
-
-```
-.ui-edit-table           可编辑表格基础：编辑态单元格内边距、.ui-inline 控件
-.ui-edit-hint-cell       编辑态表尾提示行（colspan 整行，--surface-2）
-.ui-edit-hint            提示文本；.warn 转 warn 色
-.acc-kv                  账号信息表列宽；≤900px 标签列收窄
-.acc-token-table         单行不换行；≤1100px 隐藏表头，行转卡片（data-label 作字段名）
-.acc-ops                 操作列 nowrap
-.acc-progress            流量进度条（原生 progress）；.ok/.warn/.bad 三档
-.tok-edit-row > td       展开表单行容器，colspan=6，背景 --surface-2
-.tok-form                字段网格 4 列；≤1100px 2 列，≤760px 1 列
-.tok-form-foot           左侧提示 + 右侧按钮，窄屏换行
-.tok-hint                副作用警示，--warn 色（与 .ui-edit-hint 共用规则）
-```
-
-不新增第三套 chip 样式，分组标签继续用 `UI.pill`。
-
-## 10.4 列表页调整
-
-```
-行点击      → #/access/<id>（原为展开）
-操作列      移除「有效权限 / 停用 / 删除」，只留「详情 ›」
-保留        搜索、新建账号
-删除        行内展开相关状态与函数
-```
-
-## 10.5 行内展开表单状态机
-
-Token 表单行的状态在页面实例上；账号信息表的状态由 `UI.editTable` 内部持有：
-
-```js
-this.editId = 0;          // 当前展开的 Token id，0 表示全部收起
-this.editDirty = false;   // Token 表单是否有改动
-this.kvEditor = null;     // UI.editTable 实例，isEditing()/leave()/save()
-```
-
-```
-closed ──点「编辑」──────────────► editing(dirty=false)
-editing ──输入───────────────────► editing(dirty=true)
-editing ──点「保存」─────────────► submitting ──成功──► closed（刷新 + toast）
-editing ──点「取消」/ Esc────────► dirty ? confirm : closed
-editing ──点其它行「编辑」────────► dirty ? confirm : 切换 editId
-editing ──切换筛选───────────────► dirty ? confirm : closed + 切筛选
-editing ──自动刷新 timer─────────► 跳过，不重绘
-```
-
-账号信息表由 `UI.editTable` 走同一套状态机，页面只判断 `kvEditor.isEditing()`：
-
-```
-closed ──点「编辑资料」──────────► editing, dirty=false
-editing ──输入──────────────────► dirty 变化（表尾提示随字段变化）
-editing ──点「保存」────────────► confirmSave ──► PUT ──► closed（onSaved 刷新）
-editing ──点「取消」/ Esc────────► dirty ? confirm : closed
-editing ──点 Token 操作/筛选─────► kvEditor.leave()：dirty ? confirm : 收起后继续
-editing ──自动刷新 timer─────────► 跳过，不重绘
-```
-
-提交中禁用保存按钮，防止重复 PUT；失败回到 `editing(dirty=true)`，输入不丢。
-
-表单值只在展开时从行/账号读取一次，之后以 DOM 为准，避免刷新把输入改回去。
-
-## 10.6 UI.editTable 标准组件
-
-`admin_ui.js` 里的单条记录可编辑表格。只读与编辑形态由同一份字段声明生成，页面不再写两套模板。
-
-```js
-const editor = UI.editTable(host, {
-  data,                       // 当前记录
-  columns: 2,                 // 每行几组「标签 + 值」，默认 2
-  fields: [{
-    key: 'status',
-    label: '状态',
-    span: 1,                  // 占几组；2 表示整行
-    cls: 'acc-wrap',          // 值单元格附加类
-    view: d => UI.status(d.status, MAP),
-    edit: {                   // 没有 edit 即只读字段
-      type: 'switch',         // text / number / datetime-local / select / switch / textarea / custom
-      id: 'ae-status',
-      onValue: 'active', offValue: 'disabled',   // 开关映射到的业务值
-      onLabel: '启用', offLabel: '停用',
-      value: d => d.status,   // 可选：编辑值不同于 key
-      html: (v, d) => '…',    // type=custom 时自定义控件，需带 data-ef
-      placeholder, maxlength, rows, step, min, max,
-    },
-  }],
-  actions: headerEl,          // 可选：组件负责渲染视图/编辑两套按钮
-  renderActions: (editing, data) => html,
-  hint: (values, data) => ({ text, warn }),
-  confirmSave: (values, data) => Promise<bool>,
-  save: (values, data) => Promise,
-  onSaved: (values, data),
-  onStateChange: (editing, data),
-  dirtyMessage, focus,
-  editing: false,             // 初始是否编辑
-});
-```
-
-```
-editor.start()        进入编辑；首个控件自动聚焦
-editor.save()         收集 values → confirmSave → save → 退出编辑 → onSaved
-editor.cancel()       有改动先确认，再恢复只读
-editor.leave()        页面执行其它操作前调用，返回是否已退出
-editor.update(data)   只读态换数据；编辑态不覆盖输入
-editor.isEditing()    页面据此暂停自动刷新
-editor.isDirty()      当前值与进入编辑时是否不同
-editor.values()       读取所有 [data-ef] 控件的值
-```
-
-约定：
-
-```
-同一张表       表格行数、列宽在两种形态下不变，只替换单元格内容
-只读字段       保持文本渲染，编辑时仍能看到账号 ID、创建时间等上下文
-布尔字段       用 type:'switch'，不要用 select 或裸 checkbox；
-               开关文案随勾选即时切换，Enter 只保存、不误切换
-按钮           编辑态的保存/取消由 data-edit-save / data-edit-cancel 绑定，
-               视图态按钮继续走 data-act + UI.actions
-Esc / Enter    Esc 取消；输入框内 Enter 保存（textarea 不拦截）
-保存失败       留在编辑态，表尾提示错误，按钮恢复可点
-```
-
-后续任何「单条记录表格 → 表单」的页面都可直接复用，不需要再写一遍脏检查与确认逻辑。
-
-## 10.7 表格行内展开表单
-
-`UI.editTable` 用于「单条记录的 KV 表」，列表里的行用它不合适。列表行用一组更小的公共方法：
-
-```js
-// 1. 生成表单行，插到目标数据行之后
-const html = '<tr class="ui-row-edit"><td colspan="5"><div class="ui-row-edit-inner">' +
-  UI.formGrid(fields, data) +
-  '<div class="ui-row-edit-foot">…[取消][保存]</div></div></td></tr>';
-
-// 2. 控件渲染与取值和 editTable 同一套
-UI.fieldControl(field, value, data);   // text / number / password / select / switch / textarea
-UI.fieldValues(root, fields);          // 读回业务值，checkbox 按 onValue/offValue 映射
-UI.bindFields(root);                   // 开关文案随勾选更新
-
-// 3. 列表表格用 UI.dataTable，expand 返回表单行
-UI.dataTable({
-  cols: [...],
-  rows,
-  cells: row => [ ... ],          // 或逐列 render
-  expand: row => editing ? formRowHtml : '',
-});
-```
-
-已使用：管理台「账号」行内编辑（角色 / 状态 / 密码 / 设备范围）、字典管理行内编辑。
-
-### 什么时候用展开表单，什么时候用弹窗
+## 10.1 什么时候用展开表单，什么时候用弹窗
 
 ```
 展开表单   表格里已有这一行，修改多个字段，且需要保留上下文
@@ -869,68 +671,7 @@ client_token.create / update / rotate / delete
 
 详情页只读，不记审计；「有效权限」查询也不记，避免刷日志。
 
-# 14. 测试
-
-## 14.1 更新
-
-```
-scripts/admin_token_e2e.py
-  列表点击行 → 详情页，不再展开
-  Token 操作全部改到详情页
-  新增：状态筛选、Token 行内展开表单、账号表格原地转表单、
-       脏数据确认、404、删除账号输入确认
-```
-
-## 14.2 新增用例
-
-```
-1  列表点击 alice → #/access/1，卡片一显示用户名/状态/Token 数
-2  卡片一 KV 完整：账号 ID、创建人、更新时间、最近使用、权限摘要
-3  停用账号 → 顶部提示条出现，Token 仍可见
-4  状态筛选：全部/启用/停用/已吊销，计数与行数一致
-5  新建 Token → 一次性明文 → 关闭后表格出现，账号卡片 Token 数 +1
-6  行内展开表单：展开「构建机」→ 改名称、配额、频率 → 保存 → 折叠，回读一致
-7  行内展开表单改周期 → 本周期用量清零；只改配额不清零
-8  行内展开表单有改动时点「取消」→ 确认放弃；确认后恢复原值
-9  行内展开表单展开后等待 >5s，输入内容不被自动刷新覆盖
-10 轮换 → 旧 Token 无法接入，新 Token 可接入
-11 停用 / 启用 Token → 状态徽标变化，行内展开表单仍可编辑
-12 吊销 → 行变 muted，操作按钮消失，不再提供编辑
-13 删除账号：输入错误用户名按钮禁用；输入正确后回列表
-14 直接访问 #/access/9999 → 404 态
-15 900px 下无横向溢出，Token 行卡片化，行内展开表单单列
-
-账号表格编辑（现有 admin_token_e2e 已覆盖 5b–5e）
-16 点「编辑资料」→ KV 表原地变表单，行数不变，只读字段仍是文本
-17 改展示名 / 备注 → 保存 → 表格恢复，值已更新
-18 有改动点「取消」→ 确认 → 恢复原值
-19 表单里把状态改为停用 → 提示行转 warn，保存需二次确认，完成后出现停用横幅
-20 账号表单有改动时点 Token「编辑」→ 确认放弃 → 账号表恢复只读，Token 表单展开
-```
-
-回归：
-
-```
-admin_permission_e2e    14 项
-admin_actions_e2e       16 项
-admin_smoke             17 项（空库仍匹配「暂无接入账号」，无需改）
-rtunnel/tests/e2e.py    42 项
-```
-
-# 15. 实施顺序
-
-```
-1  后端详情接口 + Api 错误状态码
-2  详情页骨架：路由、账号卡片、Token 表格（只读）
-3  迁移 Token 操作：新建、启停、轮换、吊销
-4  行内展开表单：插入/移除表单行、保存、脏数据确认、暂停自动刷新
-5  状态筛选、删除账号确认
-6  列表页去掉展开，改为跳转
-7  窄屏样式与卡片化
-8  用例更新与新增
-```
-
-# 16. 非目标
+# 14. 非目标
 
 ```
 Token 级设备白名单       按 account-token.md 的结论，v1 不做
@@ -940,7 +681,7 @@ Token 级设备白名单       按 account-token.md 的结论，v1 不做
 多 relay                 策略与用量都在进程内，单实例
 ```
 
-# 17. 决策记录
+# 15. 决策记录
 
 ```
 1. 列表页不保留行内展开，行点击进详情，管理入口只留详情页。
