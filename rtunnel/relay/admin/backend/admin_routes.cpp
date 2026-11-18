@@ -153,15 +153,6 @@ void AdminServer::registerRoutes() {
         handleAclReload(ctx, role);
         return 200;
     });
-    access("dict.read", "GET", "/api/v1/permission/overview", &AdminServer::handlePermOverview);
-    access("dict.read", "GET", "/api/v1/permission/client-groups/:id", &AdminServer::handlePermClientGet);
-    access("dict.read", "GET", "/api/v1/permission/agent-groups/:id", &AdminServer::handlePermAgentGet);
-    access("dict.read", "GET", "/api/v1/permission/effective", &AdminServer::handlePermEffective);
-    access("dict.read", "GET", "/api/v1/permission/export-acl", &AdminServer::handlePermExportAcl);
-    service_.Handle("POST", "/api/v1/permission/import-acl", [this](const HttpContextPtr& ctx) {
-        std::string role; int rc = requirePerm(ctx, "dict.write", role); if (rc) return rc;
-        handlePermImportAcl(ctx, role); return 200;
-    });
     // 接入账号与 Token
     access("account.read", "GET", "/api/v1/client-accounts", &AdminServer::handleClientAccounts);
     access("account.read", "GET", "/api/v1/client-accounts/:id", &AdminServer::handleClientAccountGet);
@@ -219,16 +210,6 @@ void AdminServer::registerRoutes() {
     service_.Handle("DELETE", "/api/v1/admin-tokens/:id", [this](const HttpContextPtr& ctx) {
         std::string role; int rc = requirePerm(ctx, "token.write", role); if (rc) return rc;
         handleAdminTokenDelete(ctx, currentActor());
-        return (int)ctx->response->status_code;
-    });
-    service_.Handle("GET", "/api/v1/admin-tokens/:id/groups", [this](const HttpContextPtr& ctx) {
-        std::string role; int rc = requirePerm(ctx, "token.read", role); if (rc) return rc;
-        handleAdminTokenGroups(ctx, currentActor());
-        return (int)ctx->response->status_code;
-    });
-    service_.Handle("PUT", "/api/v1/admin-tokens/:id/groups", [this](const HttpContextPtr& ctx) {
-        std::string role; int rc = requirePerm(ctx, "token.scope", role); if (rc) return rc;
-        handleAdminTokenGroupsSave(ctx, currentActor());
         return (int)ctx->response->status_code;
     });
     // 资源字典与权限组
@@ -349,41 +330,6 @@ void AdminServer::registerRoutes() {
         std::string role; int rc = requirePerm(ctx, "dict.write", role); if (rc) return rc;
         handleDictTtyAdd(ctx, role); return 200;
     });
-    access("dict.read", "GET", "/api/v1/permission/agent-groups/:id/candidates", &AdminServer::handlePermAgentCandidates);
-
-    service_.Handle("POST", "/api/v1/permission/agent-groups/:id/devices", [this](const HttpContextPtr& ctx) {
-        std::string role; int rc = requirePerm(ctx, "dict.write", role); if (rc) return rc;
-        handlePermAgentAddDevices(ctx, role); return 200;
-    });
-
-
-    service_.Handle("POST", "/api/v1/permission/client-groups", [this](const HttpContextPtr& ctx) {
-        std::string role; int rc = requirePerm(ctx, "dict.write", role); if (rc) return rc;
-        handlePermClientSave(ctx, role); return 200;
-    });
-    service_.Handle("PUT", "/api/v1/permission/client-groups/:id", [this](const HttpContextPtr& ctx) {
-        std::string role; int rc = requirePerm(ctx, "dict.write", role); if (rc) return rc;
-        handlePermClientSave(ctx, role); return 200;
-    });
-    service_.Handle("DELETE", "/api/v1/permission/client-groups/:id", [this](const HttpContextPtr& ctx) {
-        std::string role; int rc = requirePerm(ctx, "dict.write", role); if (rc) return rc;
-        handlePermClientDelete(ctx, role); return 200;
-    });
-    service_.Handle("POST", "/api/v1/permission/agent-groups", [this](const HttpContextPtr& ctx) {
-        std::string role; int rc = requirePerm(ctx, "dict.write", role); if (rc) return rc;
-        handlePermAgentSave(ctx, role); return 200;
-    });
-    service_.Handle("PUT", "/api/v1/permission/agent-groups/:id", [this](const HttpContextPtr& ctx) {
-        std::string role; int rc = requirePerm(ctx, "dict.write", role); if (rc) return rc;
-        handlePermAgentSave(ctx, role); return 200;
-    });
-    service_.Handle("DELETE", "/api/v1/permission/agent-groups/:id", [this](const HttpContextPtr& ctx) {
-        std::string role; int rc = requirePerm(ctx, "dict.write", role); if (rc) return rc;
-        handlePermAgentDelete(ctx, role); return 200;
-    });
-
-    access("dict.read", "GET", "/api/v1/groups/device-map", &AdminServer::handleGroupDeviceMap);
-
     service_.Handle("POST", "/api/v1/certs/issue", [this](const HttpContextPtr& ctx) {
         std::string role;
         int rc = requirePerm(ctx, "cert.write", role);
@@ -496,20 +442,6 @@ void AdminServer::registerRoutes() {
         if (rc) return rc;
         handleUserDelete(ctx, currentActor());
         return 200;
-    });
-    service_.Handle("GET", "/api/v1/users/:id/groups", [this](const HttpContextPtr& ctx) {
-        std::string role;
-        int rc = requirePerm(ctx, "account.read", role);
-        if (rc) return rc;
-        handleUserGroups(ctx);
-        return (int)ctx->response->status_code;
-    });
-    service_.Handle("PUT", "/api/v1/users/:id/groups", [this](const HttpContextPtr& ctx) {
-        std::string role;
-        int rc = requirePerm(ctx, "account.write", role);
-        if (rc) return rc;
-        handleUserGroupsSave(ctx, currentActor());
-        return (int)ctx->response->status_code;
     });
     service_.Handle("GET", "/api/v1/devices", [this](const HttpContextPtr& ctx) {
         std::string role;

@@ -1,7 +1,7 @@
 # 接入账号与 Token（设计稿）
 
 状态：P1–P3 已实现；P4 仅完成审计与文档，旧凭据导入未做（原因见 §10）  
-关联：`docs/permission.md`、`docs/admin/permission.md`、`docs/design/rtunnel.md`
+关联：`docs/design/rtunnel.md`
 
 ---
 
@@ -143,7 +143,7 @@ OPEN 超限   OPEN_FAIL(RATE_LIMITED)，消息带 retry_after=毫秒
 接入账号页
   账号列表：用户名 / 状态 / Token 数 / 最近使用 / 创建时间
   行展开：Token 列表 + 用量
-  操作：新建账号、停用、删除、有效权限、导入旧凭据
+  操作：新建账号、停用、删除、有效权限、分配权限组
 
 Token 列表
   名称 / 前缀 / 状态 / 到期 / 流量进度 / 频率 / 并发 / 最近使用
@@ -678,15 +678,15 @@ relay 在 hloop_run 返回后、admin stop 前刷一次
 └───────────────────────────────────────────────┘
 ```
 
-## 5.11 权限页联动
+## 5.11 授权对象联动
 
 ```
-客户端分组成员选择   改为从 client_accounts + 静态文件用户取候选
-不存在提示           用户 alice 不是接入账号
-有效权限预览         直接复用 permEffectiveClient(username)
+接入账号权限   在「授权对象」页把账号加入权限组（subject_type=client）
+rtk 令牌权限   同一页按令牌再绑定权限组（subject_type=rtk），与账号组取交集
+有效权限预览   GET /api/v1/client-accounts/{id}/effective
 ```
 
-Token 不参与分组，分组始终按账号用户名求值。
+账号未加入任何权限组时无权限；令牌组只能收窄，不能放大账号权限。
 
 # 6. 兼容与迁移
 
@@ -814,7 +814,6 @@ relay 侧限流、并发、流量计量      → 全在事件循环线程，无�
 
 ```bash
 # 某个账号当前能用什么
-权限页 →「有效权限」，或
 curl -b cookie 'http://127.0.0.1:9443/api/v1/client-accounts/1/effective'
 
 # Token 用量

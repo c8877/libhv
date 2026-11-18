@@ -404,10 +404,7 @@ int AdminServer::start(const AdminConfig& cfg) {
         std::string db_err;
         if (db_.open(cfg_.db_path, db_err)) {
             loadSettings();
-            db_.permMigrateLegacy();
-            db_.permSyncDictIds();
             db_.permSeed();
-            db_.permMigrateGroups();
             db_.distRecover();
             logf_("[admin] db: %s", cfg_.db_path.c_str());
         } else {

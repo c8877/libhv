@@ -10,7 +10,7 @@
     </div>
     <div class="tip muted">
       所有 HTTP 接口都支持 <code>Authorization: Bearer atk-…</code>；
-      Token 继承归属账号的角色，绑定设备分组后只会出现在组内设备上。
+      Token 继承归属账号的角色，绑定权限组后只会出现在授权设备上。
       文档按角色裁剪，取消「只显示我可调用」可查看更高权限接口。
     </div>
     <ApiDocPanel :role="role" />

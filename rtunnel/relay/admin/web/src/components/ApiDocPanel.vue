@@ -9,7 +9,7 @@
         <el-tag size="small" type="info">{{ token.username }}</el-tag>
         <el-tag size="small">{{ roleName }}</el-tag>
         <el-tag v-if="token.group_count > 0" size="small" type="warning">
-          {{ token.group_count }} 个设备分组
+          {{ token.group_count }} 个权限组
         </el-tag>
         <el-tag v-else size="small" type="info">继承账号设备范围</el-tag>
       </div>
@@ -134,7 +134,7 @@
         <div class="sec-title">设备范围</div>
         <div class="muted scope-text">
           <template v-if="token && token.group_count > 0">
-            该 Token 绑定 {{ token.group_count }} 个设备分组（{{ token.groups || '—' }}），
+            该 Token 绑定 {{ token.group_count }} 个权限组（{{ token.groups || '—' }}），
             设备相关接口只能看到并操作组内设备，即使归属账号是 admin。
           </template>
           <template v-else>

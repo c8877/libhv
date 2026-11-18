@@ -13,18 +13,6 @@ struct sqlite3_stmt;
 std::string dbColText(sqlite3_stmt* st, int col);
 long long   dbColInt(sqlite3_stmt* st, int col);
 
-struct DbPermAcl {
-    long long agent_group_id = 0;
-    std::string tcp_ports;
-    std::string tty;
-    std::string file = "none";
-    bool shell = false;
-    bool sysinfo = false;
-    bool metrics = false;
-    bool config = false;
-    bool web = false;
-};
-
 struct DbGroupAclRule {
     std::string user;
     std::string devid;
@@ -122,40 +110,12 @@ public:
     bool distOtaSucceeded(const std::string& devid, const std::string& version);
     bool distRecover();   // relay 重启后把中断的传输/安装阶段重新入队
 
-    // 设备分组映射与账号范围
-    bool groupGet(long long id, std::string& json_out, std::string& err);
-    bool groupDelete(long long id, std::string& err);
-    bool groupDeviceMap(std::string& json_out);
-    bool groupSubjectDevids(const std::string& type, const std::string& subject,
-                            std::vector<std::string>& out, bool& has_groups);
-    bool userGroupList(const std::string& username, std::string& json_out);
-    bool userSetGroups(const std::string& username, const std::vector<long long>& ids, std::string& err);
-    bool permOverview(std::string& json_out);
-    bool permClientGet(long long id, std::string& json_out, std::string& err);
-    bool permClientSave(long long id, const std::string& name, const std::string& desc,
-                        const std::vector<std::string>& users,
-                        const std::vector<DbPermAcl>& acl, long long& out_id, std::string& err);
-    bool permClientDelete(long long id, std::string& err);
-    bool permAgentGet(long long id, std::string& json_out, std::string& err);
-    bool permAgentSave(long long id, const std::string& name, const std::string& desc,
-                       const std::vector<std::string>& devices,
-                       const std::map<std::string, std::string>& caps,
-                       long long& out_id, std::string& err);
-    bool permAgentDelete(long long id, std::string& err);
-    bool permEffectiveClient(const std::string& user, std::string& json_out, std::string& err);
-    bool permImportAcl(const std::string& content, const std::vector<std::string>& extra_devices,
-                       std::string& json_out, std::string& err);
-    bool permExportAcl(std::string& json_out);
-    bool permMigrateLegacy();
-    bool permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::string>& users,
-                         std::set<long long>& scoped_tokens);
-    bool permSyncDictIds();
-    bool permAgentCandidates(long long group_id, std::string& json_out);
-    bool permAgentAddDevices(long long group_id, const std::vector<std::string>& devids, std::string& err);
-
     // ---- 资源权限：资源字典 + 权限组 ----
     bool permSeed();                        // 幂等：补资源、预置权限组
-    bool permMigrateGroups();               // 一次性：旧客户端分组/设备分组 -> 权限组
+    // 数据面规则：账号规则 + 令牌级收窄规则
+    bool permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::string>& users,
+                         std::set<long long>& scoped_tokens);
+    bool permEffectiveClient(const std::string& user, std::string& json_out, std::string& err);
     bool permResources(std::string& json_out);
     bool permResourceUpdate(const std::string& key, const std::string& name,
                             const std::string& desc, int enabled, std::string& err);
@@ -255,11 +215,6 @@ public:
     bool clientTokenAuth(const std::string& hash, long long now_ms, const std::string& ip,
                          long long& account_id, std::string& username, long long& token_id,
                          std::string& err);
-    // 令牌绑定的设备分组（复用 subject_groups，subject_type='atk'）
-    bool adminTokenGroups(long long token_id, std::string& json_out);
-    bool adminTokenSetGroups(long long token_id, const std::vector<long long>& ids,
-                             std::string& err);
-
     bool dictTtys(const std::string& q, std::string& json_out);
     // 字典分页：kind = ports | ttys
     bool dictPage(const std::string& kind, const std::string& q, int page, int page_size,

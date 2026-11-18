@@ -19,7 +19,7 @@ export const DOCS = [
   {
     group: 'device', method: 'GET', path: '/api/v1/overview', minRole: 'viewer',
     summary: '全局概览：在线 agent/client/会话数、流量、版本',
-    note: '绑定设备分组的 Token 只统计组内设备（返回 scoped=true）',
+    note: '绑定权限组的 Token 只统计组内设备（返回 scoped=true）',
     curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/overview"`,
     resp: `{ "agents": 3, "clients": 1, "streams": 2, "bytes_in": 812345, "bytes_out": 991234, "version": "1.4.2", "scoped": false }`,
   },
@@ -262,45 +262,6 @@ export const DOCS = [
 
   // ---------------------------------------------------------------- 权限
   {
-    group: 'perm', method: 'GET', path: '/api/v1/permission/overview', minRole: 'operator',
-    summary: '权限总览：客户端组、设备组、字典规模',
-    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/permission/overview"`,
-  },
-  {
-    group: 'perm', method: 'GET', path: '/api/v1/permission/client-groups/:id', minRole: 'operator',
-    summary: '客户端组详情（成员与 ACL）',
-    params: [{ name: 'id', in: 'path', desc: '客户端组 ID' }],
-    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/permission/client-groups/2"`,
-  },
-  {
-    group: 'perm', method: 'GET', path: '/api/v1/permission/agent-groups/:id', minRole: 'operator',
-    summary: '设备组详情（设备与能力上限）',
-    params: [{ name: 'id', in: 'path', desc: '设备组 ID' }],
-    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/permission/agent-groups/3"`,
-  },
-  {
-    group: 'perm', method: 'GET', path: '/api/v1/permission/agent-groups/:id/candidates', minRole: 'operator',
-    summary: '设备组可添加的设备候选',
-    params: [{ name: 'id', in: 'path', desc: '设备组 ID' }],
-    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/permission/agent-groups/3/candidates"`,
-  },
-  {
-    group: 'perm', method: 'GET', path: '/api/v1/permission/effective', minRole: 'operator',
-    summary: '某接入账号的最终生效权限',
-    params: [{ name: 'client', in: 'query', desc: '接入账号用户名' }],
-    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/permission/effective?client=box01"`,
-  },
-  {
-    group: 'perm', method: 'GET', path: '/api/v1/permission/export-acl', minRole: 'operator',
-    summary: '导出 ACL 文本',
-    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/permission/export-acl"`,
-  },
-  {
-    group: 'perm', method: 'POST', path: '/api/v1/permission/import-acl', minRole: 'admin',
-    summary: '导入 ACL 文本（覆盖式）',
-    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"content":"box01=dev-*:80,443\\n"}' "$RT/api/v1/permission/import-acl"`,
-  },
-  {
     group: 'perm', method: 'GET', path: '/api/v1/permission/dict/ports', minRole: 'operator',
     summary: '端口字典',
     params: [{ name: 'q', in: 'query', desc: '搜索关键词' }],
@@ -365,52 +326,6 @@ export const DOCS = [
     group: 'perm', method: 'POST', path: '/api/v1/permission/dict/ttys/batch-delete', minRole: 'manager',
     summary: '批量删除串口',
     curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"ids":[3,4]}' "$RT/api/v1/permission/dict/ttys/batch-delete"`,
-  },
-  {
-    group: 'perm', method: 'GET', path: '/api/v1/groups/device-map', minRole: 'operator',
-    summary: '设备与分组的映射关系',
-    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/groups/device-map"`,
-  },
-  {
-    group: 'perm', method: 'POST', path: '/api/v1/permission/client-groups', minRole: 'manager',
-    summary: '新建客户端组',
-    note: 'acl[].file = none|ro|rw；shell/sysinfo/metrics/config/web 为布尔',
-    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"name":"只读组","users":["box01"],\n       "acl":[{"agent_group_id":3,"tcp_ports":"80,443","tty":"","file":"ro",\n               "shell":false,"sysinfo":true,"metrics":true,"config":false,"web":true}]}' \\\n  "$RT/api/v1/permission/client-groups"`,
-  },
-  {
-    group: 'perm', method: 'PUT', path: '/api/v1/permission/client-groups/:id', minRole: 'manager',
-    summary: '修改客户端组（整表替换）',
-    params: [{ name: 'id', in: 'path', desc: '客户端组 ID' }],
-    curl: `curl -sS -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"name":"只读组","users":["box01"],"acl":[]}' \\\n  "$RT/api/v1/permission/client-groups/2"`,
-  },
-  {
-    group: 'perm', method: 'DELETE', path: '/api/v1/permission/client-groups/:id', minRole: 'manager',
-    summary: '删除客户端组',
-    params: [{ name: 'id', in: 'path', desc: '客户端组 ID' }],
-    curl: `curl -sS -X DELETE -H "Authorization: Bearer $ATK" "$RT/api/v1/permission/client-groups/2"`,
-  },
-  {
-    group: 'perm', method: 'POST', path: '/api/v1/permission/agent-groups', minRole: 'manager',
-    summary: '新建设备组',
-    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"name":"产线A","description":"A 车间","devices":["mp135","mp136"]}' \\\n  "$RT/api/v1/permission/agent-groups"`,
-  },
-  {
-    group: 'perm', method: 'PUT', path: '/api/v1/permission/agent-groups/:id', minRole: 'manager',
-    summary: '修改设备组（整表替换）',
-    params: [{ name: 'id', in: 'path', desc: '设备组 ID' }],
-    curl: `curl -sS -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"name":"产线A","description":"A 车间","devices":["mp135"]}' \\\n  "$RT/api/v1/permission/agent-groups/3"`,
-  },
-  {
-    group: 'perm', method: 'DELETE', path: '/api/v1/permission/agent-groups/:id', minRole: 'manager',
-    summary: '删除设备组',
-    params: [{ name: 'id', in: 'path', desc: '设备组 ID' }],
-    curl: `curl -sS -X DELETE -H "Authorization: Bearer $ATK" "$RT/api/v1/permission/agent-groups/3"`,
-  },
-  {
-    group: 'perm', method: 'POST', path: '/api/v1/permission/agent-groups/:id/devices', minRole: 'manager',
-    summary: '向设备组追加设备',
-    params: [{ name: 'id', in: 'path', desc: '设备组 ID' }],
-    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"devids":["mp137"]}' "$RT/api/v1/permission/agent-groups/3/devices"`,
   },
   {
     group: 'perm', method: 'GET', path: '/api/v1/client-accounts', minRole: 'operator',
@@ -578,18 +493,6 @@ export const DOCS = [
     curl: `curl -sS -X DELETE -H "Authorization: Bearer $ATK" "$RT/api/v1/users/5"`,
   },
   {
-    group: 'sys', method: 'GET', path: '/api/v1/users/:id/groups', minRole: 'manager',
-    summary: '账号绑定的设备分组',
-    params: [{ name: 'id', in: 'path', desc: '账号 ID' }],
-    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/users/5/groups"`,
-  },
-  {
-    group: 'sys', method: 'PUT', path: '/api/v1/users/:id/groups', minRole: 'admin',
-    summary: '保存账号的设备分组绑定',
-    params: [{ name: 'id', in: 'path', desc: '账号 ID' }],
-    curl: `curl -sS -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"groups":[3]}' "$RT/api/v1/users/5/groups"`,
-  },
-  {
     group: 'sys', method: 'GET', path: '/api/v1/devices', minRole: 'manager',
     summary: '设备归属列表',
     curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/devices"`,
@@ -660,7 +563,7 @@ export const DOCS = [
       { name: 'page_size', in: 'query', desc: '每页条数，默认 10，最大 200' },
       { name: 'q', in: 'query', desc: '按键/值/名称搜索' },
     ],
-    note: '字典页使用；旧的全量接口 /permission/dict/ports|ttys 仍保留',
+    note: '字典页使用；增删改查走 /permission/dict/ports|ttys',
     curl: `curl -sS -H "Authorization: Bearer $ATK" \\\n  "$RT/api/v1/permission/dicts?kind=ports&page=1&page_size=10"`,
     resp: `{ "kind": "ports", "page": 1, "page_size": 10, "total": 23, "items": [{ "id": 1, "value": "22", "name": "ssh" }] }`,
   },
@@ -791,7 +694,7 @@ export const ERRORS = [
   ['401', '未认证 / Token 停用、吊销、过期 / 归属账号停用'],
   ['403', '角色不足，或设备不在 Token 绑定的分组内'],
   ['404', '设备离线、文件不存在、任务不存在'],
-  ['409', '分片 offset 不匹配、目标文件冲突、字典项被引用'],
+  ['409', '分片 offset 不匹配、目标文件冲突'],
   ['413', '超过 file.max_upload_mb / file.max_edit_mb'],
   ['504', '设备未在超时时间内应答'],
 ]

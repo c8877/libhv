@@ -127,14 +127,6 @@
           </el-checkbox-group>
         </el-form-item>
 
-        <el-form-item v-if="showScope" label="设备范围">
-          <div v-if="!edit.groups.length" class="muted">还没有设备分组，先到权限页创建。</div>
-          <el-checkbox-group v-else v-model="edit.scope" class="scope">
-            <el-checkbox v-for="g in edit.groups" :key="g.id" :value="g.id" class="scope-item">
-              {{ g.name }} <span class="muted">· {{ g.device_count }} 台</span>
-            </el-checkbox>
-          </el-checkbox-group>
-        </el-form-item>
       </el-form>
       <div class="muted">角色/状态立即生效；新密码至少 8 位，留空不改。</div>
       <template #footer>
@@ -186,8 +178,6 @@ function canEdit(u) {
   return canManageTarget(u) || (u && u.username === me.value.username)
 }
 
-const showScope = computed(() =>
-  roleOf() === 'admin' && edit.user && edit.user.role !== 'admin')
 const showPermGroups = computed(() =>
   can('account.write') && edit.user && edit.user.role !== 'admin')
 
@@ -197,7 +187,7 @@ const createForm = reactive({ username: '', password: '', role: 'viewer' })
 const editDlg = ref(false)
 const edit = reactive({
   user: null, username: '', role: 'viewer', status: 'active',
-  old_password: '', password: '', groups: [], scope: [], initialScope: '[]',
+  old_password: '', password: '',
   permGroups: [], permIds: [], initialPerm: '[]',
 })
 const allPermGroups = ref([])
@@ -251,7 +241,7 @@ async function createUser() {
 async function openEdit(u) {
   Object.assign(edit, {
     user: u, username: u.username, role: u.role, status: u.status,
-    old_password: '', password: '', groups: [], scope: [], initialScope: '[]',
+    old_password: '', password: '',
     permGroups: [], permIds: (u.perm_groups || []).slice(), initialPerm: JSON.stringify((u.perm_groups || []).slice().sort()),
   })
   editDlg.value = true
@@ -263,16 +253,6 @@ async function openEdit(u) {
       edit.initialPerm = JSON.stringify((r.ids || []).slice().sort())
     } catch (e) {
       ElMessage.warning('权限组加载失败：' + e.message)
-    }
-  }
-  if (showScope.value) {
-    try {
-      const r = await Api.get('/api/v1/users/' + u.id + '/groups')
-      edit.groups = r.groups || []
-      edit.scope = edit.groups.filter((g) => g.selected).map((g) => g.id)
-      edit.initialScope = JSON.stringify(edit.scope.slice().sort())
-    } catch (e) {
-      ElMessage.warning('设备范围加载失败：' + e.message)
     }
   }
 }
@@ -296,12 +276,6 @@ async function saveUser() {
       const ids = edit.permIds.slice().sort((a, b) => a - b)
       if (JSON.stringify(ids) !== edit.initialPerm) {
         await Api.put('/api/v1/users/' + u.id + '/perm-groups', { ids })
-      }
-    }
-    if (showScope.value) {
-      const scope = edit.scope.slice().sort()
-      if (JSON.stringify(scope) !== edit.initialScope) {
-        await Api.put('/api/v1/users/' + u.id + '/groups', { groups: scope })
       }
     }
     ElMessage.success('已保存')

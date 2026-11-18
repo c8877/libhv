@@ -1369,8 +1369,7 @@ void AgentApp::cleanupParts(const std::string& dir, time_t cutoff) {
 }
 
 // ---------------------------------------------------------------- OTA 安装
-// 新格式：gzip(tar) 部署包（manifest.json + install.sh + bin + service + etc）。
-// 旧格式：gzip(裸二进制) 只用于把老布局设备迁到带版本化文件的新布局。
+// 部署包：gzip(tar)，内含 manifest.json + install.sh + bin + service + etc。
 
 static bool otaVersionOk(const std::string& v) {
     if (v.empty() || v.size() > 40) return false;

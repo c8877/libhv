@@ -1,5 +1,5 @@
 // 管理台账号 API Token（atk-）API。
-// 归属账号沿用 users 表；设备范围通过设备分组绑定（subject_groups.subject_type='atk'）。
+// 归属账号沿用 users 表；设备范围通过权限组绑定（perm_group_members.subject_type='atk'）。
 #include "admin_server.hpp"
 #include "api_reply.hpp"
 #include "cpputil/json.hpp"
@@ -129,38 +129,5 @@ void AdminServer::handleAdminTokenDelete(const HttpContextPtr& ctx, const AdminA
     if (!canTouch(actor, owner)) { apiError(ctx, HTTP_STATUS_FORBIDDEN, "无权管理该 Token"); return; }
     if (!db_.adminTokenDelete(id, err)) { apiNotFound(ctx, err); return; }
     audit(actor.username, "admin_token.revoke", "user=" + uname + " id=" + std::to_string(id));
-    ctx->send("{\"ok\":true}");
-}
-
-void AdminServer::handleAdminTokenGroups(const HttpContextPtr& ctx, const AdminActor& actor) {
-    long long id = atoll(ctx->param("id").c_str());
-    DbTokenSpec spec;
-    long long owner = 0;
-    std::string uname, status, err;
-    if (!db_.adminTokenSpec(id, spec, owner, uname, &status, err)) { apiNotFound(ctx, err); return; }
-    if (!canTouch(actor, owner)) { apiError(ctx, HTTP_STATUS_FORBIDDEN, "无权查看该 Token"); return; }
-    std::string out;
-    if (!db_.adminTokenGroups(id, out)) {
-        apiError(ctx, HTTP_STATUS_INTERNAL_SERVER_ERROR, "db error");
-        return;
-    }
-    ctx->send(out);
-}
-
-void AdminServer::handleAdminTokenGroupsSave(const HttpContextPtr& ctx, const AdminActor& actor) {
-    long long id = atoll(ctx->param("id").c_str());
-    DbTokenSpec spec;
-    long long owner = 0;
-    std::string uname, status, err;
-    if (!db_.adminTokenSpec(id, spec, owner, uname, &status, err)) { apiNotFound(ctx, err); return; }
-    json req = json::parse(ctx->body(), nullptr, false);
-    if (req.is_discarded() || !req.is_object()) { apiBad(ctx, "bad json"); return; }
-    std::vector<long long> ids;
-    if (req.contains("groups")) {
-        for (auto& v : req["groups"]) if (v.is_number_integer()) ids.push_back(v.get<long long>());
-    }
-    if (!db_.adminTokenSetGroups(id, ids, err)) { apiBad(ctx, err); return; }
-    audit(actor.username, "admin_token.groups",
-          "user=" + uname + " id=" + std::to_string(id) + " groups=" + std::to_string(ids.size()));
     ctx->send("{\"ok\":true}");
 }

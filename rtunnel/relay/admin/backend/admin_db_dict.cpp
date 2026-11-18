@@ -7,8 +7,6 @@
 
 using nlohmann::json;
 
-static int portRefs(sqlite3* db, long long id);
-static int ttyRefs(sqlite3* db, long long id);
 
 static bool parsePortRange(const std::string& value, int& lo, int& hi) {
     if (value.empty()) return false;
@@ -44,7 +42,6 @@ bool AdminDb::dictPorts(const std::string& q, std::string& json_out) {
         j["name"] = (const char*)sqlite3_column_text(st, 3);
         j["description"] = (const char*)sqlite3_column_text(st, 4);
         j["enabled"] = sqlite3_column_int(st, 5) != 0;
-        j["refs"] = portRefs(db_, j["id"].get<long long>());
         arr.push_back(j);
     }
     sqlite3_finalize(st);
@@ -100,7 +97,6 @@ bool AdminDb::dictTtys(const std::string& q, std::string& json_out) {
         j["description"] = (const char*)sqlite3_column_text(st, 3);
         j["kind"] = (const char*)sqlite3_column_text(st, 4);
         j["enabled"] = sqlite3_column_int(st, 5) != 0;
-        j["refs"] = ttyRefs(db_, j["id"].get<long long>());
         arr.push_back(j);
     }
     sqlite3_finalize(st);
@@ -138,31 +134,6 @@ bool AdminDb::dictTtyAdd(const std::string& pattern, const std::string& name, co
     if (!ok) { err = "insert failed"; return false; }
     out_id = sqlite3_last_insert_rowid(db_);
     return true;
-}
-
-static int refCount(sqlite3* db, const char* acl_sql, const char* cap_sql, long long id) {
-    int n = 0;
-    const char* queries[] = {acl_sql, cap_sql};
-    for (auto* q : queries) {
-        sqlite3_stmt* st = nullptr;
-        if (sqlite3_prepare_v2(db, q, -1, &st, nullptr) != SQLITE_OK) continue;
-        sqlite3_bind_int64(st, 1, id);
-        if (sqlite3_step(st) == SQLITE_ROW) n += sqlite3_column_int(st, 0);
-        sqlite3_finalize(st);
-    }
-    return n;
-}
-
-static int portRefs(sqlite3* db, long long id) {
-    return refCount(db,
-                    "SELECT COUNT(*) FROM client_acl_ports WHERE port_id=?",
-                    "SELECT COUNT(*) FROM agent_group_ports WHERE port_id=?", id);
-}
-
-static int ttyRefs(sqlite3* db, long long id) {
-    return refCount(db,
-                    "SELECT COUNT(*) FROM client_acl_ttys WHERE tty_id=?",
-                    "SELECT COUNT(*) FROM agent_group_ttys WHERE tty_id=?", id);
 }
 
 bool AdminDb::dictBatchAdd(const std::string& kind, const std::vector<std::string>& values,
@@ -270,14 +241,12 @@ bool AdminDb::dictDelete(const std::string& kind, long long id, std::string& err
         sqlite3_bind_int64(st, 1, id);
         if (sqlite3_step(st) != SQLITE_ROW) { sqlite3_finalize(st); err = "not found"; return false; }
         sqlite3_finalize(st);
-        if (portRefs(db_, id) > 0) { err = "referenced"; return false; }
         if (sqlite3_prepare_v2(db_, "DELETE FROM port_dict WHERE id=?", -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
     } else {
         if (sqlite3_prepare_v2(db_, "SELECT 1 FROM tty_dict WHERE id=?", -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
         sqlite3_bind_int64(st, 1, id);
         if (sqlite3_step(st) != SQLITE_ROW) { sqlite3_finalize(st); err = "not found"; return false; }
         sqlite3_finalize(st);
-        if (ttyRefs(db_, id) > 0) { err = "referenced"; return false; }
         if (sqlite3_prepare_v2(db_, "DELETE FROM tty_dict WHERE id=?", -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
     }
     sqlite3_bind_int64(st, 1, id);
@@ -351,15 +320,13 @@ bool AdminDb::dictPage(const std::string& kind, const std::string& q, int page, 
             j["name"] = (const char*)sqlite3_column_text(st, 3);
             j["description"] = (const char*)sqlite3_column_text(st, 4);
             j["enabled"] = sqlite3_column_int(st, 5) != 0;
-            j["refs"] = portRefs(db_, j["id"].get<long long>());
-        } else {
+            } else {
             j["value"] = (const char*)sqlite3_column_text(st, 1);
             j["name"] = (const char*)sqlite3_column_text(st, 2);
             j["description"] = (const char*)sqlite3_column_text(st, 3);
             j["kind"] = (const char*)sqlite3_column_text(st, 4);
             j["enabled"] = sqlite3_column_int(st, 5) != 0;
-            j["refs"] = ttyRefs(db_, j["id"].get<long long>());
-        }
+            }
         items.push_back(j);
     }
     sqlite3_finalize(st);

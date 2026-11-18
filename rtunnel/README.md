@@ -17,7 +17,6 @@
 - 设计文档：`docs/design/rtunnel.md`
 - 全部拓扑/流程/时序/状态图（Mermaid + ASCII）与协议/配置/状态/参数表：
   `docs/design/rtunnel-diagrams.md`
-- 权限与分组：`docs/permission.md`；权限页设计：`docs/admin/permission.md`
 - 接入账号与 Token：`docs/design/account-token.md`；账号详情页：`docs/design/account-detail.md`
 
 ## 构建
@@ -134,7 +133,7 @@ build/bin/rtunnel-endpoint-test          # --server 地址解析单测
 
 relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，独立 worker 线程）：
 
-- 能力：概览、设备/会话、踢会话/下线、权限（分组 / 有效权限 / 旧 ACL 导入导出）、接入账号与 Token（时效 / 流量 / 频率 / 并发）、设备文件与服务管理、证书签发/吊销、文件仓库、分发与 OTA、审计、系统设置
+- 能力：概览、设备/会话、踢会话/下线、权限（权限组 / 授权对象 / 资源与设备字典）、接入账号与 Token（时效 / 流量 / 频率 / 并发）、设备文件与服务管理、证书签发/吊销、文件仓库、分发与 OTA、审计、系统设置
 - 侧栏按用途分 5 组，组可折叠（默认只展开当前页所在组，空白组按角色隐藏）：
   监控（概览/设备/会话）、运维（文件/分发/任务/Agent 升级）、
   权限（权限/接入账号/客户端/账号）、开放接口（API Token/接口文档）、
@@ -193,7 +192,7 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 - 预置 4 组：超级管理员（`super=1`）、管理员、操作员、观察者；首次启动写入一次，
   后续勾选结果不会被重启覆盖
 - 资源分类：设备（查看/终端/端口转发/能力/OTA/串口/采样/断开/绑定）、文件（读/写/删除）、
-  分发（读/写）、权限（读/写）、账号（读/写/删除）、令牌（读/写/设备范围）、证书（读/写）、
+  分发（读/写）、权限（读/写）、账号（读/写/删除）、令牌（读/写）、证书（读/写）、
   审计、系统（读/写/关机）
 - API：
   - `GET /api/v1/permission/resources`、`PUT /api/v1/permission/resources/{key}`
@@ -206,10 +205,6 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 - 页面：「权限组」用成员/功能资源/设备资源三个 tab；功能资源是分组矩阵，成员与设备用穿梭框；
   「授权对象」按账号/atk/接入账号/rtk 查看并分配权限组；「字典库」管理四类字典
 - 菜单与按钮按 `/api/v1/me` 返回的 `perms`/`super` 显示，服务端始终二次校验
-- **旧 ACL 迁移**：首次启动时把 `client_groups` + `client_group_acl` 自动转成
-  「接入:<原组名>」权限组（能力映射为资源、设备取设备组并集、端口并入组级范围），
-  把 `subject_groups` 的 admin/atk 设备范围转成「设备范围:<主体>」组；迁移只执行一次
-  （`settings.perm.groups_migrated`），旧表保留只读
 
 **atk 与 rtk 的区别**（两者都是令牌，但不是同一种身份）：
 
@@ -254,7 +249,6 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 - API：`GET/POST /api/v1/admin-tokens`、`PUT /api/v1/admin-tokens/{id}`、
   `POST /api/v1/admin-tokens/{id}/rotate`、`DELETE /api/v1/admin-tokens/{id}`；
   权限组用 `GET/PUT /api/v1/permission/subjects/atk/{id}/groups`
-  （旧 `GET/PUT /api/v1/admin-tokens/{id}/groups` 是设备分组，已不参与鉴权）
 - 页面：「API Token」导航页（manager/admin）
 
 ```bash

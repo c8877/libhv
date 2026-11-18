@@ -2,7 +2,7 @@
 
 状态：已实现；交互设计保留在本文，代码见 `rtunnel/relay/admin/web/src/pages/access/[id].vue`
 
-关联：`docs/design/account-token.md`、`docs/admin/permission.md`
+关联：`docs/design/account-token.md`
 
 ---
 
@@ -373,7 +373,7 @@ revoked 行      仍保留在列表里，方便查历史用量和吊销时间
 ### 布局
 
 ```
-展开行        <tr class="tok-edit-row"><td colspan="6">…</td></tr>，与权限页展开行一致
+展开行        <tr class="tok-edit-row"><td colspan="6">…</td></tr>，与权限组页展开行一致
 数据行        始终只读，不替换成输入框，不参与表单布局
 字段网格      auto-fit minmax(180px, 1fr)：常规 6 列，≤1200px 3 列，≤900px 2 列
 字段标签      12px muted，输入框在下
@@ -622,7 +622,7 @@ if (!r.ok) {
 弹窗       新建记录（还没有行可挂）
            一次性产物（Token 明文只显示一次）
            确认类（删除、停用、放弃修改）
-           独立工作台（字典管理、有效权限预览、旧 ACL 导入导出）
+           独立工作台（字典管理、有效权限预览、权限组维护）
 
 prompt     只剩单字段、可逆、无需上下文的快捷动作
            绑定设备归属、延长截止时间、输入设备 Web 端口

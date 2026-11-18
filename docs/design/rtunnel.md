@@ -538,18 +538,18 @@ operator（Shell、Web、文件上传下载）/ viewer（概览、设备列表�
 | GET | `/api/v1/clients`、`/api/v1/streams` | 客户端与流列表 |
 | DELETE | `/api/v1/streams/{a_sid}` | 踢单个会话（双侧 RESET） |
 | GET | `/api/v1/devices`、`PUT /api/v1/devices/{devid}/owner` | 设备归属 |
-| GET/POST/PUT/DELETE | `/api/v1/permission/client-groups[/{id}]` | 客户端分组（成员与 ACL 一起保存） |
-| GET/POST/PUT/DELETE | `/api/v1/permission/agent-groups[/{id}]` | 设备分组（设备与能力上限） |
-| GET | `/api/v1/permission/agent-groups/{id}/candidates` | 可添加设备候选 |
-| POST | `/api/v1/permission/agent-groups/{id}/devices` | 批量添加设备 |
-| GET/POST/PUT/DELETE | `/api/v1/permission/dict/{ports,ttys}[/{id}]` | 端口/TTY 字典、批量新增与删除 |
-| GET | `/api/v1/permission/overview`、`/effective?client=` | 分组概览与有效权限预览 |
-| POST/GET | `/api/v1/permission/import-acl`、`/export-acl` | 旧 ACL 导入导出（导入仅 admin） |
+| GET/POST/PUT/DELETE | `/api/v1/permission/groups[/{id}]` | 权限组（资源/设备/成员） |
+| GET/PUT | `/api/v1/permission/groups/{id}/members` | 权限组成员 |
+| GET | `/api/v1/permission/resources`、`PUT /permission/resources/{key}` | 功能资源字典 |
+| GET | `/api/v1/permission/subjects`、`GET/PUT /permission/subjects/{type}/{id}/groups` | 授权对象与权限组绑定 |
+| GET | `/api/v1/permission/dicts?kind=resources|devices|ports|ttys` | 四类字典分页 |
+| GET/POST/PUT/DELETE | `/api/v1/permission/dict/{ports,ttys}[/{id}]` | 端口/串口字典、批量新增与删除 |
+| PUT | `/api/v1/permission/devices/{devid}` | 设备资源改名/停用 |
 | GET/POST/PUT/DELETE | `/api/v1/client-accounts[/{id}]` | 接入账号；含 `/effective`、`/{id}/tokens` |
 | PUT/POST/DELETE | `/api/v1/client-tokens/{id}`、`/rotate` | Token 限额、启停、轮换、吊销 |
-| GET/POST/PUT/DELETE | `/api/v1/admin-tokens[/{id}]`、`/{id}/rotate`、`/{id}/groups` | 管理台 API Token；manager 管自己的，admin 管全部，Token 不能管理 Token |
+| GET/POST/PUT/DELETE | `/api/v1/admin-tokens[/{id}]`、`/{id}/rotate` | 管理台 API Token；manager 管自己的，admin 管全部，Token 不能管理 Token |
 | GET/PUT | `/api/v1/acl/file`、`POST /api/v1/acl/reload` | ACL 文件读写与热加载（兜底授权） |
-| GET/POST/PUT/DELETE | `/api/v1/users[/{id}]` | 管理台账号、角色、状态、密码、设备范围 |
+| GET/POST/PUT/DELETE | `/api/v1/users[/{id}]` | 管理台账号、角色、状态、密码、权限组 |
 | GET/PUT | `/api/v1/settings` | 运行参数（上传上限、会话、锁定时长等） |
 | GET/POST | `/api/v1/distributions[/{id}]` | 文件分发任务与重试/取消/延长/校验 |
 | GET | `/api/v1/audit` | 审计（登录、OPEN、踢、证书、文件、终端、权限变更） |
@@ -650,7 +650,7 @@ relay 用 `--admin-docroot` 指向该目录提供静态文件（不传时页面 
 
 ```
 relay/admin/web/src
-├── pages/           每个路由一个页面（概览/设备/权限/文件/分发/Token/文档/设置…）
+├── pages/           每个路由一个页面（概览/设备/权限组/文件/分发/Token/文档/设置…）
 ├── components/      FileManagerCard、SvcManagerCard、ApiDocPanel 等
 ├── layout/          AppLayout：侧栏分组 + 顶栏
 └── shared/          api/store/nav/utils/api-docs

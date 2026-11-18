@@ -100,8 +100,8 @@ private:
     bool        ownsDevid(const std::string& devid);
     bool        clientGroupDevids(std::vector<std::string>& out);
     bool        scopeRestricted();
-    bool        tokenScoped();   // 仅当本次请求由绑定了设备分组的 atk Token 发起
-    // atk Token 绑定的设备分组内设备；未绑定分组时返回 false
+    bool        tokenScoped();   // 仅当本次请求由绑定了权限组的 atk Token 发起
+    // atk Token 授权范围内的设备；未绑定权限组时返回 false
     bool        tokenGroupDevids(std::vector<std::string>& out);
     // WebSocket 握手鉴权（浏览器自动带 Cookie）
     bool        wsAuthorize(const HttpRequestPtr& req, AdminActor& actor, std::string& role);
@@ -162,7 +162,6 @@ private:
     void handleKickStream(const HttpContextPtr& ctx, const std::string& role);
     void handleKickAgent(const HttpContextPtr& ctx, const std::string& role);
     // api_groups.cpp
-    void handleGroupDeviceMap(const HttpContextPtr& ctx);
     void handlePermissionDicts(const HttpContextPtr& ctx);
     void handlePermResources(const HttpContextPtr& ctx);
     void handlePermGroupDetail(const HttpContextPtr& ctx);
@@ -180,21 +179,11 @@ private:
     void handleClientPermGroupsSave(const HttpContextPtr& ctx, const std::string& role);
     void handleUserPermGroups(const HttpContextPtr& ctx);
     void handleUserPermGroupsSave(const HttpContextPtr& ctx, const std::string& role);
-    void handlePermOverview(const HttpContextPtr& ctx);
-    void handlePermClientGet(const HttpContextPtr& ctx);
-    void handlePermClientSave(const HttpContextPtr& ctx, const std::string& role);
-    void handlePermClientDelete(const HttpContextPtr& ctx, const std::string& role);
-    void handlePermAgentGet(const HttpContextPtr& ctx);
-    void handlePermAgentSave(const HttpContextPtr& ctx, const std::string& role);
-    void handlePermAgentDelete(const HttpContextPtr& ctx, const std::string& role);
-    void handlePermEffective(const HttpContextPtr& ctx);
-    void handlePermImportAcl(const HttpContextPtr& ctx, const std::string& role);
-    void handlePermExportAcl(const HttpContextPtr& ctx);
-    void handlePermAgentCandidates(const HttpContextPtr& ctx);
-    void handlePermAgentAddDevices(const HttpContextPtr& ctx, const std::string& role);    void handleDictPorts(const HttpContextPtr& ctx);
+    void handleDictPorts(const HttpContextPtr& ctx);
     void handleDictPortAdd(const HttpContextPtr& ctx, const std::string& role);
     void handleDictTtys(const HttpContextPtr& ctx);
-    void handleDictTtyAdd(const HttpContextPtr& ctx, const std::string& role);    void handleDictBatchAdd(const HttpContextPtr& ctx, const std::string& role, const std::string& kind);
+    void handleDictTtyAdd(const HttpContextPtr& ctx, const std::string& role);
+    void handleDictBatchAdd(const HttpContextPtr& ctx, const std::string& role, const std::string& kind);
     void handleDictUpdate(const HttpContextPtr& ctx, const std::string& role, const std::string& kind);
     void handleDictDelete(const HttpContextPtr& ctx, const std::string& role, const std::string& kind);
     void handleDictBatchDelete(const HttpContextPtr& ctx, const std::string& role, const std::string& kind);
@@ -242,10 +231,6 @@ private:
     void handleAdminTokenUpdate(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleAdminTokenRotate(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleAdminTokenDelete(const HttpContextPtr& ctx, const AdminActor& actor);
-    void handleAdminTokenGroups(const HttpContextPtr& ctx, const AdminActor& actor);
-    void handleAdminTokenGroupsSave(const HttpContextPtr& ctx, const AdminActor& actor);
-    void handleUserGroups(const HttpContextPtr& ctx);
-    void handleUserGroupsSave(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleDeviceList(const HttpContextPtr& ctx);
     void handleDeviceBind(const HttpContextPtr& ctx, const AdminActor& actor);
     // api_proxy.cpp

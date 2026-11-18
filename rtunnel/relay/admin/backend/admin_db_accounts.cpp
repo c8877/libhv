@@ -102,7 +102,8 @@ bool AdminDb::clientAccountGet(long long id, std::string& json_out, std::string&
         "(SELECT COALESCE(MAX(t.last_used_ms),0) FROM client_tokens t WHERE t.account_id=a.id),"
         "(SELECT t.last_used_ip FROM client_tokens t WHERE t.account_id=a.id "
         " ORDER BY t.last_used_ms DESC LIMIT 1),"
-        "(SELECT COUNT(*) FROM client_group_members m WHERE m.username=a.username) "
+        "(SELECT COUNT(*) FROM perm_group_members m WHERE m.subject_type='client' "
+        " AND m.subject_id=CAST(a.id AS TEXT)) "
         "FROM client_accounts a WHERE a.id=?";
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) {
         err = "db error";
@@ -200,16 +201,7 @@ bool AdminDb::clientAccountDelete(long long id, std::string& err) {
     sqlite3_finalize(st);
     if (username.empty()) { exec("ROLLBACK", e); err = "account not found"; return false; }
     bool ok = exec(("DELETE FROM client_tokens WHERE account_id=" + sid).c_str(), e);
-    if (ok && !username.empty()) {
-        // 分组成员按用户名引用，一并清理，避免留下悬空授权
-        sqlite3_stmt* d = nullptr;
-        if (sqlite3_prepare_v2(db_, "DELETE FROM client_group_members WHERE username=?", -1, &d, nullptr) == SQLITE_OK) {
-            sqlite3_bind_text(d, 1, username.c_str(), -1, SQLITE_TRANSIENT);
-            ok = sqlite3_step(d) == SQLITE_DONE;
-            sqlite3_finalize(d);
-        }
-    }
-    // 资源权限组也按 account id 记录，删除账号时一并清理
+    // 权限组按 account id 记录，删除账号时一并清理
     sqlite3_stmt* pg = nullptr;
     if (sqlite3_prepare_v2(db_,
             "DELETE FROM perm_group_members WHERE subject_type='client' AND subject_id=?", -1, &pg,

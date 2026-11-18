@@ -16,14 +16,6 @@
       <el-table-column label="状态" width="90">
         <template #default><el-tag type="success" size="small">在线</el-tag></template>
       </el-table-column>
-      <el-table-column v-if="!isPhone" label="分组" min-width="140">
-        <template #default="{ row }">
-          <template v-if="groups[row.devid] && groups[row.devid].length">
-            <el-tag v-for="g in groups[row.devid]" :key="g" size="small" class="group">{{ g }}</el-tag>
-          </template>
-          <span v-else class="muted">—</span>
-        </template>
-      </el-table-column>
       <el-table-column v-if="!isPhone" prop="remote_addr" label="远端地址" min-width="150" />
       <el-table-column v-if="!isPhone" label="最近活跃" min-width="120">
         <template #default="{ row }">{{ ago(row.last_seen_ms) }} 前活跃</template>
@@ -69,7 +61,6 @@ import { useBreakpoint } from '@/shared/useBreakpoint.js'
 const router = useRouter()
 const { isPhone } = useBreakpoint()
 const list = ref([])
-const groups = ref({})
 const q = ref('')
 const loading = ref(false)
 
@@ -85,7 +76,6 @@ async function refresh(silent) {
   if (!silent) loading.value = true
   try {
     list.value = await Api.get('/api/v1/agents')
-    try { groups.value = await Api.get('/api/v1/groups/device-map') } catch (e) { groups.value = {} }
   } catch (e) {
     if (!silent) ElMessage.error('加载失败：' + e.message)
   } finally {
@@ -168,7 +158,6 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 
 <style scoped>
 .search { width: 240px; }
-.group { margin-right: 4px; }
 :deep(.row-click) { cursor: pointer; }
 @media (max-width: 599px) {
   .search { width: 100%; }

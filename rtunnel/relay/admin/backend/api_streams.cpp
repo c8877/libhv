@@ -14,7 +14,7 @@ bool devAllowed(const std::vector<std::string>& mine, bool scoped, const char* d
     return std::find(mine.begin(), mine.end(), std::string(devid ? devid : "")) != mine.end();
 }
 
-// 绑定了设备分组的 atk Token 只统计组内设备：agent 连接按 devid 过滤，
+// 绑定了权限组的 atk Token 只统计组内设备：agent 连接按 devid 过滤，
 // client 连接只有在与组内 agent 存在会话时才计入。
 bool clientRelevant(RelayConn* c, const std::vector<std::string>& mine, bool scoped) {
     if (!scoped) return true;

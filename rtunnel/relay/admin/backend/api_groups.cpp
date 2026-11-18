@@ -1,4 +1,4 @@
-// 分组 ACL 刷新与设备分组映射 API
+// 分组 ACL 刷新 API
 #include "admin_server.hpp"
 #include "cpputil/json.hpp"
 
@@ -38,14 +38,4 @@ void AdminServer::refreshTokenCache() {
         relay_->setAuthPolicies(policies);
         return std::string();
     });
-}
-
-void AdminServer::handleGroupDeviceMap(const HttpContextPtr& ctx) {
-    std::string out;
-    if (!db_.groupDeviceMap(out)) {
-        ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
-        ctx->send("{\"error\":\"db error\"}");
-        return;
-    }
-    ctx->send(out);
 }

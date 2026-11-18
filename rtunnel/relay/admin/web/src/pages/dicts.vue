@@ -106,9 +106,6 @@
         <el-table-column v-if="!isPhone" label="说明" min-width="200" show-overflow-tooltip>
           <template #default="{ row }"><span class="muted">{{ row.description || '—' }}</span></template>
         </el-table-column>
-        <el-table-column label="引用" width="70">
-          <template #default="{ row }">{{ row.refs || 0 }}</template>
-        </el-table-column>
         <el-table-column label="状态" width="80">
           <template #default="{ row }">
             <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '停用' }}</el-tag>
