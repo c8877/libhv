@@ -5,7 +5,6 @@
 #endif
 
 #include <stdio.h>
-#include <ctype.h>
 
 bool adminValidFileName(const std::string& s) {
     if (s.empty() || s.size() > 128) return false;
@@ -18,22 +17,29 @@ bool adminValidFileName(const std::string& s) {
     return true;
 }
 
-std::string adminUrlDecode(const std::string& in) {
-    std::string out;
-    out.reserve(in.size());
-    for (size_t i = 0; i < in.size(); ++i) {
-        if (in[i] == '%' && i + 2 < in.size() &&
-            isxdigit((unsigned char)in[i + 1]) && isxdigit((unsigned char)in[i + 2])) {
-            auto hex = [](char c) {
-                return (c <= '9') ? (c - '0') : (tolower((unsigned char)c) - 'a' + 10);
-            };
-            out.push_back((char)((hex(in[i + 1]) << 4) | hex(in[i + 2])));
-            i += 2;
-        } else {
-            out.push_back(in[i]);
-        }
+bool adminValidRepoPath(const std::string& s) {
+    if (s.size() > 1024) return false;
+    std::string p = s;
+    if (!p.empty() && p[0] == '/') p.erase(0, 1);
+    if (p.empty()) return true;
+    size_t start = 0;
+    for (;;) {
+        size_t pos = p.find('/', start);
+        std::string seg = (pos == std::string::npos) ? p.substr(start) : p.substr(start, pos - start);
+        if (!adminValidFileName(seg)) return false;
+        if (pos == std::string::npos) break;
+        start = pos + 1;
+        if (start >= p.size()) return false;   // 尾随 /
     }
-    return out;
+    return true;
+}
+
+bool adminRepoPath(const std::string& root, const std::string& rel, std::string& out) {
+    if (!adminValidRepoPath(rel)) return false;
+    std::string p = rel;
+    if (!p.empty() && p[0] == '/') p.erase(0, 1);
+    out = p.empty() ? root : (root + "/" + p);
+    return true;
 }
 
 std::string adminSha256File(const std::string& path) {

@@ -154,6 +154,7 @@
     var CSS = `
 :host{all:initial}
 *{box-sizing:border-box}
+*[hidden]{display:none!important}
 .overlay{position:fixed;inset:0;background:rgba(15,18,24,.62);display:flex;align-items:center;justify-content:center;
   font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
   color:var(--fg);z-index:2147483000;padding:18px}
@@ -205,12 +206,74 @@ tbody tr[data-type=dir]{cursor:pointer}
 .badge.lnk{background:rgba(245,158,11,.18);color:#f59e0b}
 .ops{white-space:nowrap;text-align:right}
 .ops button{padding:2px 7px;font-size:12px;margin-left:4px}
+.ibtn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:7px;
+  background:transparent;color:var(--fg);flex:none;cursor:pointer}
+.ibtn:hover:not(:disabled){background:var(--hover)}
+.ibtn.primary{background:var(--accent);color:#fff}
+.ibtn.primary:hover:not(:disabled){background:var(--accent);filter:brightness(1.07)}
+.ibtn.danger{color:#ef4444}
+.ibtn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.ibtn[hidden]{display:none}
+.bar .spacer{flex:1;min-width:6px}
+.tico{display:inline-flex;flex:none;color:var(--muted)}
+.tico svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.tico.dir{color:#e0a33a}
+.tico.img{color:#a855f7}
+.tico.lnk{color:#f59e0b}
+.name .tw{flex:none;width:16px;height:16px;border:0;background:transparent;padding:0;text-align:center;color:var(--muted);
+  cursor:pointer;user-select:none;font-size:11px;line-height:1;display:inline-flex;align-items:center;justify-content:center}
+.name .tw:hover{background:transparent;color:var(--fg)}
+.name .tw::before{content:'';width:0;height:0;border-left:4px solid currentColor;border-top:3.5px solid transparent;
+  border-bottom:3.5px solid transparent;transition:transform .12s;transform-origin:35% 50%}
+.name .tw.open::before{transform:rotate(90deg)}
+.name .tw.ph{visibility:hidden}
+.name .ind{flex:none;height:1px}
+.name .iming{display:none;margin-left:auto;padding-left:8px;color:var(--muted);font-size:11px;white-space:nowrap}
+tbody td.dim{color:var(--muted);font-size:12px;white-space:nowrap}
+table.tree{table-layout:fixed}
+table.tree td:nth-child(1),table.tree th:nth-child(1){width:32px}
+table.tree td:nth-child(3),table.tree th:nth-child(3){width:96px}
+table.tree td:nth-child(4),table.tree th:nth-child(4){width:136px}
+table.tree td:nth-child(5),table.tree th:nth-child(5){width:52px}
+table.tree .name{min-width:0}
+table.tree .name .nm{flex:1;min-width:0;max-width:none}
+table.tree td{overflow:hidden}
+tr.tree-note td{color:var(--muted);font-size:12px;font-style:italic}
+tr.tree-note .note{padding:2px 0}
 .formrow td{padding:0;background:var(--panel);border-bottom:1px solid var(--line)}
 .iform{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 12px 10px 34px}
 .iform .lb{color:var(--muted);font-size:12px;white-space:nowrap}
-.iform input{flex:1;min-width:180px;max-width:560px;border:1px solid var(--line);background:var(--input);color:var(--fg);
-  border-radius:8px;padding:6px 9px;font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;outline:none}
-.iform input:focus{border-color:var(--accent)}
+.iform input:not([type=checkbox]):not([type=radio]){flex:1;min-width:180px;max-width:560px;border:1px solid var(--line);
+  background:var(--input);color:var(--fg);border-radius:8px;padding:6px 9px;
+  font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;outline:none}
+.iform input:not([type=checkbox]):not([type=radio]):focus{border-color:var(--accent)}
+.iform input[type=checkbox],.iform input[type=radio]{flex:none;width:auto;min-width:0;margin:0;accent-color:var(--accent)}
+.iform .sp{flex:1}
+.iform select{border:1px solid var(--line);background:var(--input);color:var(--fg);border-radius:8px;padding:6px 8px;
+  font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace;max-width:280px}
+.iform .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;width:100%}
+.iform .row .lb{min-width:64px}
+.iform .warn{color:#f59e0b;font-size:12px}
+.iform .hint,.iform .err{font-size:12px}
+.iform .hint{color:var(--muted)}
+.iform .err{color:#ef4444}
+.iform .prog{flex:1;min-width:100px;max-width:300px;height:6px;border-radius:4px;background:var(--line);overflow:hidden}
+.iform .prog i{display:block;height:100%;width:0;background:var(--accent);transition:width .12s}
+.ifile{display:flex;flex-direction:column;align-items:stretch;gap:8px;padding:10px 12px 11px 34px}
+.ifile .top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;width:100%;min-width:0}
+.ifile .kind{flex:none;font-size:11px;line-height:18px;padding:0 6px;border-radius:6px;
+  border:1px solid var(--line);background:var(--input);color:var(--muted)}
+.ifile .nm{font:600 13px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg);word-break:break-all}
+.ifile .top .sp{flex:1}
+.ifile .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:6px 20px;width:100%}
+.ifile .cell{display:flex;gap:8px;font-size:12.5px;min-width:0}
+.ifile .cell.wide{grid-column:1/-1}
+.ifile .cell .k{flex:none;min-width:56px;color:var(--muted)}
+.ifile .cell .v{min-width:0;color:var(--fg);word-break:break-all}
+.ifile .acts{display:flex;gap:8px;flex-wrap:wrap;width:100%}
+.iconf{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 12px 10px 34px}
+.iconf .tx{font-size:13px;color:var(--fg)}
+.iconf .tx b{font-weight:600}
 tr.editing td{background:var(--sel)}
 .rowmenu{position:fixed;pointer-events:auto;z-index:2147483200;min-width:132px;background:var(--panel);border:1px solid var(--line);border-radius:9px;
   box-shadow:0 10px 30px var(--shadow);padding:4px}
@@ -223,6 +286,8 @@ tr.editing td{background:var(--sel)}
 .empty{padding:48px 16px;text-align:center;color:var(--muted)}
 footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px solid var(--line);background:var(--panel);font-size:12px;color:var(--muted);min-height:40px}
 .summary{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dest{margin-left:auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted)}
+.dest:empty{display:none}
 .up{display:none;align-items:center;gap:8px;margin-left:auto;min-width:0}
 .up.show{display:flex}
 .up .nm{max-width:260px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--fg)}
@@ -259,15 +324,24 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
 @media (max-width:720px){
   .overlay{padding:0}
   .win{width:100%;height:100%;border-radius:0;border:0}
-  .bar{gap:6px;padding:7px 8px}
-  .bar button{padding:5px 8px;font-size:12px}
+  .bar{gap:4px;padding:6px 8px}
+  .bar .ibtn{width:30px;height:30px}
   .path{min-width:100px}
-  .search{width:120px}
+  .search{width:110px;flex:1;min-width:90px}
   .meta{display:none}
+  .tools .spacer{display:none}
   th:nth-child(3),td:nth-child(3),th:nth-child(4),td:nth-child(4){display:none}
   .name .nm{max-width:150px}
+  table.tree .name .nm{max-width:none}
+  table.tree td:nth-child(5),table.tree th:nth-child(5){width:44px}
+  table.tree td:nth-child(1),table.tree th:nth-child(1){width:28px}
+  .name .iming{display:inline;padding-left:6px;font-size:10.5px}
+  .name .iming .itm{display:none}
+  tbody td{padding:7px 6px}
   .iform{padding:8px 8px 9px 10px}
   .iform input{min-width:120px}
+  .ifile{padding:9px 8px 10px 10px}
+  .ifile .grid{grid-template-columns:1fr}
 }
 :host{--bg:#f7f8fa;--panel:#ffffff;--input:#ffffff;--fg:#1f2937;--muted:#6b7280;--line:#e5e7eb;--line-soft:#f0f1f4;
   --hover:#f3f4f6;--sel:#eef4ff;--btn:#ffffff;--badge:#eef0f4;--accent:#2563eb;--shadow:rgba(0,0,0,.08)}
@@ -278,6 +352,24 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
   .jv .js{color:#98c379}
   .jv .jn,.jv .jb{color:#d19a66}
 }`;
+
+
+    var ICONS = {
+        mkdir: '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v6M9 14h6"/></svg>',
+        touch: '<svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 12v5M9.5 14.5h5"/></svg>',
+        upload: '<svg viewBox="0 0 24 24"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M20 16v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3"/></svg>',
+        pack: '<svg viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>',
+        del: '<svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 14h10l1-14"/><path d="M10 10v6M14 10v6"/></svg>',
+        refresh: '<svg viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>',
+        pencil: '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13 5 4 4"/></svg>',
+        tree: '<svg viewBox="0 0 24 24"><path d="M5 4v16"/><path d="M5 8h5M10 8v4h5M10 12v6h5"/></svg>',
+        list: '<svg viewBox="0 0 24 24"><path d="M4 6h2M4 12h2M4 18h2"/><path d="M10 6h10M10 12h10M10 18h10"/></svg>',
+        eye: '<svg viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg>',
+        folder: '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
+        file: '<svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
+        image: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="9" r="1.6"/><path d="m4 17 5-5 4 4 2-2 5 4"/></svg>',
+        link: '<svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg>'
+    };
 
     var HTML = `
 <div class="overlay" hidden>
@@ -292,16 +384,20 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
     <div class="bar">
       <div class="crumb" id="crumb"></div>
       <input class="path" id="path" spellcheck="false" autocomplete="off" hidden>
-      <button id="editPath" title="输入路径">编辑</button>
-      <button id="refresh">刷新</button>
-      <label class="chk"><input type="checkbox" id="hidden"> 隐藏文件</label>
+      <button class="ibtn" id="editPath" title="输入路径" aria-label="输入路径">${ICONS.pencil}</button>
+      <button class="ibtn" id="refresh" title="刷新" aria-label="刷新">${ICONS.refresh}</button>
+      <button class="ibtn" id="viewToggle" title="切换为列表视图" aria-label="切换视图">${ICONS.list}</button>
     </div>
     <div class="bar tools">
-      <button id="mkdir">+ 新建文件夹</button>
-      <button id="touch">+ 新建文件</button>
-      <button class="primary" id="upload">上传</button>
-      <button class="danger" id="del">删除</button>
+      <button class="ibtn" id="mkdir" title="新建文件夹" aria-label="新建文件夹">${ICONS.mkdir}</button>
+      <button class="ibtn" id="touch" title="新建文件" aria-label="新建文件">${ICONS.touch}</button>
+      <button class="ibtn primary" id="upload" title="上传到当前目录" aria-label="上传">${ICONS.upload}</button>
+      <button class="ibtn" id="pack" title="打包下载" aria-label="打包下载" hidden>${ICONS.pack}</button>
+      <button class="ibtn danger" id="del" title="删除选中" aria-label="删除选中">${ICONS.del}</button>
+      <span class="spacer"></span>
       <input class="search" id="search" placeholder="搜索当前目录">
+      <button class="ibtn" id="hiddenBtn" title="显示隐藏文件" aria-label="显示隐藏文件">${ICONS.eye}</button>
+      <input type="checkbox" id="hidden" hidden>
       <span class="meta" id="meta"></span>
     </div>
     <div class="tablewrap">
@@ -319,6 +415,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
     </div>
     <footer>
       <div class="summary" id="summary">—</div>
+      <div class="dest" id="dest"></div>
       <div class="up" id="upbox">
         <span class="nm" id="upname"></span>
         <div class="upbar"><i id="upbar"></i></div>
@@ -358,6 +455,13 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
     function Manager(opts) {
         opts = opts || {};
         this.opts = opts;
+        // 默认走设备 WS 协议；传 backend 时改走自定义传输（如文件仓库 HTTP）
+        this.backend = opts.backend || null;
+        this.caps = { mkdir: true, touch: true, rename: true, move: true, pack: false, upload: true,
+                      del: true, edit: true, rowEdit: false, flat: false, tree: false, hidden: true,
+                      dirSize: true, archive: true };
+        this.menuExtras = opts.menuExtras || null;
+        this.onMenuAction = opts.onMenuAction || null;
         this.wsUrl = opts.wsUrl || ((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/fs');
         this.token = opts.token || sessionStorage.getItem('rtfs.token:' + this.wsUrl) || '';
         this.title = opts.title || '文件管理';
@@ -378,13 +482,26 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         this.seq = 1;
         this.cwd = '/';
         this.entries = [];
-        this.sel = new Set();
-        this.dirSizes = new Map();     // 勾选目录后递归统计的结果
+        this.sel = new Set();          // 选中项的绝对路径
+        this.dirSizes = new Map();     // path -> 递归统计结果
         this.dirPending = new Map();
         this.sortKey = 'name';
         this.sortDir = 1;
         this.filter = '';
         this.hidden = false;
+        // 树形为默认视图；文件仓库（flat）强制列表
+        this.viewMode = opts.viewMode === 'list' ? 'list' : 'tree';
+        if (!opts.viewMode) {
+            try {
+                var savedView = global.localStorage.getItem('rtfs.view');
+                if (savedView === 'list' || savedView === 'tree') this.viewMode = savedView;
+            } catch (e) { /* 隐私模式下不可用 */ }
+        }
+        this.expanded = new Set();     // 已展开目录的绝对路径
+        this.kids = new Map();         // path -> 子项
+        this.loadingKids = new Set();
+        this._entryByPath = new Map();
+        this._rowItems = [];
         this.visible = false;
         this.uploading = false;
         this.uploadCancel = false;
@@ -403,6 +520,33 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         this._bind();
     }
 
+    Manager.prototype.isTree = function () {
+        return this.viewMode === 'tree' && !this.caps.flat && (!this.backend || !!this.caps.tree);
+    };
+
+    Manager.prototype.applyViewButton = function () {
+        if (!this.q || !this.q.viewToggle) return;
+        var tree = this.isTree();
+        this.q.viewToggle.innerHTML = tree ? ICONS.list : ICONS.tree;
+        this.q.viewToggle.title = tree ? '切换为列表视图' : '切换为树形视图';
+        this.q.viewToggle.setAttribute('aria-label', this.q.viewToggle.title);
+    };
+
+    Manager.prototype.setView = function (mode) {
+        this.viewMode = mode === 'list' ? 'list' : 'tree';
+        try { global.localStorage.setItem('rtfs.view', this.viewMode); } catch (e) { /* ignore */ }
+        this.applyViewButton();
+        this.render();
+    };
+
+    Manager.prototype.syncHiddenBtn = function () {
+        if (!this.q || !this.q.hiddenBtn) return;
+        this.q.hiddenBtn.classList.toggle('on', !!this.hidden);
+        var t = this.hidden ? '不显示隐藏文件' : '显示隐藏文件';
+        this.q.hiddenBtn.title = t;
+        this.q.hiddenBtn.setAttribute('aria-label', t);
+    };
+
     Manager.prototype._build = function () {
         var host = document.createElement('div');
         if (this.inline) {
@@ -420,9 +564,12 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         var wrap = document.createElement('div');
         wrap.innerHTML = HTML;
         while (wrap.firstChild) this.sh.appendChild(wrap.firstChild);
+        if (this.opts.height) this.sh.querySelector('.win').style.height = this.opts.height;
+        if (this.opts.searchPlaceholder) this.sh.getElementById('search').placeholder = this.opts.searchPlaceholder;
         var q = this.q = {};
         var ids = ['close', 'title', 'rootLine', 'crumb', 'path', 'editPath', 'refresh', 'hidden', 'rowmenu',
-            'mkdir', 'touch', 'upload', 'del', 'search', 'meta', 'all', 'rows', 'empty', 'summary',
+            'mkdir', 'touch', 'upload', 'pack', 'del', 'search', 'meta', 'all', 'rows', 'empty', 'summary', 'dest', 'viewToggle',
+            'hiddenBtn',
             'upbox', 'upname', 'upbar', 'uppct', 'upcancel', 'editor', 'edTitle', 'edHost', 'edTree',
             'edClose', 'edCancel', 'edSave', 'preview', 'pvTitle', 'pvBody', 'pvClose',
             'jsonview', 'jvTitle', 'jvBody', 'jvClose', 'jvSource', 'jvExpand', 'jvCollapse', 'toast', 'file'];
@@ -432,6 +579,8 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         if (this.inline) this.overlay.classList.add('inline');
         this.overlay.style.pointerEvents = 'auto';
         this.renderCrumb();
+        this.applyViewButton();
+        this.syncHiddenBtn();
     };
 
     Manager.prototype._bind = function () {
@@ -453,14 +602,22 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
             var dest = seg.getAttribute('data-path');
             if (dest !== self.cwd) self.load(dest);
         });
-        on('hidden', 'change', function () { self.hidden = self.q.hidden.checked; self.load(self.cwd); });
+        on('hidden', 'change', function () { self.hidden = self.q.hidden.checked; self.syncHiddenBtn(); self.load(self.cwd); });
+        on('hiddenBtn', 'click', function () {
+            self.q.hidden.checked = !self.q.hidden.checked;
+            self.hidden = self.q.hidden.checked;
+            self.syncHiddenBtn();
+            self.load(self.cwd);
+        });
         on('mkdir', 'click', function () { self.mkdir(); });
         on('touch', 'click', function () { self.touch(); });
         on('upload', 'click', function () { self.q.file.click(); });
-        on('file', 'change', function () { self.uploadFiles(self.q.file.files, self.cwd); self.q.file.value = ''; });
+        on('file', 'change', function () { self.uploadFiles(self.q.file.files, self.targetDir()); self.q.file.value = ''; });
+        on('viewToggle', 'click', function () { self.setView(self.isTree() ? 'list' : 'tree'); });
+        on('pack', 'click', function () { self.archiveSelected(); });
         on('del', 'click', function () { self.removeSelected(); });
         on('all', 'change', function () { self.selectAll(self.q.all.checked); });
-        on('search', 'input', function () { self.filter = self.q.search.value.toLowerCase(); self.render(); });
+        on('search', 'input', function () { self.setFilter(self.q.search.value); });
         on('upcancel', 'click', function () { self.uploadCancel = true; });
         on('edClose', 'click', function () { self.closeEditor(); });
         on('edCancel', 'click', function () { self.closeEditor(); });
@@ -491,26 +648,75 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         });
         this.q.rows.addEventListener('click', function (e) {
             var tr = e.target.closest('tr');
-            if (!tr || tr.dataset.name === undefined) return;
+            if (!tr || tr.dataset.path === undefined) return;
+            if (Date.now() - (self._lpAt || 0) < 700) return;
             if (e.target.matches('input[type=checkbox]')) {
-                self.toggleSel(tr.dataset.name, e.target.checked);
+                self.toggleSel(tr.dataset.path, e.target.checked);
                 return;
             }
             if (e.target.closest('button')) return;
-            // 目录名称单击直接进入（不再保留「打开」按钮）
-            if (tr.dataset.type === 'dir' && e.target.closest('.nm')) {
+            if (tr.dataset.type !== 'dir') return;
+            if (self.isTree()) {
+                self.toggleExpand(tr.dataset.path);
+            } else if (e.target.closest('.nm')) {
                 self._navAt = Date.now();
-                self.openEntry(tr.dataset.name, 'dir');
+                self.openEntry(tr.dataset.path, 'dir');
             }
         });
         this.q.rows.addEventListener('dblclick', function (e) {
             if (e.target.closest('button')) return;
             var tr = e.target.closest('tr');
-            if (!tr || tr.dataset.name === undefined) return;
-            // 单击目录名已经触发跳转，避免双击在换目录后误开新行
-            if (tr.dataset.type === 'dir' && Date.now() - (self._navAt || 0) < 500) return;
-            // 文件：文本进编辑器、图片进预览、其他直接下载
-            self.openEntry(tr.dataset.name, tr.dataset.type);
+            if (!tr || tr.dataset.path === undefined) return;
+            if (tr.dataset.type === 'dir') {
+                // 单击已经切换展开状态时，双击仍进入该目录作为根
+                self.openEntry(tr.dataset.path, 'dir');
+                return;
+            }
+            // 双击文件展开详情卡片，打开仍走卡片按钮或右键菜单
+            self.showInfo(tr.dataset.path);
+        });
+        this.q.rows.addEventListener('contextmenu', function (e) {
+            var tr = e.target.closest('tr');
+            if (!tr || tr.dataset.path === undefined) return;
+            e.preventDefault();
+            e.stopPropagation();
+            self.showRowMenu({ x: e.clientX, y: e.clientY }, tr.dataset.path, tr.dataset.type, true);
+        });
+        // 触屏长按 500ms 走同一套菜单；移动超过 10px 视为滚动
+        this.q.rows.addEventListener('touchstart', function (e) {
+            var tr = e.target.closest('tr');
+            if (!tr || tr.dataset.path === undefined || e.touches.length !== 1) return;
+            var t = e.touches[0];
+            var sx = t.clientX, sy = t.clientY, moved = false;
+            var timer = setTimeout(function () {
+                if (moved) return;
+                self._lpAt = Date.now();
+                self.showRowMenu({ x: sx, y: sy }, tr.dataset.path, tr.dataset.type, true);
+                if (navigator.vibrate) { try { navigator.vibrate(10); } catch (err) {} }
+            }, 500);
+            function move(ev) {
+                var p = ev.touches[0];
+                if (Math.abs(p.clientX - sx) > 10 || Math.abs(p.clientY - sy) > 10) {
+                    moved = true;
+                    clearTimeout(timer);
+                }
+            }
+            function end() {
+                clearTimeout(timer);
+                tr.removeEventListener('touchmove', move);
+                tr.removeEventListener('touchend', end);
+                tr.removeEventListener('touchcancel', end);
+            }
+            tr.addEventListener('touchmove', move, { passive: true });
+            tr.addEventListener('touchend', end);
+            tr.addEventListener('touchcancel', end);
+        }, { passive: true });
+        this.q.rows.addEventListener('click', function (e) {
+            var caret = e.target.closest('button[data-act=expand]');
+            if (!caret) return;
+            e.stopPropagation();
+            var ctr = caret.closest('tr');
+            if (ctr) self.toggleExpand(ctr.dataset.path);
         });
         this.q.rows.addEventListener('click', function (e) {
             var mb = e.target.closest('button[data-menu]');
@@ -518,23 +724,24 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
             e.stopPropagation();
             var tr = mb.closest('tr');
             if (!tr) return;
-            self.showRowMenu(mb, tr.dataset.name, tr.dataset.type);
+            // 树形行只有 ⋯，直接给完整菜单
+            self.showRowMenu(mb, tr.dataset.path, tr.dataset.type, self.isTree());
         });
         this.q.rows.addEventListener('click', function (e) {
             var b = e.target.closest('button[data-op]');
             if (!b) return;
             var tr = b.closest('tr');
             if (!tr) return;
-            self.runAction(tr.dataset.name, tr.dataset.type, b.getAttribute('data-op'));
+            self.runAction(tr.dataset.path, tr.dataset.type, b.getAttribute('data-op'));
         });
         this.q.rowmenu.addEventListener('click', function (e) {
             e.stopPropagation();
             var b = e.target.closest('button[data-op]');
             if (!b) return;
             var m = self.q.rowmenu;
-            var name = m.dataset.name, type = m.dataset.type, op = b.getAttribute('data-op');
+            var path = m.dataset.path, type = m.dataset.type, op = b.getAttribute('data-op');
             self.closeRowMenu();
-            self.runAction(name, type, op);
+            self.runAction(path, type, op);
         });
         this._docClick = function (e) {
             if (!self.q.rowmenu || self.q.rowmenu.hidden) return;
@@ -567,7 +774,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
             if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
                 var dest = self.cwd;
                 var tr = e.target && e.target.closest ? e.target.closest('tr') : null;
-                if (tr && tr.dataset && tr.dataset.type === 'dir') dest = join(self.cwd, tr.dataset.name);
+                if (tr && tr.dataset && tr.dataset.type === 'dir') dest = tr.dataset.path;
                 self.uploadFiles(e.dataTransfer.files, dest);
             }
         });
@@ -577,17 +784,20 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
             var t = path && path[0];
             if (t && (t.tagName === 'INPUT' || (t.closest && t.closest('.cm-editor')))) return;
             if (e.key === 'Escape') {
+                // Hex/尾部查看器盖在文件管理器上，Esc 只关查看器，不关管理器
+                if (global.RtunnelFileView && global.RtunnelFileView.isOpen()) return;
                 if (!self.q.rowmenu.hidden) self.closeRowMenu();
                 else if (!self.q.jsonview.hidden) self.closeJsonView();
                 else if (!self.q.editor.hidden) self.closeEditor();
                 else if (!self.q.preview.hidden) self.closePreview();
-                else self.close();
+                else if (self._form && self._infoPath) self.closeInlineForm();
+                // 内嵌在页面里时 Esc 不应该收起整个文件管理器（页面有自己的开关）
+                else if (!self.inline) self.close();
                 e.preventDefault();
             }
             else if (e.key === 'Delete') { self.removeSelected(); e.preventDefault(); }
             else if (e.key === 'F2' && self.sel.size === 1) {
-                var n = Array.from(self.sel)[0];
-                self.rename(n, join(self.cwd, n)); e.preventDefault();
+                self.rename(Array.from(self.sel)[0]); e.preventDefault();
             }
             else if (e.key === 'Backspace' && self.cwd !== '/') { self.load(parentOf(self.cwd)); e.preventDefault(); }
         };
@@ -598,6 +808,10 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
     function parentOf(p) {
         var i = p.lastIndexOf('/');
         return i <= 0 ? '/' : p.slice(0, i);
+    }
+    function baseName(p) {
+        var i = p.lastIndexOf('/');
+        return i < 0 ? p : p.slice(i + 1);
     }
     function saveBlob(blob, name) {
         var a = document.createElement('a');
@@ -646,6 +860,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         this.closePreview();
         if (this.reconnectTimer) { clearTimeout(this.reconnectTimer); this.reconnectTimer = null; }
         this._closeWs();
+        if (this.backend && this.backend.close) { try { this.backend.close(); } catch (e) {} }
         if (this.onClose) this.onClose();
     };
 
@@ -675,6 +890,17 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
 
     Manager.prototype.connect = function () {
         var self = this;
+        if (this.backend) {
+            if (this.connected) return Promise.resolve(this.welcome);
+            this.connSeq++;
+            return this.backend.connect().then(function (w) {
+                self.connected = true;
+                self.welcome = w || {};
+                self.applyCaps(self.welcome.caps);
+                self.applySpace(self.welcome);
+                return self.welcome;
+            });
+        }
         if (this.ws && this.connected) return Promise.resolve(this.welcome);
         this._closeWs();
         var seq = this.connSeq;
@@ -751,14 +977,143 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
     Manager.prototype.applySpace = function (w) {
         var ro = this.readonly || !w.rw;
         this.rw = !!w.rw;
-        this.q.rootLine.textContent = '根目录: ' + (w.root || '/') + ' · 可用 ' + fmtSize(w.free_kb * 1024) +
-            ' / ' + fmtSize(w.total_kb * 1024) + (ro ? ' · 只读' : '');
+        if (w.label) {
+            this.q.rootLine.textContent = w.label + (ro ? ' · 只读' : '');
+        }
+        else {
+            this.q.rootLine.textContent = '根目录: ' + (w.root || '/') + ' · 可用 ' + fmtSize(w.free_kb * 1024) +
+                ' / ' + fmtSize(w.total_kb * 1024) + (ro ? ' · 只读' : '');
+        }
         this.q.mkdir.disabled = ro;
         this.q.touch.disabled = ro;
         this.q.upload.disabled = ro;
         this.q.del.disabled = ro;
         this.space = { root: w.root || '/', free_kb: w.free_kb, total_kb: w.total_kb };
         if (this.onSpace) this.onSpace(this.space);
+    };
+
+    // 后端能力：仓库没有目录/重命名/移动，隐藏对应入口
+    Manager.prototype.applyCaps = function (caps) {
+        if (!caps) return;
+        var self = this;
+        for (var k in caps) if (Object.prototype.hasOwnProperty.call(caps, k)) this.caps[k] = caps[k];
+        var c = this.caps, q = this.q;
+        q.mkdir.hidden = !c.mkdir;
+        q.touch.hidden = !c.touch;
+        if (c.flat) {
+            // 仓库只有一层：固定列表视图，去掉路径栏，刷新并到工具栏
+            this.viewMode = 'list';
+            q.viewToggle.hidden = true;
+            var bar1 = q.crumb.parentNode;
+            var tools = q.mkdir.parentNode;
+            if (q.refresh.parentNode !== tools) tools.insertBefore(q.refresh, q.mkdir);
+            if (q.editPath.parentNode === bar1) bar1.hidden = true;
+        }
+        q.pack.hidden = !c.pack;
+        q.upload.hidden = !c.upload;
+        q.del.hidden = !c.del;
+        q.hiddenBtn.hidden = c.hidden === false;
+        if (this.backend && !c.tree) {
+            // 后端只有一层：不提供视图切换
+            q.viewToggle.hidden = true;
+        } else {
+            q.viewToggle.hidden = false;
+            this.applyViewButton();
+        }
+    };
+
+    // ------------------------------------------------------------ 后端封装
+
+    Manager.prototype.listDir = function (path) {
+        if (this.backend) return this.backend.list(path, this.hidden);
+        return this.request({ op: 'list', id: this.id(), path: path, hidden: this.hidden, limit: 500 }, 'list');
+    };
+
+    Manager.prototype.statEntry = function (path) {
+        if (this.backend) {
+            return this.backend.stat(path).then(function (e) { return { entry: e }; });
+        }
+        return this.request({ op: 'stat', id: this.id(), path: path }, 'stat');
+    };
+
+    Manager.prototype.dirSize = function (path) {
+        if (this.backend) return this.backend.size(path);
+        return this.request({ op: 'size', id: this.id(), path: path }, 'size');
+    };
+
+    Manager.prototype.mkPath = function (path) {
+        if (this.backend) return this.backend.mkdir(path);
+        return this.request({ op: 'mkdir', id: this.id(), path: path }, 'mkdir');
+    };
+
+    Manager.prototype.touchPath = function (path) {
+        if (this.backend) return this.backend.touch(path);
+        return this.request({ op: 'touch', id: this.id(), path: path }, 'touch');
+    };
+
+    Manager.prototype.renamePath = function (path, name) {
+        if (this.backend) return this.backend.rename(path, name);
+        return this.request({ op: 'rename', id: this.id(), path: path, name: name }, 'rename');
+    };
+
+    Manager.prototype.movePath = function (path, dir) {
+        if (this.backend) return this.backend.move(path, dir);
+        return this.request({ op: 'move', id: this.id(), path: path, dir: dir }, 'move');
+    };
+
+    Manager.prototype.deletePath = function (path, recursive) {
+        if (this.backend) return this.backend.remove(path, recursive);
+        return this.request({ op: 'delete', id: this.id(), path: path, recursive: !!recursive }, 'delete');
+    };
+
+    Manager.prototype.putText = function (path, text) {
+        if (this.backend && this.backend.writeText) return this.backend.writeText(path, text);
+        return this.uploadBlob(new Blob([text], { type: 'text/plain' }), path.split('/').pop(), parentOf(path));
+    };
+
+    // 列表内展开的确认条（删除）
+    Manager.prototype.confirmRow = function (anchor, opts) {
+        var self = this;
+        this.closeInlineForm();
+        var formTr = document.createElement('tr');
+        formTr.className = 'formrow';
+        var td = document.createElement('td');
+        td.colSpan = 5;
+        var box = document.createElement('div');
+        box.className = 'iconf';
+        var tx = document.createElement('span');
+        tx.className = 'tx';
+        tx.appendChild(document.createTextNode(opts.text || ''));
+        if (opts.name) {
+            var b = document.createElement('b');
+            b.textContent = opts.name;
+            tx.appendChild(b);
+        }
+        if (opts.tail) tx.appendChild(document.createTextNode(opts.tail));
+        var ok = document.createElement('button');
+        ok.className = opts.danger === false ? 'primary' : 'danger';
+        ok.textContent = opts.ok || '删除';
+        var no = document.createElement('button');
+        no.textContent = '取消';
+        box.appendChild(tx); box.appendChild(ok); box.appendChild(no);
+        td.appendChild(box);
+        formTr.appendChild(td);
+        var row = anchor && anchor.parentNode ? anchor : null;
+        if (row) {
+            row.parentNode.insertBefore(formTr, row.nextSibling);
+            row.classList.add('editing');
+        }
+        else {
+            this.q.rows.insertBefore(formTr, this.q.rows.firstChild);
+        }
+        this._form = { tr: row, row: formTr };
+        var close = function () { self.closeInlineForm(); };
+        no.addEventListener('click', close);
+        ok.addEventListener('click', function () {
+            ok.disabled = true; no.disabled = true;
+            opts.onOk(close);
+        });
+        setTimeout(function () { ok.focus(); }, 0);
     };
 
     // ------------------------------------------------------------ WS 收发
@@ -950,41 +1305,140 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
 
     Manager.prototype.load = function (path) {
         var self = this;
-        var id = this.id();
-        return this.request({ op: 'list', id: id, path: path, hidden: this.hidden, limit: 500 }, 'list')
+        return this.listDir(path)
             .then(function (r) {
-                self.cwd = r.path || path;
+                var next = r.path || path;
+                var sameRoot = next === self.cwd;
+                self.cwd = next;
                 self.entries = r.entries || [];
                 self.sel.clear();
                 self.dirSizes.clear();
                 self.dirPending.clear();
+                if (!sameRoot) {
+                    // 换根后旧展开路径不再有效，搜索结果也属于旧根
+                    self.expanded.clear();
+                    self.kids.clear();
+                    self.loadingKids.clear();
+                    self.filter = '';
+                    self._searchHits = null;
+                    self._searching = false;
+                    self._searchSeq = (self._searchSeq || 0) + 1;
+                    self.q.search.value = '';
+                }
                 self.q.path.value = self.cwd;
                 self.renderCrumb();
                 self.applySpace(r);
                 self.render();
+                if (self.opts.onList) self.opts.onList(r);
+                if (sameRoot && self.isTree() && self.expanded.size) self.reloadExpanded();
+                // 刷新后搜索条件仍有效：重新拉一次结果
+                if (sameRoot && self.filter && self.isTree() && self.backend && self.backend.search) {
+                    self.setFilter(self.filter);
+                }
             })
             .catch(function (e) { if (self.visible) self.toast(e.message, true); });
     };
 
-    Manager.prototype.render = function () {
+    // ------------------------------------------------------------ 树形视图
+
+    Manager.prototype.fetchKids = function (path, quiet) {
         var self = this;
-        this.closeInlineForm();
-        var rows = this.q.rows;
-        while (rows.firstChild) rows.removeChild(rows.firstChild);
-        // 操作列可用宽度 → 最多平铺几个按钮，剩下的进 ⋯
-        var wrapW = rows.parentElement ? rows.parentElement.clientWidth : 0;
-        var avail = wrapW - 480;
-        var cum = [0, 44, 90, 138, 186, 238, 290];
-        this._opSlots = 0;
-        for (var ci = 0; ci < cum.length; ci++) if (avail >= cum[ci]) this._opSlots = ci;
-        var list = this.entries.slice();
-        var f = this.filter;
-        if (f) list = list.filter(function (e) { return e.name.toLowerCase().indexOf(f) >= 0; });
+        if (this.loadingKids.has(path)) return Promise.resolve();
+        this.loadingKids.add(path);
+        if (!quiet) this.render();
+        return this.listDir(path).then(function (r) {
+            self.loadingKids.delete(path);
+            self.kids.set(path, r.entries || []);
+            if (!quiet) self.render();
+        }).catch(function (e) {
+            self.loadingKids.delete(path);
+            self.expanded.delete(path);
+            self.kids.delete(path);
+            if (!quiet) {
+                self.toast('打开目录失败：' + (e.message || e), true);
+                self.render();
+            }
+            throw e;
+        });
+    };
+
+    Manager.prototype.toggleExpand = function (path) {
+        if (this.expanded.has(path)) {
+            this.expanded.delete(path);
+            this.render();
+            return;
+        }
+        this.expanded.add(path);
+        if (this.kids.has(path) || this.loadingKids.has(path)) { this.render(); return; }
+        this.fetchKids(path, false);
+    };
+
+    // 刷新后重新读取所有已展开目录；父目录先于子目录
+    Manager.prototype.reloadExpanded = function () {
+        var self = this;
+        var paths = Array.from(this.expanded).sort(function (a, b) {
+            return a.split('/').length - b.split('/').length || a.localeCompare(b);
+        });
+        var chain = Promise.resolve();
+        paths.forEach(function (p) {
+            chain = chain.then(function () { return self.fetchKids(p, true); }).catch(function () {});
+        });
+        chain.then(function () { if (self.visible) self.render(); });
+    };
+
+    Manager.prototype.findEntry = function (path) {
+        var p = this.cwd;
+        if (path === p) return null;
+        var prefix = p === '/' ? '/' : p + '/';
+        if (path.indexOf(prefix) !== 0) return null;
+        var parts = path.slice(prefix.length).split('/');
+        var entries = this.entries;
+        var e = null;
+        for (var i = 0; i < parts.length; i++) {
+            e = null;
+            for (var j = 0; j < entries.length; j++) {
+                if (entries[j].name === parts[i]) { e = entries[j]; break; }
+            }
+            if (!e) return null;
+            if (i < parts.length - 1) {
+                p = join(p, parts[i]);
+                entries = this.kids.get(p) || [];
+            }
+        }
+        return e;
+    };
+
+    Manager.prototype.entryOf = function (path) {
+        return this._entryByPath.get(path) || this.findEntry(path);
+    };
+
+    Manager.prototype.targetDir = function () {
+        if (this.sel.size === 1) {
+            var p = Array.from(this.sel)[0];
+            var e = this.entryOf(p);
+            if (e && e.type === 'dir') return p;
+            if (e) return parentOf(p);
+        }
+        return this.cwd;
+    };
+
+    Manager.prototype.sizeText = function (e, path) {
+        if (e.type === 'dir') {
+            var ds = this.dirSizes.get(path);
+            if (ds) return fmtSize(ds.bytes) + (ds.truncated ? '+' : '');
+            if (this.dirPending.get(path)) return '统计中…';
+            return '—';
+        }
+        return fmtSize(e.size);
+    };
+
+    Manager.prototype.sortEntries = function (list, parent) {
+        var self = this;
         list.sort(function (a, b) {
             var k = self.sortKey;
             if (k === 'size') {
                 // 目录大小来自勾选后的递归统计；未统计的目录排在最后
-                var ax = self.sizeForSort(a), bx = self.sizeForSort(b);
+                var ax = self.sizeForSort(a, join(parent, a.name)), bx = self.sizeForSort(b, join(parent, b.name));
                 if (ax === null && bx === null) return String(a.name).localeCompare(String(b.name), 'zh-CN');
                 if (ax === null) return 1;
                 if (bx === null) return -1;
@@ -997,54 +1451,170 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
             if (k === 'name') return self.sortDir * String(x).localeCompare(String(y), 'zh-CN');
             return self.sortDir * ((x || 0) - (y || 0));
         });
-        var totalSize = 0;
-        for (var i = 0; i < list.length; i++) {
-            var e = list[i];
-            if (e.type === 'file') totalSize += e.size || 0;
-            var tr = document.createElement('tr');
-            tr.dataset.name = e.name;
-            tr.dataset.type = e.type;
-            if (this.sel.has(e.name)) tr.className = 'sel';
+        return list;
+    };
 
-            var td0 = document.createElement('td');
-            var cb = document.createElement('input');
-            cb.type = 'checkbox';
-            cb.checked = this.sel.has(e.name);
-            td0.appendChild(cb);
-            tr.appendChild(td0);
+    // 搜索：后端支持递归搜索时（文件仓库）走服务端，否则只过滤已加载节点
+    Manager.prototype.setFilter = function (value) {
+        var self = this;
+        this.filter = String(value || '').trim().toLowerCase();
+        this._searchSeq = (this._searchSeq || 0) + 1;
+        var seq = this._searchSeq;
+        var remote = this.isTree() && this.backend && this.backend.search && this.filter;
+        this._searchHits = null;
+        this._searching = !!remote;
+        if (!remote) { this.render(); return; }
+        this.render();
+        this.backend.search(this.cwd, this.filter).then(function (list) {
+            if (seq !== self._searchSeq) return;
+            self._searching = false;
+            self._searchHits = list || [];
+            self.render();
+        }).catch(function (e) {
+            if (seq !== self._searchSeq) return;
+            self._searching = false;
+            self._searchHits = [];
+            self.toast('搜索失败：' + (e.message || e), true);
+            self.render();
+        });
+    };
 
-            var td1 = document.createElement('td');
-            var nm = document.createElement('div');
-            nm.className = 'name';
-            var badge = document.createElement('span');
-            badge.className = 'badge ' + (e.type === 'dir' ? 'dir' : e.type === 'link' ? 'lnk' : isImage(e.name) ? 'img' : '');
-            badge.textContent = e.type === 'dir' ? 'DIR' : e.type === 'link' ? 'LNK' : isImage(e.name) ? 'IMG' : 'FILE';
-            var span = document.createElement('span');
-            span.className = 'nm';
-            span.textContent = e.name + (e.is_link && e.target ? ' → ' + e.target : '');
-            span.title = e.name;
-            nm.appendChild(badge); nm.appendChild(span);
-            td1.appendChild(nm);
-            tr.appendChild(td1);
-
-            var td2 = document.createElement('td');
-            if (e.type === 'dir') {
-                var ds = this.dirSizes.get(e.name);
-                if (ds) {
-                    td2.textContent = fmtSize(ds.bytes) + (ds.truncated ? '+' : '');
-                    td2.title = '包含子目录';
-                }
-                else if (this.dirPending.get(e.name)) td2.textContent = '统计中…';
-                else td2.textContent = '-';
+    // 拍平当前树：搜索时只保留命中的节点及其祖先，并自动展开祖先
+    Manager.prototype.treeNodes = function () {
+        var self = this, f = this.filter;
+        if (f && this._searchHits) {
+            // 服务端递归搜索结果：路径已完整，直接平铺展示
+            return this._searchHits.map(function (e) {
+                var p = '/' + String(e.name || '').replace(/^\/+/, '');
+                return { e: e, parent: '/', path: p, depth: 0, flat: true };
+            });
+        }
+        var out = [];
+        function matchBelow(entries, parent) {
+            for (var i = 0; i < entries.length; i++) {
+                var e = entries[i], p = join(parent, e.name);
+                if (!f || e.name.toLowerCase().indexOf(f) >= 0) return true;
+                if (e.type === 'dir' && self.kids.has(p) && matchBelow(self.kids.get(p), p)) return true;
             }
-            else td2.textContent = fmtSize(e.size);
-            tr.appendChild(td2);
-            var td3 = document.createElement('td');
-            td3.textContent = fmtTime(e.mtime);
-            tr.appendChild(td3);
+            return false;
+        }
+        function walk(entries, parent, depth) {
+            var list = self.sortEntries(entries.slice(), parent);
+            for (var i = 0; i < list.length; i++) {
+                var e = list[i], p = join(parent, e.name);
+                var selfHit = !f || e.name.toLowerCase().indexOf(f) >= 0;
+                var kids = e.type === 'dir' ? self.kids.get(p) : null;
+                var below = f && kids ? matchBelow(kids, p) : false;
+                if (f && !selfHit && !below) continue;
+                out.push({ e: e, parent: parent, path: p, depth: depth });
+                if (e.type !== 'dir') continue;
+                if (!(self.expanded.has(p) || (f && below))) continue;
+                if (self.loadingKids.has(p)) { out.push({ loading: true, parent: p, path: p, depth: depth + 1 }); continue; }
+                if (!kids) continue;
+                if (!kids.length) { out.push({ emptyDir: true, parent: p, path: p, depth: depth + 1 }); continue; }
+                walk(kids, p, depth + 1);
+            }
+        }
+        walk(this.entries, this.cwd, 0);
+        return out;
+    };
 
-            var td4 = document.createElement('td');
-            td4.className = 'ops';
+    Manager.prototype.noteRow = function (text, depth) {
+        var tr = document.createElement('tr');
+        tr.className = 'tree-note';
+        var td = document.createElement('td');
+        td.colSpan = 5;
+        var d = document.createElement('div');
+        d.className = 'note';
+        d.style.paddingLeft = (14 + depth * 16) + 'px';
+        d.textContent = text;
+        td.appendChild(d);
+        tr.appendChild(td);
+        return tr;
+    };
+
+    Manager.prototype.buildRow = function (e, parent, depth, tree, flat) {
+        var path = join(parent, e.name);
+        var tr = document.createElement('tr');
+        tr.dataset.path = path;
+        tr.dataset.name = e.name;
+        tr.dataset.type = e.type;
+        tr.dataset.dir = parent;
+        if (this.sel.has(path)) tr.className = 'sel';
+
+        var td0 = document.createElement('td');
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = this.sel.has(path);
+        td0.appendChild(cb);
+        tr.appendChild(td0);
+
+        var td1 = document.createElement('td');
+        var nm = document.createElement('div');
+        nm.className = 'name';
+        if (tree && depth > 0) {
+            var ind = document.createElement('span');
+            ind.className = 'ind';
+            ind.style.width = (depth * 16) + 'px';
+            nm.appendChild(ind);
+        }
+        if (e.type === 'dir') {
+            var tw = document.createElement('button');
+            tw.type = 'button';
+            var live = tree && !flat;
+            tw.className = 'tw' + (live && this.expanded.has(path) ? ' open' : '') + (live ? '' : ' ph');
+            tw.setAttribute('data-act', 'expand');
+            tw.title = live ? (this.expanded.has(path) ? '收起' : '展开') : '';
+            if (!live) tw.tabIndex = -1;
+            nm.appendChild(tw);
+        } else {
+            // 文件也占一个箭头槽，列表视图下图标与目录对齐
+            var tw2 = document.createElement('span');
+            tw2.className = 'tw ph';
+            nm.appendChild(tw2);
+        }
+        var ic = document.createElement('span');
+        ic.className = 'tico ' + (e.type === 'dir' ? 'dir' : e.type === 'link' ? 'lnk' : isImage(e.name) ? 'img' : '');
+        ic.innerHTML = e.type === 'dir' ? ICONS.folder : e.type === 'link' ? ICONS.link
+            : isImage(e.name) ? ICONS.image : ICONS.file;
+        nm.appendChild(ic);
+        var span = document.createElement('span');
+        span.className = 'nm';
+        span.textContent = e.name + (e.is_link && e.target ? ' → ' + e.target : '');
+        span.title = e.name;
+        nm.appendChild(span);
+        var im = document.createElement('span');
+        im.className = 'iming';
+        var isz = document.createElement('span');
+        isz.textContent = this.sizeText(e, path);
+        var itm = document.createElement('span');
+        itm.className = 'itm';
+        itm.textContent = ' · ' + fmtTime(e.mtime);
+        im.appendChild(isz);
+        im.appendChild(itm);
+        nm.appendChild(im);
+        td1.appendChild(nm);
+        tr.appendChild(td1);
+
+        var td2 = document.createElement('td');
+        td2.className = 'dim';
+        td2.textContent = this.sizeText(e, path);
+        tr.appendChild(td2);
+
+        var td3 = document.createElement('td');
+        td3.className = 'dim';
+        td3.textContent = fmtTime(e.mtime);
+        tr.appendChild(td3);
+
+        var td4 = document.createElement('td');
+        td4.className = 'ops';
+        if (tree || flat) {
+            var mb = document.createElement('button');
+            mb.setAttribute('data-menu', '1');
+            mb.textContent = '⋯';
+            mb.title = '更多操作';
+            td4.appendChild(mb);
+        } else {
             var acts = this.rowActions(e.type, e.name);
             var slots = Math.min(this._opSlots, acts.length);
             for (var ai = 0; ai < slots; ai++) {
@@ -1055,31 +1625,137 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
                 td4.appendChild(ab);
             }
             if (slots < acts.length) {
-                var mb = document.createElement('button');
-                mb.setAttribute('data-menu', '1');
-                mb.textContent = '⋯';
-                mb.title = '更多操作';
-                td4.appendChild(mb);
+                var mb2 = document.createElement('button');
+                mb2.setAttribute('data-menu', '1');
+                mb2.textContent = '⋯';
+                mb2.title = '更多操作';
+                td4.appendChild(mb2);
             }
-            tr.appendChild(td4);
-            rows.appendChild(tr);
         }
-        this.q.empty.hidden = list.length > 0;
-        var selCount = this.sel.size, selSize = 0, sizePending = false;
-        for (var s of this.sel) {
-            var en = this.entries.find(function (x) { return x.name === s; });
-            if (!en) continue;
+        tr.appendChild(td4);
+        return tr;
+    };
+
+    Manager.prototype.render = function () {
+        var self = this;
+        // 排序/搜索/勾选/窗口变化都会重建行，详情卡片跟着行一起重建
+        var keepInfo = this._infoPath;
+        this.closeInlineForm();
+        var rows = this.q.rows;
+        while (rows.firstChild) rows.removeChild(rows.firstChild);
+        this._entryByPath = new Map();
+        this._rowItems = [];
+        var tree = this.isTree();
+        var table = this.sh.querySelector('table');
+        if (table) table.classList.toggle('tree', tree);
+        // 操作列可用宽度 → 最多平铺几个按钮，剩下的进 ⋯
+        var wrapW = rows.parentElement ? rows.parentElement.clientWidth : 0;
+        var avail = wrapW >= 560 ? wrapW - 480 : 0;
+        var cum = [0, 44, 90, 138, 186, 238, 290];
+        this._opSlots = 0;
+        if (!tree) {
+            for (var ci = 0; ci < cum.length; ci++) if (avail >= cum[ci]) this._opSlots = ci;
+            // 窄屏隐藏了大小/时间列，仍有空间放一个主操作
+            if (wrapW > 0 && wrapW < 560) this._opSlots = 1;
+        }
+        var count = 0;
+        if (tree) {
+            var nodes = this.treeNodes();
+            for (var i = 0; i < nodes.length; i++) {
+                var n = nodes[i];
+                if (n.loading) { rows.appendChild(this.noteRow('加载中…', n.depth)); continue; }
+                if (n.emptyDir) { rows.appendChild(this.noteRow('空目录', n.depth)); continue; }
+                this._entryByPath.set(n.path, n.e);
+                this._rowItems.push(n.path);
+                count++;
+                rows.appendChild(this.buildRow(n.e, n.parent, n.depth, true, !!n.flat));
+            }
+        } else {
+            var list = this.entries.slice();
+            var f = this.filter;
+            if (f) list = list.filter(function (e) { return e.name.toLowerCase().indexOf(f) >= 0; });
+            this.sortEntries(list, this.cwd);
+            count = list.length;
+            for (var j = 0; j < list.length; j++) {
+                var e = list[j], p = join(this.cwd, e.name);
+                this._entryByPath.set(p, e);
+                this._rowItems.push(p);
+                rows.appendChild(this.buildRow(e, this.cwd, 0, false));
+            }
+        }
+        this.q.empty.hidden = count > 0 || this._searching;
+        this.q.empty.textContent = this._searching ? '搜索中…' : this.filter ? '没有匹配项' : '空目录';
+
+        // 树形下汇总所有可见文件；列表下等同于当前目录
+        var totalSize = 0;
+        for (var ti = 0; ti < this._rowItems.length; ti++) {
+            var te = this._entryByPath.get(this._rowItems[ti]);
+            if (te && te.type === 'file') totalSize += te.size || 0;
+        }
+        var selCount = this.sel.size, selSize = 0, sizePending = false, selHasDir = false;
+        this.sel.forEach(function (p) {
+            var en = self._entryByPath.get(p) || self.findEntry(p);
+            if (!en) return;
             if (en.type === 'file') selSize += en.size || 0;
             else if (en.type === 'dir') {
-                var dsz = this.dirSizes.get(s);
+                selHasDir = true;
+                var dsz = self.dirSizes.get(p);
                 if (dsz) selSize += dsz.bytes;
-                else if (this.dirPending.get(s)) sizePending = true;
+                else if (self.dirPending.get(p)) sizePending = true;
+            }
+        });
+        // 目录不参与体积统计，只显示选中数量，避免出现「0 B」
+        this.q.summary.textContent = count + ' 项 · ' + fmtSize(totalSize) +
+            (selCount ? ' · 已选 ' + selCount + ' 项' +
+                (selHasDir ? '' : ' (' + fmtSize(selSize) + (sizePending ? '，统计中…' : '') + ')') : '');
+        var allOn = this._rowItems.length > 0;
+        for (var ri = 0; ri < this._rowItems.length; ri++) {
+            if (!this.sel.has(this._rowItems[ri])) { allOn = false; break; }
+        }
+        this.q.all.checked = allOn;
+        this.q.del.disabled = this.readonly || !this.rw || !this.caps.del || !selCount;
+        this.q.pack.disabled = !selCount;
+        this.q.meta.textContent = this._searchHits
+            ? '搜索 ' + count + ' 项'
+            : (this.filter ? '筛选 ' + count + ' / ' + this.entries.length : '共 ' + this.entries.length + ' 项');
+        var dest = (!this.readonly && this.rw && !this.caps.flat) ? this.targetDir() : '';
+        this.q.dest.textContent = dest ? '上传到 ' + dest : '';
+        this.q.upload.title = '上传到 ' + (dest || this.cwd);
+        this.q.upload.setAttribute('aria-label', this.q.upload.title);
+        if (keepInfo) {
+            var ke = this._entryByPath.get(keepInfo);
+            if (ke) this.showInfo(keepInfo);
+        }
+    };
+
+    // 右键 / ⋯ 的完整菜单（顺序按使用频率，与行内按钮不同）
+    Manager.prototype.rowMenuActions = function (type, name) {
+        var items = [];
+        if (this.menuExtras) {
+            var extra = this.menuExtras(type, name) || [];
+            if (extra.length) {
+                items = items.concat(extra);
+                items.push({ sep: true });
             }
         }
-        this.q.summary.textContent = list.length + ' 项 · ' + fmtSize(totalSize) +
-            (selCount ? ' · 已选 ' + selCount + ' 项 (' + fmtSize(selSize) + (sizePending ? '，统计中…' : '') + ')' : '');
-        this.q.all.checked = list.length > 0 && this.sel.size === this.entries.length;
-        this.q.meta.textContent = (this.filter ? '筛选 ' + list.length + ' / ' + this.entries.length : '共 ' + this.entries.length + ' 项');
+        items.push({ op: 'open', label: '打开' });
+        if (type === 'file') {
+            items.push({ op: 'edit', label: '编辑（文本）' });
+            items.push({ op: 'hex', label: '查看 Hex' });
+            items.push({ op: 'tail', label: '查看尾部' });
+        }
+        items.push({ op: 'info', label: '属性' });
+        items.push({ sep: true });
+        items.push({ op: 'dl', label: type === 'dir' ? '打包下载' : '下载' });
+        if (!this.readonly && this.rw) {
+            if (this.caps.rename) items.push({ op: 'rename', label: '重命名' });
+            if (this.caps.move) items.push({ op: 'move', label: '移动' });
+            if (this.caps.del) {
+                items.push({ sep: true });
+                items.push({ op: 'del', label: '删除', danger: true });
+            }
+        }
+        return items;
     };
 
     Manager.prototype.rowActions = function (type, name) {
@@ -1087,125 +1763,242 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         var w = !this.readonly && this.rw;
         if (w && type === 'file' && isImage(name)) items.push({ op: 'pv', label: '预览' });
         if (w) {
-            items.push({ op: 'rename', label: '重命名' });
-            items.push({ op: 'move', label: '移动' });
-            items.push({ op: 'del', label: '删除', danger: true });
+            if (this.caps.rename) items.push({ op: 'rename', label: '重命名' });
+            if (this.caps.move) items.push({ op: 'move', label: '移动' });
+            if (this.caps.del) items.push({ op: 'del', label: '删除', danger: true });
         }
+        if (this.caps.rowEdit && type === 'file') items.push({ op: 'edit', label: '编辑' });
         return items;
     };
 
-    Manager.prototype.runAction = function (name, type, op) {
-        var path = join(this.cwd, name);
-        if (op === 'dl') {
+    Manager.prototype.runAction = function (path, type, op) {
+        var name = baseName(path);
+        if (this.onMenuAction && this.onMenuAction(op, name, type, path)) return;
+        if (op === 'open') this.openEntry(path, type);
+        else if (op === 'edit') this.openEditor(path);
+        else if (op === 'hex') this.openHexView(name, path);
+        else if (op === 'tail') this.openTailView(name, path);
+        else if (op === 'info') this.showInfo(path);
+        else if (op === 'dl') {
             if (type === 'dir') this.downloadArchive(path);
             else this.downloadToFile(path);
         }
         else if (op === 'pv') this.openPreview(path);
-        else if (op === 'rename') this.rename(name, path);
-        else if (op === 'move') this.move(name, path);
-        else if (op === 'del') this.remove(name, type === 'dir', path);
+        else if (op === 'rename') this.rename(path);
+        else if (op === 'move') this.move(path);
+        else if (op === 'del') this.remove(path, type === 'dir');
     };
 
     Manager.prototype.closeRowMenu = function () {
         if (!this.q.rowmenu) return;
         this.q.rowmenu.hidden = true;
-        this.q.rowmenu.dataset.name = '';
+        this.q.rowmenu.dataset.path = '';
         this.q.rowmenu.dataset.type = '';
     };
 
-    Manager.prototype.showRowMenu = function (btn, name, type) {
-        var self = this;
-        var acts = this.rowActions(type, name);
-        var rest = acts.slice(Math.min(this._opSlots, acts.length));
-        if (!rest.length) return;
+    Manager.prototype.showRowMenu = function (anchor, path, type, full) {
+        var name = baseName(path);
+        var acts;
+        if (full) acts = this.rowMenuActions(type, name);
+        else {
+            var all = this.rowActions(type, name);
+            acts = all.slice(Math.min(this._opSlots, all.length));
+        }
+        if (!acts.length) return;
         var menu = this.q.rowmenu;
         while (menu.firstChild) menu.removeChild(menu.firstChild);
-        for (var i = 0; i < rest.length; i++) {
-            if (rest[i].op === 'del' && i > 0) {
+        var pendingSep = false, shown = 0;
+        for (var i = 0; i < acts.length; i++) {
+            if (acts[i].sep) { pendingSep = shown > 0; continue; }
+            if (pendingSep) {
                 var sep = document.createElement('div');
                 sep.className = 'sep';
                 menu.appendChild(sep);
+                pendingSep = false;
             }
             var b = document.createElement('button');
-            b.setAttribute('data-op', rest[i].op);
-            b.textContent = rest[i].label;
-            if (rest[i].danger) b.className = 'danger';
+            b.setAttribute('data-op', acts[i].op);
+            b.textContent = acts[i].label;
+            if (acts[i].danger) b.className = 'danger';
             menu.appendChild(b);
+            shown++;
         }
-        menu.dataset.name = name;
+        menu.dataset.path = path;
         menu.dataset.type = type;
         this._menuAt = Date.now();
         menu.style.left = '0px';
         menu.style.top = '0px';
         menu.hidden = false;
-        var rb = btn.getBoundingClientRect();
         var mw = menu.offsetWidth, mh = menu.offsetHeight;
-        var left = Math.min(Math.max(8, rb.right - mw), global.innerWidth - mw - 8);
-        var top = rb.bottom + 6;
-        if (top + mh > global.innerHeight - 8) top = Math.max(8, rb.top - mh - 6);
+        var left, top;
+        if (anchor && anchor.getBoundingClientRect) {
+            var rb = anchor.getBoundingClientRect();
+            left = Math.min(Math.max(8, rb.right - mw), global.innerWidth - mw - 8);
+            top = rb.bottom + 6;
+            if (top + mh > global.innerHeight - 8) top = Math.max(8, rb.top - mh - 6);
+        }
+        else {
+            left = Math.min(Math.max(8, anchor.x), global.innerWidth - mw - 8);
+            top = Math.min(Math.max(8, anchor.y), global.innerHeight - mh - 8);
+        }
         menu.style.left = left + 'px';
         menu.style.top = top + 'px';
     };
 
-    Manager.prototype.sizeForSort = function (e) {
+    Manager.prototype.sizeForSort = function (e, path) {
         if (e.type !== 'dir') return e.size || 0;
-        var ds = this.dirSizes.get(e.name);
+        var ds = this.dirSizes.get(path);
         return ds ? ds.bytes : null;
     };
 
     Manager.prototype.selectAll = function (on) {
         this.sel.clear();
         if (on) {
-            for (var i = 0; i < this.entries.length; i++) {
-                var e = this.entries[i];
-                this.sel.add(e.name);
-                if (e.type === 'dir') this.fetchDirSize(e.name);
+            for (var i = 0; i < this._rowItems.length; i++) {
+                var p = this._rowItems[i];
+                this.sel.add(p);
+                var e = this._entryByPath.get(p);
+                if (e && e.type === 'dir') this.fetchDirSize(p);
             }
         }
         this.render();
     };
 
-    Manager.prototype.toggleSel = function (name, on) {
-        if (on) this.sel.add(name); else this.sel.delete(name);
+    Manager.prototype.toggleSel = function (path, on) {
+        if (on) this.sel.add(path); else this.sel.delete(path);
         if (on) {
-            var e = this.entries.find(function (x) { return x.name === name; });
-            if (e && e.type === 'dir') this.fetchDirSize(name);
+            var e = this._entryByPath.get(path) || this.findEntry(path);
+            if (e && e.type === 'dir') this.fetchDirSize(path);
         }
         this.render();
     };
 
-    // 勾选目录时按需递归统计，结果缓存在当前目录的 dirSizes 中
-    Manager.prototype.fetchDirSize = function (name) {
+    // 勾选目录时按需递归统计，结果按绝对路径缓存
+    Manager.prototype.fetchDirSize = function (path) {
         var self = this;
-        if (this.dirSizes.has(name) || this.dirPending.has(name)) return;
-        this.dirPending.set(name, true);
-        var id = this.id();
-        this.request({ op: 'size', id: id, path: join(this.cwd, name) }, 'size')
+        // 后端没有递归统计能力时不做请求，目录大小保持「—」
+        if (this.caps.dirSize === false) return;
+        if (this.dirSizes.has(path) || this.dirPending.has(path)) return;
+        this.dirPending.set(path, true);
+        this.dirSize(path)
             .then(function (r) {
-                self.dirPending.delete(name);
-                self.dirSizes.set(name, { bytes: r.bytes || 0, truncated: !!r.truncated });
+                self.dirPending.delete(path);
+                self.dirSizes.set(path, { bytes: r.bytes || 0, truncated: !!r.truncated });
                 self.render();
             })
             .catch(function (e) {
-                self.dirPending.delete(name);
-                self.toast('统计大小失败：' + e.message, true);
+                self.dirPending.delete(path);
+                self.toast('统计大小失败：' + (e.message || e), true);
                 self.render();
             });
     };
 
-    Manager.prototype.openEntry = function (name, type) {
-        if (type === 'dir') { this._navAt = Date.now(); this.load(join(this.cwd, name)); return; }
-        if (isImage(name)) this.openPreview(join(this.cwd, name));
-        else if (isText(name)) this.openEditor(join(this.cwd, name));
-        else this.downloadToFile(join(this.cwd, name));
+    Manager.prototype.openEntry = function (path, type) {
+        if (type === 'dir') { this._navAt = Date.now(); this.load(path); return; }
+        var name = baseName(path);
+        if (isImage(name)) this.openPreview(path);
+        else if (isText(name)) this.openEditor(path);
+        else this.downloadToFile(path);
+    };
+
+    // 文件/目录详情卡片：双击文件或菜单「属性」在行内展开
+    Manager.prototype.showInfo = function (path) {
+        var self = this;
+        var tr = this.rowByPath(path);
+        if (!tr) return;
+        if (this._infoPath === path && this._form) { this.closeInlineForm(); return; }
+        var e = this._entryByPath.get(path) || this.findEntry(path);
+        var name = baseName(path);
+        if (!e) e = { name: name, type: 'file', size: 0, mtime: 0 };
+        var kind = e.type === 'dir' ? '目录' : e.type === 'link' ? '链接'
+            : isImage(name) ? '图片' : isText(name) ? '文本文件' : '文件';
+        var size = this.sizeText(e, path);
+        if (e.type === 'dir' && !this.dirSizes.has(path)) size = '—';
+        var mtime = e.mtime ? fmtTime(e.mtime) : '—';
+
+        this.inlinePanel(path, function (api) {
+            api.box.className = 'iform ifile';
+
+            var top = document.createElement('div');
+            top.className = 'top';
+            var kindEl = document.createElement('span');
+            kindEl.className = 'kind';
+            kindEl.textContent = kind;
+            var nmEl = document.createElement('b');
+            nmEl.className = 'nm';
+            nmEl.textContent = name;
+            var sp = document.createElement('span');
+            sp.className = 'sp';
+            var closeBtn = document.createElement('button');
+            closeBtn.textContent = '关闭';
+            closeBtn.addEventListener('click', function () { api.close(); });
+            top.appendChild(kindEl); top.appendChild(nmEl); top.appendChild(sp); top.appendChild(closeBtn);
+
+            function cell(k, v, wide) {
+                var d = document.createElement('div');
+                d.className = 'cell' + (wide ? ' wide' : '');
+                var a = document.createElement('span');
+                a.className = 'k';
+                a.textContent = k;
+                var b = document.createElement('span');
+                b.className = 'v';
+                b.textContent = v;
+                d.appendChild(a); d.appendChild(b);
+                return d;
+            }
+            var grid = document.createElement('div');
+            grid.className = 'grid';
+            grid.appendChild(cell('大小', size));
+            grid.appendChild(cell('修改时间', mtime));
+            grid.appendChild(cell('路径', path, true));
+
+            var acts = document.createElement('div');
+            acts.className = 'acts';
+            function act(label, primary, fn) {
+                var b = document.createElement('button');
+                b.textContent = label;
+                if (primary) b.className = 'primary';
+                b.addEventListener('click', fn);
+                acts.appendChild(b);
+            }
+            var writable = !self.readonly && self.rw;
+            act(e.type === 'dir' ? '打开' : (isImage(name) ? '预览' : '打开'), true, function () {
+                self.openEntry(path, e.type);
+            });
+            if (e.type === 'file' && isText(name) && writable && self.caps.edit) {
+                act('编辑（文本）', false, function () { self.openEditor(path); });
+            }
+            if (e.type === 'file') {
+                act('查看 Hex', false, function () { self.openHexView(name, path); });
+                act('查看尾部', false, function () { self.openTailView(name, path); });
+            }
+            act(e.type === 'dir' ? '打包下载' : '下载', false, function () {
+                if (e.type === 'dir') self.downloadArchive(path);
+                else self.downloadToFile(path);
+            });
+
+            api.box.appendChild(top);
+            api.box.appendChild(grid);
+            api.box.appendChild(acts);
+        });
+        this._infoPath = path;
     };
 
     Manager.prototype.createEntry = function (op, label, defName) {
         var self = this;
         var name = global.prompt(label, defName);
         if (!name) return;
-        this.request({ op: op, id: this.id(), path: join(this.cwd, name) }, op)
-            .then(function () { self.load(self.cwd); })
+        if (name.indexOf('/') >= 0 || name === '.' || name === '..') {
+            this.toast('名称不能包含 /');
+            return;
+        }
+        // 选中目录时新建到该目录，否则建在当前目录
+        var dir = this.targetDir();
+        var call = op === 'mkdir' ? this.mkPath(join(dir, name)) : this.touchPath(join(dir, name));
+        call.then(function () {
+            if (dir !== self.cwd) self.expanded.add(dir);
+            self.load(self.cwd);
+        })
             .catch(function (e) { self.toast(e.message, true); });
     };
 
@@ -1217,6 +2010,15 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         this.createEntry('touch', '新建文件名称：', 'new.txt');
     };
 
+    Manager.prototype.rowByPath = function (path) {
+        var list = this.q.rows.querySelectorAll('tr');
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].dataset && list[i].dataset.path === path) return list[i];
+        }
+        return null;
+    };
+
+    // 兼容仓库等只有一层的宿主：按文件名查找
     Manager.prototype.rowByName = function (name) {
         var list = this.q.rows.querySelectorAll('tr');
         for (var i = 0; i < list.length; i++) {
@@ -1302,16 +2104,44 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         }, 0);
     };
 
+    // 宿主编排的行内面板（如部署表单），沿用列表内展开的样式
+    Manager.prototype.inlinePanel = function (nameOrPath, build) {
+        var self = this;
+        var tr = this.rowByPath(nameOrPath) || this.rowByName(nameOrPath);
+        if (!tr) return null;
+        this.closeInlineForm();
+        var formTr = document.createElement('tr');
+        formTr.className = 'formrow';
+        var td = document.createElement('td');
+        td.colSpan = 5;
+        var box = document.createElement('div');
+        box.className = 'iform';
+        td.appendChild(box);
+        formTr.appendChild(td);
+        tr.parentNode.insertBefore(formTr, tr.nextSibling);
+        tr.classList.add('editing');
+        this._form = { tr: tr, row: formTr };
+        var api = {
+            box: box,
+            close: function () { self.closeInlineForm(); },
+            toast: function (m, isErr) { self.toast(m, isErr); }
+        };
+        if (build) build(api);
+        return api;
+    };
+
     Manager.prototype.closeInlineForm = function () {
         if (!this._form) return;
         if (this._form.tr) this._form.tr.classList.remove('editing');
         if (this._form.row && this._form.row.parentNode) this._form.row.parentNode.removeChild(this._form.row);
         this._form = null;
+        this._infoPath = '';
     };
 
-    Manager.prototype.rename = function (oldName, path) {
+    Manager.prototype.rename = function (path) {
         var self = this;
-        var tr = this.rowByName(oldName);
+        var oldName = baseName(path);
+        var tr = this.rowByPath(path);
         if (!tr) return;
         this.inlineForm(tr, {
             label: '重命名为',
@@ -1320,7 +2150,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
             onOk: function (name, done) {
                 if (name === oldName) { done(null); return; }
                 if (name.indexOf('/') >= 0) { done(new Error('名称不能包含 /')); return; }
-                self.request({ op: 'rename', id: self.id(), path: path, name: name }, 'rename')
+                self.renamePath(path, name)
                     .then(function () {
                         self.load(self.cwd);
                         done(null, '已重命名 ' + oldName + ' → ' + name);
@@ -1330,9 +2160,10 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         });
     };
 
-    Manager.prototype.move = function (name, path) {
+    Manager.prototype.move = function (path) {
         var self = this;
-        var tr = this.rowByName(name);
+        var name = baseName(path);
+        var tr = this.rowByPath(path);
         if (!tr) return;
         var cur = parentOf(path);
         this.inlineForm(tr, {
@@ -1343,8 +2174,9 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
                 if (dest.length > 1 && dest.charAt(dest.length - 1) === '/') dest = dest.replace(/\/+$/, '');
                 if (dest === cur) { done(null); return; }
                 if (dest.charAt(0) !== '/') { done(new Error('请输入绝对路径')); return; }
-                self.request({ op: 'move', id: self.id(), path: path, dir: dest }, 'move')
+                self.movePath(path, dest)
                     .then(function () {
+                        if (dest !== self.cwd) self.expanded.add(dest);
                         self.load(self.cwd);
                         done(null, '已移动 ' + name);
                     })
@@ -1353,42 +2185,69 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         });
     };
 
-    Manager.prototype.remove = function (name, isDir, path) {
+    Manager.prototype.remove = function (path, isDir) {
         var self = this;
-        if (!global.confirm('删除 ' + name + (isDir ? ' 及其全部内容' : '') + '？')) return;
-        var id = this.id();
-        this.request({ op: 'delete', id: id, path: path, recursive: !!isDir }, 'delete')
-            .then(function () { self.load(self.cwd); })
-            .catch(function (e) { self.toast(e.message, true); });
+        var name = baseName(path);
+        this.confirmRow(this.rowByPath(path), {
+            text: '删除 ', name: name, tail: isDir ? ' 及其全部内容？' : '？', ok: '删除',
+            onOk: function (close) {
+                self.deletePath(path, !!isDir).then(function () {
+                    close();
+                    self.load(self.cwd);
+                    self.toast('已删除 ' + name);
+                }).catch(function (e) { close(); self.toast(e.message, true); });
+            }
+        });
     };
 
     Manager.prototype.removeSelected = function () {
         var self = this;
-        if (this.readonly || !this.rw) return;
+        if (this.readonly || !this.rw || !this.caps.del) return;
         if (!this.sel.size) { this.toast('请先选择文件'); return; }
-        var names = Array.from(this.sel);
-        if (!global.confirm('删除选中的 ' + names.length + ' 项？目录会连同内容一起删除。')) return;
-        var chain = Promise.resolve();
-        var failed = 0;
-        names.forEach(function (n) {
-            chain = chain.then(function () {
-                var en = self.entries.find(function (x) { return x.name === n; });
-                var id = self.id();
-                return self.request({ op: 'delete', id: id, path: join(self.cwd, n), recursive: !!(en && en.type === 'dir') }, 'delete')
-                    .catch(function (e) { failed++; self.toast(e.message, true); });
-            });
+        var paths = Array.from(this.sel);
+        var hasDir = paths.some(function (p) {
+            var en = self._entryByPath.get(p) || self.findEntry(p);
+            return !!(en && en.type === 'dir');
         });
-        chain.then(function () { self.load(self.cwd); if (!failed) self.toast('已删除 ' + names.length + ' 项'); });
+        this.confirmRow(null, {
+            text: '删除已选中的 ' + paths.length + ' 项？', tail: hasDir ? '目录会连同内容一起删除。' : '', ok: '删除',
+            onOk: function (close) {
+                close();
+                var chain = Promise.resolve();
+                var failed = 0;
+                paths.forEach(function (p) {
+                    chain = chain.then(function () {
+                        var en = self._entryByPath.get(p) || self.findEntry(p);
+                        return self.deletePath(p, !!(en && en.type === 'dir'))
+                            .catch(function (e) { failed++; self.toast(e.message, true); });
+                    });
+                });
+                chain.then(function () {
+                    self.load(self.cwd);
+                    if (!failed) self.toast('已删除 ' + paths.length + ' 项');
+                });
+            }
+        });
     };
 
     // ------------------------------------------------------------ 上传/下载
 
-    Manager.prototype.download = function (path, onProgress) {
+    Manager.prototype.download = function (path, onProgress, opts) {
         var self = this;
+        if (this.backend) {
+            if (this._dlBusy) return Promise.reject(new Error('已有下载任务进行中'));
+            this._dlBusy = true;
+            return this.backend.download(path, onProgress, opts).finally(function () { self._dlBusy = false; });
+        }
         if (this._dlBusy) return Promise.reject(new Error('已有下载任务进行中'));
         this._dlBusy = true;
         var id = this.id();
-        return this.request({ op: 'download_open', id: id, path: path }, 'download_meta')
+        var req = { op: 'download_open', id: id, path: path };
+        if (opts && (opts.offset || opts.limit)) {
+            req.offset = opts.offset || 0;
+            if (opts.limit) req.limit = opts.limit;
+        }
+        return this.request(req, 'download_meta')
             .then(function (meta) {
                 var chunks = [], got = 0;
                 function step() {
@@ -1420,6 +2279,8 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
     // 目录打包成 tar.gz 边压边传；支持 File System Access API 时直接写入磁盘，否则回退 Blob。
     Manager.prototype.downloadArchive = function (path) {
         var self = this;
+        // 仓库后端暂不支持目录打包，逐文件下载或勾选文件打包
+        if (this.backend) { this.toast('目录暂不支持打包，请勾选文件后打包', true); return; }
         if (this._dlBusy) { this.toast('已有下载任务进行中', true); return; }
         var id = this.id();
         var base = path === '/' ? 'root' : path.split('/').pop();
@@ -1479,6 +2340,31 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         });
     };
 
+    // 勾选后打包（仅后端支持时提供按钮）
+    Manager.prototype.archiveSelected = function () {
+        var self = this;
+        if (!this.backend || !this.backend.archive) return;
+        var dirs = 0;
+        var paths = Array.from(this.sel).filter(function (p) {
+            var en = self.entryOf(p);
+            if (en && en.type === 'dir') { dirs++; return false; }
+            return true;
+        });
+        if (!paths.length) { this.toast(dirs ? '目录暂不支持打包' : '请先选择文件'); return; }
+        if (dirs) this.toast('已跳过 ' + dirs + ' 个目录');
+        var base = paths.length === 1 ? baseName(paths[0]).replace(/\.[^.]+$/, '') : ('repo-' + paths.length);
+        this.toast('正在打包 ' + paths.length + ' 项…');
+        this.backend.archive(paths, function (done, total) {
+            self.q.summary.textContent = '打包中 ' + fmtSize(done) + (total ? ' / ' + fmtSize(total) : '');
+        }).then(function (r) {
+            saveBlob(r.blob, r.name || (base + '.tar.gz'));
+            self.toast('已打包 ' + paths.length + ' 项');
+            self.render();
+        }).catch(function (e) {
+            self.toast('打包失败：' + (e.message || e), true);
+        });
+    };
+
     Manager.prototype.uploadFiles = function (files, dir) {
         var self = this;
         if (this.readonly || !this.rw || !files || !files.length) return;
@@ -1488,6 +2374,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
             if (i >= arr.length || self.uploadCancel) {
                 self.uploadCancel = false;
                 self.q.upbox.className = 'up';
+                if (dir && dir !== self.cwd) self.expanded.add(dir);
                 self.load(self.cwd);
                 return;
             }
@@ -1502,6 +2389,24 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
 
     Manager.prototype.uploadOne = function (file, dir) {
         var self = this;
+        if (this.backend) {
+            this.uploadCancel = false;
+            this.q.upbox.className = 'up show';
+            this.q.upname.textContent = file.name;
+            this.q.upbar.style.width = '0%';
+            this.q.uppct.textContent = '0%';
+            return this.backend.upload(file, dir, function (sent, total) {
+                var pct = total ? Math.floor(sent * 100 / total) : 100;
+                self.q.upbar.style.width = pct + '%';
+                self.q.uppct.textContent = pct + '%';
+            }, function () { return self.uploadCancel; }).then(function () {
+                self.q.upbox.className = 'up';
+                self.toast('已上传 ' + file.name);
+            }).catch(function (e) {
+                self.q.upbox.className = 'up';
+                throw e;
+            });
+        }
         this.uploadCancel = false;
         this.q.upbox.className = 'up show';
         this.q.upname.textContent = file.name;
@@ -1577,10 +2482,69 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
 
     // ------------------------------------------------------------ 编辑/预览
 
+    Manager.prototype.statPath = function (path) {
+        return this.statEntry(path);
+    };
+
+    // 只读一段文件（Hex / 尾部查看用），返回 Uint8Array
+    Manager.prototype.readRange = function (path, offset, len) {
+        if (this.backend) return this.backend.readRange(path, offset, len);
+        return this.download(path, null, { offset: offset, limit: len }).then(function (r) {
+            return r.blob.arrayBuffer().then(function (buf) { return new Uint8Array(buf); });
+        });
+    };
+
+    Manager.prototype.ensureViewLib = function () {
+        var self = this;
+        if (global.RtunnelFileView) return Promise.resolve(global.RtunnelFileView);
+        if (this._viewLib) return this._viewLib;
+        this._viewLib = new Promise(function (resolve, reject) {
+            var s = document.createElement('script');
+            s.src = self.opts.viewUrl || '/assets/file-view.js';
+            s.async = true;
+            s.onload = function () {
+                if (global.RtunnelFileView) resolve(global.RtunnelFileView);
+                else { self._viewLib = null; reject(new Error('查看器组件不可用')); }
+            };
+            s.onerror = function () { self._viewLib = null; reject(new Error('查看器组件加载失败')); };
+            document.head.appendChild(s);
+        });
+        return this._viewLib;
+    };
+
+    Manager.prototype.openHexView = function (name, path) {
+        var self = this;
+        this.ensureViewLib().then(function (lib) {
+            return self.statPath(path).then(function (st) {
+                lib.openHex({
+                    name: name + ' · Hex',
+                    size: st.entry.size,
+                    read: function (off, len) { return self.readRange(path, off, len); }
+                });
+            });
+        }).catch(function (e) { self.toast(e.message || '查看失败', true); });
+    };
+
+    Manager.prototype.openTailView = function (name, path) {
+        var self = this;
+        this.ensureViewLib().then(function (lib) {
+            return self.statPath(path).then(function (st) {
+                lib.openTail({
+                    name: name + ' · 尾部',
+                    size: st.entry.size,
+                    read: function (off, len) { return self.readRange(path, off, len); },
+                    stat: function () {
+                        return self.statPath(path).then(function (r) { return r.entry.size; });
+                    }
+                });
+            });
+        }).catch(function (e) { self.toast(e.message || '查看失败', true); });
+    };
+
     // 读取文本文件（限制 1 MiB），返回 { name, text }
     Manager.prototype.readText = function (path) {
         var self = this;
-        return this.request({ op: 'stat', id: this.id(), path: path }, 'stat').then(function (st) {
+        return this.statEntry(path).then(function (st) {
             if (st.entry.size > 1024 * 1024) throw new Error('文件超过 1 MiB，请下载后查看');
             return self.download(path).then(function (r) {
                 return r.blob.text().then(function (t) { return { name: r.meta.name, text: t }; });
@@ -1663,11 +2627,10 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         if (!this.editing) return;
         if (this.readonly || !this.rw) { this.toast('只读模式', true); return; }
         var text = this.editorInst ? this.editorInst.getValue() : this.editing.text;
-        var blob = new Blob([text], { type: 'text/plain' });
         var name = this.editing.name;
-        var dir = parentOf(this.editing.path);
+        var path = this.editing.path;
         this.q.edSave.disabled = true;
-        this.uploadBlob(blob, name, dir).then(function () {
+        this.putText(path, text).then(function () {
             self.toast('已保存 ' + name);
             self.closeEditor();
             self.load(self.cwd);

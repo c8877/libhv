@@ -448,6 +448,10 @@ void Session::handleDelete(const nlohmann::json& j, uint32_t id) {
 
 void Session::handleDownloadOpen(const nlohmann::json& j, uint32_t id) {
     std::string path = j.value("path", std::string());
+    // 范围读取：Hex/尾部查看用，不传 offset/limit 时仍是整个文件
+    uint64_t offset = j.value("offset", (uint64_t)0);
+    uint64_t limit = j.value("limit", (uint64_t)0);
+    uint64_t file_size = 0;
     if (dl_active_ || dl_fd_ >= 0) cancelDownload();
     {
         int fd = -1;
@@ -459,10 +463,14 @@ void Session::handleDownloadOpen(const nlohmann::json& j, uint32_t id) {
             sendError(id, rc, err);
             return;
         }
+        file_size = size;
+        if (offset > size) offset = size;
+        uint64_t remain = size - offset;
+        uint64_t len = (limit > 0 && limit < remain) ? limit : remain;
         dl_fd_ = fd;
         dl_id_ = id;
-        dl_off_ = 0;
-        dl_size_ = size;
+        dl_off_ = offset;
+        dl_size_ = offset + len;   // 绝对结束位置，pumpDownload 用 dl_off_ >= dl_size_ 判断结束
         dl_active_ = true;
         dl_inflight_ = 0;
     }
@@ -471,7 +479,9 @@ void Session::handleDownloadOpen(const nlohmann::json& j, uint32_t id) {
     m["id"] = id;
     m["path"] = path;
     m["name"] = baseName(path);
-    m["size"] = dl_size_;
+    m["size"] = dl_size_ - dl_off_;
+    m["offset"] = dl_off_;
+    m["file_size"] = file_size;
     m["chunk"] = svc_->config().chunk;
     sendJson(m);
     pumpDownload();

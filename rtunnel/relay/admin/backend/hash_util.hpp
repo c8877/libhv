@@ -3,7 +3,12 @@
 
 // 文件名校验：禁止 / \ .. 前导点 与控制字符，允许 UTF-8，最长 128 字节
 bool adminValidFileName(const std::string& s);
-std::string adminUrlDecode(const std::string& in);
+
+// 仓库相对路径校验：每段复用文件名校验，允许 / 分隔，拒绝前导 ..、空段、尾随 /
+bool adminValidRepoPath(const std::string& s);
+
+// 把仓库相对路径拼到根目录下；rel 可为 ""、"/" 或 "/a/b"
+bool adminRepoPath(const std::string& root, const std::string& rel, std::string& out);
 
 // 文件 SHA-256（十六进制小写）；无 OpenSSL 构建返回空
 std::string adminSha256File(const std::string& path);

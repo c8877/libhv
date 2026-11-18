@@ -22,6 +22,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { bytes } from '@/shared/utils.js'
 import editorUrl from '../../../../../shared/web/cm-editor.bundle.js?url'
 import '../../../../../shared/web/fs-ui.js'
+import '../../../../../shared/web/file-view.js'
 
 const RtunnelFs = window.RtunnelFs
 
@@ -64,12 +65,6 @@ function ensureManager() {
   return fm
 }
 
-function open() {
-  if (!props.devid || !fsOn.value || expanded.value) return
-  expanded.value = true
-  ensureManager().open()
-}
-
 function toggle() {
   if (!props.devid || !fsOn.value) return
   ensureManager()
@@ -83,18 +78,24 @@ function toggle() {
   nextTick(() => { if (fsHost.value) fsHost.value.scrollIntoView({ block: 'nearest' }) })
 }
 
-// 能力配置里有文件管理时直接展开表格，不再要求点按钮
+// 能力配置里有文件管理时只更新状态，不自动展开；列表在首次展开时才连接加载
 watch(fsOn, (on) => {
-  if (!on) {
-    space.value = null
-    if (fm) {
-      fm.close()
-      expanded.value = false
-    }
-    return
+  if (on) return
+  space.value = null
+  if (fm) {
+    fm.close()
+    expanded.value = false
   }
-  nextTick(open)
 }, { immediate: true })
+
+// 同一个路由组件会在设备之间复用，换设备时重建会话，避免连到上一个设备
+watch(() => props.devid, () => {
+  space.value = null
+  expanded.value = false
+  if (!fm) return
+  fm.destroy()
+  fm = null
+})
 
 onBeforeUnmount(() => {
   if (fm) {

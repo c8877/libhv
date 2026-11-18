@@ -22,7 +22,7 @@ bool gzipCompress(const std::string& in, std::string& out, int level) {
     return true;
 }
 
-bool gzipDecompress(const char* data, size_t len, std::string& out) {
+bool gzipDecompress(const char* data, size_t len, std::string& out, size_t max_out) {
     z_stream zs;
     memset(&zs, 0, sizeof(zs));
     if (inflateInit2(&zs, 15 + 16) != Z_OK) return false;
@@ -37,6 +37,7 @@ bool gzipDecompress(const char* data, size_t len, std::string& out) {
         ret = inflate(&zs, Z_NO_FLUSH);
         if (ret != Z_OK && ret != Z_STREAM_END) { inflateEnd(&zs); return false; }
         out.append(buf, sizeof(buf) - zs.avail_out);
+        if (max_out && out.size() > max_out) { inflateEnd(&zs); return false; }
     } while (ret != Z_STREAM_END);
     inflateEnd(&zs);
     return true;

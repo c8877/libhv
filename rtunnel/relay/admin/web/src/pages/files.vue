@@ -1,244 +1,401 @@
 <template>
-  <div>
-    <div class="panel">
+  <div class="files-page">
+    <section class="panel">
       <div class="panel-head">
-        <h2>上传文件</h2>
+        <h2>文件仓库</h2>
         <span class="spacer" />
-        <span class="muted">单文件上限 {{ limitMb }} MiB</span>
+        <el-tag v-if="loaded" :type="writable ? 'success' : 'info'" size="small">{{ writable ? '读写' : '只读' }}</el-tag>
       </div>
-      <div class="upload-row">
-        <input ref="fileInput" type="file" class="hidden" @change="onPick" />
-        <el-button @click="fileInput.click()">选择文件</el-button>
-        <span class="muted file-name">{{ file ? file.name + ' · ' + bytes(file.size) : '未选择' }}</span>
-        <el-button type="primary" :disabled="!file || uploading" :loading="uploading" @click="upload">上传</el-button>
+      <div class="mono repo-line">
+        relay 本机仓库 · 当前目录 {{ count }} 项 · {{ bytes(total) }}
+        <span v-if="loaded && !writable"> · 当前角色只能浏览和下载</span>
+        <span v-if="!loaded"> · 正在读取…</span>
       </div>
-      <el-progress v-if="uploading" :percentage="progress" :stroke-width="8" class="up-progress" />
-      <div v-if="upStatus" class="muted up-status">{{ upStatus }}</div>
-    </div>
-
-    <div class="panel">
-      <div class="panel-head">
-        <h2>文件列表</h2>
-        <span class="muted">共 {{ list.length }} 个</span>
-        <span class="spacer" />
-        <el-input v-model="q" placeholder="搜索文件名" clearable class="search">
-          <template #prefix><el-icon><Search /></el-icon></template>
-        </el-input>
-        <el-button :loading="loading" @click="load">刷新</el-button>
-      </div>
-
-      <el-table :data="filtered" v-loading="loading" :default-sort="{ prop: 'name', order: 'ascending' }"
-                @sort-change="onSort">
-        <el-table-column prop="name" label="名称" min-width="140" sortable="custom">
-          <template #default="{ row }"><b>{{ row.name }}</b></template>
-        </el-table-column>
-        <el-table-column prop="size" label="大小" width="90" align="right" sortable="custom">
-          <template #default="{ row }">{{ bytes(row.size) }}</template>
-        </el-table-column>
-        <el-table-column v-if="!isPhone" label="哈希" min-width="180">
-          <template #default="{ row }">
-            <code :title="row.sha256 || ''">{{ (row.sha256 || '').slice(0, 8) }}</code>
-            <el-button v-if="row.sha256" link type="primary" @click="copyText(row.sha256, '哈希已复制')">复制</el-button>
-          </template>
-        </el-table-column>
-        <el-table-column v-if="!isPhone" prop="mtime_ms" label="修改时间" min-width="170" sortable="custom">
-          <template #default="{ row }">{{ time(row.mtime_ms) }}</template>
-        </el-table-column>
-        <el-table-column :min-width="isPhone ? 92 : 220" label="操作">
-          <template #default="{ row }">
-            <el-dropdown v-if="isPhone" trigger="click" @command="(c) => onAction(c, row)">
-              <el-button size="small">更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="download">下载</el-dropdown-item>
-                  <el-dropdown-item v-if="canManage()" command="push" divided>分发</el-dropdown-item>
-                  <el-dropdown-item v-if="canManage()" command="del">删除</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-            <template v-else>
-              <el-button size="small" @click="download(row)">下载</el-button>
-              <el-button v-if="canManage()" size="small" @click="push(row)">分发</el-button>
-              <el-button v-if="canManage()" size="small" type="danger" plain @click="remove(row)">删除</el-button>
-            </template>
-          </template>
-        </el-table-column>
-        <template #empty><el-empty description="暂无文件" :image-size="70" /></template>
-      </el-table>
-    </div>
+      <div ref="host" class="repo-host"></div>
+    </section>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Api } from '@/shared/api.js'
-import { auth, canManage } from '@/shared/store.js'
-import { bytes, copyText, downloadBlob, time } from '@/shared/utils.js'
-import { useBreakpoint } from '@/shared/useBreakpoint.js'
+import { auth, canManage, canOperate } from '@/shared/store.js'
+import { bytes } from '@/shared/utils.js'
+import { createRepoBackend } from '@/shared/repo-backend.js'
+import editorUrl from '../../../../../shared/web/cm-editor.bundle.js?url'
+import '../../../../../shared/web/fs-ui.js'
+import '../../../../../shared/web/file-view.js'
 
+const RtunnelFs = window.RtunnelFs
 const router = useRouter()
-const { isPhone } = useBreakpoint()
-const list = ref([])
-const q = ref('')
-const loading = ref(false)
-const fileInput = ref(null)
-const file = ref(null)
-const uploading = ref(false)
-const progress = ref(0)
-const upStatus = ref('')
-const sort = ref({ prop: 'name', order: 'ascending' })
 
-const limitMb = computed(() => parseInt(auth.settings['file.max_upload_mb'] || '32', 10) || 32)
-const filtered = computed(() => {
-  const k = q.value.trim().toLowerCase()
-  return k ? list.value.filter((f) => f.name.toLowerCase().includes(k)) : list.value
-})
+const host = ref(null)
+const loaded = ref(false)
+const count = ref(0)
+const total = ref(0)
+let fm = null
+let agents = []
 
-function sortParam() {
-  const map = { ascending: 'asc', descending: 'desc' }
-  const prop = sort.value.prop || 'name'
-  // 表格列用 mtime_ms，接口参数是 mtime
-  const key = prop === 'mtime_ms' ? 'mtime' : prop
-  return 'sort=' + key + '&order=' + (map[sort.value.order] || 'asc')
+const writable = computed(() => canOperate())
+const maxUploadMb = computed(() => parseInt(auth.settings['file.max_upload_mb'] || '32', 10) || 32)
+const maxEditMb = computed(() => parseInt(auth.settings['file.max_edit_mb'] || '4', 10) || 4)
+
+// --------------------------------------------------------------- 部署
+
+const LAST_DEV = 'rtunnel.files.deployDevid'
+const dirKey = (id) => 'rtunnel.files.deployDir.' + id
+
+function readStore(key, def) {
+  try { return localStorage.getItem(key) || def } catch (e) { return def }
 }
 
-async function load() {
-  loading.value = true
+function writeStore(key, val) {
+  try { localStorage.setItem(key, val) } catch (e) { /* ignore */ }
+}
+
+function pickDevid() {
+  const saved = readStore(LAST_DEV, '')
+  const hit = agents.find((a) => a.devid === saved && a.online)
+  if (hit) return hit.devid
+  const first = agents.find((a) => a.online)
+  return first ? first.devid : ''
+}
+
+function joinDir(dir, name) {
+  const d = (dir || '/').replace(/\/+$/, '')
+  return (d === '' ? '' : d) + '/' + name
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag)
+  if (cls) e.className = cls
+  if (text !== undefined) e.textContent = text
+  return e
+}
+
+function capLabel(cap) {
+  return {
+    loading: '读取能力…',
+    none: '没有在线设备',
+    offline: '设备离线',
+    off: '未启用文件服务',
+    ro: '只读（agent 未开 --file-rw）',
+    unknown: '无法读取设备能力',
+    rw: '可写',
+  }[cap] || ''
+}
+
+async function readCap(devid) {
+  const a = agents.find((x) => x.devid === devid)
+  if (!devid) return 'none'
+  if (!a || !a.online) return 'offline'
   try {
-    list.value = await Api.get('/api/v1/files?' + sortParam())
+    const r = await Api.get('/api/v1/agents/' + encodeURIComponent(devid) + '/sysinfo?mode=full')
+    const c = (r && r.sysinfo && r.sysinfo.caps) || {}
+    return c.fs ? (c.fs_rw ? 'rw' : 'ro') : 'off'
   } catch (e) {
-    ElMessage.error('加载失败：' + e.message)
-  } finally {
-    loading.value = false
+    return 'unknown'
   }
 }
 
-function onSort({ prop, order }) {
-  if (!prop || !order) return
-  sort.value = { prop, order }
-  load()
-}
+function openDeploy(name, row, repoPath) {
+  if (!canManage()) return
+  const repoFile = repoPath || name
+  const absPath = '/' + String(repoFile).replace(/^\/+/, '')
+  const size = Number(row && row.size) || 0
+  let devid = pickDevid()
+  let cap = devid ? 'loading' : 'none'
+  let busy = false
+  let ws = null
 
-function onPick(e) {
-  file.value = e.target.files[0] || null
-  upStatus.value = ''
-}
+  const panel = fm.inlinePanel(absPath, ({ box, close }) => {
+    const r1 = el('div', 'row')
+    r1.appendChild(el('span', 'lb', '目标设备'))
+    const sel = el('select')
+    for (const a of agents) {
+      const o = el('option', '', a.devid + (a.online ? '' : '（离线）'))
+      o.value = a.devid
+      o.disabled = !a.online
+      if (a.devid === devid) o.selected = true
+      sel.appendChild(o)
+    }
+    if (!agents.length) {
+      const o = el('option', '', '没有在线设备')
+      o.value = ''
+      sel.appendChild(o)
+    }
+    sel.disabled = busy
+    const capTx = el('span', cap === 'rw' ? 'hint' : 'warn', capLabel(cap))
+    r1.appendChild(sel)
+    r1.appendChild(capTx)
 
-function send(url, blob, onprog) {
-  return new Promise((res, rej) => {
-    const xhr = new XMLHttpRequest()
-    xhr.open('POST', url)
-    xhr.setRequestHeader('X-Requested-With', 'fetch')
-    xhr.upload.onprogress = (e) => { if (e.lengthComputable && onprog) onprog(e.loaded) }
-    xhr.onload = () => (xhr.status === 200 ? res(xhr.responseText)
-      : rej(new Error('HTTP ' + xhr.status + ' ' + xhr.responseText)))
-    xhr.onerror = () => rej(new Error('网络错误'))
-    xhr.send(blob)
-  })
-}
+    const r2 = el('div', 'row')
+    r2.appendChild(el('span', 'lb', '目标路径'))
+    const inp = el('input')
+    inp.type = 'text'
+    inp.spellcheck = false
+    inp.autocomplete = 'off'
+    inp.value = joinDir(readStore(dirKey(devid), '/'), name)
+    inp.disabled = busy
+    r2.appendChild(inp)
 
-async function upload() {
-  const fi = file.value
-  if (!fi) return
-  if (fi.size > limitMb.value * 1024 * 1024) {
-    ElMessage.error('文件 ' + bytes(fi.size) + ' 超过 ' + limitMb.value + ' MiB 上限')
-    return
-  }
-  uploading.value = true
-  progress.value = 0
-  upStatus.value = '上传中…'
-  const CHUNK = 8 * 1024 * 1024
-  const url = '/api/v1/files/' + encodeURIComponent(fi.name)
-  try {
-    if (fi.size <= CHUNK) {
-      await send(url, fi, (loaded) => {
-        progress.value = Math.floor((loaded * 100) / fi.size)
-        upStatus.value = '上传中… ' + bytes(loaded) + ' / ' + bytes(fi.size)
-      })
-    } else {
-      const uid = Math.random().toString(36).slice(2) + Date.now().toString(36)
-      let off = 0
-      let tries = 0
-      while (off < fi.size) {
-        const chunk = fi.slice(off, off + CHUNK)
-        try {
-          await send(url + '?append=1&upload=' + uid + '&offset=' + off, chunk, (loaded) => {
-            const cur = off + loaded
-            progress.value = Math.floor((cur * 100) / fi.size)
-            upStatus.value = '上传中… ' + bytes(cur) + ' / ' + bytes(fi.size)
-          })
-          off += chunk.size
-          tries = 0
-        } catch (e) {
-          if (++tries > 2) throw e
-          const st = await Api.get('/api/v1/uploads/' + encodeURIComponent(fi.name) + '?upload=' + uid)
-          off = st.received || off
-          upStatus.value = '重试中… 已传 ' + bytes(off) + ' / ' + bytes(fi.size)
+    const r3 = el('div', 'row')
+    r3.appendChild(el('span', 'lb', '选项'))
+    const lab = el('label', 'chk')
+    const ow = el('input')
+    ow.type = 'checkbox'
+    ow.disabled = busy
+    lab.appendChild(ow)
+    lab.appendChild(document.createTextNode(' 覆盖同名文件'))
+    r3.appendChild(lab)
+    r3.appendChild(el('span', 'hint', '目标已存在时默认不覆盖'))
+
+    const r4 = el('div', 'row')
+    const msg = el('span', 'hint', '')
+    const prog = el('div', 'prog')
+    const bar = el('i')
+    prog.appendChild(bar)
+    prog.hidden = true
+    const ok = el('button', 'primary', '部署')
+    ok.disabled = cap !== 'rw'
+    const no = el('button', '', '取消')
+    r4.appendChild(msg)
+    r4.appendChild(prog)
+    r4.appendChild(el('span', 'sp'))
+    r4.appendChild(ok)
+    r4.appendChild(no)
+
+    box.appendChild(r1)
+    box.appendChild(r2)
+    box.appendChild(r3)
+    box.appendChild(r4)
+
+    function setMsg(text, kind) {
+      msg.textContent = text || ''
+      msg.className = kind === 'err' ? 'err' : kind === 'warn' ? 'warn' : 'hint'
+    }
+
+    async function refreshCap() {
+      cap = devid ? 'loading' : 'none'
+      capTx.textContent = capLabel(cap)
+      capTx.className = 'hint'
+      ok.disabled = true
+      const got = await readCap(devid)
+      if (!box.isConnected) return
+      cap = got
+      capTx.textContent = capLabel(cap)
+      capTx.className = cap === 'rw' ? 'hint' : 'warn'
+      ok.disabled = busy || cap !== 'rw'
+    }
+
+    sel.addEventListener('change', () => {
+      devid = sel.value
+      inp.value = joinDir(readStore(dirKey(devid), '/'), name)
+      ow.checked = false
+      setMsg('')
+      refreshCap()
+    })
+
+    no.addEventListener('click', () => {
+      if (busy && ws) {
+        try { ws.send(JSON.stringify({ op: 'push_cancel', id: 2 })) } catch (e) { /* ignore */ }
+        setMsg('正在取消…')
+        return
+      }
+      close()
+    })
+
+    ok.addEventListener('click', () => {
+      const target = inp.value.trim()
+      if (!/^\//.test(target) || target.indexOf('..') >= 0 || target.length > 1024) {
+        setMsg('请输入合法的绝对路径', 'err')
+        return
+      }
+      if (cap !== 'rw') {
+        setMsg('目标设备当前不可写', 'err')
+        return
+      }
+      busy = true
+      ok.disabled = true
+      no.textContent = '取消'
+      sel.disabled = true
+      inp.disabled = true
+      ow.disabled = true
+      prog.hidden = false
+      bar.style.width = '0%'
+      setMsg('准备部署…')
+
+      const proto = location.protocol === 'https:' ? 'wss://' : 'ws://'
+      ws = new WebSocket(proto + location.host + '/ws/fs/' + encodeURIComponent(devid))
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ op: 'push_open', id: 1, repo: repoFile, path: target, overwrite: !!ow.checked }))
+      }
+      ws.onmessage = (ev) => {
+        if (typeof ev.data !== 'string') return
+        let j
+        try { j = JSON.parse(ev.data) } catch (e) { return }
+        if (j.op === 'push_progress') {
+          const sent = Number(j.sent) || 0
+          const all = Number(j.total) || size
+          const pct = all ? Math.floor((sent * 100) / all) : 0
+          bar.style.width = pct + '%'
+          setMsg(pct + '% · ' + bytes(sent) + ' / ' + bytes(all))
+        } else if (j.op === 'push_done') {
+          busy = false
+          try { ws.close() } catch (e) { /* ignore */ }
+          ws = null
+          if (j.ok) {
+            writeStore(LAST_DEV, devid)
+            const d = target.slice(0, target.lastIndexOf('/')) || '/'
+            writeStore(dirKey(devid), d)
+            close()
+            fm.toast('已部署到 ' + devid + ':' + target)
+            fm.load('/')
+          } else if (j.conflict) {
+            bar.style.width = '0%'
+            prog.hidden = true
+            ok.disabled = false
+            ok.textContent = '覆盖并部署'
+            sel.disabled = false
+            inp.disabled = false
+            ow.disabled = false
+            no.textContent = '取消'
+            setMsg('目标已存在：' + target + '，勾选「覆盖同名文件」后重试', 'warn')
+          } else {
+            bar.style.width = '0%'
+            prog.hidden = true
+            sel.disabled = false
+            inp.disabled = false
+            ow.disabled = false
+            ok.disabled = false
+            no.textContent = '取消'
+            setMsg(j.message || '部署失败', 'err')
+          }
+        } else if (j.op === 'error') {
+          busy = false
+          bar.style.width = '0%'
+          prog.hidden = true
+          sel.disabled = false
+          inp.disabled = false
+          ow.disabled = false
+          ok.disabled = false
+          no.textContent = '取消'
+          setMsg(j.message || '部署失败', 'err')
+          try { ws.close() } catch (e) { /* ignore */ }
+          ws = null
         }
       }
-      await send(url + '?finalize=1&upload=' + uid, new Blob([]))
-    }
-    progress.value = 100
-    upStatus.value = '已上传 ' + fi.name + '（' + bytes(fi.size) + '）'
-    ElMessage.success('已上传 ' + fi.name)
-    file.value = null
-    if (fileInput.value) fileInput.value.value = ''
-    await load()
+      ws.onerror = () => {
+        if (!busy) return
+        busy = false
+        prog.hidden = true
+        ok.disabled = false
+        sel.disabled = false
+        inp.disabled = false
+        ow.disabled = false
+        no.textContent = '取消'
+        setMsg('连接失败', 'err')
+      }
+      ws.onclose = () => {
+        if (!busy) return
+        busy = false
+        prog.hidden = true
+        ok.disabled = false
+        sel.disabled = false
+        inp.disabled = false
+        ow.disabled = false
+        no.textContent = '取消'
+        setMsg('连接已断开', 'err')
+      }
+    })
+
+    refreshCap()
+  })
+
+  return panel
+}
+
+// --------------------------------------------------------------- 挂载
+
+function menuExtras(type) {
+  if (type !== 'file' || !canManage()) return []
+  return [
+    { op: 'deploy', label: '部署到设备…' },
+    { op: 'distribute', label: '分发到多台设备…' },
+  ]
+}
+
+function onMenuAction(op, name, type, path) {
+  const abs = path || ('/' + name)
+  const repoPath = abs.replace(/^\/+/, '')
+  if (op === 'deploy') {
+    const row = fm ? fm.entryOf(abs) : null
+    openDeploy(name, row, repoPath)
+    return true
+  }
+  if (op === 'distribute') {
+    router.push('/distribute?file=' + encodeURIComponent(repoPath))
+    return true
+  }
+  return false
+}
+
+async function loadAgents() {
+  try {
+    const arr = await Api.get('/api/v1/agents')
+    agents = Array.isArray(arr) ? arr : []
   } catch (e) {
-    upStatus.value = ''
-    ElMessage.error('上传失败：' + e.message)
-  } finally {
-    uploading.value = false
+    agents = []
   }
 }
 
-async function download(row) {
-  try {
-    const r = await fetch('/api/v1/files/' + encodeURIComponent(row.name), { cache: 'no-store' })
-    if (!r.ok) throw new Error('HTTP ' + r.status)
-    downloadBlob(await r.blob(), row.name)
-  } catch (e) {
-    ElMessage.error('下载失败：' + e.message)
+function mount() {
+  if (!RtunnelFs || !host.value) return
+  fm = RtunnelFs.createManager({
+    inline: true,
+    container: host.value,
+    title: '文件仓库',
+    height: 'calc(100vh - 230px)',
+    searchPlaceholder: '搜索文件名',
+    editorUrl,
+    backend: createRepoBackend({
+      writable: writable.value,
+      maxUploadMb: maxUploadMb.value,
+      maxEditMb: maxEditMb.value,
+      canDelete: canManage(),
+      canEdit: canManage(),
+    }),
+    menuExtras,
+    onMenuAction,
+    onList: (r) => {
+      loaded.value = true
+      count.value = (r.entries || []).length
+      total.value = (r.entries || []).reduce((n, e) => n + (e.size || 0), 0)
+    },
+    onSpace: () => { loaded.value = true },
+  })
+  // 挂载后直接加载仓库根目录
+  nextTick(() => fm && fm.open())
+}
+
+onMounted(() => {
+  loadAgents().then(mount)
+})
+
+onBeforeUnmount(() => {
+  if (fm) {
+    fm.destroy()
+    fm = null
   }
-}
-
-function push(row) {
-  router.push('/distribute?file=' + encodeURIComponent(row.name))
-}
-
-async function remove(row) {
-  try {
-    await ElMessageBox.confirm('删除 ' + row.name + '？', '删除文件',
-      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
-  } catch (e) { return }
-  try {
-    await Api.del('/api/v1/files/' + encodeURIComponent(row.name))
-    ElMessage.success('已删除 ' + row.name)
-    await load()
-  } catch (e) {
-    ElMessage.error('删除失败：' + e.message)
-  }
-}
-
-function onAction(cmd, row) {
-  if (cmd === 'download') download(row)
-  else if (cmd === 'push') push(row)
-  else if (cmd === 'del') remove(row)
-}
-
-onMounted(load)
+})
 </script>
 
 <style scoped>
-.hidden { display: none; }
-.upload-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.up-progress { margin-top: 12px; max-width: 420px; }
-.up-status { margin-top: 6px; }
-.search { width: 220px; }
-@media (max-width: 599px) {
-  .search { width: 100%; }
-  .panel-head { flex-wrap: wrap; }
+.repo-line {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 10px;
+  overflow-wrap: anywhere;
 }
 </style>
