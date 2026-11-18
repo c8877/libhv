@@ -163,6 +163,10 @@
 .overlay.inline[hidden]{display:none}
 .overlay.inline .win{width:100%;height:min(560px,70vh);box-shadow:none}
 .overlay.inline header{display:none}
+.win:fullscreen{width:100vw;height:100vh;border:0;border-radius:0}
+.overlay.inline .win:fullscreen{width:100vw;height:100vh}
+.win:-webkit-full-screen{width:100vw;height:100vh;border:0;border-radius:0}
+.overlay.inline .win:-webkit-full-screen{width:100vw;height:100vh}
 .win{width:min(1080px,100%);height:min(760px,100%);background:var(--bg);border:1px solid var(--line);border-radius:14px;
   display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,.45)}
 header{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
@@ -211,6 +215,7 @@ tbody tr[data-type=dir]{cursor:pointer}
 .ibtn:hover:not(:disabled){background:var(--hover)}
 .ibtn.primary{background:var(--accent);color:#fff}
 .ibtn.primary:hover:not(:disabled){background:var(--accent);filter:brightness(1.07)}
+.ibtn.on{color:var(--accent)}
 .ibtn.danger{color:#ef4444}
 .ibtn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
 .ibtn[hidden]{display:none}
@@ -364,6 +369,10 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         pencil: '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13 5 4 4"/></svg>',
         tree: '<svg viewBox="0 0 24 24"><path d="M5 4v16"/><path d="M5 8h5M10 8v4h5M10 12v6h5"/></svg>',
         list: '<svg viewBox="0 0 24 24"><path d="M4 6h2M4 12h2M4 18h2"/><path d="M10 6h10M10 12h10M10 18h10"/></svg>',
+        expandAll: '<svg viewBox="0 0 24 24"><path d="m7 6 5 5 5-5"/><path d="m7 13 5 5 5-5"/></svg>',
+        collapseAll: '<svg viewBox="0 0 24 24"><path d="m7 18 5-5 5 5"/><path d="m7 11 5-5 5 5"/></svg>',
+        fullscreen: '<svg viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M16 3h3a2 2 0 0 1 2 2v3"/><path d="M8 21H5a2 2 0 0 1-2-2v-3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>',
+        exitFullscreen: '<svg viewBox="0 0 24 24"><path d="M8 3v3a2 2 0 0 1-2 2H3"/><path d="M21 8h-3a2 2 0 0 1-2-2V3"/><path d="M3 16h3a2 2 0 0 1 2 2v3"/><path d="M16 21v-3a2 2 0 0 1 2-2h3"/></svg>',
         eye: '<svg viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg>',
         folder: '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
         file: '<svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>',
@@ -387,6 +396,8 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
       <button class="ibtn" id="editPath" title="输入路径" aria-label="输入路径">${ICONS.pencil}</button>
       <button class="ibtn" id="refresh" title="刷新" aria-label="刷新">${ICONS.refresh}</button>
       <button class="ibtn" id="viewToggle" title="切换为列表视图" aria-label="切换视图">${ICONS.list}</button>
+      <button class="ibtn" id="expandAll" title="全部展开" aria-label="全部展开" hidden>${ICONS.expandAll}</button>
+      <button class="ibtn" id="collapseAll" title="全部折叠" aria-label="全部折叠" hidden>${ICONS.collapseAll}</button>
     </div>
     <div class="bar tools">
       <button class="ibtn" id="mkdir" title="新建文件夹" aria-label="新建文件夹">${ICONS.mkdir}</button>
@@ -397,6 +408,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
       <span class="spacer"></span>
       <input class="search" id="search" placeholder="搜索当前目录">
       <button class="ibtn" id="hiddenBtn" title="显示隐藏文件" aria-label="显示隐藏文件">${ICONS.eye}</button>
+      <button class="ibtn" id="fullscreen" title="全屏" aria-label="全屏" hidden>${ICONS.fullscreen}</button>
       <input type="checkbox" id="hidden" hidden>
       <span class="meta" id="meta"></span>
     </div>
@@ -531,6 +543,136 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         this.q.viewToggle.innerHTML = tree ? ICONS.list : ICONS.tree;
         this.q.viewToggle.title = tree ? '切换为列表视图' : '切换为树形视图';
         this.q.viewToggle.setAttribute('aria-label', this.q.viewToggle.title);
+        this.syncTreeTools();
+    };
+
+    // 树形专用的「全部展开/折叠」只在当前确实是树形视图时出现
+    Manager.prototype.syncTreeTools = function () {
+        if (!this.q || !this.q.expandAll) return;
+        var show = this.isTree();
+        this.q.expandAll.hidden = !show;
+        this.q.collapseAll.hidden = !show;
+    };
+
+    Manager.prototype.isFullscreen = function () {
+        var d = document;
+        var el = d.fullscreenElement || d.webkitFullscreenElement || d.msFullscreenElement;
+        return !!(el && this.q && el === this.q.win);
+    };
+
+    Manager.prototype.syncFullscreenBtn = function () {
+        var q = this.q;
+        if (!q || !q.fullscreen || !q.win) return;
+        var supported = !!(q.win.requestFullscreen || q.win.webkitRequestFullscreen || q.win.msRequestFullscreen);
+        q.fullscreen.hidden = !supported;
+        var on = this.isFullscreen();
+        q.fullscreen.innerHTML = on ? ICONS.exitFullscreen : ICONS.fullscreen;
+        var t = on ? '退出全屏' : '全屏';
+        q.fullscreen.title = t;
+        q.fullscreen.setAttribute('aria-label', t);
+        q.fullscreen.classList.toggle('on', on);
+    };
+
+    Manager.prototype.toggleFullscreen = function () {
+        var self = this, d = document, el = this.q && this.q.win;
+        if (!el) return;
+        if (this.isFullscreen()) {
+            var exit = d.exitFullscreen || d.webkitExitFullscreen || d.msExitFullscreen;
+            if (!exit) return;
+            try {
+                var p = exit.call(d);
+                if (p && p.catch) p.catch(function () {});
+            } catch (e) { /* ignore */ }
+            return;
+        }
+        var req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+        if (!req) { this.toast('当前浏览器不支持全屏', true); return; }
+        try {
+            var pr = req.call(el);
+            if (pr && pr.catch) pr.catch(function () { self.toast('无法进入全屏', true); });
+        } catch (e) {
+            this.toast('无法进入全屏', true);
+        }
+    };
+
+    // 展开当前目录（或指定目录）下的整棵子树；目录过多时按上限截断
+    Manager.prototype.expandAll = function () {
+        this.expandSubtree(null);
+    };
+
+    Manager.prototype.expandSubtree = function (root) {
+        var self = this;
+        if (!this.isTree() || this._treeBusy) return;
+        this._treeBusy = true;
+        var seq = this._treeSeq = (this._treeSeq || 0) + 1;
+        var MAX_DIRS = 800;
+        var dirs = 0, truncated = false;
+
+        function walk(path) {
+            if (seq !== self._treeSeq) return Promise.resolve();
+            if (dirs >= MAX_DIRS) { truncated = true; return Promise.resolve(); }
+            dirs++;
+            self.expanded.add(path);
+            if (dirs % 10 === 0) self.render();
+            var load = self.kids.has(path) ? Promise.resolve() : self.fetchKids(path, true).catch(function () {});
+            return load.then(function () {
+                if (seq !== self._treeSeq) return;
+                var kids = self.kids.get(path) || [];
+                var chain = Promise.resolve();
+                for (var i = 0; i < kids.length; i++) {
+                    if (kids[i].type !== 'dir') continue;
+                    (function (p) {
+                        chain = chain.then(function () { return walk(p); });
+                    })(join(path, kids[i].name));
+                }
+                return chain;
+            });
+        }
+
+        var chain = Promise.resolve();
+        if (root) {
+            chain = walk(root);
+        }
+        else {
+            for (var i = 0; i < this.entries.length; i++) {
+                if (this.entries[i].type !== 'dir') continue;
+                (function (p) {
+                    chain = chain.then(function () { return walk(p); });
+                })(join(this.cwd, this.entries[i].name));
+            }
+        }
+        chain.then(function () {
+            if (seq !== self._treeSeq) return;
+            self._treeBusy = false;
+            self.render();
+            if (truncated) self.toast('目录过多，已展开 ' + MAX_DIRS + ' 个');
+        }).catch(function () {
+            if (seq !== self._treeSeq) return;
+            self._treeBusy = false;
+            self.render();
+        });
+    };
+
+    Manager.prototype.collapseAll = function () {
+        if (!this.isTree()) return;
+        this._treeSeq = (this._treeSeq || 0) + 1;
+        this._treeBusy = false;
+        this.expanded.clear();
+        this.render();
+    };
+
+    Manager.prototype.collapseSubtree = function (path) {
+        var self = this;
+        this._treeSeq = (this._treeSeq || 0) + 1;
+        this._treeBusy = false;
+        (function close(p) {
+            var kids = self.kids.get(p) || [];
+            for (var i = 0; i < kids.length; i++) {
+                if (kids[i].type === 'dir') close(join(p, kids[i].name));
+            }
+            self.expanded.delete(p);
+        })(path);
+        this.render();
     };
 
     Manager.prototype.setView = function (mode) {
@@ -570,11 +712,12 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         var q = this.q = {};
         var ids = ['close', 'title', 'rootLine', 'crumb', 'path', 'editPath', 'refresh', 'hidden', 'rowmenu',
             'mkdir', 'touch', 'upload', 'pack', 'del', 'search', 'meta', 'all', 'rows', 'empty', 'summary', 'dest', 'viewToggle',
-            'hiddenBtn',
+            'expandAll', 'collapseAll', 'fullscreen', 'hiddenBtn',
             'upbox', 'upname', 'upbar', 'uppct', 'upcancel', 'editor', 'edTitle', 'edHost', 'edTree',
             'edClose', 'edCancel', 'edSave', 'preview', 'pvTitle', 'pvBody', 'pvClose',
             'jsonview', 'jvTitle', 'jvBody', 'jvClose', 'jvSource', 'jvExpand', 'jvCollapse', 'toast', 'file'];
         for (var i = 0; i < ids.length; i++) q[ids[i]] = this.sh.getElementById(ids[i]);
+        q.win = this.sh.querySelector('.win');
         q.title.textContent = this.title;
         this.overlay = this.sh.querySelector('.overlay');
         if (this.inline) this.overlay.classList.add('inline');
@@ -582,6 +725,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         this.renderCrumb();
         this.applyViewButton();
         this.syncHiddenBtn();
+        this.syncFullscreenBtn();
     };
 
     Manager.prototype._bind = function () {
@@ -615,6 +759,9 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         on('upload', 'click', function () { self.q.file.click(); });
         on('file', 'change', function () { self.uploadFiles(self.q.file.files, self.targetDir()); self.q.file.value = ''; });
         on('viewToggle', 'click', function () { self.setView(self.isTree() ? 'list' : 'tree'); });
+        on('expandAll', 'click', function () { self.expandAll(); });
+        on('collapseAll', 'click', function () { self.collapseAll(); });
+        on('fullscreen', 'click', function () { self.toggleFullscreen(); });
         on('pack', 'click', function () { self.archiveSelected(); });
         on('del', 'click', function () { self.removeSelected(); });
         on('all', 'change', function () { self.selectAll(self.q.all.checked); });
@@ -756,6 +903,9 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         };
         window.addEventListener('scroll', this._closeMenu, true);
         window.addEventListener('resize', this._closeMenu);
+        this._fsHandler = function () { self.syncFullscreenBtn(); };
+        document.addEventListener('fullscreenchange', this._fsHandler);
+        document.addEventListener('webkitfullscreenchange', this._fsHandler);
         if (global.ResizeObserver) {
             this._lastW = 0;
             this._ro = new ResizeObserver(function () {
@@ -792,6 +942,8 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
                 else if (!self.q.editor.hidden) self.closeEditor();
                 else if (!self.q.preview.hidden) self.closePreview();
                 else if (self._form && self._infoPath) self.closeInlineForm();
+                // 全屏时 Esc 交给浏览器退出全屏，不关整个文件管理器
+                else if (self.isFullscreen()) return;
                 // 内嵌在页面里时 Esc 不应该收起整个文件管理器（页面有自己的开关）
                 else if (!self.inline) self.close();
                 e.preventDefault();
@@ -853,6 +1005,11 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
     };
 
     Manager.prototype.close = function () {
+        if (this.isFullscreen()) {
+            var d = document;
+            var exit = d.exitFullscreen || d.webkitExitFullscreen || d.msExitFullscreen;
+            if (exit) { try { exit.call(d); } catch (e) { /* ignore */ } }
+        }
         this.visible = false;
         this.closedByUser = true;
         this.overlay.hidden = true;
@@ -875,6 +1032,10 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         if (this._closeMenu) {
             window.removeEventListener('scroll', this._closeMenu, true);
             window.removeEventListener('resize', this._closeMenu);
+        }
+        if (this._fsHandler) {
+            document.removeEventListener('fullscreenchange', this._fsHandler);
+            document.removeEventListener('webkitfullscreenchange', this._fsHandler);
         }
         if (this._ro) this._ro.disconnect();
         if (this.host && this.host.parentNode) this.host.parentNode.removeChild(this.host);
@@ -1022,6 +1183,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
             q.viewToggle.hidden = false;
             this.applyViewButton();
         }
+        this.syncTreeTools();
     };
 
     // ------------------------------------------------------------ 后端封装
@@ -1307,6 +1469,9 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
 
     Manager.prototype.load = function (path) {
         var self = this;
+        // 换目录/刷新时中止尚未完成的全部展开
+        this._treeSeq = (this._treeSeq || 0) + 1;
+        this._treeBusy = false;
         return this.listDir(path)
             .then(function (r) {
                 var next = r.path || path;
@@ -1754,6 +1919,10 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
             }
         }
         items.push({ op: 'open', label: '打开' });
+        if (type === 'dir' && this.isTree()) {
+            items.push({ op: 'expandAll', label: '全部展开' });
+            items.push({ op: 'collapseAll', label: '全部折叠' });
+        }
         if (type === 'file') {
             items.push({ op: 'edit', label: '编辑（文本）' });
             items.push({ op: 'hex', label: '查看 Hex' });
@@ -1790,6 +1959,8 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         var name = baseName(path);
         if (this.onMenuAction && this.onMenuAction(op, name, type, path)) return;
         if (op === 'open') this.openEntry(path, type);
+        else if (op === 'expandAll') this.expandSubtree(path);
+        else if (op === 'collapseAll') this.collapseSubtree(path);
         else if (op === 'edit') this.openEditor(path);
         else if (op === 'hex') this.openHexView(name, path);
         else if (op === 'tail') this.openTailView(name, path);
