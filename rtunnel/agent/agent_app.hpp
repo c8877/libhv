@@ -66,7 +66,7 @@ public:
     int allow_all = 0;
     int allow_shell = 0;
     char allow_tty[512] = {0}; // 逗号分隔的串口白名单   // 允许 OPEN_SHELL（forkpty 起 shell，默认禁用）
-    std::string config_file = "/opt/data/etc/agent.json"; // --config-file 可覆盖
+    std::string config_file = "/opt/data/etc/rtunnel-agent.json"; // --config-file 可覆盖
     bool config_loaded = false;                          // 本次启动是否成功读取配置文件
     std::string file_dir = "/opt/data/files";
     double cpu_usage = 0;
@@ -134,7 +134,7 @@ private:
     void killShellChild(LocalStream* s);
     void sendSysinfo(int mode = 0);
     std::string sysinfo_sig;
-    void onReady() override { sendSysinfo(); }
+    void onReady() override;
     void loadConfig();
     bool saveConfig();
     int applyFileConfig(const std::string& root, int rw, int max_mb, int enabled, std::string& err);
@@ -142,7 +142,15 @@ private:
     void handleFileFrame(const rtnp::Frame* f);
     void handleOtaApply(const rtnp::Frame* f);
     static bool otaProbe(const std::string& path, const std::string& expect, std::string& out);
-    uint32_t ota_restart_sid_ = 0; // exec 失败时补发 OTA_APPLY_ACK 用
+    bool hasOtaPending();
+    void clearOtaPending();
+    void scheduleAgentRestart(uint32_t sid, const std::string& installed);
+    void restartAgentNow();
+    std::string app_prefix_;            // /opt/rtunnel/agent（由 /proc/self/exe 推导）
+    std::string ota_installed_path_;    // 本次安装后的可执行文件
+    uint32_t ota_restart_sid_ = 0;      // 重启失败时补发 OTA_APPLY_ACK 用
+    int ota_flush_ticks_ = 0;           // ACK 写完后等 flush 的计时
+    bool ota_connected_ = false;        // 本次进程是否已通过 relay 认证
     struct TtyCfg {
         int enabled = 1;
         int baud = 115200;

@@ -65,7 +65,7 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
 # agent 两件套：rtunnel-agent 带本地设备详情页；rtunnel-agent-noweb 不含 Web 代码。
 # 页面是内嵌单文件 HTML，无外部资源，适合离线设备。
 option(RTUNNEL_AGENT_WEB "rtunnel-agent 内置本地 Web 设备详情页" ON)
-set(RTUNNEL_AGENT_SOURCES agent/main.cpp agent/agent_app.cpp
+set(RTUNNEL_AGENT_SOURCES agent/main.cpp agent/agent_app.cpp agent/ota_pkg.cpp
                            agent/fs_service.cpp agent/fs_session.cpp agent/fs_archive.cpp
                            agent/svc_service.cpp agent/svc_session.cpp)
 # 共享前端：同一份 fs-ui.js / svc-ui.js / file-view.js 同时给本地 Web 和 relay-admin 使用。
@@ -166,6 +166,7 @@ add_custom_target(rtunnel-deploy
             "${RTUNNEL_DEPLOY_DIR}/relay/service"
             "${RTUNNEL_DEPLOY_DIR}/relay/web"
             "${RTUNNEL_DEPLOY_DIR}/agent/bin"
+            "${RTUNNEL_DEPLOY_DIR}/agent/etc"
             "${RTUNNEL_DEPLOY_DIR}/agent/service"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:rtunnel-relay> "${RTUNNEL_DEPLOY_DIR}/relay/bin/rtunnel-relay"
@@ -180,6 +181,15 @@ add_custom_target(rtunnel-deploy
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/deploy/agent/rtunnel-agent.service"
             "${RTUNNEL_DEPLOY_DIR}/agent/service/rtunnel-agent.service"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/deploy/agent/install.sh"
+            "${RTUNNEL_DEPLOY_DIR}/agent/install.sh"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/deploy/agent/agent-boot-check.sh"
+            "${RTUNNEL_DEPLOY_DIR}/agent/bin/agent-boot-check.sh"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/deploy/agent/rtunnel-agent.json"
+            "${RTUNNEL_DEPLOY_DIR}/agent/etc/rtunnel-agent.json"
     COMMAND ${CMAKE_COMMAND} -E remove_directory
             "${RTUNNEL_DEPLOY_DIR}/relay/web/dist"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -191,6 +201,7 @@ if (RTUNNEL_AGENT_WEB)
     add_custom_target(rtunnel-deploy-web
         COMMAND ${CMAKE_COMMAND} -E make_directory
                 "${RTUNNEL_DEPLOY_DIR}/agent-web/bin"
+                "${RTUNNEL_DEPLOY_DIR}/agent-web/etc"
                 "${RTUNNEL_DEPLOY_DIR}/agent-web/service"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 $<TARGET_FILE:rtunnel-agent> "${RTUNNEL_DEPLOY_DIR}/agent-web/bin/rtunnel-agent"
@@ -198,8 +209,17 @@ if (RTUNNEL_AGENT_WEB)
                 $<TARGET_FILE:rtunnel-client> "${RTUNNEL_DEPLOY_DIR}/agent-web/bin/rtunnel-client"
         ${RTUNNEL_AGENT_WEB_STRIP_ARGS}
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${CMAKE_CURRENT_SOURCE_DIR}/deploy/agent/rtunnel-agent-web.service"
+                "${CMAKE_CURRENT_SOURCE_DIR}/deploy/agent/rtunnel-agent.service"
                 "${RTUNNEL_DEPLOY_DIR}/agent-web/service/rtunnel-agent.service"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/deploy/agent/install.sh"
+                "${RTUNNEL_DEPLOY_DIR}/agent-web/install.sh"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/deploy/agent/agent-boot-check.sh"
+                "${RTUNNEL_DEPLOY_DIR}/agent-web/bin/agent-boot-check.sh"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CMAKE_CURRENT_SOURCE_DIR}/deploy/agent/rtunnel-agent.json"
+                "${RTUNNEL_DEPLOY_DIR}/agent-web/etc/rtunnel-agent.json"
         DEPENDS rtunnel-agent rtunnel-client
         COMMENT "assembling rtunnel agent-web deploy directory")
 endif()

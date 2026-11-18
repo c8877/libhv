@@ -1,18 +1,15 @@
 #!/bin/bash
-# 把 agent 的 lite / web 二进制 gzip 压缩后上传到 relay 文件仓库的 agent/ 目录（OTA 用）。
-# 上传名形如 rtunnel-agent-lite-1.4.3.gz，OTA 页选择后会自动填入目标版本，
-# 设备侧收到后解压、校验 --version 再安装。
+# 把 package_agent.sh 生成的部署包上传到 relay 文件仓库的 agent/ 目录（OTA 用）。
 #
 # 用法：
 #   RT=https://192.168.1.133:9443 ATK=atk-xxxx ./deploy/upload_agent.sh [版本]
-#   INSECURE=1 ...        # relay 使用自签证书时跳过校验
+#   LEGACY=1 ...   # 额外上传旧的裸二进制 .gz，供尚未升级到新 agent 的设备使用
+#   INSECURE=1 ... # relay 使用自签证书时跳过校验
 #
 # 环境变量：
-#   RT                    管理台地址，必填
-#   ATK                   管理台账号 API Token（atk- 开头），必填
-#   RTUNNEL_DEPLOY_DIR    部署目录，默认 build/deploy
-#
-# 上传前先构建：cmake --build build --target rtunnel-deploy rtunnel-deploy-web
+#   RT                  管理台地址，必填
+#   ATK                 管理台账号 API Token（atk- 开头），必填
+#   RTUNNEL_DEPLOY_DIR  部署目录，默认 build/deploy
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -23,13 +20,10 @@ LITE="$DEPLOY/agent/bin/rtunnel-agent"
 WEB="$DEPLOY/agent-web/bin/rtunnel-agent"
 VER="${1:-}"
 
-if [ -z "$VER" ]; then
+if [ -z "$VER" ] && [ -x "$LITE" ]; then
     VER="$("$LITE" --version 2>/dev/null | tr -d '\r\n')"
 fi
-if [ -z "$VER" ]; then
-    echo "无法获取 agent 版本，请显式传入：$0 1.4.3" >&2
-    exit 1
-fi
+[ -n "$VER" ] || { echo "无法获取版本，请显式传入：$0 1.4.9" >&2; exit 1; }
 
 CURL=(curl -fsS)
 AUTH=(-H "Authorization: Bearer $ATK")
@@ -50,19 +44,42 @@ trap 'rm -rf "$TMPDIR_UP"' EXIT
 
 upload() {
     local src="$1" name="$2"
-    if [ ! -f "$src" ]; then
-        echo "缺少 $src，请先构建并执行 rtunnel-deploy 与 rtunnel-deploy-web" >&2
-        exit 1
-    fi
-    local gz="$TMPDIR_UP/$name.gz"
-    # -n：不写入时间戳，同样的二进制重复上传可得到一致的 gzip
-    gzip -9 -n -c "$src" > "$gz"
-    printf '上传 %s (%s → %s) ... ' "$name.gz" "$(du -h "$src" | cut -f1)" "$(du -h "$gz" | cut -f1)"
-    "${CURL[@]}" -X POST "${AUTH[@]}" --data-binary "@$gz" "$BASE/$name.gz?dir=agent" >/dev/null
+    [ -f "$src" ] || { echo "缺少 $src" >&2; exit 1; }
+    printf '上传 %s (%s) ... ' "$name" "$(du -h "$src" | cut -f1)"
+    "${CURL[@]}" -X POST "${AUTH[@]}" --data-binary "@$src" "$BASE/$name?dir=agent" >/dev/null
     echo ok
 }
 
-upload "$LITE" "rtunnel-agent-lite-$VER"
-upload "$WEB" "rtunnel-agent-web-$VER"
+# 新格式：package_agent.sh 已经压好的 tar.gz，原样上传
+for v in lite web; do
+    pkg="$DEPLOY/packages/rtunnel-agent-$v-$VER.tar.gz"
+    if [ -f "$pkg" ]; then
+        upload "$pkg" "rtunnel-agent-$v-$VER.tar.gz"
+    elif [ "$v" = lite ]; then
+        echo "缺少 $pkg，先执行：./deploy/package_agent.sh $VER" >&2
+        exit 1
+    else
+        echo "跳过 web 包（未构建）" >&2
+    fi
+done
 
-echo "完成：agent/rtunnel-agent-lite-$VER.gz、agent/rtunnel-agent-web-$VER.gz"
+# 旧格式：裸二进制 gzip，仅用于过渡期老 agent
+WITH_LEGACY=0
+if [ "${LEGACY:-0}" = "1" ]; then
+    WITH_LEGACY=1
+    upload_legacy() {
+        local src="$1" name="$2"
+        [ -x "$src" ] || return 0
+        local gz="$TMPDIR_UP/$name.gz"
+        gzip -9 -n -c "$src" > "$gz"
+        upload "$gz" "$name.gz"
+    }
+    upload_legacy "$LITE" "rtunnel-agent-lite-$VER"
+    upload_legacy "$WEB" "rtunnel-agent-web-$VER"
+fi
+
+if [ "$WITH_LEGACY" = 1 ]; then
+    echo "完成：版本 $VER（含 legacy .gz）"
+else
+    echo "完成：版本 $VER"
+fi

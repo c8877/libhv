@@ -1,0 +1,8 @@
+{
+  "shell": true,
+  "ota": true,
+  "fs_enabled": true,
+  "fs_rw": true,
+  "svc_enabled": true,
+  "svc_rw": true
+}

@@ -1,33 +1,29 @@
 [Unit]
-Description=rtunnel agent (C)
-# 本单元对应不带本地 Web 的 rtunnel-agent；需要设备详情页请用 rtunnel-agent-web.service
+Description=rtunnel agent
+# lite/web 共用同一个 unit：变体只由 bin/rtunnel-agent 软链指向哪个版本决定。
+# 旧部署使用的 rtunnel-agent-web.service 已合并；起本服务时自动停掉它。
 After=network-online.target
 Wants=network-online.target
-StartLimitBurst=5
-StartLimitIntervalSec=60
+Conflicts=rtunnel-agent-web.service
+# OTA 重启会占用一次启动额度，给 boot-check 留出回滚次数
+StartLimitBurst=10
+StartLimitIntervalSec=120
 
 [Service]
 Type=simple
 WorkingDirectory=/opt/rtunnel/agent
-# 必填参数，例如：
-#   AGENT_ARGS=--devid board01 --server 10.0.0.10 --port 18443 \
-#              --allow 22,8080 --allow-shell
-# 多 relay（按顺序故障切换，最多 8 个）：
-#   AGENT_ARGS=--devid board01 --server 10.0.0.10:18443,10.0.0.11:18443 \
-#              --allow 22 --allow-shell
+# 每台设备不同的身份与 relay 地址放在 /etc/rtunnel/agent.env：
+#   AGENT_ARGS=--devid board01 --server 10.0.0.10:18443 --allow 22,8080
+# 能力开关在 /opt/data/etc/rtunnel-agent.json，不再写进 unit。
 EnvironmentFile=-/etc/rtunnel/agent.env
-# 文件管理：relay-admin 可远程浏览/上传/下载；默认只读，需要写入时在
-# /etc/rtunnel/agent.env 里设置 AGENT_FILE_FLAGS=--file-rw
-Environment=AGENT_FILE_ROOT=/opt/data/files
-Environment=AGENT_FILE_MAX_MB=512
-Environment=AGENT_FILE_FLAGS=--file-ro
-Environment=AGENT_FILE_TOKEN_ARG=
-ExecStartPre=/bin/mkdir -p ${AGENT_FILE_ROOT}
-ExecStart=/opt/rtunnel/agent/bin/rtunnel-agent ${AGENT_ARGS} \
-          --file-root ${AGENT_FILE_ROOT} --file-max-mb ${AGENT_FILE_MAX_MB} \
-          ${AGENT_FILE_FLAGS} ${AGENT_FILE_TOKEN_ARG}
-Restart=on-failure
-RestartSec=5
+Environment=AGENT_ARGS=
+# OTA 启动计数：连续多次起不来时自动切回上一个版本
+ExecStartPre=-/opt/rtunnel/agent/bin/agent-boot-check.sh
+# 用 sh 包一层：AGENT_ARGS 为空时不会产生空参数，带空格的值也按 shell 规则拆分
+ExecStart=/bin/sh -c 'exec /opt/rtunnel/agent/bin/rtunnel-agent $AGENT_ARGS --config-file /opt/data/etc/rtunnel-agent.json'
+# 正常退出（OTA 安装完成）也要拉起，因此用 always
+Restart=always
+RestartSec=3
 LimitNOFILE=65535
 LogsDirectory=rtunnel
 

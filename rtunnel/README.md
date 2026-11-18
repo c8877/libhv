@@ -279,7 +279,7 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
 - `SYSINFO_REQ(0x19)` / `SYSINFO(0x1A)`：按需采集，relay 仅内存缓存，不落库
 - `CONFIG_SET(0x1B)` / `CONFIG_ACK(0x1C)`：在线修改端口、Shell、OTA、文件/服务能力与串口白名单，
   agent 原子生效并写入配置文件，重启后保持
-- 能力配置加载顺序：`--config-file` 指定文件（默认 `/opt/data/etc/agent.json`）→
+- 能力配置加载顺序：`--config-file` 指定文件（默认 `/opt/data/etc/rtunnel-agent.json`）→
   文件不存在时使用命令行参数；文件中未出现的字段沿用命令行值，文件中的值优先。
   首次在线修改能力或采样配置时创建该文件；采样配置也随能力配置一起落盘
 - relay 通过 `SYSINFO` 的 `caps` 获取 agent 的**运行时**能力，设备详情页「能力」表格
@@ -293,56 +293,69 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
 
 ## Agent OTA 升级
 
-OTA 不另建传输通道：升级包走「文件上传 + 文件分发」已实现的能力落到设备 `--file-dir`，
-分发任务完成后由 relay 下发安装指令，按阶段推进并统一记录在 `distribution_tasks`：
+OTA 不另建传输通道：部署包走「文件上传 + 文件分发」落到设备 `--file-dir`，
+分发完成后 relay 下发安装指令，统一记录在 `distribution_tasks`：
 
-1. 把新二进制 gzip 压缩后上传到文件仓库的 `agent/` 目录（或直接放入
-   `--admin-file-dir/agent/`）；lite / web 两个变体都上传，文件名带上版本，例如
-   `rtunnel-agent-lite-1.4.3.gz`、`rtunnel-agent-web-1.4.3.gz`；
-2. `/ota` 从 `agent/` 目录选择升级包（会自动带出文件名里的版本），
-   目标版本须与新二进制 `--version` 一致，再选设备；
-3. 传输阶段复用 `FILE_BEGIN/DATA/END`（0x1D-0x1F）：32KiB 分片、256KiB 窗口、
-   sha256 校验、断点续传，任务状态 `running`；
+1. `deploy/package_agent.sh` 生成两个部署包：
+   `rtunnel-agent-lite-<ver>.tar.gz` / `rtunnel-agent-web-<ver>.tar.gz`。
+   包内是 `manifest.json`、`install.sh`、`bin/rtunnel-agent-<variant>-<ver>`、
+   `bin/agent-boot-check.sh`、`etc/rtunnel-agent.json` 和 `service/rtunnel-agent.service`；
+   版本取二进制 `--version`，必须与文件名一致；
+2. `deploy/upload_agent.sh` 上传到文件仓库 `agent/`（需要 atk 令牌），
+   `/ota` 页从文件名解析 variant 和版本；
+3. 传输复用 `FILE_BEGIN/DATA/END`（0x1D-0x1F），落盘 `file_dir/agent/xxx.tar.gz`；
 4. relay 发 `OTA_APPLY`（0x30，JSON：path/version/size/sha256）：
-   agent 校验文件大小与 sha256 → `.gz` 包先解压到同目录临时文件 → 执行 `--version`
-   自检（`verifying`）→
-   校验通过后 ACK `verified`（`installing`）→ 复制到二进制目录、备份 `<self>.prev`、
-   原子替换、ACK `installed` 并 `execv` 重启（`confirming`）；
-5. agent 以新版本重连并上报 SYSINFO，relay 比对目标版本 → `success`。
+   agent 校验大小与 sha256 → 解包到 `.ota/`（拒绝 `..`、绝对路径、符号链接）→
+   manifest 与 `--version` 自检（`verifying`）→ ACK `verified`（`installing`）；
+5. agent 执行包内 `install.sh`：装版本化二进制和 boot-check、更新 unit、
+   配置不存在时安装默认配置（旧 `agent.json` 先迁移）、写 `state/previous` 与
+   `state/pending`，最后原子切换 `bin/rtunnel-agent -> rtunnel-agent-<variant>-<ver>`；
+6. ACK `installed`，等 ACK 写出后排队 `systemctl --no-block restart rtunnel-agent.service`
+   并退出；unit 的 `Restart=always` 兜底（`confirming`）；
+7. 新 agent 启动时 `ExecStartPre=agent-boot-check.sh` 计数；AUTH_OK 后清 pending、
+   上报 SYSINFO（含版本），relay 在 `confirming` 阶段比对目标版本 → `success`。
 
 任务状态：`scheduled→queued→running→verifying→installing→confirming→success`；
 失败分支为 `failed / timeout / conflict / unsupported / canceled`，重试沿用分发任务的
-退避与截止时间；重试会重新走传输（`.part` 续传）和安装。OTA 与普通分发任务都在
-「任务」页查看，可按 `kind=ota` 过滤，任务详情显示目标版本和当前阶段。
+退避与截止时间。OTA 与普通分发任务都在「任务」页查看，可按 `kind=ota` 过滤。
+
+失败与回滚：
+
+- 包校验/解包/`--version` 自检失败：不动现场，旧版继续跑；
+- `install.sh` 失败：软链还没切换（切换是最后一步），旧版继续跑；
+- 新版本连续 3 次没起来，或每次启动 45s 内没连上 relay：`agent-boot-check.sh` 把软链切回
+  `state/previous`，任务因版本不匹配显示 `version not confirmed`；
+- 手动回滚：`/opt/rtunnel/agent/install.sh --rollback`，然后重启服务；
+- 查看当前/上一版本：`/opt/rtunnel/agent/install.sh --status`。
 
 设备侧前置条件与限制：
 
-- agent 必须显式开启 `--allow-ota`（或 `agent.json` 的 `"ota": true`），默认关闭；
+- 配置里 `"ota": true`（部署包自带 `/opt/data/etc/rtunnel-agent.json` 默认开启）；
 - 只对常驻 agent 生效，按需 agent（`a:<user>`）拒绝；
-- 二进制所在目录必须可写；分发临时文件在 `--file-dir`；
-- 同设备已有进行中的 OTA 时，新任务记 `conflict`；设备已是目标版本且未勾选
-  「强制重装」也记 `conflict`；
-- 升级会重启 agent，正在进行的隧道/shell 会断开；
-- 失败时原二进制不变；替换后重启失败会自动回滚 `.prev`；
-- 手动回滚：设备上 `mv rtunnel-agent.prev rtunnel-agent` 后重启；
+- `/opt/rtunnel/agent/bin` 和 `/opt/data/etc` 必须可写；
+- 升级会重启 agent，隧道/shell 会断开；
+- 旧布局（`bin/rtunnel-agent` 是真实文件）第一次升级会自动迁移为版本化文件 + 软链；
 - 版本确认超时 `ota.apply_timeout_s`（默认 180s）。
+
+迁移注意：合并后的 unit 不再引用 `AGENT_WEB` / `AGENT_FILE_*`，这些能力改由
+`rtunnel-agent.json` 控制；自定义过 `AGENT_WEB`（例如局域网访问本地页）的设备，
+升级后在配置里写 `"local_web": "0.0.0.0:8080"`。`/etc/rtunnel/agent.env` 只保留
+`AGENT_ARGS` 的身份与 relay 地址。
+
+过渡期：新 agent 只接受 `.tar.gz` 部署包，老 agent 不认。`upload_agent.sh` 加
+`LEGACY=1` 会额外上传裸二进制 `.gz`，让老设备先用旧包升到带安装器的新 agent。
+
+```bash
+# 生成 lite + web 两个包（版本默认取部署二进制的 --version）
+./deploy/package_agent.sh 1.4.9
+
+# 上传（加 LEGACY=1 同时上传旧 .gz）
+RT=https://relay:9443 ATK=atk-xxxx ./deploy/upload_agent.sh 1.4.9
+```
 
 API：`POST /api/v1/distributions` 增加 `kind: "ota"` 与 `version`、`force` 字段；
 查询复用 `GET /api/v1/distributions?kind=ota` 与 `.../summary`，重试/取消复用
 `POST /api/v1/distributions/:id/retry|cancel`。
-
-升级包上传用 HTTP 客户端 + 管理台 API Token（`atk-`），仓库的 `agent/` 目录可直接创建：
-
-```bash
-# lite + web 一起 gzip 并上传；版本默认取部署二进制的 --version
-RT=https://relay:9443 ATK=atk-xxxx ./deploy/upload_agent.sh 1.4.3
-
-# 等价 curl（单个包）：先压到临时文件再上传
-gzip -9 -n -c rtunnel-agent > /tmp/rtunnel-agent-lite-1.4.3.gz
-curl -sS -X POST -H "Authorization: Bearer $ATK" \
-  --data-binary @/tmp/rtunnel-agent-lite-1.4.3.gz \
-  "$RT/api/v1/files/rtunnel-agent-lite-1.4.3.gz?dir=agent"
-```
 
 ## Web 终端（免密）
 
@@ -435,7 +448,7 @@ http://B:9443/device/<devid>/<port>/<path>
 | `--server/--port --devid` | relay 地址与设备 ID；`--server` 可重复或逗号分隔（最多 8 个，故障自动切换） |
 | `--allow 22,80` / `--allow-all` | 目标端口白名单 |
 | `--allow-shell` / `--max-idle` | 允许 `OPEN_SHELL` / 空闲自退秒数 |
-| `--allow-ota` | 允许 relay 通知安装 file_dir 中的新版本（默认关） |
+| `--allow-ota` | 允许 relay 通知安装 file_dir 中的新版本（命令行默认关；部署包自带配置为开） |
 | `--local-web [ADDR:]PORT` | 本地只读设备详情页（带 Web 构建），默认 `127.0.0.1:8080` |
 | `--file-root DIR` | 文件管理根目录，默认同 `--file-dir`（`/opt/data/files`） |
 | `--file-rw` / `--file-ro` | 允许/禁止写操作；二进制默认只读，部署服务默认开启读写 |
@@ -463,11 +476,12 @@ http://B:9443/device/<devid>/<port>/<path>
 - 响应支持 gzip 协商（`Accept-Encoding: gzip`），HTML 与 JSON 都会压缩，并带 `Vary: Accept-Encoding`
 - 数据由 agent 主循环采集并缓存，HTTP 线程只读快照，不直接访问隧道状态
 - 两个构建变体：`rtunnel-agent`（带 Web）与 `rtunnel-agent-noweb`（纯隧道，体积更小）。
-  `build/deploy/agent` / `build/deploy/agent-web` 是对应的两份部署目录，
-  `deploy/package_agent.sh` 会打包为 `rtunnel-agent-lite-*.tar.gz` 与
-  `rtunnel-agent-web-*.tar.gz`（解压后都是 `agent/`，可直接替换）。
-  这两个 tar 包用于手工部署；OTA 用的是裸二进制再 gzip 压缩的 `.gz` 包，
-  由 `deploy/upload_agent.sh` 压缩并上传到文件仓库 `agent/` 目录
+  两者共用一个 `rtunnel-agent.service`，变体只由 `bin/rtunnel-agent` 软链指向哪个版本决定；
+  带 Web 的构建默认监听 `127.0.0.1:8080`，可在 `rtunnel-agent.json` 用
+  `"local_web": "0.0.0.0:8080"` 改地址，或用 `false` 关闭。
+  `build/deploy/agent` / `build/deploy/agent-web` 是对应的两份部署目录；
+  `deploy/package_agent.sh` 生成带 `install.sh` 的 `.tar.gz` 部署包（OTA 和手工安装共用），
+  `deploy/upload_agent.sh` 上传到文件仓库 `agent/` 目录
 
 ### 文件管理（WebSocket）
 
@@ -509,7 +523,7 @@ http://B:9443/device/<devid>/<port>/<path>
 - 管理台角色：`operator` 只读，`manager/admin` 读写；agent 侧还会再按 `--file-ro/--file-rw`
   和 `--file-token` 校验一次
 - 管理台「能力配置」可启停文件服务并修改根目录、读写模式、单文件上限，
-  热生效并写入 agent 配置文件（`--config-file`，默认 `/opt/data/etc/agent.json`）
+  热生效并写入 agent 配置文件（`--config-file`，默认 `/opt/data/etc/rtunnel-agent.json`）
 - relay-admin 通过本机 relay 打开管理流，需要配置 `--admin-shell-user/--admin-shell-token`
   并确保该用户对目标设备有 ACL（与 Web 终端一致）
 - 本地 Web 与 relay 两条路径都可单独使用：lite 包没有本地页面，但管理台仍能管理文件

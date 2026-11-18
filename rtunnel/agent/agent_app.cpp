@@ -5,6 +5,7 @@
 #include "common/logging.hpp"
 #include "common/shell_spawn.hpp"
 #include "fs_session.hpp"
+#include "ota_pkg.hpp"
 #ifdef RTUNNEL_AGENT_WEB
 #include "agent_web.hpp"
 #endif
@@ -664,7 +665,10 @@ void AgentApp::loadConfig() {
     while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) js.append(buf, n);
     fclose(fp);
     auto j = nlohmann::json::parse(js, nullptr, false);
-    if (j.is_discarded() || !j.is_object()) return;
+    if (j.is_discarded() || !j.is_object()) {
+        logf_("[agent] config file %s is not valid json, using command line options", config_file.c_str());
+        return;
+    }
     config_loaded = true;
     if (j.contains("allow") && j["allow"].is_array()) {
         int idx = 0;
@@ -721,6 +725,25 @@ void AgentApp::loadConfig() {
         int v = j["fs_max_mb"].get<int>();
         if (v > 0 && v <= 10240) file_max_mb = v;
     }
+    if (j.contains("local_web")) {
+        if (j["local_web"].is_boolean() && !j["local_web"].get<bool>()) {
+#ifdef RTUNNEL_AGENT_WEB
+            web_enabled = 0;
+            web_listen.clear();
+#endif
+        }
+        else if (j["local_web"].is_string()) {
+            std::string v = j["local_web"].get<std::string>();
+#ifdef RTUNNEL_AGENT_WEB
+            if (!v.empty()) {
+                web_listen = v;
+                web_enabled = 1;
+            }
+#else
+            logf_("[agent] config local_web=%s ignored: binary built without local web", v.c_str());
+#endif
+        }
+    }
     logf_("[agent] config loaded from %s (allow=%d shell=%d)", config_file.c_str(), allow_ports[0], allow_shell);
 }
 
@@ -732,7 +755,20 @@ bool AgentApp::saveConfig() {
         if (system(cmd.c_str()) != 0) { /* 目录可能已存在 */
         }
     }
-    nlohmann::json j;
+    // 以现有文件为底稿，保留本版本不认识的键（例如手工写入的 local_web）
+    nlohmann::json j = nlohmann::json::object();
+    {
+        FILE* fp = fopen(config_file.c_str(), "r");
+        if (fp) {
+            std::string js;
+            char buf[4096];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) js.append(buf, n);
+            fclose(fp);
+            auto old = nlohmann::json::parse(js, nullptr, false);
+            if (!old.is_discarded() && old.is_object()) j = old;
+        }
+    }
     j["allow"] = nlohmann::json::array();
     for (int i = 0; i < 32 && allow_ports[i] > 0; ++i) j["allow"].push_back(allow_ports[i]);
     j["shell"] = allow_shell != 0;
@@ -744,6 +780,8 @@ bool AgentApp::saveConfig() {
     j["svc_enabled"] = svc_enabled != 0;
     j["svc_rw"] = svc_rw != 0;
     j["ota"] = allow_ota != 0;
+    // local_web 不在这里写：它来自部署配置或命令行，运行期端口占用导致的失败
+    // 不能固化成 "local_web": false，否则下次启动本地页会被永久关掉。
     j["metrics"] = nlohmann::json::object();
     {
         nlohmann::json arr = nlohmann::json::array();
@@ -1331,7 +1369,8 @@ void AgentApp::cleanupParts(const std::string& dir, time_t cutoff) {
 }
 
 // ---------------------------------------------------------------- OTA 安装
-// 文件已由 FILE_BEGIN/DATA/END 落到 file_dir；这里只校验、安装并重启。
+// 新格式：gzip(tar) 部署包（manifest.json + install.sh + bin + service + etc）。
+// 旧格式：gzip(裸二进制) 只用于把老布局设备迁到带版本化文件的新布局。
 
 static bool otaVersionOk(const std::string& v) {
     if (v.empty() || v.size() > 40) return false;
@@ -1460,12 +1499,196 @@ static bool otaCopyFile(const std::string& src, const std::string& dst, mode_t m
     return ok;
 }
 
+static std::string otaDirName(const std::string& p) {
+    size_t s = p.find_last_of('/');
+    return s == std::string::npos ? std::string() : p.substr(0, s);
+}
+
+static std::string otaBaseName(const std::string& p) {
+    size_t s = p.find_last_of('/');
+    return s == std::string::npos ? p : p.substr(s + 1);
+}
+
+static bool otaUnderSystemd() {
+    const char* inv = getenv("INVOCATION_ID");
+    return inv && inv[0] && access("/run/systemd/system", F_OK) == 0;
+}
+
+static std::string otaTail(const std::string& path, size_t max) {
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) return std::string();
+    off_t sz = lseek(fd, 0, SEEK_END);
+    if (sz < 0) {
+        close(fd);
+        return std::string();
+    }
+    off_t start = sz > (off_t)max ? sz - (off_t)max : 0;
+    if (lseek(fd, start, SEEK_SET) < 0) {
+        close(fd);
+        return std::string();
+    }
+    std::string s;
+    char buf[1024];
+    ssize_t n;
+    while ((n = read(fd, buf, sizeof(buf))) > 0) s.append(buf, (size_t)n);
+    close(fd);
+    for (auto& c : s) {
+        if (c == '\n' || c == '\r' || c == '\t') c = ' ';
+    }
+    while (!s.empty() && s.back() == ' ') s.pop_back();
+    return s;
+}
+
+// 运行 install.sh；stdout/stderr 落日志，60s 超时。
+// 返回进程退出码；-1 启动失败，-2 超时
+static int otaRunInstaller(const std::string& prefix, const std::string& pkgdir,
+                           const std::string& variant, const std::string& version, bool units,
+                           std::string& out) {
+    std::string script = pkgdir + "/install.sh";
+    std::string log = pkgdir + "/install.log";
+    int fd = open(log.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return -1;
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(fd);
+        return -1;
+    }
+    if (pid == 0) {
+        dup2(fd, 1);
+        dup2(fd, 2);
+        close(fd);
+        if (units) {
+            execl("/bin/sh", "sh", script.c_str(), "--pkg-dir", pkgdir.c_str(), "--variant", variant.c_str(),
+                  "--version", version.c_str(), "--prefix", prefix.c_str(), (char*)NULL);
+        }
+        else {
+            execl("/bin/sh", "sh", script.c_str(), "--pkg-dir", pkgdir.c_str(), "--variant", variant.c_str(),
+                  "--version", version.c_str(), "--prefix", prefix.c_str(), "--no-units", (char*)NULL);
+        }
+        _exit(127);
+    }
+    close(fd);
+    int status = 0;
+    bool done = false;
+    for (int i = 0; i < 600; ++i) {
+        pid_t r = waitpid(pid, &status, WNOHANG);
+        if (r == pid) {
+            done = true;
+            break;
+        }
+        if (r < 0) break;
+        usleep(100000);
+    }
+    if (!done) {
+        kill(pid, SIGKILL);
+        waitpid(pid, &status, 0);
+    }
+    out = otaTail(log, 1200);
+    if (!done) return -2;
+    if (!WIFEXITED(status)) return -1;
+    return WEXITSTATUS(status);
+}
+
+bool AgentApp::hasOtaPending() {
+    if (app_prefix_.empty()) return false;
+    return access((app_prefix_ + "/state/pending").c_str(), F_OK) == 0;
+}
+
+void AgentApp::clearOtaPending() {
+    if (app_prefix_.empty()) return;
+    std::string p = app_prefix_ + "/state/pending";
+    FILE* fp = fopen(p.c_str(), "r");
+    if (!fp) return;
+    char line[512] = {0};
+    bool got = fgets(line, sizeof(line), fp) != NULL;
+    fclose(fp);
+    if (!got) return;
+    // prev\tnew\ttries\tlast-start
+    std::string s(line);
+    size_t t1 = s.find('\t');
+    size_t t2 = (t1 == std::string::npos) ? std::string::npos : s.find('\t', t1 + 1);
+    std::string target = (t1 != std::string::npos && t2 != std::string::npos) ? s.substr(t1 + 1, t2 - t1 - 1) : std::string();
+    // 只有当前进程就是 pending 里的新版本才清；回滚后的旧进程要留给 boot-check 判断
+    if (target.empty() || otaBaseName(self_path) != target) return;
+    if (unlink(p.c_str()) == 0) logf_("[agent] ota pending cleared (%s)", target.c_str());
+}
+
+void AgentApp::onReady() {
+    ota_connected_ = true;
+    clearOtaPending();
+    sendSysinfo();
+}
+
+void AgentApp::scheduleAgentRestart(uint32_t sid, const std::string& installed) {
+    ota_restart_sid_ = sid;
+    ota_installed_path_ = installed;
+    ota_flush_ticks_ = 0;
+    htimer_t* t = htimer_add(
+        loop,
+        [](htimer_t* tm) {
+            auto* app = (AgentApp*)hevent_userdata(tm);
+            // ACK 还在用户态缓冲就退出会丢帧；最多等 2s。
+            // 连接已断开时 io 为空，直接重启（relay 会按超时处理）。
+            if (app->io != NULL && !hio_write_is_complete(app->io) && ++app->ota_flush_ticks_ < 40) return;
+            app->restartAgentNow();
+        },
+        50, INFINITE);
+    hevent_set_userdata(t, this);
+}
+
+void AgentApp::restartAgentNow() {
+    // 新进程要重新建立 relay 连接，不能继承旧 socket
+    for (int fd = 3; fd < 1024; ++fd) fcntl(fd, F_SETFD, FD_CLOEXEC);
+    if (otaUnderSystemd()) {
+        logf_("[agent] ota restart via systemd");
+        int rc = system("systemctl --no-block restart rtunnel-agent.service");
+        if (rc != 0) logf_("[agent] systemctl restart rc=%d", rc);
+        _exit(0);
+    }
+    std::vector<char*> av;
+    for (auto& s : saved_argv) av.push_back(const_cast<char*>(s.c_str()));
+    av.push_back(NULL);
+    execv(ota_installed_path_.c_str(), av.data());
+    int e = errno;
+    logf_("[agent] ota restart failed: %s", strerror(e));
+    // 非 systemd 布局：把软链切回上一个版本，避免下次启动继续跑坏文件
+    std::string prev;
+    {
+        FILE* fp = fopen((app_prefix_ + "/state/previous").c_str(), "r");
+        if (fp) {
+            char line[512] = {0};
+            if (fgets(line, sizeof(line), fp)) {
+                std::string s(line);
+                size_t t = s.find('\t');
+                prev = s.substr(0, t == std::string::npos ? s.size() : t);
+                while (!prev.empty() && (prev.back() == '\n' || prev.back() == '\r')) prev.pop_back();
+            }
+            fclose(fp);
+        }
+    }
+    std::string link = app_prefix_ + "/bin/rtunnel-agent";
+    if (!prev.empty() && access((app_prefix_ + "/bin/" + prev).c_str(), F_OK) == 0) {
+        std::string tmp = link + ".tmp." + std::to_string((long)getpid());
+        unlink(tmp.c_str());
+        if (symlink(prev.c_str(), tmp.c_str()) == 0) rename(tmp.c_str(), link.c_str());
+        logf_("[agent] ota rolled back to %s", prev.c_str());
+    }
+    nlohmann::json rj;
+    rj["ok"] = false;
+    rj["phase"] = "installed";
+    rj["error"] = std::string("restart failed: ") + strerror(e);
+    std::string s = rj.dump();
+    rtnp::Writer w;
+    w.str(s.c_str());
+    if (io != NULL) rtnp::send(io, rtnp::OTA_APPLY_ACK, ota_restart_sid_, w.data, (uint16_t)w.len);
+}
+
 void AgentApp::handleOtaApply(const rtnp::Frame* f) {
     auto ack = [&](bool ok, const char* phase, const std::string& err) {
         nlohmann::json j;
         j["ok"] = ok;
         if (phase && phase[0]) j["phase"] = phase;
-        if (!err.empty()) j["error"] = err;
+        if (!err.empty()) j["error"] = err.size() > 600 ? err.substr(0, 600) + "..." : err;
         if (!ok) logf_("[agent] ota: %s", err.c_str());
         std::string s = j.dump();
         rtnp::Writer w;
@@ -1526,12 +1749,10 @@ void AgentApp::handleOtaApply(const rtnp::Frame* f) {
         return;
     }
 
-    // 升级包可以是 gzip 压缩的裸二进制（.gz）：解压到同目录临时文件再校验安装
-    std::string payload = path;
-    std::string unpacked;
+    std::string raw;
     bool gz = path.size() > 3 && path.compare(path.size() - 3, 3, ".gz") == 0;
     if (gz) {
-        std::string buf, raw;
+        std::string buf;
         if (!otaReadFile(path, buf)) {
             ack(false, NULL, "read package failed");
             return;
@@ -1540,6 +1761,92 @@ void AgentApp::handleOtaApply(const rtnp::Frame* f) {
             ack(false, NULL, "gunzip failed");
             return;
         }
+        logf_("[agent] ota: gunzip %s -> %zu bytes", path.c_str(), raw.size());
+    }
+    else if (!otaReadFile(path, raw)) {
+        ack(false, NULL, "read package failed");
+        return;
+    }
+
+    // ---- 新格式：tar.gz 部署包 ----
+    if (rtopkg::isTar(raw)) {
+        if (app_prefix_.empty()) {
+            ack(false, NULL, "unexpected install layout");
+            return;
+        }
+        std::string staging = app_prefix_ + "/.ota/" + std::to_string((long)getpid());
+        rtopkg::removeTree(staging);
+        std::string err;
+        if (!rtopkg::extract(raw, staging, err)) {
+            ack(false, NULL, "unpack: " + err);
+            return;
+        }
+        struct StageGuard {
+            std::string p;
+            ~StageGuard() { if (!p.empty()) rtopkg::removeTree(p); }
+        } stage_guard{staging};
+
+        std::string pkgroot;
+        if (!rtopkg::resolveRoot(staging, pkgroot, err)) {
+            ack(false, NULL, "package: " + err);
+            return;
+        }
+        rtopkg::Manifest m;
+        if (!rtopkg::readManifest(pkgroot, m, err)) {
+            ack(false, NULL, "manifest: " + err);
+            return;
+        }
+        if (m.version != version) {
+            ack(false, NULL, "manifest version mismatch");
+            return;
+        }
+        std::string pkgbin = pkgroot + "/" + m.binary;
+        if (stat(pkgbin.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
+            ack(false, NULL, "package binary missing");
+            return;
+        }
+        chmod(pkgbin.c_str(), 0755);
+
+        std::string probe;
+        if (!otaProbe(pkgbin, version, probe)) {
+            std::string e = "version probe failed";
+            if (!probe.empty()) e += ": " + probe;
+            ack(false, NULL, e);
+            return;
+        }
+        ack(true, "verified", "");
+
+        std::string log;
+        int rc = otaRunInstaller(app_prefix_, pkgroot, m.variant, version, otaUnderSystemd(), log);
+        if (rc != 0) {
+            std::string e = (rc == -2) ? "install timeout" : "install failed";
+            if (rc > 0) e += " (" + std::to_string(rc) + ")";
+            if (!log.empty()) e += ": " + log;
+            ack(false, NULL, e);
+            return;
+        }
+        std::string installed = app_prefix_ + "/bin/rtunnel-agent-" + m.variant + "-" + version;
+        size_t ip = log.find("INSTALLED=");
+        if (ip != std::string::npos) {
+            size_t start = ip + 10;
+            size_t end = log.find(' ', start);
+            std::string v = log.substr(start, end == std::string::npos ? std::string::npos : end - start);
+            if (!v.empty() && v[0] == '/') installed = v;
+        }
+        logf_("[agent] ota installed %s -> %s", version.c_str(), installed.c_str());
+        ack(true, "installed", "");
+        scheduleAgentRestart(f->sid, installed);
+        return;
+    }
+
+    // ---- 旧格式：裸二进制。只支持老布局（bin/rtunnel-agent 是真实文件）----
+    if (otaBaseName(self_path) != "rtunnel-agent") {
+        ack(false, NULL, "legacy package on versioned layout; use .tar.gz");
+        return;
+    }
+    std::string payload = path;
+    std::string unpacked;
+    if (gz) {
         unpacked = path + ".bin-" + std::to_string((long)getpid());
         int fd = open(unpacked.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0755);
         bool wok = fd >= 0;
@@ -1562,9 +1869,7 @@ void AgentApp::handleOtaApply(const rtnp::Frame* f) {
         }
         chmod(unpacked.c_str(), 0755);
         payload = unpacked;
-        logf_("[agent] ota: gunzip %s -> %zu bytes", path.c_str(), raw.size());
     }
-    // 无论成功失败，安装流程结束后删除解压出来的临时文件
     struct UnpackGuard {
         std::string p;
         ~UnpackGuard() { if (!p.empty()) unlink(p.c_str()); }
@@ -1587,7 +1892,6 @@ void AgentApp::handleOtaApply(const rtnp::Frame* f) {
         ack(false, NULL, err);
         return;
     }
-
     std::string prev = self_path + ".prev";
     unlink(prev.c_str());
     if (rename(self_path.c_str(), prev.c_str()) != 0) {
@@ -1603,34 +1907,7 @@ void AgentApp::handleOtaApply(const rtnp::Frame* f) {
     }
     logf_("[agent] ota installed %s, restarting", version.c_str());
     ack(true, "installed", "");
-    ota_restart_sid_ = f->sid;
-    htimer_t* t = htimer_add(
-        loop,
-        [](htimer_t* tm) {
-            auto* app = (AgentApp*)hevent_userdata(tm);
-            // 所有 fd 置 CLOEXEC：新进程要重新建立 relay 连接，不能继承旧 socket
-            for (int fd = 3; fd < 1024; ++fd) fcntl(fd, F_SETFD, FD_CLOEXEC);
-            std::vector<char*> av;
-            for (auto& s : app->saved_argv) av.push_back(const_cast<char*>(s.c_str()));
-            av.push_back(NULL);
-            execv(app->self_path.c_str(), av.data());
-            // exec 失败：回滚二进制，连接还在，回报错误后继续以旧进程运行
-            int e = errno;
-            std::string prev = app->self_path + ".prev";
-            unlink(app->self_path.c_str());
-            rename(prev.c_str(), app->self_path.c_str());
-            logf_("[agent] ota restart failed: %s", strerror(e));
-            nlohmann::json rj;
-            rj["ok"] = false;
-            rj["phase"] = "installed";
-            rj["error"] = std::string("restart failed: ") + strerror(e);
-            std::string s = rj.dump();
-            rtnp::Writer w;
-            w.str(s.c_str());
-            rtnp::send(app->io, rtnp::OTA_APPLY_ACK, app->ota_restart_sid_, w.data, (uint16_t)w.len);
-        },
-        300, 1);
-    hevent_set_userdata(t, this);
+    scheduleAgentRestart(f->sid, self_path);
 }
 
 static bool readTtyCounters(const std::string& want, unsigned long long& rx, unsigned long long& tx) {
@@ -1913,6 +2190,7 @@ nlohmann::json AgentApp::buildSysinfo() {
         caps["svc_rw"] = svc_.ready() && svc_rw != 0;
         caps["svc_token"] = svc_.tokenRequired();
         caps["ota"] = allow_ota != 0;
+        caps["ota_pkg"] = "tar.gz"; // 支持 install.sh 部署包
         caps["allow_tty"] = nlohmann::json::array();
         {
             std::string list = allow_tty;
@@ -1926,6 +2204,13 @@ nlohmann::json AgentApp::buildSysinfo() {
             }
         }
         caps["version"] = hv_version();
+#ifdef RTUNNEL_AGENT_WEB
+        caps["variant"] = "web";
+        caps["local_web"] = web_enabled ? web_listen : std::string();
+#else
+        caps["variant"] = "lite";
+        caps["local_web"] = std::string();
+#endif
         caps["config_file"] = config_file;
         caps["config_loaded"] = config_loaded;
         caps["metrics"] = nlohmann::json::object();
@@ -2352,6 +2637,12 @@ int AgentApp::run(int argc, char** argv) {
         args_line += argv[i];
     }
     saved_argv.assign(argv, argv + argc);
+#ifdef RTUNNEL_AGENT_WEB
+    // 合并 lite/web 为同一个 unit 后，带 Web 的构建默认开启本地页；
+    // 配置文件里的 local_web 可以改地址或设为 false 关闭。
+    web_listen = "127.0.0.1:8080";
+    web_enabled = 1;
+#endif
     {
         char buf[4096];
         ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
@@ -2359,6 +2650,10 @@ int AgentApp::run(int argc, char** argv) {
             buf[n] = '\0';
             self_path = buf;
         }
+    }
+    {
+        std::string bin = otaDirName(self_path);
+        if (!bin.empty() && otaBaseName(bin) == "bin") app_prefix_ = otaDirName(bin);
     }
     std::vector<std::string> servers;
     for (int i = 1; i < argc; ++i) {
@@ -2407,8 +2702,10 @@ int AgentApp::run(int argc, char** argv) {
                 web_listen = "127.0.0.1:8080";
             web_enabled = 1;
 #else
-            fprintf(stderr, "本二进制未编译本地 Web；请使用带 Web 的构建，或去掉 --local-web\n");
-            return 1;
+            // 老 web unit 会传 --local-web；lite 包升级到 web 设备时忽略而不是退出，
+            // 否则服务会 crash loop，设备再也无法通过 relay 完成下一次 OTA。
+            if (i + 1 < argc && argv[i + 1][0] != '-') ++i;
+            fprintf(stderr, "[agent] --local-web ignored: binary built without local web\n");
 #endif
         }
         else if (strcmp(argv[i], "--file-root") == 0 && i + 1 < argc) {
@@ -2538,6 +2835,20 @@ int AgentApp::run(int argc, char** argv) {
         3600 * 1000, INFINITE);
     hevent_set_userdata(part_timer, this);
     loadConfig();
+    if (otaUnderSystemd() && hasOtaPending()) {
+        logf_("[agent] ota pending: waiting for relay before commit");
+        htimer_t* ota_wd = htimer_add(
+            lp,
+            [](htimer_t* t) {
+                auto* app = (AgentApp*)hevent_userdata(t);
+                if (!app->ota_connected_) {
+                    logf_("[agent] ota: relay not reached in 45s, exiting for boot-check rollback");
+                    _exit(1);
+                }
+            },
+            45000, 1);
+        hevent_set_userdata(ota_wd, this);
+    }
     {
         std::string ferr;
         int frc = applyFileConfig(file_root, file_rw, file_max_mb, file_enabled, ferr);
@@ -2564,14 +2875,17 @@ int AgentApp::run(int argc, char** argv) {
         refreshWebSnapshot();
         std::string werr;
         if (agentWebStart(this, web_listen, werr) != 0) {
-            fprintf(stderr, "[agent] local web: %s\n", werr.c_str());
-            hloop_free(&lp);
-            return 1;
+            // 本地页是辅助能力，端口被占用时不拖垮隧道/OTA
+            fprintf(stderr, "[agent] local web disabled: %s\n", werr.c_str());
+            web_enabled = 0;
+            web_listen.clear();
         }
-        logf_("[agent] local web on %s", web_listen.c_str());
-        htimer_t* web_timer = htimer_add(
-            lp, [](htimer_t* t) { ((AgentApp*)hevent_userdata(t))->refreshWebSnapshot(); }, 2000, INFINITE);
-        hevent_set_userdata(web_timer, this);
+        else {
+            logf_("[agent] local web on %s", web_listen.c_str());
+            htimer_t* web_timer = htimer_add(
+                lp, [](htimer_t* t) { ((AgentApp*)hevent_userdata(t))->refreshWebSnapshot(); }, 2000, INFINITE);
+            hevent_set_userdata(web_timer, this);
+        }
     }
 #endif
     if (series_cfgs.empty()) {

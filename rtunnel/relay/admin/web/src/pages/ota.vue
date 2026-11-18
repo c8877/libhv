@@ -36,9 +36,11 @@
       <el-button link type="primary" @click="$router.push('/files')">上传新版本 →</el-button>
     </div>
     <div class="hint muted">
-      升级包放在文件库 <code>agent/</code> 目录，用 gzip 压缩后上传，命名
-      <code>rtunnel-agent-lite-&lt;版本&gt;.gz</code> / <code>rtunnel-agent-web-&lt;版本&gt;.gz</code>；
-      选择后会自动填入版本号，设备侧自动解压安装。
+      升级包放在文件库 <code>agent/</code> 目录，命名
+      <code>rtunnel-agent-lite-&lt;版本&gt;.tar.gz</code> / <code>rtunnel-agent-web-&lt;版本&gt;.tar.gz</code>
+      （由 <code>deploy/package_agent.sh</code> 生成，含安装脚本和服务文件）；
+      选择后会自动填入版本号，设备侧解包、自检并切换软链。旧的裸二进制
+      <code>.gz</code> 仍可选中，只用于过渡期升级还没有安装器的设备。
     </div>
 
     <el-alert type="warning" :closable="false" show-icon
@@ -193,9 +195,9 @@ async function loadFiles() {
   }
 }
 
-// 从文件名末尾取版本号，例如 rtunnel-agent-lite-1.4.3.gz
+// 从文件名末尾取版本号，例如 rtunnel-agent-lite-1.4.3.tar.gz / .gz
 function versionOf(name) {
-  const base = String(name || '').replace(/\.gz$/i, '')
+  const base = String(name || '').replace(/\.tar\.gz$/i, '').replace(/\.gz$/i, '')
   const m = base.match(/(\d+\.\d+\.\d+(?:[-+][\w.]+)?)$/)
   return m ? m[1] : ''
 }
