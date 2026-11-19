@@ -132,7 +132,14 @@
                 <div class="vform-row span2">
                   <span class="vlabel">转发端口</span>
                   <div class="vcontrol">
-                    <el-input v-model="capsForm.ports" size="small" :disabled="!canCaps" placeholder="22, 8080, 8099" />
+                    <DictChips v-if="dictOk" v-model="capsForm.ports" :options="portOptions"
+                               :max="31" :can-edit="canCaps" kind="port"
+                               :manage-to="can('dict.write') ? '/dicts' : ''"
+                               placeholder="9000 或 8000-8010"
+                               empty-hint="端口字典为空，可用「+ 自定义」添加"
+                               @manage="router.push('/dicts')" />
+                    <el-input v-else v-model="portsRaw" size="small" :disabled="!canCaps"
+                              placeholder="22, 8080, 8099" />
                   </div>
                 </div>
                 <div class="vform-row">
@@ -212,11 +219,19 @@
                 <div class="vform-row span2">
                   <span class="vlabel">允许串口</span>
                   <div class="vcontrol tty-allow">
-                    <el-tag v-for="(p, i) in capsForm.allow_tty" :key="p" size="small"
-                            :closable="canTty" @close="removeAllowTty(i)">{{ p }}</el-tag>
-                    <el-input v-if="allowTtyOpen" v-model="allowTtyInput" size="small" class="allow-input"
-                              placeholder="/dev/ttyS2" @keyup.enter="addAllowTty" @blur="addAllowTty" />
-                    <el-button v-else size="small" :disabled="!canTty" @click="allowTtyOpen = true">+ 添加</el-button>
+                    <DictChips v-if="dictOk" v-model="capsForm.allow_tty" :options="ttyOptions"
+                               :max="16" :can-edit="canTty" kind="tty"
+                               :manage-to="can('dict.write') ? '/dicts' : ''"
+                               placeholder="/dev/ttyS3"
+                               empty-hint="串口字典为空，可用「+ 自定义」添加"
+                               @manage="router.push('/dicts')" />
+                    <template v-else>
+                      <el-tag v-for="(p, i) in capsForm.allow_tty" :key="p" size="small"
+                              :closable="canTty" @close="removeAllowTty(i)">{{ p }}</el-tag>
+                      <el-input v-if="allowTtyOpen" v-model="allowTtyInput" size="small" class="allow-input"
+                                placeholder="/dev/ttyS2" @keyup.enter="addAllowTty" @blur="addAllowTty" />
+                      <el-button v-else size="small" :disabled="!canTty" @click="allowTtyOpen = true">+ 添加</el-button>
+                    </template>
                     <div class="vform-note">留空时只允许串口配置里启用的设备</div>
                   </div>
                 </div>
@@ -732,6 +747,7 @@ import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import { ago, bytes, copyText, downloadJson, duration, kbPair, time } from '@/shared/utils.js'
 import FileManagerCard from '@/components/FileManagerCard.vue'
 import SvcManagerCard from '@/components/SvcManagerCard.vue'
+import DictChips from '@/components/DictChips.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -800,10 +816,16 @@ const charts = {}
 const capsOpen = ref(false)
 const capsSaving = ref(false)
 const capsForm = reactive({
-  ports: '', file_dir: '', shell: false, ota: false, allow_tty: [],
+  ports: [], file_dir: '', shell: false, ota: false, allow_tty: [],
   fsSupported: false, fs: false, fs_root: '', fs_rw: false, fs_max_mb: 512,
   svcSupported: false, svc: false, svc_rw: false,
 })
+// 没有字典读权限时退化成自由输入；portsRaw 只在该模式下使用
+const dictOk = ref(true)
+const dictLoading = ref(false)
+const dictPorts = ref([])
+const dictTtys = ref([])
+const portsRaw = ref('')
 const allowTtyOpen = ref(false)
 const allowTtyInput = ref('')
 const capsRefreshing = ref(false)
@@ -866,6 +888,75 @@ const capsChips = computed(() => {
   out.push(c.mtls ? 'mTLS' : 'mTLS 未启用')
   return out
 })
+
+// 端口字典 -> chips；区间按展开后的端口逐个计数，* 和超长区间不提供
+const portOptions = computed(() => {
+  const out = []
+  for (const it of dictPorts.value) {
+    const v = String(it.value || '').trim()
+    if (!v || v === '*') continue
+    let values = []
+    const m = v.match(/^(\d+)\s*-\s*(\d+)$/)
+    if (m) {
+      const lo = Number(m[1])
+      const hi = Number(m[2])
+      if (!(lo >= 1 && hi <= 65535 && lo <= hi)) continue
+      if (hi - lo + 1 > 31) continue
+      for (let p = lo; p <= hi; p++) values.push(p)
+    } else if (/^\d+$/.test(v)) {
+      const p = Number(v)
+      if (p < 1 || p > 65535) continue
+      values = [p]
+    } else {
+      continue
+    }
+    out.push({
+      key: 'p' + it.id,
+      label: it.name || v,
+      sub: values.length > 1 ? v + '（' + values.length + '）' : v,
+      values,
+      enabled: !!it.enabled,
+    })
+  }
+  return out
+})
+
+// 串口候选：字典 ∪ 设备串口配置 ∪ 扫描结果 ∪ sysinfo 上报
+const ttyOptions = computed(() => {
+  const out = []
+  const seen = new Set()
+  const push = (path, label, enabled) => {
+    if (!path || seen.has(path)) return
+    seen.add(path)
+    out.push({ key: 't' + path, label: label || path, sub: path, values: [path], enabled })
+  }
+  for (const it of dictTtys.value) push(String(it.value || ''), it.name, !!it.enabled)
+  for (const t of ttys.value) push(t.path, t.alias, t.enabled !== false)
+  for (const d of ttyDisc.value) push(d.path, '', true)
+  for (const s of (sys.value && sys.value.serial) || []) push(s.path, s.alias, s.enabled !== false)
+  return out
+})
+
+// 字典读不到（无权限/接口异常）时退回自由输入
+async function loadDicts() {
+  if (dictLoading.value) return
+  dictLoading.value = true
+  try {
+    const [p, t] = await Promise.all([
+      Api.get('/api/v1/permission/dicts?kind=ports&page=1&page_size=200'),
+      Api.get('/api/v1/permission/dicts?kind=ttys&page=1&page_size=200'),
+    ])
+    dictPorts.value = (p && p.items) || []
+    dictTtys.value = (t && t.items) || []
+    dictOk.value = true
+  } catch (e) {
+    dictPorts.value = []
+    dictTtys.value = []
+    dictOk.value = false
+  } finally {
+    dictLoading.value = false
+  }
+}
 
 const ttySerial = computed(() => {
   const map = {}
@@ -1234,7 +1325,11 @@ function removeAllowTty(i) {
 function fillCapsFromSys() {
   if (!sys.value) return
   const c = sys.value.caps || {}
-  capsForm.ports = (c.ports || []).join(', ')
+  const ports = Array.isArray(c.ports)
+    ? c.ports.map(Number).filter((x) => Number.isInteger(x) && x > 0 && x <= 65535)
+    : []
+  capsForm.ports = ports
+  portsRaw.value = ports.join(', ')
   capsForm.file_dir = c.file_dir || ''
   capsForm.shell = !!c.shell
   capsForm.ota = !!c.ota
@@ -1253,7 +1348,10 @@ function fillCapsFromSys() {
 
 function toggleCaps() {
   capsOpen.value = !capsOpen.value
-  if (capsOpen.value) fillCapsFromSys()
+  if (capsOpen.value) {
+    fillCapsFromSys()
+    loadDicts()
+  }
 }
 
 // 能力配置以 agent 的 sysinfo 为准：强制拉全量后重新填充
@@ -1264,17 +1362,29 @@ async function refreshCaps() {
     sysCached.value = false
     await loadSysinfo(true)
     fillCapsFromSys()
+    await loadDicts()
   } finally {
     capsRefreshing.value = false
   }
 }
 
 async function saveCaps() {
-  const raw = canCaps.value ? capsForm.ports.trim() : ''
-  const ports = raw ? raw.split(/[,\s]+/).filter(Boolean).map(Number) : []
-  if (canCaps.value && ports.some((x) => !Number.isInteger(x) || x <= 0 || x > 65535)) {
-    ElMessage.error('端口必须是 1–65535 的整数')
-    return
+  let ports = []
+  if (canCaps.value) {
+    if (dictOk.value) {
+      ports = Array.from(new Set(capsForm.ports.map(Number))).sort((a, b) => a - b)
+    } else {
+      const raw = portsRaw.value.trim()
+      ports = raw ? raw.split(/[,\s]+/).filter(Boolean).map(Number) : []
+    }
+    if (ports.length > 31) {
+      ElMessage.error('转发端口最多 31 个')
+      return
+    }
+    if (ports.some((x) => !Number.isInteger(x) || x <= 0 || x > 65535)) {
+      ElMessage.error('端口必须是 1–65535 的整数')
+      return
+    }
   }
   const body = {}
   if (canCaps.value) {
