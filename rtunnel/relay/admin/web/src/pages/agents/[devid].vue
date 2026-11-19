@@ -665,7 +665,7 @@
             <el-pagination small background layout="total, sizes, prev, pager, next"
                            :total="seriesCfg.length" :page-sizes="metricPageSizes"
                            :page-size="metricPer" v-model:current-page="metricPage"
-                           @size-change="metricPage = 1" />
+                           @size-change="onMetricSize" />
           </div>
         </el-tab-pane>
         <el-tab-pane label="串口配置" name="tty">
@@ -801,7 +801,7 @@
                 <el-pagination small background layout="total, sizes, prev, pager, next"
                                :total="filteredTtys.length" :page-sizes="ttyPageSizes"
                                :page-size="ttyPer" v-model:current-page="ttyPage"
-                               @size-change="ttyPage = 1" />
+                               @size-change="onTtySize" />
               </div>
           </div>
           <div v-show="ttyTab === 'unconfig'">
@@ -910,7 +910,7 @@
                 <el-pagination small background layout="total, sizes, prev, pager, next"
                                :total="filteredUnconfigured.length" :page-sizes="ttyPageSizes"
                                :page-size="ttyPer" v-model:current-page="ttyAddPage"
-                               @size-change="ttyAddPage = 1" />
+                               @size-change="onTtySize" />
               </div>
           </div>
         </el-tab-pane>
@@ -943,7 +943,7 @@
         <el-pagination small background layout="total, sizes, prev, pager, next"
                        :total="streams.length" :page-sizes="sessionPageSizes"
                        :page-size="sessionPer" v-model:current-page="sessionPage"
-                       @size-change="sessionPage = 1" />
+                       @size-change="onSessionSize" />
       </div>
     </div>
 
@@ -1379,7 +1379,8 @@ async function loadNet(silent, refresh) {
 
 function onNetPage() { loadNet(false, false) }
 
-function onNetSize() {
+function onNetSize(size) {
+  netPer.value = Number(size) || 10
   netPage.value = 1
   loadNet(false, false)
 }
@@ -1934,7 +1935,24 @@ function onProcSort() {
   loadProcs(true)
 }
 
-function onProcSize() {
+function onMetricSize(size) {
+  metricPer.value = Number(size) || 10
+  metricPage.value = 1
+}
+
+function onTtySize(size) {
+  ttyPer.value = Number(size) || 10
+  ttyPage.value = 1
+  ttyAddPage.value = 1
+}
+
+function onSessionSize(size) {
+  sessionPer.value = Number(size) || 10
+  sessionPage.value = 1
+}
+
+function onProcSize(size) {
+  procPer.value = Number(size) || 10
   procPage.value = 1
   loadProcs(true, false)
 }
@@ -2511,6 +2529,7 @@ async function init() {
   procSort.value = 'cpu'
   procShowKernel.value = false
   procPage.value = 1
+  procPer.value = 10
   procPeriod.value = 0
   stopProcTimer()
   procCtx.open = false

@@ -32,7 +32,7 @@ install -m 0755 build_mp135/bin/rtunnel-agent       build/deploy/agent-web/bin/r
 "${STRIP}" --strip-all build/deploy/agent/bin/rtunnel-agent
 "${STRIP}" --strip-all build/deploy/agent-web/bin/rtunnel-agent
 install -m 0644 rtunnel/deploy/agent/rtunnel-agent.service     build/deploy/agent/service/rtunnel-agent.service
-install -m 0644 rtunnel/deploy/agent/rtunnel-agent-web.service build/deploy/agent-web/service/rtunnel-agent.service
+install -m 0644 rtunnel/deploy/agent/rtunnel-agent.service     build/deploy/agent-web/service/rtunnel-agent.service
 file build/deploy/agent/bin/rtunnel-agent build/deploy/agent-web/bin/rtunnel-agent
 
 # 两份可拷贝部署包：rtunnel-agent-lite-<ver>.tar.gz / rtunnel-agent-web-<ver>.tar.gz
