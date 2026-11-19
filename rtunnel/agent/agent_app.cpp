@@ -2423,15 +2423,16 @@ void AgentApp::handleProcReq(const rtnp::Frame* f) {
     opt.kernel = rj.value("kernel", false);
     opt.page = rj.value("page", 1);
     opt.page_size = rj.value("page_size", 10);
+    bool force = rj.value("refresh", false); // 自动刷新/手动刷新要求重新采样
 
     // 预热缓存命中：用已有采样渲染，省掉 300ms 双采样
     uint64_t now_ms = wallMs();
-    {
+    if (!force) {
         rtproc::Snapshot snap;
         bool hit = false;
         {
             std::lock_guard<std::mutex> lk(proc_cache_mu_);
-            if (proc_cache_.ts && now_ms >= proc_cache_.ts && now_ms - proc_cache_.ts <= 45000) {
+            if (proc_cache_.ts && now_ms >= proc_cache_.ts && now_ms - proc_cache_.ts <= 35000) {
                 snap = proc_cache_;
                 hit = true;
             }
@@ -2443,8 +2444,6 @@ void AgentApp::handleProcReq(const rtnp::Frame* f) {
             rtnp::Writer w;
             w.str(body.c_str());
             rtnp::send(io, rtnp::PROC_INFO, sid, w.data, (uint16_t)w.len);
-            // 有请求说明页面正在看，顺延预热节奏
-            warm_next_ms_.store(now_ms + 30000);
             return;
         }
     }

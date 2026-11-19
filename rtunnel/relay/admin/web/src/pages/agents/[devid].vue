@@ -1863,7 +1863,7 @@ function renderCharts() {
 
 function onFeatTab(name) {
   if (name === 'proc') {
-    loadProcs(true)
+    loadProcs(false)
     startProcTimer()
     return
   }
@@ -1913,7 +1913,8 @@ async function loadProcs(refresh, silent) {
     const q = encodeURIComponent(procQuery.value.trim())
     const r = await Api.get(agentBase.value + '/procs?sort=' + procSort.value + '&q=' + q +
       '&kernel=' + (procShowKernel.value ? '1' : '0') +
-      '&page=' + procPage.value + '&page_size=' + procPer.value)
+      '&page=' + procPage.value + '&page_size=' + procPer.value +
+      (refresh ? '&refresh=1' : ''))
     procs.value = r
     procTs.value = Number((r && r.ts) || 0) || Date.now()
     procCached.value = !!(r && r.cached)
@@ -1931,11 +1932,11 @@ async function loadProcs(refresh, silent) {
   }
 }
 
-function onProcPage() { loadProcs(true, false) }
+function onProcPage() { loadProcs(false, false) }
 
 function onProcSort() {
   procPage.value = 1
-  loadProcs(true)
+  loadProcs(false)
 }
 
 function onMetricSize(size) {
@@ -1957,7 +1958,7 @@ function onSessionSize(size) {
 function onProcSize(size) {
   procPer.value = Number(size) || 10
   procPage.value = 1
-  loadProcs(true, false)
+  loadProcs(false, false)
 }
 
 function stopProcTimer() {
@@ -1972,7 +1973,7 @@ function startProcTimer() {
   const sec = Number(procPeriod.value) || 0
   if (sec <= 0 || featTab.value !== 'proc' || !can('device.proc.read')) return
   procTimer.value = setInterval(() => {
-    if (featTab.value === 'proc' && !document.hidden) loadProcs(false, true)
+    if (featTab.value === 'proc' && !document.hidden) loadProcs(true, true)
   }, sec * 1000)
 }
 
@@ -2064,11 +2065,11 @@ async function killProc(row) {
 watch(procQuery, () => {
   procPage.value = 1
   if (procQueryTimer) clearTimeout(procQueryTimer)
-  procQueryTimer = setTimeout(() => loadProcs(true, false), 300)
+  procQueryTimer = setTimeout(() => loadProcs(false, false), 300)
 })
 watch(procShowKernel, () => {
   procPage.value = 1
-  loadProcs(true, false)
+  loadProcs(false, false)
 })
 
 function onObsTab(name) {

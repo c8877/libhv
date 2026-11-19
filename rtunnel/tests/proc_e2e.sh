@@ -104,7 +104,17 @@ assert ms < 800, "cached request too slow: %dms" % ms
 print("warm cache ok: age=%dms, page1=%dms" % (a["cache_age_ms"], ms))
 PY
 
+# 显式刷新（自动刷新/刷新按钮）要求重新采样，不能回缓存
+curl -fsS -b "$T/c" "$A/api/v1/agents/tproc/procs?sort=pid&page=1&page_size=10&refresh=1" >"$T/force.json"
+python3 - "$T/force.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d.get("cached") is False, d.get("cached")
+assert d.get("entries"), "empty entries"
+print("force refresh ok")
+PY
 
+# 搜索：q 命中目标进程
 curl -fsS -b "$T/c" "$A/api/v1/agents/tproc/procs?q=sleep%20777" >"$T/q.json"
 python3 - "$T/q.json" "$SLEEP_PID" <<'PY'
 import json, sys

@@ -651,6 +651,7 @@ int AdminServer::handleAgentProcs(const HttpContextPtr& ctx) {
     if (page_size > 50) page_size = 50;
     req["page"] = page;
     req["page_size"] = page_size;
+    req["refresh"] = ctx->param("refresh") == "1";
     return proxyAgentProc(ctx, devid, req);
 }
 
