@@ -83,7 +83,28 @@ for x in e[:20]:
 print("list ok:", s["total"], "procs,", len(e), "entries")
 PY
 
-# 搜索：q 命中目标进程
+# 详情页预热：打开详情后 agent 后台采样，随后的进程请求应直接命中缓存
+curl -fsS -b "$T/c" "$A/api/v1/agents/tproc" >/dev/null
+sleep 0.8
+t0=$(date +%s%N)
+curl -fsS -b "$T/c" "$A/api/v1/agents/tproc/procs?sort=pid&page=1&page_size=10" >"$T/warm1.json"
+t1=$(date +%s%N)
+curl -fsS -b "$T/c" "$A/api/v1/agents/tproc/procs?sort=pid&page=2&page_size=10" >"$T/warm2.json"
+python3 - "$T/warm1.json" "$T/warm2.json" "$(( (t1 - t0) / 1000000 ))" <<'PY'
+import json, sys
+a = json.load(open(sys.argv[1]))
+b = json.load(open(sys.argv[2]))
+ms = int(sys.argv[3])
+assert a.get("cached") is True, a.get("cached")
+assert a.get("cache_age_ms", 0) > 0, a.get("cache_age_ms")
+assert b.get("cached") is True, b.get("cached")
+assert a["entries"] and b["entries"], "empty page"
+assert a["entries"][0]["pid"] != b["entries"][0]["pid"], "page 1/2 identical"
+assert ms < 800, "cached request too slow: %dms" % ms
+print("warm cache ok: age=%dms, page1=%dms" % (a["cache_age_ms"], ms))
+PY
+
+
 curl -fsS -b "$T/c" "$A/api/v1/agents/tproc/procs?q=sleep%20777" >"$T/q.json"
 python3 - "$T/q.json" "$SLEEP_PID" <<'PY'
 import json, sys

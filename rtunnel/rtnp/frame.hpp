@@ -63,6 +63,7 @@ enum Type : uint8_t {
     NET_INFO       = 0x34,   // C→B：str json 网络/IPC 快照；sid 回显请求号
     PROC_REQ       = 0x35,   // B→C：str json {op,sort,q,limit,pid,signal}；sid=请求号
     PROC_INFO      = 0x36,   // C→B：str json 进程列表/详情/信号结果；sid 回显请求号
+    WARM_REQ       = 0x37,   // B→C：str json {ttl_ms}；详情页打开期间续期，agent 后台预热缓存
 };
 
 // 错误码

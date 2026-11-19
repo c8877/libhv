@@ -2129,6 +2129,7 @@ nlohmann::json AgentApp::buildSysinfo() {
         caps["ota_pkg"] = "tar.gz"; // 支持 install.sh 部署包
         caps["net"] = true;         // 支持 NET_REQ 网络/IPC 快照
         caps["proc"] = true;        // 支持 PROC_REQ 进程列表与信号
+        caps["warm"] = true;        // 支持 WARM_REQ 详情页预采样
         caps["allow_tty"] = nlohmann::json::array();
         {
             std::string list = allow_tty;
@@ -2423,6 +2424,31 @@ void AgentApp::handleProcReq(const rtnp::Frame* f) {
     opt.page = rj.value("page", 1);
     opt.page_size = rj.value("page_size", 10);
 
+    // 预热缓存命中：用已有采样渲染，省掉 300ms 双采样
+    uint64_t now_ms = wallMs();
+    {
+        rtproc::Snapshot snap;
+        bool hit = false;
+        {
+            std::lock_guard<std::mutex> lk(proc_cache_mu_);
+            if (proc_cache_.ts && now_ms >= proc_cache_.ts && now_ms - proc_cache_.ts <= 45000) {
+                snap = proc_cache_;
+                hit = true;
+            }
+        }
+        if (hit) {
+            json out = rtproc::render(snap, opt, now_ms - snap.ts);
+            out["op"] = "list";
+            std::string body = out.dump();
+            rtnp::Writer w;
+            w.str(body.c_str());
+            rtnp::send(io, rtnp::PROC_INFO, sid, w.data, (uint16_t)w.len);
+            // 有请求说明页面正在看，顺延预热节奏
+            warm_next_ms_.store(now_ms + 30000);
+            return;
+        }
+    }
+
     if (proc_inflight_.fetch_add(1) > 2) {
         proc_inflight_.fetch_sub(1);
         json e;
@@ -2437,10 +2463,21 @@ void AgentApp::handleProcReq(const rtnp::Frame* f) {
 
     hloop_t* lp = loop;
     std::thread([this, sid, opt, lp]() {
+        rtproc::Snapshot snap;
         std::string err;
-        nlohmann::json out = rtproc::collect(opt, err);
+        nlohmann::json out;
+        if (rtproc::sample(snap, err)) {
+            out = rtproc::render(snap, opt, 0);
+            {
+                std::lock_guard<std::mutex> lk(proc_cache_mu_);
+                proc_cache_ = std::move(snap);
+            }
+            warm_next_ms_.store(wallMs() + 30000);
+        } else {
+            out = nlohmann::json::object();
+            out["error"] = err;
+        }
         out["op"] = "list";
-        if (!err.empty()) out["error"] = err;
         std::string body = out.dump();
         AsyncPost* t = new AsyncPost;
         memset(&t->ev, 0, sizeof t->ev);
@@ -2453,6 +2490,65 @@ void AgentApp::handleProcReq(const rtnp::Frame* f) {
         hloop_post_event(lp, &t->ev);
         proc_inflight_.fetch_sub(1);
     }).detach();
+}
+
+void AgentApp::ensureWarmTimer() {
+    if (warm_timer_started_) return;
+    warm_timer_started_ = true;
+    htimer_t* t = htimer_add(loop, warmTickCb, 5000, INFINITE);
+    hevent_set_userdata(t, this);
+}
+
+void AgentApp::warmTickCb(htimer_t* t) {
+    ((AgentApp*)hevent_userdata(t))->onWarmTick();
+}
+
+// 页面打开期间每 30s 预采样一次，proc 结果进缓存，服务列表刷新 Service 内部缓存。
+void AgentApp::onWarmTick() {
+    uint64_t now = wallMs();
+    uint64_t until = warm_until_ms_.load(std::memory_order_relaxed);
+    if (!until || now > until) return;
+    if (now < warm_next_ms_.load(std::memory_order_relaxed)) return;
+    int expect = 0;
+    if (!warm_inflight_.compare_exchange_strong(expect, 1)) return;
+    warm_next_ms_.store(now + 30000);
+
+    std::thread([this]() {
+        rtproc::Snapshot snap;
+        std::string err;
+        if (rtproc::sample(snap, err)) {
+            std::lock_guard<std::mutex> lk(proc_cache_mu_);
+            proc_cache_ = std::move(snap);
+        }
+        if (svc_.ready()) {
+            // 结果丢弃，只为把 Service 的列表缓存刷新到最新
+            svc_.listAsync(rtvs::ListOptions(), [](const nlohmann::json&) {});
+        }
+        warm_inflight_.store(0);
+    }).detach();
+}
+
+// B→C：设备详情页打开后按 ttl 续期预热（默认 120s，每 30s 采样一次）。
+void AgentApp::handleWarmReq(const rtnp::Frame* f) {
+    using nlohmann::json;
+    uint64_t ttl = 120000;
+    if (f->len) {
+        rtnp::Reader r(f->payload, f->len);
+        std::string req = r.strBytes();
+        json j = json::parse(req, nullptr, false);
+        if (!j.is_discarded() && j.is_object()) {
+            long long t = j.value("ttl_ms", 120000LL);
+            if (t >= 30000 && t <= 600000) ttl = (uint64_t)t;
+        }
+    }
+    uint64_t now = wallMs();
+    uint64_t old = warm_until_ms_.exchange(now + ttl);
+    ensureWarmTimer();
+    if (!old || now > old) {
+        // 首次或已过期：立即预热一轮，页面随后进来的请求就能命中
+        warm_next_ms_.store(now);
+        onWarmTick();
+    }
 }
 
 void AgentApp::onFrame(rtnp::Frame* f) {
@@ -2474,6 +2570,7 @@ void AgentApp::onFrame(rtnp::Frame* f) {
     case rtnp::OTA_CANCEL: handleOtaApply(f); return;
     case rtnp::NET_REQ: handleNetReq(f); return;
     case rtnp::PROC_REQ: handleProcReq(f); return;
+    case rtnp::WARM_REQ: handleWarmReq(f); return;
     case rtnp::TTY_LIST_REQ: {
         nlohmann::json arr = nlohmann::json::array();
         DIR* d = opendir("/dev");

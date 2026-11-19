@@ -395,7 +395,8 @@ void Service::listAsync(const ListOptions& opt, Callback cb) {
             return;
         }
         long long now = nowMs();
-        if (!list_cache_.is_null() && now - list_cache_ms_ < 10000) {
+        // 详情页预热每 30s 刷新一次，缓存留 40s 保证期间的请求都能直接命中
+        if (!list_cache_.is_null() && now - list_cache_ms_ < 40000) {
             cb(applyListPage(list_cache_, opt));
             return;
         }

@@ -71,6 +71,7 @@
 
           <el-alert v-if="procErr" :title="procErr" type="warning" :closable="false" show-icon class="net-alert" />
           <div v-else-if="procTs" class="net-cached proc-ts">采集于 {{ time(procTs) }}
+            <span v-if="procCached" class="muted">· 缓存</span>
             <span v-if="procTruncated" class="muted">· 结果已截断，可搜索缩小范围</span>
           </div>
 
@@ -1138,6 +1139,7 @@ const procs = ref(null)
 const procLoading = ref(false)
 const procErr = ref('')
 const procTs = ref(0)
+const procCached = ref(false)
 const procPage = ref(1)
 const procPer = ref(10)
 const procPeriod = ref(0)
@@ -1913,7 +1915,8 @@ async function loadProcs(refresh, silent) {
       '&kernel=' + (procShowKernel.value ? '1' : '0') +
       '&page=' + procPage.value + '&page_size=' + procPer.value)
     procs.value = r
-    procTs.value = Date.now()
+    procTs.value = Number((r && r.ts) || 0) || Date.now()
+    procCached.value = !!(r && r.cached)
     procErr.value = ''
     const pages = Number(r && r.pages) || 1
     if (procPage.value > pages) procPage.value = pages
@@ -2525,6 +2528,7 @@ async function init() {
   procs.value = null
   procErr.value = ''
   procTs.value = 0
+  procCached.value = false
   procQuery.value = ''
   procSort.value = 'cpu'
   procShowKernel.value = false

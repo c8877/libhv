@@ -24,8 +24,22 @@ struct Options {
     int page_size = 10;       // 1..200
 };
 
-// {"ts","sample_ms","summary":{...},"entries":[...],"truncated":bool}
+// 一次采样得到的全量进程行与系统摘要；可按需缓存后反复渲染分页结果。
+struct Snapshot {
+    nlohmann::json rows = nlohmann::json::array();
+    nlohmann::json summary = nlohmann::json::object();
+    uint64_t ts = 0;
+};
+
+// 采样：两次读 /proc（间隔 300ms）算 CPU%，不做过滤/排序/分页。
 // err 只在读不到 /proc 时非空。
+bool sample(Snapshot& out, std::string& err);
+
+// 按选项过滤、排序、分页并限制单帧预算；age_ms > 0 表示来自缓存。
+nlohmann::json render(const Snapshot& snap, const Options& opt, uint64_t age_ms);
+
+// {"ts","sample_ms","summary":{...},"entries":[...],"truncated":bool}
+// 等价于 sample + render(age_ms=0)。
 nlohmann::json collect(const Options& opt, std::string& err);
 
 // 单进程详情：命令行、exe、cwd、内存明细、CPU 时间、启动时间。

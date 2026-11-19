@@ -206,9 +206,12 @@ std::string lower(const std::string& s) {
 
 } // namespace
 
-nlohmann::json collect(const Options& opt, std::string& err) {
+bool sample(Snapshot& out, std::string& err) {
     using nlohmann::json;
     err.clear();
+    out.rows = json::array();
+    out.summary = json::object();
+    out.ts = 0;
 
     long hz = sysconf(_SC_CLK_TCK);
     if (hz <= 0) hz = 100;
@@ -228,7 +231,7 @@ nlohmann::json collect(const Options& opt, std::string& err) {
     std::vector<int> pids = listPids();
     if (pids.empty()) {
         err = "read /proc failed";
-        return json::object();
+        return false;
     }
 
     struct Row {
@@ -282,52 +285,9 @@ nlohmann::json collect(const Options& opt, std::string& err) {
         else ++sleeping;
     }
 
-    std::string q = lower(opt.q);
-    std::vector<size_t> hits;
+    json jr = json::array();
     for (size_t i = 0; i < rows.size(); ++i) {
-        if (!opt.kernel && rows[i].kernel) continue;
-        if (!q.empty()) {
-            std::string hay = std::to_string(rows[i].st.pid) + " " + rows[i].st.comm + " " +
-                              rows[i].cmd + " " + rows[i].user;
-            if (lower(hay).find(q) == std::string::npos) continue;
-        }
-        hits.push_back(i);
-    }
-
-    std::string sort = opt.sort;
-    if (sort != "mem" && sort != "pid" && sort != "start") sort = "cpu";
-    if (sort == "mem") {
-        std::stable_sort(hits.begin(), hits.end(),
-                         [&](size_t a, size_t b) { return rows[a].ss.rss_kb > rows[b].ss.rss_kb; });
-    } else if (sort == "pid") {
-        std::stable_sort(hits.begin(), hits.end(),
-                         [&](size_t a, size_t b) { return rows[a].st.pid < rows[b].st.pid; });
-    } else if (sort == "start") {
-        std::stable_sort(hits.begin(), hits.end(),
-                         [&](size_t a, size_t b) { return rows[a].st.starttime > rows[b].st.starttime; });
-    } else {
-        std::stable_sort(hits.begin(), hits.end(),
-                         [&](size_t a, size_t b) { return rows[a].cpu > rows[b].cpu; });
-    }
-
-    int page_size = opt.page_size;
-    if (page_size < 1) page_size = 10;
-    if (page_size > 200) page_size = 200;
-    int matched = (int)hits.size();
-    int pages = matched > 0 ? (matched + page_size - 1) / page_size : 1;
-    int page = opt.page;
-    if (page < 1) page = 1;
-    if (page > pages) page = pages;
-    size_t begin = (size_t)(page - 1) * (size_t)page_size;
-    size_t end = begin + (size_t)page_size;
-    if (begin > hits.size()) begin = hits.size();
-    if (end > hits.size()) end = hits.size();
-
-    json entries = json::array();
-    size_t used = 0;
-    bool truncated = false;
-    for (size_t k = begin; k < end; ++k) {
-        Row& r = rows[hits[k]];
+        const Row& r = rows[i];
         json e;
         e["pid"] = r.st.pid;
         e["ppid"] = r.st.ppid;
@@ -342,13 +302,7 @@ nlohmann::json collect(const Options& opt, std::string& err) {
         e["cmd"] = r.cmd;
         e["kernel"] = r.kernel;
         e["start_ms"] = boot_ms + (uint64_t)(r.st.starttime * 1000 / hz);
-        std::string s = e.dump();
-        if (used + s.size() > kBudget) {
-            truncated = true;
-            break;
-        }
-        used += s.size();
-        entries.push_back(std::move(e));
+        jr.push_back(std::move(e));
     }
 
     long long mem_total = 0, mem_avail = 0;
@@ -378,20 +332,101 @@ nlohmann::json collect(const Options& opt, std::string& err) {
     summary["mem_total_kb"] = mem_total;
     summary["mem_used_kb"] = mem_total > mem_avail ? mem_total - mem_avail : 0;
     summary["uptime_sec"] = (long long)uptime;
+
+    out.rows = std::move(jr);
+    out.summary = std::move(summary);
+    out.ts = wallMs();
+    return true;
+}
+
+nlohmann::json render(const Snapshot& snap, const Options& opt, uint64_t age_ms) {
+    using nlohmann::json;
+    const json& rows = snap.rows;
+
+    std::string q = lower(opt.q);
+    std::vector<size_t> hits;
+    hits.reserve(rows.size());
+    for (size_t i = 0; i < rows.size(); ++i) {
+        const json& r = rows[i];
+        if (!opt.kernel && r.value("kernel", false)) continue;
+        if (!q.empty()) {
+            std::string hay = std::to_string(r.value("pid", 0)) + " " + r.value("comm", std::string()) + " " +
+                              r.value("cmd", std::string()) + " " + r.value("user", std::string());
+            if (lower(hay).find(q) == std::string::npos) continue;
+        }
+        hits.push_back(i);
+    }
+
+    std::string sort = opt.sort;
+    if (sort != "mem" && sort != "pid" && sort != "start") sort = "cpu";
+    if (sort == "mem") {
+        std::stable_sort(hits.begin(), hits.end(), [&](size_t a, size_t b) {
+            return rows[a].value("rss_kb", 0LL) > rows[b].value("rss_kb", 0LL);
+        });
+    } else if (sort == "pid") {
+        std::stable_sort(hits.begin(), hits.end(), [&](size_t a, size_t b) {
+            return rows[a].value("pid", 0) < rows[b].value("pid", 0);
+        });
+    } else if (sort == "start") {
+        std::stable_sort(hits.begin(), hits.end(), [&](size_t a, size_t b) {
+            return rows[a].value("start_ms", 0ULL) > rows[b].value("start_ms", 0ULL);
+        });
+    } else {
+        std::stable_sort(hits.begin(), hits.end(), [&](size_t a, size_t b) {
+            return rows[a].value("cpu_pct", 0.0) > rows[b].value("cpu_pct", 0.0);
+        });
+    }
+
+    int page_size = opt.page_size;
+    if (page_size < 1) page_size = 10;
+    if (page_size > 200) page_size = 200;
+    int matched = (int)hits.size();
+    int pages = matched > 0 ? (matched + page_size - 1) / page_size : 1;
+    int page = opt.page;
+    if (page < 1) page = 1;
+    if (page > pages) page = pages;
+    size_t begin = (size_t)(page - 1) * (size_t)page_size;
+    size_t end = begin + (size_t)page_size;
+    if (begin > hits.size()) begin = hits.size();
+    if (end > hits.size()) end = hits.size();
+
+    json entries = json::array();
+    size_t used = 0;
+    bool truncated = false;
+    for (size_t k = begin; k < end; ++k) {
+        const json& r = rows[hits[k]];
+        std::string s = r.dump();
+        if (used + s.size() > kBudget) {
+            truncated = true;
+            break;
+        }
+        used += s.size();
+        entries.push_back(r);
+    }
+
+    json summary = snap.summary;
     summary["matched"] = matched;
 
     json out;
-    out["ts"] = wallMs();
+    out["ts"] = snap.ts;
     out["sample_ms"] = kSampleMs;
     out["sort"] = sort;
-    out["summary"] = summary;
+    out["summary"] = std::move(summary);
     out["entries"] = std::move(entries);
     out["truncated"] = truncated;
     out["page"] = page;
     out["page_size"] = page_size;
     out["pages"] = pages;
     out["matched"] = matched;
+    out["cached"] = age_ms > 0;
+    out["cache_age_ms"] = age_ms;
     return out;
+}
+
+nlohmann::json collect(const Options& opt, std::string& err) {
+    Snapshot snap;
+    if (!sample(snap, err)) return nlohmann::json::object();
+    return render(snap, opt, 0);
 }
 
 nlohmann::json detail(int pid, std::string& err) {

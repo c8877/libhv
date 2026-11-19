@@ -1107,6 +1107,21 @@ bool RelayServer::startProcQuery(const char* devid, const std::string& json, uin
     return true;
 }
 
+void RelayServer::warmDevice(const char* devid, uint32_t ttl_ms) {
+    RelayConn* a = findAgent(devid);
+    if (!a || !a->io) return;
+    uint64_t now = (uint64_t)time(NULL) * 1000;
+    auto it = warm_sent_ms.find(devid);
+    if (it != warm_sent_ms.end() && now - it->second < 15000) return;
+    warm_sent_ms[devid] = now;
+    nlohmann::json j;
+    j["ttl_ms"] = ttl_ms;
+    std::string s = j.dump();
+    rtnp::Writer w;
+    w.str(s.c_str());
+    rtnp::send(a->io, rtnp::WARM_REQ, 0, w.data, (uint16_t)w.len);
+}
+
 std::string RelayServer::takeProcResult(uint32_t rid) {
     auto it = proc_results.find(rid);
     if (it == proc_results.end()) return std::string();

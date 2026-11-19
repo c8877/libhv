@@ -346,6 +346,7 @@ sequenceDiagram
 | `0x34` | `NET_INFO` | C→B | `str json`：TCP/UDP/UNIX/IPC 快照，sid 回显 |
 | `0x35` | `PROC_REQ` | B→C | `str json {op:list|detail|signal,...}`，sid 为请求号 |
 | `0x36` | `PROC_INFO` | C→B | `str json`：进程列表/详情/信号结果，sid 回显 |
+| `0x37` | `WARM_REQ` | B→C | `str json {ttl_ms}`：详情页打开期间续期，agent 每 30s 预热进程/服务缓存 |
 
 **会话级（stream_id > 0）**
 

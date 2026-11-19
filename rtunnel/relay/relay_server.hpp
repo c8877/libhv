@@ -187,6 +187,7 @@ public:
     uint32_t net_seq = 0;
     std::unordered_map<uint32_t, std::string> proc_results;
     uint32_t proc_seq = 0;
+    std::unordered_map<std::string, uint64_t> warm_sent_ms; // devid -> 上次下发预热的时间
     struct NetCache { std::string json; uint64_t ts = 0; };
     std::unordered_map<std::string, NetCache> net_cache;
     std::unordered_map<uint32_t, std::string> metric_data_results;
@@ -282,6 +283,8 @@ private:
     void         netCachePut(const std::string& key, const std::string& json);
     bool         startProcQuery(const char* devid, const std::string& json, uint32_t& rid, std::string& err);
     std::string  takeProcResult(uint32_t rid);
+    // 详情页打开期间让 agent 每 30s 预采样（同一设备 15s 内只下发一次）
+    void         warmDevice(const char* devid, uint32_t ttl_ms = 120000);
     bool         pushTtyCfg(const char* devid, const std::string& json);
     bool         pushMetricCfg(const char* devid, const std::string& json);
     bool         startMetricQuery(const char* devid, const std::string& json, uint32_t& rid, std::string& err);

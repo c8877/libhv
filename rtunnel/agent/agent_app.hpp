@@ -7,6 +7,7 @@
 #include "common/tunnel_link.hpp"
 #include "fs_service.hpp"
 #include "svc_session.hpp"
+#include "proc_service.hpp"
 #include <string>
 #include <vector>
 #include <map>
@@ -118,6 +119,13 @@ private:
     uint64_t net_ipc_ts_ = 0;
     std::atomic<int> net_inflight_{0};
     std::atomic<int> proc_inflight_{0};
+    // 设备详情页打开期间（WARM_REQ 续期）每 30s 预采样进程与服务，供后续请求直接命中
+    std::mutex proc_cache_mu_;
+    rtproc::Snapshot proc_cache_;
+    std::atomic<uint64_t> warm_until_ms_{0};
+    std::atomic<uint64_t> warm_next_ms_{0};
+    std::atomic<int> warm_inflight_{0};
+    bool warm_timer_started_ = false;
     uint64_t started_ms_ = 0; // loop 启动时刻（单调时钟，算 agent 运行时长）
     rtfs::Service fs_;
     rtvs::Service svc_;
@@ -149,6 +157,10 @@ private:
     void handleOtaApply(const rtnp::Frame* f);
     void handleNetReq(const rtnp::Frame* f);
     void handleProcReq(const rtnp::Frame* f);
+    void handleWarmReq(const rtnp::Frame* f);
+    void onWarmTick();
+    void ensureWarmTimer();
+    static void warmTickCb(htimer_t* t);
     static bool otaProbe(const std::string& path, const std::string& expect, std::string& out);
     bool hasOtaPending();
     void clearOtaPending();

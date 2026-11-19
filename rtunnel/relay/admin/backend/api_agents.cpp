@@ -88,6 +88,8 @@ void AdminServer::handleAgentDetail(const HttpContextPtr& ctx) {
         if (c == NULL) return std::string("{}");
         found = 1;
         json j;
+        // 详情页（含 5s 轮询）打开期间让 agent 预热进程与服务缓存
+        relay_->warmDevice(c->devid);
         j["devid"] = c->devid;
         j["online"] = true;
         fillConnCommon(c, j);
@@ -631,6 +633,10 @@ int AdminServer::proxyAgentProc(const HttpContextPtr& ctx, const std::string& de
 
 int AdminServer::handleAgentProcs(const HttpContextPtr& ctx) {
     std::string devid = ctx->param("devid");
+    callRelay([this, &devid]() {
+        relay_->warmDevice(devid.c_str());
+        return std::string("1");
+    });
     json req;
     req["op"] = "list";
     std::string sort = ctx->param("sort");

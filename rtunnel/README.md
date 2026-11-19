@@ -301,7 +301,9 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
   `GET .../procs/{pid}`、`POST .../procs/signal {pid,signal}`
   （agent 扫 `/proc/<pid>/{stat,status,cmdline}`，CPU 用 300ms 双采样的单核百分比；
   PID 1 与 agent 自身拒绝发信号；分页与排序在 agent 完成，只回传当前页。查看需要
-  `device.proc.read`，信号需要 `device.proc.signal`，两者都受账号设备范围限制）
+  `device.proc.read`，信号需要 `device.proc.signal`，两者都受账号设备范围限制。
+  打开设备详情页时 relay 下发 `WARM_REQ`，agent 在页面打开期间每 30s 预采样进程与
+  服务列表；随后的翻页/搜索直接命中缓存（`cached:true`），不再等 300ms 双采样）
 - 文件分发：文件页「分发」选择设备与时间窗，创建 `POST /api/v1/distributions`，
   `GET /api/v1/distributions` 查询进度；经 RTNP 推到设备 `--file-dir/dir`
   （默认 `/opt/data/files`），32KiB 分片、256KiB 窗口、sha256 校验、断点续传、
