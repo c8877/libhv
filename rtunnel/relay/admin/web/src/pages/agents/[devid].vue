@@ -27,21 +27,183 @@
       </el-descriptions>
     </div>
 
-    <div class="panel">
-      <div class="panel-head">
-        <h2>存储</h2>
-      </div>
-      <div v-for="d in disks" :key="d.mount" class="disk">
-        <div class="disk-top">
-          <span class="mount">{{ d.mount }}</span>
-          <span v-if="d.fstype" class="fs">{{ d.fstype }}</span>
-          <span class="pct" :class="diskTone(d.pct)">{{ d.pct }}%</span>
-        </div>
-        <el-progress :percentage="d.pct" :stroke-width="6" :show-text="false" :color="diskColor(d.pct)" />
-        <div class="size">{{ d.used }} / {{ d.total }} {{ d.unit }}</div>
-      </div>
-      <el-empty v-if="sys && !disks.length" description="无挂载点" :image-size="60" />
-      <el-skeleton v-else-if="!sys" :rows="3" animated />
+    <div class="panel feat-panel">
+      <el-tabs v-model="featTab" class="feat-tabs" @tab-change="onFeatTab">
+        <el-tab-pane label="存储" name="storage">
+          <div v-for="d in disks" :key="d.mount" class="disk">
+            <div class="disk-top">
+              <span class="mount">{{ d.mount }}</span>
+              <span v-if="d.fstype" class="fs">{{ d.fstype }}</span>
+              <span class="pct" :class="diskTone(d.pct)">{{ d.pct }}%</span>
+            </div>
+            <el-progress :percentage="d.pct" :stroke-width="6" :show-text="false" :color="diskColor(d.pct)" />
+            <div class="size">{{ d.used }} / {{ d.total }} {{ d.unit }}</div>
+          </div>
+          <el-empty v-if="sys && !disks.length" description="无挂载点" :image-size="60" />
+          <el-skeleton v-else-if="!sys" :rows="3" animated />
+
+        </el-tab-pane>
+        <el-tab-pane label="文件" name="file" lazy>
+          <FileManagerCard embedded :devid="devid" :sys="sys" :can-edit="canEdit" />
+        </el-tab-pane>
+        <el-tab-pane label="服务" name="service" lazy>
+          <SvcManagerCard embedded :devid="devid" :sys="sys" :can-edit="canEdit" />
+        </el-tab-pane>
+        <el-tab-pane label="能力" name="caps">
+          <div v-if="sys" class="kv-rows">
+            <div class="kv-row">
+              <span class="caret" />
+              <span class="k">agent 版本</span>
+              <span class="v mono">{{ sys.version || '—' }}</span>
+            </div>
+            <div class="kv-row">
+              <span class="caret" />
+              <span class="k">启动参数</span>
+              <span class="v"><code class="args">{{ sys.args || '—' }}</code></span>
+            </div>
+            <div class="kv-row">
+              <span class="caret" />
+              <span class="k">能力</span>
+              <span class="v chips">
+                <el-tag v-for="c in capsChips" :key="c" size="small" effect="plain">{{ c }}</el-tag>
+                <span v-if="!capsChips.length" class="muted">—</span>
+              </span>
+            </div>
+            <div v-if="sys" class="caps-edit">
+                <div class="caps-runtime">
+                  <span class="muted">运行时配置</span>
+                  <code class="mono">{{ (sys.caps && sys.caps.config_file) || '—' }}</code>
+                  <el-tag v-if="!sys.caps || !sys.caps.config_file" size="small" type="info" effect="plain">agent 未上报</el-tag>
+                  <el-tag v-else-if="sys.caps.config_loaded" size="small" type="success" effect="plain">已从文件加载</el-tag>
+                  <el-tag v-else size="small" type="warning" effect="plain">使用命令行参数</el-tag>
+                  <span class="muted">agent {{ (sys.caps && sys.caps.version) || '—' }}</span>
+                  <span class="spacer" />
+                  <el-button link size="small" :loading="capsRefreshing" @click="refreshCaps">刷新运行时</el-button>
+                </div>
+                <div class="caps-form">
+                  <div class="caps-grid">
+                    <div class="vform-section span2">访问控制</div>
+                    <div class="vform-row span2">
+                      <span class="vlabel">转发端口</span>
+                      <div class="vcontrol">
+                        <DictChips v-if="dictOk" v-model="capsForm.ports" :options="portOptions"
+                                   :max="31" :can-edit="canCaps" kind="port"
+                                   :manage-to="can('dict.write') ? '/dicts' : ''"
+                                   placeholder="9000 或 8000-8010"
+                                   empty-hint="端口字典为空，可用「+ 自定义」添加"
+                                   @manage="router.push('/dicts')" />
+                        <el-input v-else v-model="portsRaw" size="small" :disabled="!canCaps"
+                                  placeholder="22, 8080, 8099" />
+                      </div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">允许 Shell</span>
+                      <div class="vcontrol">
+                        <el-checkbox v-model="capsForm.shell" :disabled="!canCaps">允许</el-checkbox>
+                      </div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">OTA 升级</span>
+                      <div class="vcontrol">
+                        <el-switch v-model="capsForm.ota" :disabled="!canOta" />
+                        <span class="muted">接收升级包</span>
+                      </div>
+                    </div>
+
+                    <div class="vform-section span2">文件与数据</div>
+                    <div class="vform-row span2">
+                      <span class="vlabel">数据目录</span>
+                      <div class="vcontrol stacked">
+                        <el-input v-model="capsForm.file_dir" size="small" :disabled="!canCaps" placeholder="/opt/data/files" />
+                        <div class="vform-note">升级包存放目录；文件根目录留空时也用它</div>
+                      </div>
+                    </div>
+                    <template v-if="capsForm.fsSupported">
+                      <div class="vform-row">
+                        <span class="vlabel">启用文件管理</span>
+                        <div class="vcontrol">
+                          <el-checkbox v-model="capsForm.fs" :disabled="!canCaps">启用</el-checkbox>
+                        </div>
+                      </div>
+                      <div class="vform-row">
+                        <span class="vlabel">允许写入</span>
+                        <div class="vcontrol">
+                          <el-switch v-model="capsForm.fs_rw" :disabled="!canCaps || !capsForm.fs" />
+                          <span class="muted">关闭后只读</span>
+                        </div>
+                      </div>
+                      <div class="vform-row span2">
+                        <span class="vlabel">文件根目录</span>
+                        <div class="vcontrol">
+                          <el-input v-model="capsForm.fs_root" size="small" :disabled="!canCaps || !capsForm.fs"
+                                    placeholder="/opt/data/files" />
+                        </div>
+                      </div>
+                      <div class="vform-row">
+                        <span class="vlabel">单文件上限</span>
+                        <div class="vcontrol">
+                          <el-input-number v-model="capsForm.fs_max_mb" :min="1" :max="10240"
+                                           :disabled="!canCaps || !capsForm.fs" size="small" />
+                          <span class="vunit">MB</span>
+                        </div>
+                      </div>
+                    </template>
+                    <div v-else class="vform-note muted span2">当前 agent 版本不支持文件管理配置，升级 agent 后可在此开启</div>
+
+                    <div class="vform-section span2">服务管理</div>
+                    <template v-if="capsForm.svcSupported">
+                      <div class="vform-row">
+                        <span class="vlabel">启用服务管理</span>
+                        <div class="vcontrol">
+                          <el-checkbox v-model="capsForm.svc" :disabled="!canCaps">启用</el-checkbox>
+                          <span class="muted">systemd 状态与日志</span>
+                        </div>
+                      </div>
+                      <div class="vform-row">
+                        <span class="vlabel">允许控制</span>
+                        <div class="vcontrol">
+                          <el-switch v-model="capsForm.svc_rw" :disabled="!canCaps || !capsForm.svc" />
+                          <span class="muted">关闭后只读</span>
+                        </div>
+                      </div>
+                    </template>
+                    <div v-else class="vform-note muted span2">当前 agent 版本不支持服务管理配置</div>
+
+                    <div class="vform-section span2">串口白名单</div>
+                    <div class="vform-row span2">
+                      <span class="vlabel">允许串口</span>
+                      <div class="vcontrol tty-allow">
+                        <DictChips v-if="dictOk" v-model="capsForm.allow_tty" :options="ttyOptions"
+                                   :max="16" :can-edit="canTty" kind="tty"
+                                   :manage-to="can('dict.write') ? '/dicts' : ''"
+                                   placeholder="/dev/ttyS3"
+                                   empty-hint="串口字典为空，可用「+ 自定义」添加"
+                                   @manage="router.push('/dicts')" />
+                        <template v-else>
+                          <el-tag v-for="(p, i) in capsForm.allow_tty" :key="p" size="small"
+                                  :closable="canTty" @close="removeAllowTty(i)">{{ p }}</el-tag>
+                          <el-input v-if="allowTtyOpen" v-model="allowTtyInput" size="small" class="allow-input"
+                                    placeholder="/dev/ttyS2" @keyup.enter="addAllowTty" @blur="addAllowTty" />
+                          <el-button v-else size="small" :disabled="!canTty" @click="allowTtyOpen = true">+ 添加</el-button>
+                        </template>
+                        <div class="vform-note">留空时只允许串口配置里启用的设备</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="form-actions">
+                    <span v-if="!canCaps && !canOta && !canTty" class="muted">没有修改能力配置的权限</span>
+                    <span class="spacer" />
+                    <el-button size="small" @click="fillCapsFromSys()">重置</el-button>
+                    <el-button size="small" type="primary" :loading="capsSaving"
+                               :disabled="!canCaps && !canOta && !canTty" @click="saveCaps">保存并下发</el-button>
+                  </div>
+                </div>
+            </div>
+          </div>
+          <el-skeleton v-else :rows="3" animated />
+
+        </el-tab-pane>
+      </el-tabs>
     </div>
 
     <div class="panel net-panel">
@@ -235,10 +397,6 @@
       <div v-if="netTruncated" class="muted net-foot">结果已截断，仅显示前 {{ netRows.length }} 条</div>
     </div>
 
-    <FileManagerCard :devid="devid" :sys="sys" :can-edit="canEdit" />
-
-    <SvcManagerCard :devid="devid" :sys="sys" :can-edit="canEdit" />
-
     <div class="panel">
       <div class="panel-head"><h2>系统信息</h2></div>
       <el-descriptions v-if="sys" :column="sysCols" size="small" border>
@@ -255,173 +413,6 @@
       </el-descriptions>
       <el-alert v-else-if="sysErr" :title="sysErr" type="warning" :closable="false" show-icon />
       <el-skeleton v-else :rows="2" animated />
-    </div>
-
-    <div class="panel">
-      <div class="panel-head"><h2>能力配置</h2></div>
-      <div v-if="sys" class="kv-rows">
-        <div class="kv-row">
-          <span class="caret" />
-          <span class="k">agent 版本</span>
-          <span class="v mono">{{ sys.version || '—' }}</span>
-        </div>
-        <div class="kv-row">
-          <span class="caret" />
-          <span class="k">启动参数</span>
-          <span class="v"><code class="args">{{ sys.args || '—' }}</code></span>
-        </div>
-        <div class="kv-row caps-toggle"
-             :class="{ clickable: canOpenCaps, open: capsOpen }"
-             :role="canOpenCaps ? 'button' : null"
-             :tabindex="canOpenCaps ? 0 : null"
-             :aria-expanded="canOpenCaps ? String(capsOpen) : null"
-             @click="onCapsToggle"
-             @keydown.enter.prevent="onCapsToggle"
-             @keydown.space.prevent="onCapsToggle">
-          <span class="caret">
-            <el-icon v-if="canOpenCaps" :class="{ open: capsOpen }"><ArrowRight /></el-icon>
-          </span>
-          <span class="k">能力</span>
-          <span class="v chips">
-            <el-tag v-for="c in capsChips" :key="c" size="small" effect="plain">{{ c }}</el-tag>
-            <span v-if="!capsChips.length" class="muted">—</span>
-          </span>
-          <span v-if="canOpenCaps" class="caps-hint">{{ capsOpen ? '点击收起' : '点击配置' }}</span>
-        </div>
-        <el-collapse-transition>
-          <div v-if="capsOpen && sys" class="caps-edit">
-            <div class="caps-runtime">
-              <span class="muted">运行时配置</span>
-              <code class="mono">{{ (sys.caps && sys.caps.config_file) || '—' }}</code>
-              <el-tag v-if="!sys.caps || !sys.caps.config_file" size="small" type="info" effect="plain">agent 未上报</el-tag>
-              <el-tag v-else-if="sys.caps.config_loaded" size="small" type="success" effect="plain">已从文件加载</el-tag>
-              <el-tag v-else size="small" type="warning" effect="plain">使用命令行参数</el-tag>
-              <span class="muted">agent {{ (sys.caps && sys.caps.version) || '—' }}</span>
-              <span class="spacer" />
-              <el-button link size="small" :loading="capsRefreshing" @click="refreshCaps">刷新运行时</el-button>
-            </div>
-            <div class="caps-form">
-              <div class="caps-grid">
-                <div class="vform-section span2">访问控制</div>
-                <div class="vform-row span2">
-                  <span class="vlabel">转发端口</span>
-                  <div class="vcontrol">
-                    <DictChips v-if="dictOk" v-model="capsForm.ports" :options="portOptions"
-                               :max="31" :can-edit="canCaps" kind="port"
-                               :manage-to="can('dict.write') ? '/dicts' : ''"
-                               placeholder="9000 或 8000-8010"
-                               empty-hint="端口字典为空，可用「+ 自定义」添加"
-                               @manage="router.push('/dicts')" />
-                    <el-input v-else v-model="portsRaw" size="small" :disabled="!canCaps"
-                              placeholder="22, 8080, 8099" />
-                  </div>
-                </div>
-                <div class="vform-row">
-                  <span class="vlabel">允许 Shell</span>
-                  <div class="vcontrol">
-                    <el-checkbox v-model="capsForm.shell" :disabled="!canCaps">允许</el-checkbox>
-                  </div>
-                </div>
-                <div class="vform-row">
-                  <span class="vlabel">OTA 升级</span>
-                  <div class="vcontrol">
-                    <el-switch v-model="capsForm.ota" :disabled="!canOta" />
-                    <span class="muted">接收升级包</span>
-                  </div>
-                </div>
-
-                <div class="vform-section span2">文件与数据</div>
-                <div class="vform-row span2">
-                  <span class="vlabel">数据目录</span>
-                  <div class="vcontrol stacked">
-                    <el-input v-model="capsForm.file_dir" size="small" :disabled="!canCaps" placeholder="/opt/data/files" />
-                    <div class="vform-note">升级包存放目录；文件根目录留空时也用它</div>
-                  </div>
-                </div>
-                <template v-if="capsForm.fsSupported">
-                  <div class="vform-row">
-                    <span class="vlabel">启用文件管理</span>
-                    <div class="vcontrol">
-                      <el-checkbox v-model="capsForm.fs" :disabled="!canCaps">启用</el-checkbox>
-                    </div>
-                  </div>
-                  <div class="vform-row">
-                    <span class="vlabel">允许写入</span>
-                    <div class="vcontrol">
-                      <el-switch v-model="capsForm.fs_rw" :disabled="!canCaps || !capsForm.fs" />
-                      <span class="muted">关闭后只读</span>
-                    </div>
-                  </div>
-                  <div class="vform-row span2">
-                    <span class="vlabel">文件根目录</span>
-                    <div class="vcontrol">
-                      <el-input v-model="capsForm.fs_root" size="small" :disabled="!canCaps || !capsForm.fs"
-                                placeholder="/opt/data/files" />
-                    </div>
-                  </div>
-                  <div class="vform-row">
-                    <span class="vlabel">单文件上限</span>
-                    <div class="vcontrol">
-                      <el-input-number v-model="capsForm.fs_max_mb" :min="1" :max="10240"
-                                       :disabled="!canCaps || !capsForm.fs" size="small" />
-                      <span class="vunit">MB</span>
-                    </div>
-                  </div>
-                </template>
-                <div v-else class="vform-note muted span2">当前 agent 版本不支持文件管理配置，升级 agent 后可在此开启</div>
-
-                <div class="vform-section span2">服务管理</div>
-                <template v-if="capsForm.svcSupported">
-                  <div class="vform-row">
-                    <span class="vlabel">启用服务管理</span>
-                    <div class="vcontrol">
-                      <el-checkbox v-model="capsForm.svc" :disabled="!canCaps">启用</el-checkbox>
-                      <span class="muted">systemd 状态与日志</span>
-                    </div>
-                  </div>
-                  <div class="vform-row">
-                    <span class="vlabel">允许控制</span>
-                    <div class="vcontrol">
-                      <el-switch v-model="capsForm.svc_rw" :disabled="!canCaps || !capsForm.svc" />
-                      <span class="muted">关闭后只读</span>
-                    </div>
-                  </div>
-                </template>
-                <div v-else class="vform-note muted span2">当前 agent 版本不支持服务管理配置</div>
-
-                <div class="vform-section span2">串口白名单</div>
-                <div class="vform-row span2">
-                  <span class="vlabel">允许串口</span>
-                  <div class="vcontrol tty-allow">
-                    <DictChips v-if="dictOk" v-model="capsForm.allow_tty" :options="ttyOptions"
-                               :max="16" :can-edit="canTty" kind="tty"
-                               :manage-to="can('dict.write') ? '/dicts' : ''"
-                               placeholder="/dev/ttyS3"
-                               empty-hint="串口字典为空，可用「+ 自定义」添加"
-                               @manage="router.push('/dicts')" />
-                    <template v-else>
-                      <el-tag v-for="(p, i) in capsForm.allow_tty" :key="p" size="small"
-                              :closable="canTty" @close="removeAllowTty(i)">{{ p }}</el-tag>
-                      <el-input v-if="allowTtyOpen" v-model="allowTtyInput" size="small" class="allow-input"
-                                placeholder="/dev/ttyS2" @keyup.enter="addAllowTty" @blur="addAllowTty" />
-                      <el-button v-else size="small" :disabled="!canTty" @click="allowTtyOpen = true">+ 添加</el-button>
-                    </template>
-                    <div class="vform-note">留空时只允许串口配置里启用的设备</div>
-                  </div>
-                </div>
-              </div>
-              <div class="form-actions">
-                <span v-if="!canCaps && !canOta && !canTty" class="muted">没有修改能力配置的权限</span>
-                <span class="spacer" />
-                <el-button size="small" @click="capsOpen = false">取消</el-button>
-                <el-button size="small" type="primary" :loading="capsSaving"
-                           :disabled="!canCaps && !canOta && !canTty" @click="saveCaps">保存并下发</el-button>
-              </div>
-            </div>
-          </div>
-        </el-collapse-transition>
-      </div>
-      <el-skeleton v-else :rows="3" animated />
     </div>
 
     <div class="panel">
@@ -914,7 +905,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Chart from 'chart.js/auto'
-import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import { ArrowLeft } from '@element-plus/icons-vue'
 import { Api } from '@/shared/api.js'
 import { can, canManage } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
@@ -934,7 +925,6 @@ const canEdit = computed(() => canManage())
 const canCaps = computed(() => can('device.caps.write'))
 const canOta = computed(() => can('device.ota.write'))
 const canTty = computed(() => can('device.tty.write'))
-const canOpenCaps = computed(() => canCaps.value || canOta.value || canTty.value)
 
 const detail = ref(null)
 const sys = ref(null)
@@ -987,7 +977,7 @@ const loadEl = ref(null)
 const rateEl = ref(null)
 const charts = {}
 
-const capsOpen = ref(false)
+const featTab = ref('storage')
 const capsSaving = ref(false)
 const capsForm = reactive({
   ports: [], file_dir: '', shell: false, ota: false, allow_tty: [],
@@ -1627,9 +1617,10 @@ function renderCharts() {
   }
 }
 
-function onCapsToggle() {
-  if (!canOpenCaps.value) return
-  toggleCaps()
+function onFeatTab(name) {
+  if (name !== 'caps') return
+  if (sys.value) fillCapsFromSys()
+  loadDicts()
 }
 
 function addAllowTty() {
@@ -1670,14 +1661,6 @@ function fillCapsFromSys() {
   capsForm.svcSupported = Object.prototype.hasOwnProperty.call(c, 'svc')
   capsForm.svc = !!c.svc
   capsForm.svc_rw = !!c.svc_rw
-}
-
-function toggleCaps() {
-  capsOpen.value = !capsOpen.value
-  if (capsOpen.value) {
-    fillCapsFromSys()
-    loadDicts()
-  }
 }
 
 // 能力配置以 agent 的 sysinfo 为准：强制拉全量后重新填充
@@ -1754,7 +1737,6 @@ async function saveCaps() {
   capsSaving.value = true
   try {
     const r = await Api.put(agentBase.value + '/caps', body)
-    capsOpen.value = false
     const fsMissed = body.fs !== undefined &&
       !(typeof r.fs === 'boolean' && r.fs === body.fs && (!body.fs || r.fs_root === body.fs_root))
     const svcMissed = body.svc !== undefined &&
@@ -1772,6 +1754,7 @@ async function saveCaps() {
     sysFull = false
     sysCached.value = false
     await loadAll({ silent: true })
+    if (sys.value) fillCapsFromSys()
   } catch (e) {
     ElMessage.error('失败：' + e.message)
   } finally {
@@ -2021,7 +2004,6 @@ async function deleteTty(row) {
   }
 }
 
-
 async function takeoverTty(row) {
   const name = row.alias || row.path
   try {
@@ -2081,7 +2063,7 @@ async function init() {
   ttyExpandedPath.value = ''
   ttyAddPath.value = ''
   addMetricOpen.value = false
-  capsOpen.value = false
+  featTab.value = 'storage'
   seriesPopOpen.value = false
   net.value = null
   netErr.value = ''
@@ -2127,6 +2109,12 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* ---- 存储/文件/服务/能力 合并卡片 ---- */
+.feat-panel { padding-top: 12px; }
+.feat-tabs :deep(.el-tabs__header) { margin-bottom: 14px; }
+.feat-tabs :deep(.el-tabs__item) { padding: 0 18px; }
+.feat-tabs :deep(.el-tabs__item:first-child) { padding-left: 2px; }
+.feat-tabs :deep(.el-tabs__content) { padding-top: 2px; }
 .period { width: 84px; }
 .back { margin-right: 2px; padding: 0 6px; }
 .back .el-icon { margin-right: 2px; }
@@ -2216,9 +2204,11 @@ onBeforeUnmount(() => {
 .caps-hint { flex: none; margin-left: auto; font-size: 12px; line-height: 24px; color: var(--el-text-color-secondary); }
 .args { font-size: 12px; color: var(--el-text-color-regular); white-space: pre-wrap; word-break: break-all; }
 .caps-edit {
+  margin-top: 12px;
   padding: 12px 12px 14px;
   background: var(--el-fill-color-lighter);
-  border-top: 1px solid var(--el-border-color-lighter);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
 }
 .caps-form { max-width: 100%; }
 .caps-runtime { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; font-size: 12px; }
@@ -2305,6 +2295,7 @@ onBeforeUnmount(() => {
 @media (max-width: 599px) {
   .period { width: 76px; }
   .panel-head { flex-wrap: wrap; }
+  .feat-tabs :deep(.el-tabs__item) { padding: 0 12px; }
   .tty-search { width: 100%; }
   .tty-form { grid-template-columns: 1fr; }
   .metric-edit, .tty-edit { padding-left: 12px; }

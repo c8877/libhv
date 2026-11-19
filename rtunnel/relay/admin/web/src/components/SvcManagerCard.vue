@@ -1,9 +1,9 @@
 <template>
-  <div class="panel">
-    <div class="panel-head">
-      <h2>服务管理</h2>
-      <span class="spacer" />
+  <div :class="embedded ? 'tab-body' : 'panel'">
+    <div :class="embedded ? 'tab-toolbar' : 'panel-head'">
+      <h2 v-if="!embedded">服务管理</h2>
       <el-tag v-if="sys && svcOn" :type="writable ? 'success' : 'info'" size="small">{{ writable ? '可控制' : '只读' }}</el-tag>
+      <span class="spacer" />
       <el-button type="primary" size="small" :disabled="!sys || !svcOn" @click="toggle">{{ expanded ? '收起服务管理' : '打开服务管理' }}</el-button>
     </div>
     <div class="svc-card">
@@ -26,7 +26,8 @@ const RtunnelSvc = window.RtunnelSvc
 const props = defineProps({
   devid: { type: String, default: '' },
   sys: { type: Object, default: null },
-  canEdit: { type: Boolean, default: false }
+  canEdit: { type: Boolean, default: false },
+  embedded: { type: Boolean, default: false }   // 嵌在 tab 里时不画 .panel 与外层标题
 })
 
 const caps = computed(() => (props.sys && props.sys.caps) || {})
@@ -86,6 +87,13 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.tab-body { min-width: 0; }
+.tab-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
 .svc-card {
   padding: 4px 0 2px;
 }
