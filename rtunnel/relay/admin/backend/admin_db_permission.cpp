@@ -382,6 +382,8 @@ const PermResDef kPermRes[] = {
     {"device.tty.write", "设备", "修改串口", "串口配置与 allow_tty 白名单"},
     {"device.metrics.write", "设备", "修改采样", "采样指标、间隔与保留点数"},
     {"device.kick", "设备", "断开连接", "强制下线设备或结束会话"},
+    {"device.proc.read", "设备", "查看进程", "进程列表、资源占用与进程详情"},
+    {"device.proc.signal", "设备", "管理进程", "结束进程或发送信号"},
 
     {"file.read", "文件", "查看文件", "仓库列表、下载、Hex 与尾部"},
     {"file.write", "文件", "写入文件", "上传、新建、编辑、移动"},
@@ -437,10 +439,12 @@ std::vector<std::string> presetResources(const std::string& builtin) {
                     k != "account.delete";
         } else if (builtin == "operator") {
             allow = k == "device.view" || k == "device.terminal" || k == "device.port" ||
-                    k == "device.tty.read" || k == "file.read" || k == "file.write" ||
+                    k == "device.tty.read" || k == "device.proc.read" || k == "device.proc.signal" ||
+                    k == "file.read" || k == "file.write" ||
                     k == "dict.read" || k == "account.read" || k == "settings.read";
         } else if (builtin == "viewer") {
-            allow = k == "device.view" || k == "device.tty.read" || k == "settings.read";
+            allow = k == "device.view" || k == "device.tty.read" || k == "device.proc.read" ||
+                    k == "settings.read";
         }
         if (allow) out.push_back(k);
     }

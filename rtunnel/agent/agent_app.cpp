@@ -6,6 +6,7 @@
 #include "common/shell_spawn.hpp"
 #include "fs_session.hpp"
 #include "net_service.hpp"
+#include "proc_service.hpp"
 #include "ota_pkg.hpp"
 #ifdef RTUNNEL_AGENT_WEB
 #include "agent_web.hpp"
@@ -2127,6 +2128,7 @@ nlohmann::json AgentApp::buildSysinfo() {
         caps["ota"] = allow_ota != 0;
         caps["ota_pkg"] = "tar.gz"; // 支持 install.sh 部署包
         caps["net"] = true;         // 支持 NET_REQ 网络/IPC 快照
+        caps["proc"] = true;        // 支持 PROC_REQ 进程列表与信号
         caps["allow_tty"] = nlohmann::json::array();
         {
             std::string list = allow_tty;
@@ -2268,20 +2270,21 @@ uint64_t wallMs() {
         .count();
 }
 
-// NET_INFO 必须回到 loop 线程再写，避免连接已重连时往旧 io 发送
-struct NetPost {
+// 异步采集结果必须回到 loop 线程再写，避免连接已重连时往旧 io 发送
+struct AsyncPost {
     hevent_t ev;
     AgentApp* app = nullptr;
+    uint16_t type = rtnp::NET_INFO;
     uint32_t sid = 0;
     std::string body;
 };
 
-void netPostCb(hevent_t* ev) {
-    NetPost* p = static_cast<NetPost*>(hevent_userdata(ev));
+void asyncPostCb(hevent_t* ev) {
+    AsyncPost* p = static_cast<AsyncPost*>(hevent_userdata(ev));
     if (p->app && p->app->io) {
         rtnp::Writer w;
         w.str(p->body.c_str());
-        rtnp::send(p->app->io, rtnp::NET_INFO, p->sid, w.data, (uint16_t)w.len);
+        rtnp::send(p->app->io, p->type, p->sid, w.data, (uint16_t)w.len);
     }
     delete p;
 }
@@ -2350,15 +2353,97 @@ void AgentApp::handleNetReq(const rtnp::Frame* f) {
             if (out.contains("summary")) out["summary"]["ipc"] = cached.value("total", 0);
         }
         std::string body = out.dump();
-        NetPost* t = new NetPost;
+        AsyncPost* t = new AsyncPost;
         memset(&t->ev, 0, sizeof t->ev);
-        t->ev.cb = netPostCb;
+        t->ev.cb = asyncPostCb;
         t->ev.userdata = t;
         t->app = this;
+        t->type = rtnp::NET_INFO;
         t->sid = sid;
         t->body = body;
         hloop_post_event(lp, &t->ev);
         net_inflight_.fetch_sub(1);
+    }).detach();
+}
+
+void AgentApp::handleProcReq(const rtnp::Frame* f) {
+    using nlohmann::json;
+    uint32_t sid = f->sid;
+    std::string req;
+    if (f->len) {
+        rtnp::Reader r(f->payload, f->len);
+        req = r.strBytes();
+    }
+    json rj = json::parse(req, nullptr, false);
+    if (rj.is_discarded() || !rj.is_object()) rj = json::object();
+    std::string op = rj.value("op", std::string("list"));
+
+    // 信号操作很快，直接在 loop 里做；列表要两次采样，放后台线程
+    if (op == "signal") {
+        int pid = rj.value("pid", 0);
+        int sig = rj.value("signal", SIGTERM);
+        std::string err;
+        bool ok = rtproc::sendSignal(pid, sig, err);
+        json out;
+        out["op"] = "signal";
+        out["ok"] = ok;
+        out["pid"] = pid;
+        out["signal"] = sig;
+        if (!ok) out["error"] = err;
+        std::string body = out.dump();
+        rtnp::Writer w;
+        w.str(body.c_str());
+        rtnp::send(io, rtnp::PROC_INFO, sid, w.data, (uint16_t)w.len);
+        return;
+    }
+
+    if (op == "detail") {
+        int pid = rj.value("pid", 0);
+        std::string err;
+        json out = rtproc::detail(pid, err);
+        out["op"] = "detail";
+        if (!err.empty()) out["error"] = err;
+        std::string body = out.dump();
+        rtnp::Writer w;
+        w.str(body.c_str());
+        rtnp::send(io, rtnp::PROC_INFO, sid, w.data, (uint16_t)w.len);
+        return;
+    }
+
+    rtproc::Options opt;
+    opt.sort = rj.value("sort", std::string("cpu"));
+    opt.q = rj.value("q", std::string());
+    opt.limit = rj.value("limit", 200);
+
+    if (proc_inflight_.fetch_add(1) > 2) {
+        proc_inflight_.fetch_sub(1);
+        json e;
+        e["op"] = "list";
+        e["error"] = "busy";
+        std::string body = e.dump();
+        rtnp::Writer w;
+        w.str(body.c_str());
+        rtnp::send(io, rtnp::PROC_INFO, sid, w.data, (uint16_t)w.len);
+        return;
+    }
+
+    hloop_t* lp = loop;
+    std::thread([this, sid, opt, lp]() {
+        std::string err;
+        nlohmann::json out = rtproc::collect(opt, err);
+        out["op"] = "list";
+        if (!err.empty()) out["error"] = err;
+        std::string body = out.dump();
+        AsyncPost* t = new AsyncPost;
+        memset(&t->ev, 0, sizeof t->ev);
+        t->ev.cb = asyncPostCb;
+        t->ev.userdata = t;
+        t->app = this;
+        t->type = rtnp::PROC_INFO;
+        t->sid = sid;
+        t->body = body;
+        hloop_post_event(lp, &t->ev);
+        proc_inflight_.fetch_sub(1);
     }).detach();
 }
 
@@ -2380,6 +2465,7 @@ void AgentApp::onFrame(rtnp::Frame* f) {
     case rtnp::OTA_APPLY:
     case rtnp::OTA_CANCEL: handleOtaApply(f); return;
     case rtnp::NET_REQ: handleNetReq(f); return;
+    case rtnp::PROC_REQ: handleProcReq(f); return;
     case rtnp::TTY_LIST_REQ: {
         nlohmann::json arr = nlohmann::json::array();
         DIR* d = opendir("/dev");

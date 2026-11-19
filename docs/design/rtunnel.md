@@ -344,6 +344,8 @@ sequenceDiagram
 | `0x22` | `FILE_CHECK_ACK` | C→B | `str json {exists,size,sha256,error}` |
 | `0x33` | `NET_REQ` | B→C | `str json {scope,proc,limit,refresh}`，sid 为请求号 |
 | `0x34` | `NET_INFO` | C→B | `str json`：TCP/UDP/UNIX/IPC 快照，sid 回显 |
+| `0x35` | `PROC_REQ` | B→C | `str json {op:list|detail|signal,...}`，sid 为请求号 |
+| `0x36` | `PROC_INFO` | C→B | `str json`：进程列表/详情/信号结果，sid 回显 |
 
 **会话级（stream_id > 0）**
 
@@ -538,6 +540,8 @@ operator（Shell、Web、文件上传下载）/ viewer（概览、设备列表�
 | GET | `/api/v1/agents`、`/api/v1/agents/{devid}` | 设备列表/详情 |
 | GET | `/api/v1/agents/{devid}/{sysinfo,ttys,metrics/series}` | 设备运行信息、串口、指标 |
 | GET | `/api/v1/agents/{devid}/net` | 网络与 IPC 快照（scope/proc/limit/refresh） |
+| GET | `/api/v1/agents/{devid}/procs[/{pid}]` | 进程列表与详情 |
+| POST | `/api/v1/agents/{devid}/procs/signal` | 结束进程 / 发送信号 |
 | PUT | `/api/v1/agents/{devid}/caps` | 在线改端口与 Shell（Shell 仅 admin） |
 | POST | `/api/v1/agents/{devid}/kick` | 强制设备下线（agent 自动重连） |
 | GET | `/api/v1/clients`、`/api/v1/streams` | 客户端与流列表 |

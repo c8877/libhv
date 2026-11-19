@@ -66,7 +66,8 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
 option(RTUNNEL_AGENT_WEB "rtunnel-agent 内置本地 Web 设备详情页" ON)
 set(RTUNNEL_AGENT_SOURCES agent/main.cpp agent/agent_app.cpp agent/ota_pkg.cpp
                            agent/fs_service.cpp agent/fs_session.cpp agent/fs_archive.cpp
-                           agent/svc_service.cpp agent/svc_session.cpp agent/net_service.cpp)
+                           agent/svc_service.cpp agent/svc_session.cpp agent/net_service.cpp
+                           agent/proc_service.cpp)
 # 共享前端：同一份 fs-ui.js / svc-ui.js / file-view.js 同时给本地 Web 和 relay-admin 使用。
 # 本地 Web 需要把 JS 嵌进二进制，这里在配置阶段生成头文件。
 set(RTUNNEL_FS_UI_JS "${CMAKE_CURRENT_SOURCE_DIR}/shared/web/fs-ui.js")

@@ -49,6 +49,82 @@
         <el-tab-pane label="服务" name="service" lazy>
           <SvcManagerCard embedded :devid="devid" :sys="sys" :can-edit="canEdit" />
         </el-tab-pane>
+        <el-tab-pane v-if="can('device.proc.read')" label="进程" name="proc" lazy>
+          <div class="tab-bar">
+            <span class="muted">{{ procSummaryText }}</span>
+            <span class="spacer" />
+            <el-input v-model="procQuery" size="small" clearable class="proc-search"
+                      placeholder="PID / 名称 / 命令行 / 用户" />
+            <el-select v-model="procSort" size="small" class="proc-sort" @change="loadProcs(true)">
+              <el-option label="按 CPU" value="cpu" />
+              <el-option label="按内存" value="mem" />
+              <el-option label="按 PID" value="pid" />
+              <el-option label="按启动" value="start" />
+            </el-select>
+            <el-checkbox v-model="procShowKernel" size="small">内核线程</el-checkbox>
+            <el-button size="small" @click="loadProcs(true)">刷新</el-button>
+          </div>
+
+          <el-alert v-if="procErr" :title="procErr" type="warning" :closable="false" show-icon class="net-alert" />
+          <div v-else-if="procTs" class="net-cached proc-ts">采集于 {{ time(procTs) }}
+            <span v-if="procTruncated" class="muted">· 结果已截断，可搜索缩小范围</span>
+          </div>
+
+          <el-table v-if="!isPhone" :data="procPageRows" v-loading="procLoading" size="small"
+                    @row-contextmenu="openProcMenu" @row-dblclick="showProcDetail">
+            <el-table-column label="PID" width="82">
+              <template #default="{ row }"><span class="mono">{{ row.pid }}</span></template>
+            </el-table-column>
+            <el-table-column label="用户" min-width="96" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.user || '—' }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="86">
+              <template #default="{ row }">
+                <el-tag size="small" :type="procStateTone(row)">{{ row.state_text }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="CPU" width="82" align="right">
+              <template #default="{ row }"><span class="num">{{ row.cpu_pct.toFixed(1) }}%</span></template>
+            </el-table-column>
+            <el-table-column label="内存" width="88" align="right">
+              <template #default="{ row }"><span class="num">{{ kbText(row.rss_kb) }}</span></template>
+            </el-table-column>
+            <el-table-column label="线程" width="70" align="right">
+              <template #default="{ row }"><span class="num">{{ row.threads }}</span></template>
+            </el-table-column>
+            <el-table-column label="命令" min-width="260" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span class="mono pcmd">{{ row.cmd }}</span>
+                <el-tag v-if="row.kernel" size="small" type="info" effect="plain" class="inline-tag">内核</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="启动时间" width="150">
+              <template #default="{ row }"><span class="muted">{{ time(row.start_ms) }}</span></template>
+            </el-table-column>
+            <template #empty><div class="muted">没有匹配的进程</div></template>
+          </el-table>
+
+          <div v-else class="net-cards" v-loading="procLoading">
+            <div v-for="r in procPageRows" :key="r.pid" class="net-card">
+              <div class="nc-top">
+                <span class="mono strong">{{ r.pid }}</span>
+                <span class="muted">{{ r.comm }}</span>
+                <span class="spacer" />
+                <el-tag size="small" :type="procStateTone(r)">{{ r.state_text }}</el-tag>
+                <el-button size="small" link type="primary" @click.stop="openProcMenuAt($event, r)">操作</el-button>
+              </div>
+              <div class="nc-line muted mono">{{ r.cmd }}</div>
+              <div class="nc-line">CPU {{ r.cpu_pct.toFixed(1) }}% · 内存 {{ kbText(r.rss_kb) }} · {{ r.threads }} 线程</div>
+              <div class="nc-line muted">{{ r.user }} · {{ time(r.start_ms) }}</div>
+            </div>
+            <div v-if="!procPageRows.length" class="muted pad">没有匹配的进程</div>
+          </div>
+
+          <div v-if="procVisible.length > procPer" class="net-pager">
+            <el-pagination small layout="total, prev, pager, next" :total="procVisible.length"
+                           :page-size="procPer" v-model:current-page="procPage" />
+          </div>
+        </el-tab-pane>
         <el-tab-pane label="能力" name="caps">
           <div v-if="sys" class="kv-rows">
             <div class="kv-row">
@@ -888,6 +964,61 @@
         <el-button type="primary" :loading="ttySaving" @click="saveTty">保存并下发</el-button>
       </template>
     </el-dialog>
+
+    <teleport to="body">
+      <div v-if="procCtx.open" class="pctx-menu" :style="{ left: procCtx.x + 'px', top: procCtx.y + 'px' }"
+           @contextmenu.prevent @mousedown.stop>
+        <div class="pctx-title mono">PID {{ procCtx.row && procCtx.row.pid }}</div>
+        <button class="pctx-item" @click="procCtxAction('detail')">详情</button>
+        <template v-if="can('device.proc.signal')">
+          <button class="pctx-item" @click="procCtxAction('signal')">信号</button>
+          <button class="pctx-item danger" @click="procCtxAction('kill')">结束进程</button>
+        </template>
+      </div>
+    </teleport>
+
+    <el-dialog v-model="procDetailOpen" title="进程详情" width="560px">
+      <div v-if="procDetail" class="proc-detail">
+        <div class="pd-row"><span class="k">PID</span><span class="v mono">{{ procDetail.pid }}</span></div>
+        <div class="pd-row"><span class="k">父进程</span><span class="v mono">{{ procDetail.ppid }}</span></div>
+        <div class="pd-row"><span class="k">用户</span><span class="v">{{ procDetail.user || '—' }} <span class="muted">uid {{ procDetail.uid }}</span></span></div>
+        <div class="pd-row"><span class="k">状态</span><span class="v">{{ procDetail.state_text }} <span class="muted">{{ procDetail.state }}</span></span></div>
+        <div class="pd-row"><span class="k">内存</span><span class="v">RSS {{ kbText(procDetail.rss_kb) }} · 虚拟 {{ kbText(procDetail.vsz_kb) }} · 峰值 {{ kbText(procDetail.vmpeak_kb) }}<template v-if="procDetail.vmswap_kb"> · Swap {{ kbText(procDetail.vmswap_kb) }}</template></span></div>
+        <div class="pd-row"><span class="k">线程</span><span class="v">{{ procDetail.threads }}</span></div>
+        <div class="pd-row"><span class="k">CPU 时间</span><span class="v">{{ procDetail.cpu_sec.toFixed(2) }} 秒</span></div>
+        <div class="pd-row"><span class="k">启动时间</span><span class="v">{{ time(procDetail.start_ms) }}</span></div>
+        <div class="pd-row"><span class="k">可执行文件</span><span class="v mono break">{{ procDetail.exe || '—' }}</span></div>
+        <div class="pd-row"><span class="k">工作目录</span><span class="v mono break">{{ procDetail.cwd || '—' }}</span></div>
+        <div class="pd-row"><span class="k">命令行</span><span class="v mono break">{{ procDetail.cmd || '—' }}</span></div>
+      </div>
+      <el-skeleton v-else :rows="6" animated />
+      <template #footer>
+        <el-button @click="procDetailOpen = false">关闭</el-button>
+        <el-button v-if="can('device.proc.signal')" type="primary" @click="signalFromDetail">发送信号</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="procSignalOpen" title="发送信号" width="460px">
+      <div class="vform">
+        <div class="vform-row">
+          <span class="vlabel">进程</span>
+          <div class="vcontrol mono">{{ procSignal.pid }} {{ procSignal.comm }}</div>
+        </div>
+        <div class="vform-row">
+          <span class="vlabel">信号</span>
+          <div class="vcontrol">
+            <el-select v-model="procSignal.signal" size="small">
+              <el-option v-for="x in PROC_SIGNALS" :key="x.value" :label="x.label" :value="x.value" />
+            </el-select>
+          </div>
+        </div>
+      </div>
+      <div class="muted proc-signal-note">信号会立即作用于目标进程；SIGKILL 与 SIGSTOP 无法被进程捕获。</div>
+      <template #footer>
+        <el-button @click="procSignalOpen = false">取消</el-button>
+        <el-button type="primary" :loading="procSignalSending" @click="sendProcSignal">发送</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -968,6 +1099,32 @@ const rateEl = ref(null)
 const charts = {}
 
 const featTab = ref('storage')
+const procSort = ref('cpu')
+const procQuery = ref('')
+const procShowKernel = ref(false)
+const procs = ref(null)
+const procLoading = ref(false)
+const procErr = ref('')
+const procTs = ref(0)
+const procPage = ref(1)
+const procPer = 20
+const procDetailOpen = ref(false)
+const procDetail = ref(null)
+const procSignalOpen = ref(false)
+const procSignalSending = ref(false)
+const procSignal = reactive({ pid: 0, comm: '', signal: 15 })
+const procCtx = reactive({ open: false, x: 0, y: 0, row: null })
+let procQueryTimer = null
+const PROC_SIGNALS = [
+  { value: 15, label: 'SIGTERM (15) 优雅结束' },
+  { value: 9, label: 'SIGKILL (9) 强制结束' },
+  { value: 2, label: 'SIGINT (2) 中断' },
+  { value: 1, label: 'SIGHUP (1) 挂断' },
+  { value: 10, label: 'SIGUSR1 (10)' },
+  { value: 12, label: 'SIGUSR2 (12)' },
+  { value: 18, label: 'SIGCONT (18) 继续' },
+  { value: 19, label: 'SIGSTOP (19) 暂停' },
+]
 const obsTab = ref('series')
 const capsSaving = ref(false)
 const capsForm = reactive({
@@ -1375,6 +1532,7 @@ async function loadAll(opts = {}) {
   }
   await loadSysinfo(silent)
   await loadNet(true)
+  if (featTab.value === 'proc') loadProcs(false, true)
   nowTick.value = Date.now()
   await pullSeries(!silent)
   if (!silent) loading.value = false
@@ -1609,10 +1767,150 @@ function renderCharts() {
 }
 
 function onFeatTab(name) {
+  if (name === 'proc') {
+    loadProcs(true)
+    return
+  }
   if (name !== 'caps') return
   if (sys.value) fillCapsFromSys()
   loadDicts()
 }
+
+function kbText(kb) {
+  const n = Number(kb) || 0
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + 'G'
+  if (n >= 1024) return (n / 1024).toFixed(1) + 'M'
+  return n + 'K'
+}
+
+const procEntries = computed(() => (procs.value && procs.value.entries) || [])
+const procVisible = computed(() => procEntries.value.filter((p) => procShowKernel.value || !p.kernel))
+const procPageRows = computed(() => procVisible.value.slice((procPage.value - 1) * procPer, procPage.value * procPer))
+const procTruncated = computed(() => !!(procs.value && procs.value.truncated))
+const procSummaryText = computed(() => {
+  const s = procs.value && procs.value.summary
+  if (!s) return ''
+  const f = (v) => (Number(v) || 0).toFixed(2)
+  return `${s.total} 进程 · ${s.threads} 线程 · 负载 ${f(s.load1)} / ${f(s.load5)} / ${f(s.load15)} · 内存 ${kbText(s.mem_used_kb)} / ${kbText(s.mem_total_kb)}`
+})
+
+function procStateTone(row) {
+  if (!row) return 'info'
+  if (row.state === 'R') return 'success'
+  if (row.state === 'Z') return 'danger'
+  if (row.state === 'D' || row.state === 'T' || row.state === 't') return 'warning'
+  return 'info'
+}
+
+async function loadProcs(refresh, silent) {
+  if (!can('device.proc.read')) return
+  if (!silent) procLoading.value = true
+  try {
+    const q = encodeURIComponent(procQuery.value.trim())
+    const r = await Api.get(agentBase.value + '/procs?sort=' + procSort.value + '&q=' + q + '&limit=300')
+    procs.value = r
+    procTs.value = Date.now()
+    procErr.value = ''
+    if (procPage.value > 1 && !procPageRows.value.length) procPage.value = 1
+  } catch (e) {
+    if (e.status === 501) procErr.value = 'agent 版本过旧，升级后可查看进程'
+    else if (e.status === 404) procErr.value = '设备离线，无法读取进程'
+    else if (e.status === 504) procErr.value = '采集超时，请稍后重试'
+    else procErr.value = '进程加载失败：' + e.message
+  } finally {
+    procLoading.value = false
+  }
+}
+
+function openProcMenu(row, column, event) {
+  const e = event
+  if (!e || typeof e.clientX !== 'number') return
+  e.preventDefault()
+  procCtx.row = row
+  procCtx.x = Math.min(e.clientX, window.innerWidth - 190)
+  procCtx.y = Math.min(e.clientY, window.innerHeight - 150)
+  procCtx.open = true
+}
+
+function openProcMenuAt(event, row) {
+  event.preventDefault()
+  procCtx.row = row
+  procCtx.x = Math.min(event.clientX, window.innerWidth - 190)
+  procCtx.y = Math.min(event.clientY, window.innerHeight - 150)
+  procCtx.open = true
+}
+
+function closeProcMenu() { procCtx.open = false }
+
+function procCtxAction(op) {
+  const row = procCtx.row
+  closeProcMenu()
+  if (!row) return
+  if (op === 'detail') showProcDetail(row)
+  else if (op === 'signal') openProcSignal(row)
+  else if (op === 'kill') killProc(row)
+}
+
+async function showProcDetail(row) {
+  procDetailOpen.value = true
+  procDetail.value = null
+  try {
+    procDetail.value = await Api.get(agentBase.value + '/procs/' + row.pid)
+  } catch (e) {
+    ElMessage.error('详情加载失败：' + e.message)
+    procDetailOpen.value = false
+  }
+}
+
+function openProcSignal(row) {
+  procSignal.pid = row.pid
+  procSignal.comm = row.comm || ''
+  procSignal.signal = 15
+  procSignalOpen.value = true
+}
+
+function signalFromDetail() {
+  if (!procDetail.value) return
+  procDetailOpen.value = false
+  openProcSignal(procDetail.value)
+}
+
+async function sendSignalTo(pid, sig, comm) {
+  try {
+    const r = await Api.post(agentBase.value + '/procs/signal', { pid, signal: sig })
+    if (r && r.ok) ElMessage.success(`已向 ${pid}${comm ? '（' + comm + '）' : ''} 发送信号 ${sig}`)
+    else ElMessage.error('发送失败：' + ((r && r.error) || '未知错误'))
+    loadProcs(true, true)
+  } catch (e) {
+    ElMessage.error('发送失败：' + e.message)
+  }
+}
+
+async function sendProcSignal() {
+  procSignalSending.value = true
+  try {
+    await sendSignalTo(procSignal.pid, procSignal.signal, procSignal.comm)
+    procSignalOpen.value = false
+  } finally {
+    procSignalSending.value = false
+  }
+}
+
+async function killProc(row) {
+  try {
+    await ElMessageBox.confirm(
+      `结束进程 ${row.pid}（${row.comm}）？将发送 SIGTERM，进程可能自行忽略。`,
+      '结束进程', { type: 'warning', confirmButtonText: '结束', cancelButtonText: '取消' })
+  } catch (e) { return }
+  await sendSignalTo(row.pid, 15, row.comm)
+}
+
+watch(procQuery, () => {
+  procPage.value = 1
+  if (procQueryTimer) clearTimeout(procQueryTimer)
+  procQueryTimer = setTimeout(() => loadProcs(true, true), 300)
+})
+watch(procShowKernel, () => { procPage.value = 1 })
 
 function onObsTab(name) {
   // 切回曲线时 canvas 可能刚从 display:none 恢复，尺寸为 0，需要重画
@@ -2061,6 +2359,14 @@ async function init() {
   addMetricOpen.value = false
   featTab.value = 'storage'
   obsTab.value = 'series'
+  procs.value = null
+  procErr.value = ''
+  procTs.value = 0
+  procQuery.value = ''
+  procSort.value = 'cpu'
+  procShowKernel.value = false
+  procPage.value = 1
+  procCtx.open = false
   seriesPopOpen.value = false
   net.value = null
   netErr.value = ''
@@ -2088,15 +2394,28 @@ async function init() {
 watch(() => route.params.devid, (v) => { if (v) init() })
 watch([selected, isPhone, () => enabledCfg.value.length], () => nextTick(measureSeries), { deep: true })
 
+function onProcKeydown(e) {
+  if (e.key === 'Escape') closeProcMenu()
+}
+
 let seriesRO = null
 onMounted(() => {
   init()
+  window.addEventListener('click', closeProcMenu)
+  window.addEventListener('scroll', closeProcMenu, true)
+  window.addEventListener('resize', closeProcMenu)
+  window.addEventListener('keydown', onProcKeydown)
   if (window.ResizeObserver) {
     seriesRO = new ResizeObserver(() => measureSeries())
     nextTick(() => { if (seriesWrapEl.value) seriesRO.observe(seriesWrapEl.value) })
   }
 })
 onBeforeUnmount(() => {
+  window.removeEventListener('click', closeProcMenu)
+  window.removeEventListener('scroll', closeProcMenu, true)
+  window.removeEventListener('resize', closeProcMenu)
+  window.removeEventListener('keydown', onProcKeydown)
+  if (procQueryTimer) { clearTimeout(procQueryTimer); procQueryTimer = null }
   stopTimer()
   stopSample()
   if (seriesRO) { seriesRO.disconnect(); seriesRO = null }
@@ -2106,6 +2425,49 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* ---- 进程 tab ---- */
+.proc-search { width: 240px; }
+.proc-sort { width: 108px; }
+.proc-ts { display: flex; gap: 6px; }
+.pcmd { font-size: 12px; }
+.pctx-menu {
+  position: fixed;
+  z-index: 3000;
+  min-width: 168px;
+  padding: 4px;
+  background: var(--el-bg-color-overlay, #fff);
+  border: 1px solid var(--el-border-color-light, #e4e7ed);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+.pctx-title {
+  padding: 4px 8px 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  border-bottom: 1px solid var(--el-border-color-lighter, #ebeef5);
+  margin-bottom: 4px;
+}
+.pctx-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--el-text-color-primary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.pctx-item:hover { background: var(--el-fill-color-light, #f5f7fa); }
+.pctx-item.danger { color: #e5534b; }
+.pctx-item.danger:hover { background: rgba(229, 83, 75, 0.08); }
+.proc-detail { display: flex; flex-direction: column; gap: 4px; }
+.pd-row { display: flex; gap: 12px; padding: 4px 0; font-size: 13px; line-height: 20px; }
+.pd-row .k { flex: 0 0 84px; color: var(--el-text-color-secondary); }
+.pd-row .v { flex: 1 1 auto; min-width: 0; }
+.pd-row .v.break { word-break: break-all; }
+.proc-signal-note { margin-top: 8px; font-size: 12px; }
 /* ---- 合并卡片：每个 tab 顶部的操作条 ---- */
 .tab-bar {
   display: flex;
@@ -2318,6 +2680,8 @@ onBeforeUnmount(() => {
   .form-actions, .vform-actions { flex-wrap: wrap; }
   .tab-bar { gap: 8px; }
   .tab-bar .tty-search { width: 100%; }
+  .tab-bar .proc-search { width: 100%; }
+  .tab-bar .proc-sort { width: 110px; }
   .series-bar { gap: 8px; }
   .series-label { line-height: 28px; }
   .series-select { flex-wrap: wrap; overflow: visible; padding: 4px 8px; }

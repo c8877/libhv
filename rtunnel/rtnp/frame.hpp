@@ -61,6 +61,8 @@ enum Type : uint8_t {
     OTA_CANCEL     = 0x32,   // B→C：无载荷（安装开始前有效）
     NET_REQ        = 0x33,   // B→C：str json {scope,proc,limit}；sid=请求号
     NET_INFO       = 0x34,   // C→B：str json 网络/IPC 快照；sid 回显请求号
+    PROC_REQ       = 0x35,   // B→C：str json {op,sort,q,limit,pid,signal}；sid=请求号
+    PROC_INFO      = 0x36,   // C→B：str json 进程列表/详情/信号结果；sid 回显请求号
 };
 
 // 错误码

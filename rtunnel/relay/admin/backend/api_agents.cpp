@@ -51,6 +51,7 @@ void AdminServer::handleAgents(const HttpContextPtr& ctx) {
                 j["caps_ports"] = relay_->agentPorts(c->devid);
                 j["caps_local_web"] = relay_->agentLocalWeb(c->devid);
                 j["caps_net"] = relay_->agentNetCap(c->devid);
+                j["caps_proc"] = relay_->agentProcCap(c->devid);
                 auto vt = relay_->agent_versions.find(c->devid);
                 j["version"] = vt == relay_->agent_versions.end() ? "" : vt->second;
             }
@@ -94,6 +95,7 @@ void AdminServer::handleAgentDetail(const HttpContextPtr& ctx) {
         j["caps_ports"] = relay_->agentPorts(c->devid);
         j["caps_local_web"] = relay_->agentLocalWeb(c->devid);
         j["caps_net"] = relay_->agentNetCap(c->devid);
+        j["caps_proc"] = relay_->agentProcCap(c->devid);
         j["streams"] = json::array();
         for (RelayStream* s = c->streams; s; s = s->next_c) {
             json st;
@@ -550,6 +552,124 @@ int AdminServer::handleAgentNet(const HttpContextPtr& ctx) {
         ctx->send(j.is_discarded() ? js : j.dump());
     });
     return HTTP_STATUS_NEXT;
+}
+
+int AdminServer::proxyAgentProc(const HttpContextPtr& ctx, const std::string& devid, const json& req) {
+    if (!ownsDevid(devid)) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return HTTP_STATUS_FORBIDDEN;
+    }
+    bool online = callRelay([this, &devid]() {
+                      return relay_->agentOnline(devid.c_str()) ? std::string("1") : std::string("0");
+                  }) == "1";
+    if (!online) {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"device offline\"}");
+        return HTTP_STATUS_NOT_FOUND;
+    }
+    int cap = -1;
+    callRelay([this, &devid, &cap]() {
+        cap = relay_->agentProcCap(devid.c_str());
+        return std::string("1");
+    });
+    if (cap != 1) {
+        ctx->response->status_code = HTTP_STATUS_NOT_IMPLEMENTED;
+        ctx->send("{\"error\":\"agent version too old, upgrade to 1.4.31+\",\"caps_proc\":" +
+                  std::to_string(cap) + "}");
+        return HTTP_STATUS_NOT_IMPLEMENTED;
+    }
+
+    std::string payload = req.dump();
+    uint32_t rid = 0;
+    std::string err;
+    bool sent = callRelay([this, &devid, &payload, &rid, &err]() {
+                    return relay_->startProcQuery(devid.c_str(), payload, rid, err) ? std::string("1")
+                                                                                     : std::string("0");
+                }) == "1";
+    if (!sent) {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"" + (err.empty() ? std::string("device offline") : err) + "\"}");
+        return HTTP_STATUS_NOT_FOUND;
+    }
+
+    bool signal = req.value("op", std::string()) == "signal";
+    int wait_ms = settingInt(signal ? "proxy.proc_signal_wait_ms" : "proxy.proc_wait_ms", signal ? 2000 : 4000);
+    if (wait_ms < 0) wait_ms = 0;
+    hv::async([this, ctx, rid, wait_ms]() {
+        std::string js;
+        int waits = wait_ms / 50;
+        for (int i = 0; i < waits; ++i) {
+            usleep(50000);
+            js = callRelay([this, rid]() { return relay_->takeProcResult(rid); });
+            if (!js.empty()) break;
+        }
+        if (js.empty()) {
+            ctx->response->status_code = HTTP_STATUS_GATEWAY_TIMEOUT;
+            ctx->send("{\"error\":\"timeout\"}");
+            return;
+        }
+        ctx->send(js);
+    });
+    return HTTP_STATUS_NEXT;
+}
+
+int AdminServer::handleAgentProcs(const HttpContextPtr& ctx) {
+    std::string devid = ctx->param("devid");
+    json req;
+    req["op"] = "list";
+    std::string sort = ctx->param("sort");
+    if (sort != "mem" && sort != "pid" && sort != "start") sort = "cpu";
+    req["sort"] = sort;
+    req["q"] = ctx->param("q");
+    int limit = atoi(ctx->param("limit").c_str());
+    if (limit <= 0) limit = 200;
+    if (limit > 500) limit = 500;
+    req["limit"] = limit;
+    return proxyAgentProc(ctx, devid, req);
+}
+
+int AdminServer::handleAgentProcDetail(const HttpContextPtr& ctx) {
+    std::string devid = ctx->param("devid");
+    int pid = atoi(ctx->param("pid").c_str());
+    if (pid <= 0) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"invalid pid\"}");
+        return HTTP_STATUS_BAD_REQUEST;
+    }
+    json req;
+    req["op"] = "detail";
+    req["pid"] = pid;
+    return proxyAgentProc(ctx, devid, req);
+}
+
+int AdminServer::handleAgentProcSignal(const HttpContextPtr& ctx) {
+    std::string devid = ctx->param("devid");
+    json body = json::parse(ctx->body(), nullptr, false);
+    if (body.is_discarded() || !body.is_object()) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"bad json\"}");
+        return HTTP_STATUS_BAD_REQUEST;
+    }
+    int pid = body.value("pid", 0);
+    int sig = body.value("signal", 15);
+    if (pid <= 1) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"invalid pid\"}");
+        return HTTP_STATUS_BAD_REQUEST;
+    }
+    if (sig < 1 || sig > 64) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"invalid signal\"}");
+        return HTTP_STATUS_BAD_REQUEST;
+    }
+    audit(currentActor().username, "agent.proc.signal",
+          devid + " pid=" + std::to_string(pid) + " signal=" + std::to_string(sig));
+    json req;
+    req["op"] = "signal";
+    req["pid"] = pid;
+    req["signal"] = sig;
+    return proxyAgentProc(ctx, devid, req);
 }
 
 void AdminServer::handleClients(const HttpContextPtr& ctx) {

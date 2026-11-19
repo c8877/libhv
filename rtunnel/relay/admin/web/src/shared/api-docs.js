@@ -49,6 +49,42 @@ export const DOCS = [
     resp: `{ "ts": 1763349000123, "mode": "full", "sysinfo": { "cpu": 12.5, "mem": { "used": 182, "total": 512 } } }`,
   },
   {
+    group: 'device', method: 'GET', path: '/api/v1/agents/:devid/procs', minRole: 'viewer',
+    summary: '进程列表与资源占用',
+    params: [
+      { name: 'devid', in: 'path', desc: '设备 ID' },
+      { name: 'sort', in: 'query', desc: 'cpu / mem / pid / start，默认 cpu' },
+      { name: 'q', in: 'query', desc: '匹配 PID / 名称 / 命令行 / 用户' },
+      { name: 'limit', in: 'query', desc: '条目上限，默认 200，最大 500' },
+    ],
+    note: 'CPU 为 300ms 双采样的单核百分比；结果按 26KB 预算截断（truncated=true）；agent 过旧返回 501',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" \\\n     "$RT/api/v1/agents/mp135/procs?sort=cpu&limit=100"`,
+    resp: `{ "ts": 1763349000123, "sample_ms": 300, "op": "list", "summary": { "total": 128, "running": 2, "threads": 231, "load1": 0.12, "mem_total_kb": 496000, "mem_used_kb": 210000 }, "entries": [{ "pid": 812, "user": "root", "comm": "sshd", "state": "S", "state_text": "睡眠", "cpu_pct": 0.3, "rss_kb": 4096, "threads": 1, "cmd": "sshd: root@pts/0", "kernel": false, "start_ms": 1763300000000 }], "truncated": false }`,
+  },
+  {
+    group: 'device', method: 'GET', path: '/api/v1/agents/:devid/procs/:pid', minRole: 'viewer',
+    summary: '单个进程详情',
+    params: [
+      { name: 'devid', in: 'path', desc: '设备 ID' },
+      { name: 'pid', in: 'path', desc: '进程 PID' },
+    ],
+    note: '返回命令行、可执行文件、工作目录、RSS/VSZ/峰值/Swap、CPU 时间与启动时间',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/agents/mp135/procs/812"`,
+    resp: `{ "op": "detail", "pid": 812, "ppid": 1, "user": "root", "state": "S", "comm": "sshd", "cmd": "sshd: root@pts/0", "exe": "/usr/sbin/sshd", "cwd": "/", "rss_kb": 4096, "vsz_kb": 15360, "cpu_sec": 1.23, "start_ms": 1763300000000 }`,
+  },
+  {
+    group: 'device', method: 'POST', path: '/api/v1/agents/:devid/procs/signal', minRole: 'manager',
+    summary: '向进程发送信号',
+    params: [
+      { name: 'devid', in: 'path', desc: '设备 ID' },
+      { name: 'pid', in: 'body', desc: '目标 PID，必须 > 1' },
+      { name: 'signal', in: 'body', desc: '信号号 1–64，常用 15=SIGTERM、9=SIGKILL' },
+    ],
+    note: '需要 device.proc.signal；拒绝 PID 1 与 agent 自身；操作写入审计日志',
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n     -d '{"pid":812,"signal":15}' "$RT/api/v1/agents/mp135/procs/signal"`,
+    resp: `{ "op": "signal", "ok": true, "pid": 812, "signal": 15 }`,
+  },
+  {
     group: 'device', method: 'GET', path: '/api/v1/agents/:devid/net', minRole: 'viewer',
     summary: '网络与 IPC 快照（TCP/UDP/UNIX/IPC）',
     params: [

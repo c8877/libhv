@@ -117,6 +117,7 @@ private:
     nlohmann::json net_ipc_cache_;   // 最近一次 IPC 采集结果
     uint64_t net_ipc_ts_ = 0;
     std::atomic<int> net_inflight_{0};
+    std::atomic<int> proc_inflight_{0};
     uint64_t started_ms_ = 0; // loop 启动时刻（单调时钟，算 agent 运行时长）
     rtfs::Service fs_;
     rtvs::Service svc_;
@@ -147,6 +148,7 @@ private:
     void handleFileFrame(const rtnp::Frame* f);
     void handleOtaApply(const rtnp::Frame* f);
     void handleNetReq(const rtnp::Frame* f);
+    void handleProcReq(const rtnp::Frame* f);
     static bool otaProbe(const std::string& path, const std::string& expect, std::string& out);
     bool hasOtaPending();
     void clearOtaPending();

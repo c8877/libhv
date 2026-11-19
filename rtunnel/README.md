@@ -109,6 +109,7 @@ bash rtunnel/tests/ota_e2e.sh            # OTA 安装/重启/版本确认 + 错�
 bash rtunnel/tests/dist_scope_e2e.sh     # 分发/OTA 的设备范围授权
 bash rtunnel/tests/sysinfo_e2e.sh        # 存储统计全量/增量 + 离线缓存 + 管理台不阻塞
 bash rtunnel/tests/net_e2e.sh            # 网络/IPC 快照、进程归属、缓存与离线回退
+bash rtunnel/tests/proc_e2e.sh           # 进程列表/详情/信号与 device.proc 权限
 python3 rtunnel/tests/stream_idle_e2e.py # 流空闲回收：闲置 RESET、活跃流保留
 build/bin/rtunnel-endpoint-test          # --server 地址解析单测
 ```
@@ -181,7 +182,7 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 - **之后登录**：用户名 + 密码，服务端会话（HttpOnly Cookie，默认 12h，可在设置中调整），不再用 token
 ### 资源权限与权限组
 
-管理台每个动作对应一个资源键（`perm_resources`，27 项），权限判断只认资源与设备：
+管理台每个动作对应一个资源键（`perm_resources`，29 项），权限判断只认资源与设备：
 
 - **功能资源**：`perm_resources`（代码登记）+ `perm_group_resources`（组勾选）
 - **设备资源**：`res_devices`（agent 上线自动登记）+ `perm_group_devices`（组授权）
@@ -197,7 +198,7 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 - `users.role=admin` 始终保留超级权限（全部资源 + 全部设备），避免误操作锁死管理员
 - 预置 4 组：超级管理员（`super=1`）、管理员、操作员、观察者；首次启动写入一次，
   后续勾选结果不会被重启覆盖
-- 资源分类：设备（查看/终端/端口转发/能力/OTA/串口/采样/断开）、文件（读/写/删除）、
+- 资源分类：设备（查看/终端/端口转发/能力/OTA/串口/采样/断开/进程查看/进程控制）、文件（读/写/删除）、
   分发（读/写）、权限（读/写）、账号（读/写/删除）、令牌（读/写）、证书（读/写）、
   审计、系统（读/写/关机）
 - API：
@@ -293,6 +294,11 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
   缺失 lsipc 时回退 `/proc/sysvipc`；`proc=1` 扫 `/proc/<pid>/fd` 反查占用进程。
   每类条目受 `limit` 与 26KB 预算限制，relay 缓存 3s，`refresh=1` 绕过；
   agent 低于 1.4.28 返回 501）
+- 进程：`GET /api/v1/agents/{devid}/procs?sort=cpu|mem|pid|start&q=&limit=`、
+  `GET .../procs/{pid}`、`POST .../procs/signal {pid,signal}`
+  （agent 扫 `/proc/<pid>/{stat,status,cmdline}`，CPU 用 300ms 双采样的单核百分比；
+  PID 1 与 agent 自身拒绝发信号；列表按 26KB 预算截断。查看需要 `device.proc.read`，
+  信号需要 `device.proc.signal`，两者都受账号设备范围限制）
 - 文件分发：文件页「分发」选择设备与时间窗，创建 `POST /api/v1/distributions`，
   `GET /api/v1/distributions` 查询进度；经 RTNP 推到设备 `--file-dir/dir`
   （默认 `/opt/data/files`），32KiB 分片、256KiB 窗口、sha256 校验、断点续传、

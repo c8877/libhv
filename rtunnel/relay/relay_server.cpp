@@ -1089,6 +1089,32 @@ int RelayServer::agentNetCap(const char* devid) {
     return it == caps_net.end() ? -1 : it->second;
 }
 
+int RelayServer::agentProcCap(const char* devid) {
+    auto it = caps_proc.find(devid);
+    return it == caps_proc.end() ? -1 : it->second;
+}
+
+bool RelayServer::startProcQuery(const char* devid, const std::string& json, uint32_t& rid, std::string& err) {
+    RelayConn* a = findAgent(devid);
+    if (!a || !a->io) {
+        err = "device offline";
+        return false;
+    }
+    rid = ++proc_seq;
+    rtnp::Writer w;
+    w.str(json.c_str());
+    rtnp::send(a->io, rtnp::PROC_REQ, rid, w.data, (uint16_t)w.len);
+    return true;
+}
+
+std::string RelayServer::takeProcResult(uint32_t rid) {
+    auto it = proc_results.find(rid);
+    if (it == proc_results.end()) return std::string();
+    std::string s = it->second;
+    proc_results.erase(it);
+    return s;
+}
+
 bool RelayServer::startNetQuery(const char* devid, const std::string& json, uint32_t& rid, std::string& err) {
     RelayConn* a = findAgent(devid);
     if (!a || !a->io) {
@@ -1281,6 +1307,13 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         if (!rr.err) net_results[f->sid] = std::string(nb);
         return;
     }
+    case rtnp::PROC_INFO: {
+        rtnp::Reader rr(f->payload, f->len);
+        static char pb[64 * 1024];
+        rr.str(pb, sizeof pb);
+        if (!rr.err) proc_results[f->sid] = std::string(pb);
+        return;
+    }
     case rtnp::FILE_CHECK_ACK: {
         rtnp::Reader rr(f->payload, f->len);
         static char buf[1024];
@@ -1404,6 +1437,9 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             }
             if (!sj.is_discarded() && sj.contains("caps") && sj["caps"].contains("net")) {
                 caps_net[c->devid] = sj["caps"]["net"].get<bool>() ? 1 : 0;
+            }
+            if (!sj.is_discarded() && sj.contains("caps") && sj["caps"].contains("proc")) {
+                caps_proc[c->devid] = sj["caps"]["proc"].get<bool>() ? 1 : 0;
             }
             // uptime 只出现在全量帧；用收帧时刻反推开机时间，列表可随时算当前时长
             if (full && !sj.is_discarded()) {
