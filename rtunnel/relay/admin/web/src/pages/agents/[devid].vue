@@ -431,396 +431,386 @@
       <el-skeleton v-else :rows="2" animated />
     </div>
 
-    <div class="panel">
-      <div class="panel-head series-head">
-        <h2>采样曲线</h2>
-        <span class="spacer" />
-        <el-switch v-model="sampleAuto" active-text="自动采集" @change="onSampleAuto" />
-        <el-button size="small" @click="selectAllSeries">全选</el-button>
-        <el-button size="small" @click="clearSeries">清空</el-button>
-        <el-button size="small" @click="pullSeries(true)">全量</el-button>
-      </div>
-      <div class="series-bar">
-        <span class="series-label">指标</span>
-        <el-popover v-model:visible="seriesPopOpen" placement="bottom-start" :width="250" trigger="click">
-          <template #reference>
-            <div ref="seriesWrapEl" class="series-select" role="button" tabindex="0"
-                 :aria-expanded="String(seriesPopOpen)"
-                 @keydown.enter.prevent="seriesPopOpen = !seriesPopOpen"
-                 @keydown.space.prevent="seriesPopOpen = !seriesPopOpen">
-              <template v-if="selected.length">
-                <span v-for="(s, i) in selected" v-show="isPhone || i < seriesVisible" :key="s" class="series-chip">
-                  {{ s }}<button class="chip-x" aria-label="移除" @click.stop="removeSeries(s)">×</button>
-                </span>
-                <span v-if="seriesHidden" class="series-more">+{{ seriesHidden }}<span class="more-caret">▾</span></span>
-              </template>
-              <span v-else class="series-empty">选择指标</span>
-              <div v-if="!isPhone" ref="seriesMeasureEl" class="series-measure" aria-hidden="true">
-                <span v-for="s in selected" :key="'m-' + s" class="series-chip">{{ s }}<span class="chip-x">×</span></span>
-              </div>
-            </div>
-          </template>
-          <div class="series-pop">
-            <div class="series-pop-head">已选 {{ selected.length }} / {{ enabledCfg.length }}</div>
-            <el-checkbox-group v-model="selected" class="series-options" @change="onSeriesPick">
-              <el-checkbox v-for="c in enabledCfg" :key="c.series" :value="c.series">{{ c.series }}</el-checkbox>
-            </el-checkbox-group>
-            <div class="series-pop-actions">
-              <el-button size="small" text @click="selectAllSeries">全选</el-button>
-              <el-button size="small" text @click="clearSeries">清空</el-button>
-            </div>
+    <div class="panel feat-panel obs-panel">
+      <el-tabs v-model="obsTab" class="feat-tabs" @tab-change="onObsTab">
+        <el-tab-pane label="采样曲线" name="series">
+          <div class="tab-bar">
+            <el-switch v-model="sampleAuto" active-text="自动采集" @change="onSampleAuto" />
+            <span class="spacer" />
+            <el-button size="small" @click="selectAllSeries">全选</el-button>
+            <el-button size="small" @click="clearSeries">清空</el-button>
+            <el-button size="small" @click="pullSeries(true)">全量</el-button>
           </div>
-        </el-popover>
-      </div>
-      <div v-if="!enabledCfg.length" class="muted">该设备还没有启用的采样指标，可在下方「采样配置」中添加</div>
-      <template v-else>
-        <div v-show="hasUnit('percent')" class="chart-box">
-          <div class="chart-title">百分比</div>
-          <canvas ref="percentEl" />
-        </div>
-        <div v-show="hasUnit('load')" class="chart-box">
-          <div class="chart-title">负载</div>
-          <canvas ref="loadEl" />
-        </div>
-        <div v-show="hasUnit('rate')" class="chart-box">
-          <div class="chart-title">速率</div>
-          <canvas ref="rateEl" />
-        </div>
-      </template>
-    </div>
-
-    <div class="panel">
-      <div class="panel-head">
-        <h2>采样配置</h2>
-        <span class="muted">{{ seriesCfg.length }} 项 · {{ unsyncedCount }} 项未同步</span>
-        <span class="spacer" />
-        <el-button v-if="canEdit" size="small" @click="openAddMetric">+ 添加指标</el-button>
-      </div>
-      <el-table ref="metricTable" class="row-edit-table" :data="seriesCfg" size="small" row-key="series" :show-header="!isPhone" @row-click="onMetricRow">
-        <el-table-column type="expand">
-          <template #default="{ row }">
-            <div class="metric-edit" @click.stop>
-              <div class="vform metric-form">
-                <div class="vform-row">
-                  <span class="vlabel">采样间隔</span>
-                  <div class="vcontrol">
-                    <el-input-number v-model="row.interval_sec" :min="1" :max="300" :disabled="!canEdit" size="small" />
-                    <span class="vunit">秒</span>
+          <div class="series-bar">
+            <span class="series-label">指标</span>
+            <el-popover v-model:visible="seriesPopOpen" placement="bottom-start" :width="250" trigger="click">
+              <template #reference>
+                <div ref="seriesWrapEl" class="series-select" role="button" tabindex="0"
+                     :aria-expanded="String(seriesPopOpen)"
+                     @keydown.enter.prevent="seriesPopOpen = !seriesPopOpen"
+                     @keydown.space.prevent="seriesPopOpen = !seriesPopOpen">
+                  <template v-if="selected.length">
+                    <span v-for="(s, i) in selected" v-show="isPhone || i < seriesVisible" :key="s" class="series-chip">
+                      {{ s }}<button class="chip-x" aria-label="移除" @click.stop="removeSeries(s)">×</button>
+                    </span>
+                    <span v-if="seriesHidden" class="series-more">+{{ seriesHidden }}<span class="more-caret">▾</span></span>
+                  </template>
+                  <span v-else class="series-empty">选择指标</span>
+                  <div v-if="!isPhone" ref="seriesMeasureEl" class="series-measure" aria-hidden="true">
+                    <span v-for="s in selected" :key="'m-' + s" class="series-chip">{{ s }}<span class="chip-x">×</span></span>
                   </div>
                 </div>
-                <div class="vform-row">
-                  <span class="vlabel">保留点数</span>
-                  <div class="vcontrol">
-                    <el-input-number v-model="row.points" :min="60" :max="86400" :disabled="!canEdit" size="small" />
-                    <span class="vunit">点</span>
-                  </div>
-                </div>
-                <div class="vform-row">
-                  <span class="vlabel">预计保留</span>
-                  <div class="vcontrol"><span class="vreadonly num">{{ dur(row) }}</span></div>
-                </div>
-                <div class="vform-row">
-                  <span class="vlabel">同步状态</span>
-                  <div class="vcontrol"><span class="muted">{{ metricHint(row) }}</span></div>
-                </div>
-                <div class="vform-actions">
-                  <span class="spacer" />
-                  <el-button v-if="canEdit" size="small" type="danger" plain @click="deleteMetric(row)">删除</el-button>
-                  <el-button size="small" @click="cancelMetric">取消</el-button>
-                  <el-button v-if="canEdit" size="small" type="primary" @click="saveMetricRow(row)">保存并下发</el-button>
+              </template>
+              <div class="series-pop">
+                <div class="series-pop-head">已选 {{ selected.length }} / {{ enabledCfg.length }}</div>
+                <el-checkbox-group v-model="selected" class="series-options" @change="onSeriesPick">
+                  <el-checkbox v-for="c in enabledCfg" :key="c.series" :value="c.series">{{ c.series }}</el-checkbox>
+                </el-checkbox-group>
+                <div class="series-pop-actions">
+                  <el-button size="small" text @click="selectAllSeries">全选</el-button>
+                  <el-button size="small" text @click="clearSeries">清空</el-button>
                 </div>
               </div>
+            </el-popover>
+          </div>
+          <div v-if="!enabledCfg.length" class="muted">该设备还没有启用的采样指标，可在「采样配置」中添加</div>
+          <template v-else>
+            <div v-show="hasUnit('percent')" class="chart-box">
+              <div class="chart-title">百分比</div>
+              <canvas ref="percentEl" />
+            </div>
+            <div v-show="hasUnit('load')" class="chart-box">
+              <div class="chart-title">负载</div>
+              <canvas ref="loadEl" />
+            </div>
+            <div v-show="hasUnit('rate')" class="chart-box">
+              <div class="chart-title">速率</div>
+              <canvas ref="rateEl" />
             </div>
           </template>
-        </el-table-column>
-        <el-table-column v-if="isPhone" min-width="0">
-          <template #default="{ row }">
-            <div class="metric-card">
-              <div class="metric-card-top">
+        </el-tab-pane>
+        <el-tab-pane label="采样配置" name="metric">
+          <div class="tab-bar">
+            <span class="muted">{{ seriesCfg.length }} 项 · {{ unsyncedCount }} 项未同步</span>
+            <span class="spacer" />
+            <el-button v-if="canEdit" size="small" @click="openAddMetric">+ 添加指标</el-button>
+          </div>
+          <el-table ref="metricTable" class="row-edit-table" :data="seriesCfg" size="small" row-key="series" :show-header="!isPhone" @row-click="onMetricRow">
+            <el-table-column type="expand">
+              <template #default="{ row }">
+                <div class="metric-edit" @click.stop>
+                  <div class="vform metric-form">
+                    <div class="vform-row">
+                      <span class="vlabel">采样间隔</span>
+                      <div class="vcontrol">
+                        <el-input-number v-model="row.interval_sec" :min="1" :max="300" :disabled="!canEdit" size="small" />
+                        <span class="vunit">秒</span>
+                      </div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">保留点数</span>
+                      <div class="vcontrol">
+                        <el-input-number v-model="row.points" :min="60" :max="86400" :disabled="!canEdit" size="small" />
+                        <span class="vunit">点</span>
+                      </div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">预计保留</span>
+                      <div class="vcontrol"><span class="vreadonly num">{{ dur(row) }}</span></div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">同步状态</span>
+                      <div class="vcontrol"><span class="muted">{{ metricHint(row) }}</span></div>
+                    </div>
+                    <div class="vform-actions">
+                      <span class="spacer" />
+                      <el-button v-if="canEdit" size="small" type="danger" plain @click="deleteMetric(row)">删除</el-button>
+                      <el-button size="small" @click="cancelMetric">取消</el-button>
+                      <el-button v-if="canEdit" size="small" type="primary" @click="saveMetricRow(row)">保存并下发</el-button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column v-if="isPhone" min-width="0">
+              <template #default="{ row }">
+                <div class="metric-card">
+                  <div class="metric-card-top">
+                    <b>{{ row.series }}</b><span class="sub">{{ unitLabel(row.series) }}</span>
+                    <span class="grow" />
+                    <el-switch :model-value="row.enabled" :disabled="!canEdit" @click.stop @change="(v) => toggleMetric(row, v)" />
+                  </div>
+                  <div class="metric-card-meta metric-card-sub">
+                    <span class="num">{{ row.interval_sec }} s · {{ row.points }} 点 · {{ dur(row) }}</span>
+                    <span class="grow" />
+                    <span class="sync" :class="row.enabled ? (row.synced ? 'ok' : 'warn') : 'off'">
+                      {{ row.enabled ? (row.synced ? '已同步' : '未同步') : '禁用' }}
+                    </span>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column v-if="!isPhone" label="指标" min-width="150">
+              <template #default="{ row }">
                 <b>{{ row.series }}</b><span class="sub">{{ unitLabel(row.series) }}</span>
-                <span class="grow" />
-                <el-switch :model-value="row.enabled" :disabled="!canEdit" @click.stop @change="(v) => toggleMetric(row, v)" />
-              </div>
-              <div class="metric-card-meta metric-card-sub">
-                <span class="num">{{ row.interval_sec }} s · {{ row.points }} 点 · {{ dur(row) }}</span>
-                <span class="grow" />
+              </template>
+            </el-table-column>
+            <el-table-column v-if="!isPhone" label="间隔" width="90">
+              <template #default="{ row }"><span class="num">{{ row.interval_sec }} s</span></template>
+            </el-table-column>
+            <el-table-column v-if="!isPhone" label="保留" min-width="130">
+              <template #default="{ row }">
+                <span class="num">{{ row.points }} 点</span><span class="sub">· {{ dur(row) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column v-if="!isPhone" label="同步" width="110">
+              <template #default="{ row }">
                 <span class="sync" :class="row.enabled ? (row.synced ? 'ok' : 'warn') : 'off'">
                   {{ row.enabled ? (row.synced ? '已同步' : '未同步') : '禁用' }}
                 </span>
-              </div>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column v-if="!isPhone" label="指标" min-width="150">
-          <template #default="{ row }">
-            <b>{{ row.series }}</b><span class="sub">{{ unitLabel(row.series) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column v-if="!isPhone" label="间隔" width="90">
-          <template #default="{ row }"><span class="num">{{ row.interval_sec }} s</span></template>
-        </el-table-column>
-        <el-table-column v-if="!isPhone" label="保留" min-width="130">
-          <template #default="{ row }">
-            <span class="num">{{ row.points }} 点</span><span class="sub">· {{ dur(row) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column v-if="!isPhone" label="同步" width="110">
-          <template #default="{ row }">
-            <span class="sync" :class="row.enabled ? (row.synced ? 'ok' : 'warn') : 'off'">
-              {{ row.enabled ? (row.synced ? '已同步' : '未同步') : '禁用' }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column v-if="!isPhone" label="启用" width="80">
-          <template #default="{ row }">
-            <el-switch :model-value="row.enabled" :disabled="!canEdit" @click.stop @change="(v) => toggleMetric(row, v)" />
-          </template>
-        </el-table-column>
-        <template #empty><div class="muted">暂无配置</div></template>
-      </el-table>
-    </div>
-
-    <div class="panel">
-      <div class="panel-head">
-        <h2>串口 TTY</h2>
-        <span class="spacer" />
-        <el-input v-model="ttyQuery" size="small" class="tty-search" placeholder="搜索别名 / 路径" clearable />
-        <el-button size="small" @click="loadTtys(true)">刷新</el-button>
-        <el-button v-if="canEdit" size="small" @click="manualAddTty">手动添加</el-button>
-      </div>
-      <el-tabs v-model="ttyTab">
-        <el-tab-pane :label="'已配置 (' + ttys.length + ')'" name="config">
-          <el-table ref="ttyTable" class="row-edit-table" :data="filteredTtys" size="small" row-key="path" :show-header="!isPhone"
-                    @row-click="onTtyRow" @expand-change="onTtyExpand">
-            <el-table-column type="expand">
-              <template #default="{ row }">
-                <div v-if="ttyExpandedPath === row.path" class="tty-edit" @click.stop>
-                  <div class="vform tty-vform">
-                    <div class="tty-grid">
-                      <div class="vform-row">
-                        <span class="vlabel">别名</span>
-                        <div class="vcontrol"><el-input v-model="ttyEditing.alias" size="small" :disabled="!canEdit" placeholder="设备内唯一，可留空" /></div>
-                      </div>
-                      <div class="vform-row">
-                        <span class="vlabel">启用</span>
-                        <div class="vcontrol">
-                          <el-switch v-model="ttyEditing.enabled" :disabled="!canEdit" />
-                          <span class="muted">{{ ttyEditing.enabled ? '启用' : '禁用' }}</span>
-                        </div>
-                      </div>
-                      <div class="vform-row span2">
-                        <span class="vlabel">路径</span>
-                        <div class="vcontrol path-line">
-                          <span class="vreadonly mono">{{ row.path }}</span>
-                          <el-button size="small" text @click="copyText(row.path, '路径已复制')">复制路径</el-button>
-                          <el-button v-if="canTty" size="small" text @click="takeoverTty(row)">强制接管</el-button>
-                        </div>
-                      </div>
-                    <div class="vform-row">
-                      <span class="vlabel">别名</span>
-                      <div class="vcontrol"><el-input v-model="ttyEditing.alias" size="small" :disabled="!canEdit" placeholder="设备内唯一，可留空" /></div>
-                    </div>
-                    <div class="vform-row">
-                      <span class="vlabel">启用</span>
-                      <div class="vcontrol">
-                        <el-switch v-model="ttyEditing.enabled" :disabled="!canEdit" />
-                        <span class="muted">{{ ttyEditing.enabled ? '启用' : '禁用' }}</span>
-                      </div>
-                    </div>
-                    <div class="vform-row">
-                      <span class="vlabel">波特率</span>
-                      <div class="vcontrol">
-                        <el-select v-model="ttyEditing.baud" size="small" :disabled="!canEdit">
-                          <el-option v-for="b in bauds" :key="b" :label="b" :value="b" />
-                        </el-select>
-                      </div>
-                    </div>
-                    <div class="vform-row">
-                      <span class="vlabel">数据位</span>
-                      <div class="vcontrol">
-                        <el-select v-model="ttyEditing.data_bits" size="small" :disabled="!canEdit">
-                          <el-option v-for="b in [5, 6, 7, 8]" :key="b" :label="b" :value="b" />
-                        </el-select>
-                      </div>
-                    </div>
-                    <div class="vform-row">
-                      <span class="vlabel">校验</span>
-                      <div class="vcontrol">
-                        <el-select v-model="ttyEditing.parity" size="small" :disabled="!canEdit">
-                          <el-option label="无 (N)" value="N" />
-                          <el-option label="偶 (E)" value="E" />
-                          <el-option label="奇 (O)" value="O" />
-                        </el-select>
-                      </div>
-                    </div>
-                    <div class="vform-row">
-                      <span class="vlabel">停止位</span>
-                      <div class="vcontrol">
-                        <el-select v-model="ttyEditing.stop_bits" size="small" :disabled="!canEdit">
-                          <el-option :label="1" :value="1" />
-                          <el-option :label="2" :value="2" />
-                        </el-select>
-                      </div>
-                    </div>
-                    </div>
-                    <div class="vform-actions">
-                      <span class="grow" />
-                      <el-button v-if="canEdit" size="small" type="danger" plain @click="deleteTty(row)">删除</el-button>
-                      <el-button size="small" @click="collapseTtyRow">取消</el-button>
-                      <el-button v-if="canEdit" size="small" type="primary" :loading="ttySaving" @click="saveTtyRow">保存并下发</el-button>
-                    </div>
-                  </div>
-                </div>
               </template>
             </el-table-column>
-            <el-table-column v-if="isPhone" min-width="0">
+            <el-table-column v-if="!isPhone" label="启用" width="80">
               <template #default="{ row }">
-                <div class="tty-card">
-                  <div class="tty-card-top">
-                    <b>{{ row.alias || '未命名' }}</b>
-                    <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '禁用' }}</el-tag>
-                    <span class="grow" />
-                    <el-button size="small" type="primary" link @click.stop="openTtyConsole(row)">调试</el-button>
-                  </div>
-                  <div class="path" :title="row.path">{{ row.path }}</div>
-                  <div class="tty-card-meta">
-                    <span>{{ row.baud }} · {{ row.data_bits }}{{ row.parity }}{{ row.stop_bits }}</span>
-                    <span class="num">RX {{ ttyRx(row.path) }}</span>
-                    <span class="num">TX {{ ttyTx(row.path) }}</span>
-                  </div>
-                </div>
+                <el-switch :model-value="row.enabled" :disabled="!canEdit" @click.stop @change="(v) => toggleMetric(row, v)" />
               </template>
             </el-table-column>
-            <el-table-column v-if="!isPhone" label="设备" min-width="180">
-              <template #default="{ row }">
-                <b>{{ row.alias || '—' }}</b>
-                <div class="path" :title="row.path">{{ row.path }}</div>
-              </template>
-            </el-table-column>
-            <el-table-column v-if="!isPhone" label="状态" width="80">
-              <template #default="{ row }">
-                <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '禁用' }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column v-if="!isPhone" label="参数" min-width="120">
-              <template #default="{ row }">{{ row.baud }} · {{ row.data_bits }}{{ row.parity }}{{ row.stop_bits }}</template>
-            </el-table-column>
-            <el-table-column v-if="!isPhone" label="RX" width="90">
-              <template #default="{ row }"><span class="num">{{ ttyRx(row.path) }}</span></template>
-            </el-table-column>
-            <el-table-column v-if="!isPhone" label="TX" width="90">
-              <template #default="{ row }"><span class="num">{{ ttyTx(row.path) }}</span></template>
-            </el-table-column>
-            <el-table-column v-if="!isPhone" label="调试" width="70">
-              <template #default="{ row }">
-                <el-button size="small" type="primary" link @click.stop="openTtyConsole(row)">调试</el-button>
-              </template>
-            </el-table-column>
-            <template #empty><div class="muted">暂无已配置串口</div></template>
+            <template #empty><div class="muted">暂无配置</div></template>
           </el-table>
         </el-tab-pane>
-        <el-tab-pane :label="'未配置 (' + unconfigured.length + ')'" name="unconfig">
-          <el-table ref="ttyAddTable" class="row-edit-table" :data="filteredUnconfigured" size="small" row-key="path" :show-header="!isPhone"
-                    @row-click="onTtyAddRow" @expand-change="onTtyAddExpand">
-            <el-table-column type="expand">
-              <template #default="{ row }">
-                <div v-if="ttyAddPath === row.path" class="tty-edit" @click.stop>
-                  <div class="vform tty-vform">
-                    <div class="tty-grid">
-                      <div class="vform-row span2">
-                        <span class="vlabel">路径</span>
-                        <div class="vcontrol"><span class="vreadonly mono">{{ row.path }}</span></div>
+        <el-tab-pane label="串口配置" name="tty">
+          <div class="tab-bar">
+            <el-radio-group v-model="ttyTab" size="small">
+              <el-radio-button value="config">已配置 {{ ttys.length }}</el-radio-button>
+              <el-radio-button value="unconfig">未配置 {{ unconfigured.length }}</el-radio-button>
+            </el-radio-group>
+            <span class="spacer" />
+            <el-input v-model="ttyQuery" size="small" class="tty-search" placeholder="搜索别名 / 路径" clearable />
+            <el-button size="small" @click="loadTtys(true)">刷新</el-button>
+            <el-button v-if="canEdit" size="small" @click="manualAddTty">手动添加</el-button>
+          </div>
+          <div v-show="ttyTab === 'config'">
+              <el-table ref="ttyTable" class="row-edit-table" :data="filteredTtys" size="small" row-key="path" :show-header="!isPhone"
+                        @row-click="onTtyRow" @expand-change="onTtyExpand">
+                <el-table-column type="expand">
+                  <template #default="{ row }">
+                    <div v-if="ttyExpandedPath === row.path" class="tty-edit" @click.stop>
+                      <div class="vform tty-vform">
+                        <div class="tty-grid">
+                          <div class="vform-row">
+                            <span class="vlabel">别名</span>
+                            <div class="vcontrol"><el-input v-model="ttyEditing.alias" size="small" :disabled="!canEdit" placeholder="设备内唯一，可留空" /></div>
+                          </div>
+                          <div class="vform-row">
+                            <span class="vlabel">启用</span>
+                            <div class="vcontrol">
+                              <el-switch v-model="ttyEditing.enabled" :disabled="!canEdit" />
+                              <span class="muted">{{ ttyEditing.enabled ? '启用' : '禁用' }}</span>
+                            </div>
+                          </div>
+                          <div class="vform-row span2">
+                            <span class="vlabel">路径</span>
+                            <div class="vcontrol path-line">
+                              <span class="vreadonly mono">{{ row.path }}</span>
+                              <el-button size="small" text @click="copyText(row.path, '路径已复制')">复制路径</el-button>
+                              <el-button v-if="canTty" size="small" text @click="takeoverTty(row)">强制接管</el-button>
+                            </div>
+                          </div>
+                        <div class="vform-row">
+                          <span class="vlabel">波特率</span>
+                          <div class="vcontrol">
+                            <el-select v-model="ttyEditing.baud" size="small" :disabled="!canEdit">
+                              <el-option v-for="b in bauds" :key="b" :label="b" :value="b" />
+                            </el-select>
+                          </div>
+                        </div>
+                        <div class="vform-row">
+                          <span class="vlabel">数据位</span>
+                          <div class="vcontrol">
+                            <el-select v-model="ttyEditing.data_bits" size="small" :disabled="!canEdit">
+                              <el-option v-for="b in [5, 6, 7, 8]" :key="b" :label="b" :value="b" />
+                            </el-select>
+                          </div>
+                        </div>
+                        <div class="vform-row">
+                          <span class="vlabel">校验</span>
+                          <div class="vcontrol">
+                            <el-select v-model="ttyEditing.parity" size="small" :disabled="!canEdit">
+                              <el-option label="无 (N)" value="N" />
+                              <el-option label="偶 (E)" value="E" />
+                              <el-option label="奇 (O)" value="O" />
+                            </el-select>
+                          </div>
+                        </div>
+                        <div class="vform-row">
+                          <span class="vlabel">停止位</span>
+                          <div class="vcontrol">
+                            <el-select v-model="ttyEditing.stop_bits" size="small" :disabled="!canEdit">
+                              <el-option :label="1" :value="1" />
+                              <el-option :label="2" :value="2" />
+                            </el-select>
+                          </div>
+                        </div>
+                        </div>
+                        <div class="vform-actions">
+                          <span class="grow" />
+                          <el-button v-if="canEdit" size="small" type="danger" plain @click="deleteTty(row)">删除</el-button>
+                          <el-button size="small" @click="collapseTtyRow">取消</el-button>
+                          <el-button v-if="canEdit" size="small" type="primary" :loading="ttySaving" @click="saveTtyRow">保存并下发</el-button>
+                        </div>
                       </div>
-                    <div class="vform-row">
-                      <span class="vlabel">别名</span>
-                      <div class="vcontrol"><el-input v-model="ttyAddForm.alias" size="small" :disabled="!canEdit" placeholder="设备内唯一，可留空" /></div>
                     </div>
-                    <div class="vform-row">
-                      <span class="vlabel">启用</span>
-                      <div class="vcontrol">
-                        <el-switch v-model="ttyAddForm.enabled" :disabled="!canEdit" />
-                        <span class="muted">{{ ttyAddForm.enabled ? '启用' : '禁用' }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column v-if="isPhone" min-width="0">
+                  <template #default="{ row }">
+                    <div class="tty-card">
+                      <div class="tty-card-top">
+                        <b>{{ row.alias || '未命名' }}</b>
+                        <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '禁用' }}</el-tag>
+                        <span class="grow" />
+                        <el-button size="small" type="primary" link @click.stop="openTtyConsole(row)">调试</el-button>
+                      </div>
+                      <div class="path" :title="row.path">{{ row.path }}</div>
+                      <div class="tty-card-meta">
+                        <span>{{ row.baud }} · {{ row.data_bits }}{{ row.parity }}{{ row.stop_bits }}</span>
+                        <span class="num">RX {{ ttyRx(row.path) }}</span>
+                        <span class="num">TX {{ ttyTx(row.path) }}</span>
                       </div>
                     </div>
-                    <div class="vform-row">
-                      <span class="vlabel">波特率</span>
-                      <div class="vcontrol">
-                        <el-select v-model="ttyAddForm.baud" size="small" :disabled="!canEdit">
-                          <el-option v-for="b in bauds" :key="b" :label="b" :value="b" />
-                        </el-select>
+                  </template>
+                </el-table-column>
+                <el-table-column v-if="!isPhone" label="设备" min-width="180">
+                  <template #default="{ row }">
+                    <b>{{ row.alias || '—' }}</b>
+                    <div class="path" :title="row.path">{{ row.path }}</div>
+                  </template>
+                </el-table-column>
+                <el-table-column v-if="!isPhone" label="状态" width="80">
+                  <template #default="{ row }">
+                    <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '禁用' }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column v-if="!isPhone" label="参数" min-width="120">
+                  <template #default="{ row }">{{ row.baud }} · {{ row.data_bits }}{{ row.parity }}{{ row.stop_bits }}</template>
+                </el-table-column>
+                <el-table-column v-if="!isPhone" label="RX" width="90">
+                  <template #default="{ row }"><span class="num">{{ ttyRx(row.path) }}</span></template>
+                </el-table-column>
+                <el-table-column v-if="!isPhone" label="TX" width="90">
+                  <template #default="{ row }"><span class="num">{{ ttyTx(row.path) }}</span></template>
+                </el-table-column>
+                <el-table-column v-if="!isPhone" label="调试" width="70">
+                  <template #default="{ row }">
+                    <el-button size="small" type="primary" link @click.stop="openTtyConsole(row)">调试</el-button>
+                  </template>
+                </el-table-column>
+                <template #empty><div class="muted">暂无已配置串口</div></template>
+              </el-table>
+          </div>
+          <div v-show="ttyTab === 'unconfig'">
+              <el-table ref="ttyAddTable" class="row-edit-table" :data="filteredUnconfigured" size="small" row-key="path" :show-header="!isPhone"
+                        @row-click="onTtyAddRow" @expand-change="onTtyAddExpand">
+                <el-table-column type="expand">
+                  <template #default="{ row }">
+                    <div v-if="ttyAddPath === row.path" class="tty-edit" @click.stop>
+                      <div class="vform tty-vform">
+                        <div class="tty-grid">
+                          <div class="vform-row span2">
+                            <span class="vlabel">路径</span>
+                            <div class="vcontrol"><span class="vreadonly mono">{{ row.path }}</span></div>
+                          </div>
+                        <div class="vform-row">
+                          <span class="vlabel">别名</span>
+                          <div class="vcontrol"><el-input v-model="ttyAddForm.alias" size="small" :disabled="!canEdit" placeholder="设备内唯一，可留空" /></div>
+                        </div>
+                        <div class="vform-row">
+                          <span class="vlabel">启用</span>
+                          <div class="vcontrol">
+                            <el-switch v-model="ttyAddForm.enabled" :disabled="!canEdit" />
+                            <span class="muted">{{ ttyAddForm.enabled ? '启用' : '禁用' }}</span>
+                          </div>
+                        </div>
+                        <div class="vform-row">
+                          <span class="vlabel">波特率</span>
+                          <div class="vcontrol">
+                            <el-select v-model="ttyAddForm.baud" size="small" :disabled="!canEdit">
+                              <el-option v-for="b in bauds" :key="b" :label="b" :value="b" />
+                            </el-select>
+                          </div>
+                        </div>
+                        <div class="vform-row">
+                          <span class="vlabel">数据位</span>
+                          <div class="vcontrol">
+                            <el-select v-model="ttyAddForm.data_bits" size="small" :disabled="!canEdit">
+                              <el-option v-for="b in [5, 6, 7, 8]" :key="b" :label="b" :value="b" />
+                            </el-select>
+                          </div>
+                        </div>
+                        <div class="vform-row">
+                          <span class="vlabel">校验</span>
+                          <div class="vcontrol">
+                            <el-select v-model="ttyAddForm.parity" size="small" :disabled="!canEdit">
+                              <el-option label="无 (N)" value="N" />
+                              <el-option label="偶 (E)" value="E" />
+                              <el-option label="奇 (O)" value="O" />
+                            </el-select>
+                          </div>
+                        </div>
+                        <div class="vform-row">
+                          <span class="vlabel">停止位</span>
+                          <div class="vcontrol">
+                            <el-select v-model="ttyAddForm.stop_bits" size="small" :disabled="!canEdit">
+                              <el-option :label="1" :value="1" />
+                              <el-option :label="2" :value="2" />
+                            </el-select>
+                          </div>
+                        </div>
+                        </div>
+                        <div class="vform-actions">
+                          <span class="grow" />
+                          <el-button size="small" @click="collapseTtyAddRow">取消</el-button>
+                          <el-button size="small" type="primary" :loading="ttySaving" @click="saveTtyAdd">添加</el-button>
+                        </div>
                       </div>
                     </div>
-                    <div class="vform-row">
-                      <span class="vlabel">数据位</span>
-                      <div class="vcontrol">
-                        <el-select v-model="ttyAddForm.data_bits" size="small" :disabled="!canEdit">
-                          <el-option v-for="b in [5, 6, 7, 8]" :key="b" :label="b" :value="b" />
-                        </el-select>
+                  </template>
+                </el-table-column>
+                <el-table-column v-if="isPhone" min-width="0">
+                  <template #default="{ row }">
+                    <div class="tty-card">
+                      <div class="tty-card-top">
+                        <b class="muted">未配置</b>
+                        <span class="grow" />
+                        <span class="muted">{{ canEdit ? '点击添加' : '—' }}</span>
+                      </div>
+                      <div class="path" :title="row.path">{{ row.path }}</div>
+                      <div class="tty-card-meta">
+                        <span class="num">RX {{ ttyRx(row.path) }}</span>
+                        <span class="num">TX {{ ttyTx(row.path) }}</span>
                       </div>
                     </div>
-                    <div class="vform-row">
-                      <span class="vlabel">校验</span>
-                      <div class="vcontrol">
-                        <el-select v-model="ttyAddForm.parity" size="small" :disabled="!canEdit">
-                          <el-option label="无 (N)" value="N" />
-                          <el-option label="偶 (E)" value="E" />
-                          <el-option label="奇 (O)" value="O" />
-                        </el-select>
-                      </div>
-                    </div>
-                    <div class="vform-row">
-                      <span class="vlabel">停止位</span>
-                      <div class="vcontrol">
-                        <el-select v-model="ttyAddForm.stop_bits" size="small" :disabled="!canEdit">
-                          <el-option :label="1" :value="1" />
-                          <el-option :label="2" :value="2" />
-                        </el-select>
-                      </div>
-                    </div>
-                    </div>
-                    <div class="vform-actions">
-                      <span class="grow" />
-                      <el-button size="small" @click="collapseTtyAddRow">取消</el-button>
-                      <el-button size="small" type="primary" :loading="ttySaving" @click="saveTtyAdd">添加</el-button>
-                    </div>
-                  </div>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column v-if="isPhone" min-width="0">
-              <template #default="{ row }">
-                <div class="tty-card">
-                  <div class="tty-card-top">
+                  </template>
+                </el-table-column>
+                <el-table-column v-if="!isPhone" label="设备" min-width="180">
+                  <template #default="{ row }">
                     <b class="muted">未配置</b>
-                    <span class="grow" />
-                    <span class="muted">{{ canEdit ? '点击添加' : '—' }}</span>
-                  </div>
-                  <div class="path" :title="row.path">{{ row.path }}</div>
-                  <div class="tty-card-meta">
-                    <span class="num">RX {{ ttyRx(row.path) }}</span>
-                    <span class="num">TX {{ ttyTx(row.path) }}</span>
-                  </div>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column v-if="!isPhone" label="设备" min-width="180">
-              <template #default="{ row }">
-                <b class="muted">未配置</b>
-                <div class="path" :title="row.path">{{ row.path }}</div>
-              </template>
-            </el-table-column>
-            <el-table-column v-if="!isPhone" label="状态" width="80"><span class="muted">未配置</span></el-table-column>
-            <el-table-column v-if="!isPhone" label="RX" width="90">
-              <template #default="{ row }"><span class="num">{{ ttyRx(row.path) }}</span></template>
-            </el-table-column>
-            <el-table-column v-if="!isPhone" label="TX" width="90">
-              <template #default="{ row }"><span class="num">{{ ttyTx(row.path) }}</span></template>
-            </el-table-column>
-            <el-table-column v-if="!isPhone" label="配置" width="90">
-              <template #default="{ row }"><span class="muted">{{ canEdit ? '点击添加' : '—' }}</span></template>
-            </el-table-column>
-            <template #empty><div class="muted">{{ ttyQuery ? '没有匹配的串口' : '没有未配置的串口' }}</div></template>
-          </el-table>
+                    <div class="path" :title="row.path">{{ row.path }}</div>
+                  </template>
+                </el-table-column>
+                <el-table-column v-if="!isPhone" label="状态" width="80"><span class="muted">未配置</span></el-table-column>
+                <el-table-column v-if="!isPhone" label="RX" width="90">
+                  <template #default="{ row }"><span class="num">{{ ttyRx(row.path) }}</span></template>
+                </el-table-column>
+                <el-table-column v-if="!isPhone" label="TX" width="90">
+                  <template #default="{ row }"><span class="num">{{ ttyTx(row.path) }}</span></template>
+                </el-table-column>
+                <el-table-column v-if="!isPhone" label="配置" width="90">
+                  <template #default="{ row }"><span class="muted">{{ canEdit ? '点击添加' : '—' }}</span></template>
+                </el-table-column>
+                <template #empty><div class="muted">{{ ttyQuery ? '没有匹配的串口' : '没有未配置的串口' }}</div></template>
+              </el-table>
+          </div>
         </el-tab-pane>
       </el-tabs>
     </div>
@@ -978,6 +968,7 @@ const rateEl = ref(null)
 const charts = {}
 
 const featTab = ref('storage')
+const obsTab = ref('series')
 const capsSaving = ref(false)
 const capsForm = reactive({
   ports: [], file_dir: '', shell: false, ota: false, allow_tty: [],
@@ -1623,6 +1614,11 @@ function onFeatTab(name) {
   loadDicts()
 }
 
+function onObsTab(name) {
+  // 切回曲线时 canvas 可能刚从 display:none 恢复，尺寸为 0，需要重画
+  if (name === 'series') nextTick(renderCharts)
+}
+
 function addAllowTty() {
   const v = allowTtyInput.value.trim()
   allowTtyOpen.value = false
@@ -2064,6 +2060,7 @@ async function init() {
   ttyAddPath.value = ''
   addMetricOpen.value = false
   featTab.value = 'storage'
+  obsTab.value = 'series'
   seriesPopOpen.value = false
   net.value = null
   netErr.value = ''
@@ -2109,6 +2106,14 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* ---- 合并卡片：每个 tab 顶部的操作条 ---- */
+.tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
 /* ---- 存储/文件/服务/能力 合并卡片 ---- */
 .feat-panel { padding-top: 12px; }
 .feat-tabs :deep(.el-tabs__header) { margin-bottom: 14px; }
@@ -2311,7 +2316,8 @@ onBeforeUnmount(() => {
   .vform-row .vcontrol > .el-input { width: 100%; }
   .vform-note { margin-left: 0; }
   .form-actions, .vform-actions { flex-wrap: wrap; }
-  .series-head h2 { flex: 0 0 100%; }
+  .tab-bar { gap: 8px; }
+  .tab-bar .tty-search { width: 100%; }
   .series-bar { gap: 8px; }
   .series-label { line-height: 28px; }
   .series-select { flex-wrap: wrap; overflow: visible; padding: 4px 8px; }
