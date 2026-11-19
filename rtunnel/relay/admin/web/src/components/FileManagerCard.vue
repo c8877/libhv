@@ -1,30 +1,33 @@
 <template>
   <div :class="embedded ? 'tab-body' : 'panel'">
-    <div :class="embedded ? 'tab-toolbar' : 'panel-head'">
-      <h2 v-if="!embedded">文件管理</h2>
+    <div v-if="!embedded" class="panel-head">
+      <h2>文件管理</h2>
       <el-tag v-if="sys && fsOn" :type="writable ? 'success' : 'info'" size="small">{{ writable ? '读写' : '只读' }}</el-tag>
       <span class="spacer" />
-      <el-button v-if="!embedded" type="primary" size="small" :disabled="!sys || !fsOn" @click="toggle">{{ expanded ? '收起文件管理' : '打开文件管理' }}</el-button>
+      <el-button type="primary" size="small" :disabled="!sys || !fsOn" @click="toggle">{{ expanded ? '收起文件管理' : '打开文件管理' }}</el-button>
     </div>
-    <div class="fs-card">
+    <div v-if="tabState" class="tab-empty">{{ tabState }}</div>
+    <div v-show="!tabState" ref="fsHost" class="fs-host"></div>
+    <div v-if="!embedded" class="fs-card">
       <div class="mono fs-line">
         <template v-if="!sys">正在读取设备能力…</template>
         <template v-else-if="fsOn">{{ root }} · 单文件上限 {{ maxMb }} MB<span v-if="usage"> · {{ usage }}</span><span v-if="!writable"> · 当前角色只能浏览和下载</span></template>
         <template v-else>该设备未启用文件服务（可在「能力配置」中开启）</template>
       </div>
     </div>
-    <div ref="fsHost" class="fs-host"></div>
   </div>
 </template>
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { bytes } from '@/shared/utils.js'
+import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import editorUrl from '../../../../../shared/web/cm-editor.bundle.js?url'
 import '../../../../../shared/web/fs-ui.js'
 import '../../../../../shared/web/file-view.js'
 
 const RtunnelFs = window.RtunnelFs
+const { isPhone } = useBreakpoint()
 
 const props = defineProps({
   devid: { type: String, default: '' },
@@ -47,6 +50,25 @@ const usage = computed(() => {
   return '已用 ' + bytes(used * 1024) + ' / ' + bytes(s.total_kb * 1024)
 })
 
+// 嵌在 tab 里时不再画说明条：能力未就绪/未开启展示空状态，正常时信息进管理器工具栏
+const tabState = computed(() => {
+  if (!props.embedded) return ''
+  if (!props.sys) return '正在读取设备能力…'
+  if (!fsOn.value) return '该设备未启用文件服务（可在「能力配置」中开启）'
+  return ''
+})
+
+const noteText = computed(() => {
+  if (!fsOn.value) return ''
+  // 手机宽度放不下三段：省略「上限」，只留根目录和已用空间
+  let s = root.value
+  if (!isPhone.value) s += ' · 上限 ' + maxMb.value + ' MB'
+  if (usage.value) s += ' · ' + usage.value
+  else if (isPhone.value) s += ' · 上限 ' + maxMb.value + ' MB'
+  if (!writable.value) s += ' · 只读'
+  return s
+})
+
 let fm = null
 const expanded = ref(false)
 const fsHost = ref(null)
@@ -60,11 +82,16 @@ function ensureManager() {
     wsUrl: proto + location.host + '/ws/fs/' + encodeURIComponent(props.devid),
     title: '文件管理 - ' + props.devid,
     editorUrl,
+    note: noteText.value,
+    noteWarn: !writable.value,
     onClose: () => { expanded.value = false },
     onSpace: (s) => { space.value = s }
   })
   return fm
 }
+
+// 根目录、上限、已用空间或只读状态变化时同步工具栏说明
+watch(noteText, (t) => { if (fm) fm.setNote(t, !writable.value) })
 
 function toggle() {
   if (!props.devid || !fsOn.value) return
@@ -125,11 +152,11 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .tab-body { min-width: 0; }
-.tab-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+.tab-empty {
+  padding: 48px 16px;
+  text-align: center;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
 }
 .fs-card {
   padding: 4px 0 2px;
@@ -142,4 +169,5 @@ onBeforeUnmount(() => {
 .fs-host {
   margin-top: 10px;
 }
+.tab-body .fs-host { margin-top: 0; }
 </style>

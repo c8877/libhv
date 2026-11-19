@@ -193,6 +193,9 @@ button.danger{color:#ef4444;border-color:rgba(239,68,68,.4)}
 .search{border:1px solid var(--line);background:var(--input);color:var(--fg);border-radius:8px;padding:5px 9px;font-size:13px;width:170px}
 label.chk{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:12px;white-space:nowrap}
 .meta{margin-left:auto;color:var(--muted);font-size:12px;white-space:nowrap}
+.note{display:block;min-width:0;max-width:100%;padding-left:10px;margin-left:2px;border-left:1px solid var(--line);
+  line-height:20px;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.note.warn{color:#c98a12}
 .tablewrap{flex:1;overflow:auto;background:var(--bg)}
 table{width:100%;border-collapse:collapse;font-size:13px}
 thead th{position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--line);text-align:left;padding:7px 8px;
@@ -405,6 +408,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
       <button class="ibtn primary" id="upload" title="上传到当前目录" aria-label="上传">${ICONS.upload}</button>
       <button class="ibtn" id="pack" title="打包下载" aria-label="打包下载" hidden>${ICONS.pack}</button>
       <button class="ibtn danger" id="del" title="删除选中" aria-label="删除选中">${ICONS.del}</button>
+      <span class="note" id="note" hidden></span>
       <span class="spacer"></span>
       <input class="search" id="search" placeholder="搜索当前目录">
       <button class="ibtn" id="hiddenBtn" title="显示隐藏文件" aria-label="显示隐藏文件">${ICONS.eye}</button>
@@ -711,7 +715,7 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         if (this.opts.searchPlaceholder) this.sh.getElementById('search').placeholder = this.opts.searchPlaceholder;
         var q = this.q = {};
         var ids = ['close', 'title', 'rootLine', 'crumb', 'path', 'editPath', 'refresh', 'hidden', 'rowmenu',
-            'mkdir', 'touch', 'upload', 'pack', 'del', 'search', 'meta', 'all', 'rows', 'empty', 'summary', 'dest', 'viewToggle',
+            'mkdir', 'touch', 'upload', 'pack', 'del', 'note', 'search', 'meta', 'all', 'rows', 'empty', 'summary', 'dest', 'viewToggle',
             'expandAll', 'collapseAll', 'fullscreen', 'hiddenBtn',
             'upbox', 'upname', 'upbar', 'uppct', 'upcancel', 'editor', 'edTitle', 'edHost', 'edTree',
             'edClose', 'edCancel', 'edSave', 'preview', 'pvTitle', 'pvBody', 'pvClose',
@@ -726,6 +730,16 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         this.applyViewButton();
         this.syncHiddenBtn();
         this.syncFullscreenBtn();
+        this.setNote(this.opts.note || '', this.opts.noteWarn);
+    };
+
+    // 工具栏上的补充说明（根目录、容量、只读等）；空串时整段隐藏
+    Manager.prototype.setNote = function (text, warn) {
+        if (!this.q || !this.q.note) return;
+        var s = String(text || '');
+        this.q.note.textContent = s;
+        this.q.note.hidden = !s;
+        this.q.note.classList.toggle('warn', !!warn && !!s);
     };
 
     Manager.prototype._bind = function () {
