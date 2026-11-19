@@ -9,7 +9,8 @@
       </el-input>
     </div>
 
-    <el-table :data="filtered" v-loading="loading" row-class-name="row-click" @row-click="openRow">
+    <el-table :data="filtered" v-loading="loading" row-class-name="row-click"
+              @row-click="openRow" @row-contextmenu="openContextMenu">
       <el-table-column label="devid" min-width="140">
         <template #default="{ row }"><b>{{ row.devid }}</b></template>
       </el-table-column>
@@ -36,29 +37,42 @@
       <el-table-column v-if="!isPhone" label="流量 ↓/↑" min-width="150">
         <template #default="{ row }">{{ bytes(row.bytes_in) }} / {{ bytes(row.bytes_out) }}</template>
       </el-table-column>
-      <el-table-column :min-width="isPhone ? 92 : 250" label="操作">
+      <el-table-column :min-width="isPhone ? 64 : 72" label="操作" align="center">
         <template #default="{ row }">
-          <el-dropdown v-if="isPhone" trigger="click" @command="(c) => onAction(c, row)">
-            <el-button size="small">更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item v-if="canOperate()" command="web">Web</el-dropdown-item>
-                <el-dropdown-item v-if="canOperate() && row.caps_shell !== 0" command="shell">Shell</el-dropdown-item>
-                <el-dropdown-item v-if="canManage()" command="bind" divided>绑定</el-dropdown-item>
-                <el-dropdown-item v-if="canManage()" command="kick">下线</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-          <template v-else>
-            <el-button v-if="canOperate()" size="small" @click.stop="openWeb(row)">Web</el-button>
-            <el-button v-if="canOperate() && row.caps_shell !== 0" size="small" @click.stop="openShell(row)">Shell</el-button>
-            <el-button v-if="canManage()" size="small" @click.stop="bind(row)">绑定</el-button>
-            <el-button v-if="canManage()" size="small" type="danger" plain @click.stop="kick(row)">下线</el-button>
-          </template>
+          <span @click.stop>
+            <el-dropdown trigger="click" @command="(c) => onAction(c, row)">
+              <el-button size="small" text class="more-btn" aria-label="更多操作">
+                <el-icon><MoreFilled /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="detail">详情</el-dropdown-item>
+                  <el-dropdown-item v-if="canOperate()" command="web" divided>Web</el-dropdown-item>
+                  <el-dropdown-item v-if="canOperate() && row.caps_shell !== 0" command="shell">Shell</el-dropdown-item>
+                  <el-dropdown-item v-if="canManage()" command="bind" divided>绑定</el-dropdown-item>
+                  <el-dropdown-item v-if="canManage()" command="kick">下线</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </span>
         </template>
       </el-table-column>
       <template #empty><el-empty description="暂无在线设备" :image-size="70" /></template>
     </el-table>
+
+    <teleport to="body">
+      <div v-if="ctx.open" class="ctx-menu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }"
+           @contextmenu.prevent @mousedown.stop>
+        <div class="ctx-head">{{ ctx.row && ctx.row.devid }}</div>
+        <button class="ctx-item" @click="ctxAction('detail')">详情</button>
+        <button v-if="canOperate()" class="ctx-item" @click="ctxAction('web')">打开 Web</button>
+        <button v-if="canOperate() && ctx.row && ctx.row.caps_shell !== 0" class="ctx-item"
+                @click="ctxAction('shell')">打开 Shell</button>
+        <div v-if="canManage()" class="ctx-sep" />
+        <button v-if="canManage()" class="ctx-item" @click="ctxAction('bind')">绑定账号</button>
+        <button v-if="canManage()" class="ctx-item danger" @click="ctxAction('kick')">强制下线</button>
+      </div>
+    </teleport>
   </div>
 </template>
 
@@ -99,10 +113,35 @@ async function refresh(silent) {
 }
 
 function onAction(cmd, row) {
-  if (cmd === 'web') openWeb(row)
+  if (cmd === 'detail') openRow(row)
+  else if (cmd === 'web') openWeb(row)
   else if (cmd === 'shell') openShell(row)
   else if (cmd === 'bind') bind(row)
   else if (cmd === 'kick') kick(row)
+}
+
+const ctx = ref({ open: false, x: 0, y: 0, row: null })
+
+function openContextMenu(row, column, event) {
+  event.preventDefault()
+  const w = 176
+  const h = 250
+  ctx.value = {
+    open: true,
+    row,
+    x: Math.max(8, Math.min(event.clientX, window.innerWidth - w - 8)),
+    y: Math.max(8, Math.min(event.clientY, window.innerHeight - h - 8)),
+  }
+}
+
+function closeContextMenu() {
+  ctx.value = { ...ctx.value, open: false }
+}
+
+function ctxAction(cmd) {
+  const row = ctx.value.row
+  closeContextMenu()
+  if (row) onAction(cmd, row)
 }
 
 function openRow(row) {
@@ -164,16 +203,66 @@ async function kick(row) {
 }
 
 let timer = null
+function onKeydown(e) {
+  if (e.key === 'Escape') closeContextMenu()
+}
+
 onMounted(() => {
   refresh()
   timer = setInterval(() => refresh(true), 5000)
+  window.addEventListener('click', closeContextMenu)
+  window.addEventListener('scroll', closeContextMenu, true)
+  window.addEventListener('resize', closeContextMenu)
+  window.addEventListener('keydown', onKeydown)
 })
-onBeforeUnmount(() => { if (timer) clearInterval(timer) })
+onBeforeUnmount(() => {
+  if (timer) clearInterval(timer)
+  window.removeEventListener('click', closeContextMenu)
+  window.removeEventListener('scroll', closeContextMenu, true)
+  window.removeEventListener('resize', closeContextMenu)
+  window.removeEventListener('keydown', onKeydown)
+})
 </script>
 
 <style scoped>
 .search { width: 240px; }
 :deep(.row-click) { cursor: pointer; }
+.more-btn { padding: 4px 6px; }
+.ctx-menu {
+  position: fixed;
+  z-index: 3000;
+  min-width: 176px;
+  padding: 6px;
+  border-radius: 8px;
+  background: var(--el-bg-color-overlay, #fff);
+  border: 1px solid var(--el-border-color-light, #e4e7ed);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+}
+.ctx-head {
+  padding: 4px 10px 6px;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary, #909399);
+  border-bottom: 1px solid var(--el-border-color-lighter, #ebeef5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ctx-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+  font-size: 13px;
+  color: var(--el-text-color-regular, #606266);
+  cursor: pointer;
+}
+.ctx-item:hover { background: var(--el-fill-color-light, #f5f7fa); }
+.ctx-item.danger { color: var(--el-color-danger, #f56c6c); }
+.ctx-sep { height: 1px; margin: 4px 6px; background: var(--el-border-color-lighter, #ebeef5); }
 @media (max-width: 599px) {
   .search { width: 100%; }
   .panel-head { flex-wrap: wrap; }
