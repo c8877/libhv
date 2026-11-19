@@ -1933,6 +1933,42 @@ static bool mountIgnored(const std::string& fstype, const std::string& mnt) {
     return false;
 }
 
+// 读 /sys 下的单行小文件（网卡 MAC/MTU/速率/统计）
+static bool readSysLine(const std::string& path, std::string& out) {
+    FILE* f = fopen(path.c_str(), "r");
+    if (!f) return false;
+    char buf[256];
+    size_t n = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    buf[n] = 0;
+    out.assign(buf, n);
+    while (!out.empty() && (out.back() == '\n' || out.back() == '\r' || out.back() == ' ')) out.pop_back();
+    return !out.empty();
+}
+
+static unsigned long long readSysULL(const std::string& path) {
+    std::string s;
+    if (!readSysLine(path, s)) return 0;
+    return strtoull(s.c_str(), nullptr, 10);
+}
+
+// 网卡的静态属性与累计收发量，供详情页「网卡」tab 展示
+static void fillNicDetail(const std::string& name, nlohmann::json& n) {
+    std::string base = "/sys/class/net/" + name;
+    std::string mac, mtu, speed, oper, carrier;
+    if (readSysLine(base + "/address", mac)) n["mac"] = mac;
+    if (readSysLine(base + "/mtu", mtu)) n["mtu"] = atoi(mtu.c_str());
+    if (readSysLine(base + "/speed", speed)) n["speed_mbps"] = atoi(speed.c_str()) > 0 ? atoi(speed.c_str()) : 0;
+    if (readSysLine(base + "/operstate", oper)) n["operstate"] = oper;
+    if (readSysLine(base + "/carrier", carrier)) n["carrier"] = carrier == "1";
+    n["rx_bytes"] = readSysULL(base + "/statistics/rx_bytes");
+    n["tx_bytes"] = readSysULL(base + "/statistics/tx_bytes");
+    n["rx_errors"] = readSysULL(base + "/statistics/rx_errors");
+    n["tx_errors"] = readSysULL(base + "/statistics/tx_errors");
+    n["rx_dropped"] = readSysULL(base + "/statistics/rx_dropped");
+    n["tx_dropped"] = readSysULL(base + "/statistics/tx_dropped");
+}
+
 nlohmann::json AgentApp::buildSysinfo() {
     using nlohmann::json;
     json j;
@@ -2055,6 +2091,7 @@ nlohmann::json AgentApp::buildSysinfo() {
                 n["ip"] = ip;
                 n["netmask"] = mask;
                 n["up"] = (p->ifa_flags & IFF_UP) ? true : false;
+                fillNicDetail(p->ifa_name, n);
                 nics.push_back(n);
             }
             freeifaddrs(ifs);
@@ -2249,7 +2286,8 @@ void AgentApp::sendSysinfo(int mode) {
         out["mounts"] = nlohmann::json::array();
         for (auto& m : j["mounts"]) out["mounts"].push_back({{"mount", m["mount"]}, {"used_kb", m["used_kb"]}, {"avail_kb", m["avail_kb"]}});
         out["nics"] = nlohmann::json::array();
-        for (auto& n : j["nics"]) out["nics"].push_back({{"name", n["name"]}, {"ip", n["ip"]}, {"up", n["up"]}});
+        // 增量帧带上网卡全部字段：IP/状态会变，收发计数每次都在增长
+        for (auto& n : j["nics"]) out["nics"].push_back(n);
         out["serial"] = j["serial"];
     }
     else {

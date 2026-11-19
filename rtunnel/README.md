@@ -294,9 +294,13 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
   的缓存快照，等待回帧在后台线程进行，不阻塞管理台其它请求）
 - 网络与 IPC 快照：`GET /api/v1/agents/{devid}/net?scope=tcp|udp|unix|ipc|all&proc=1&page=1&page_size=10`
   （agent 读 `/proc/net/{tcp,tcp6,udp,udp6,unix}` 与 `lsipc -m|-q|-s -J`，
-  缺失 lsipc 时回退 `/proc/sysvipc`；`proc=1` 扫 `/proc/<pid>/fd` 反查占用进程。
+  缺失 lsipc 时回退 `/proc/sysvipc`；IPC 额外扫 `/dev/shm` 上报 POSIX 共享内存
+  （`ipc_kind=posix`），否则只跑 SysV 的机器会看起来完全没有 IPC 对象。
+  `proc=1` 扫 `/proc/<pid>/fd` 反查占用进程。
   过滤、分页在 agent 完成，只回传当前页；relay 缓存 3s，`refresh=1` 绕过；
   agent 低于 1.4.28 返回 501）
+  设备详情「网络」卡片把网卡与 TCP/UDP/UNIX/IPC 放在同一组 tab；网卡数据来自
+  sysinfo（名称/IP/掩码/MAC/MTU/速率/收发字节/错误），在页面本地分页与搜索。
 - 进程：`GET /api/v1/agents/{devid}/procs?sort=cpu|mem|pid|start&q=&page=1&page_size=10`、
   `GET .../procs/{pid}`、`POST .../procs/signal {pid,signal}`
   （agent 扫 `/proc/<pid>/{stat,status,cmdline}`，CPU 用 300ms 双采样的单核百分比；

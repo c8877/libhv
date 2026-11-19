@@ -448,7 +448,7 @@ int AdminServer::handleAgentNet(const HttpContextPtr& ctx) {
     std::string utype = ctx->param("utype");
     if (utype.empty()) utype = "all";
     std::string ipc_kind = ctx->param("ipc_kind");
-    if (ipc_kind != "msg" && ipc_kind != "sem") ipc_kind = "shm";
+    if (ipc_kind != "msg" && ipc_kind != "sem" && ipc_kind != "posix") ipc_kind = "shm";
     std::string key = devid + "|" + scope + "|" + (with_proc ? "1" : "0") + "|" + std::to_string(page) +
                       "|" + std::to_string(page_size) + "|" + q + "|" + (listen_only ? "1" : "0") + "|" +
                       utype + "|" + ipc_kind;

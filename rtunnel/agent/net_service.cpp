@@ -3,8 +3,10 @@
 
 #include <arpa/inet.h>
 #include <dirent.h>
+#include <pwd.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -336,6 +338,41 @@ std::string bytesText(unsigned long long bytes) {
     return b;
 }
 
+std::string ownerName(unsigned uid) {
+    struct passwd pwd;
+    struct passwd* res = nullptr;
+    char buf[1024];
+    if (getpwuid_r((uid_t)uid, &pwd, buf, sizeof buf, &res) == 0 && res) return res->pw_name;
+    return std::to_string(uid);
+}
+
+// POSIX 共享内存（/dev/shm）。lsipc 只覆盖 SysV 对象，rpx/iox 这类应用多用 POSIX shm，
+// 只查 SysV 时 IPC 页会看起来完全为空。
+json posixShm(size_t& used, size_t budget, bool& truncated) {
+    json arr = json::array();
+    DIR* d = opendir("/dev/shm");
+    if (!d) return arr;
+    struct dirent* e;
+    while ((e = readdir(d)) != nullptr) {
+        if (e->d_name[0] == '.') continue;
+        std::string p = std::string("/dev/shm/") + e->d_name;
+        struct stat st;
+        if (lstat(p.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) continue;
+        json o;
+        o["name"] = e->d_name;
+        o["size"] = bytesText((unsigned long long)st.st_size);
+        o["size_bytes"] = (unsigned long long)st.st_size;
+        char pm[16];
+        snprintf(pm, sizeof pm, "%03o", (unsigned)(st.st_mode & 0777));
+        o["perms"] = pm;
+        o["owner"] = ownerName(st.st_uid);
+        o["mtime_ms"] = (unsigned long long)st.st_mtime * 1000;
+        if (!pushEntry(arr, o, used, budget, truncated)) break;
+    }
+    closedir(d);
+    return arr;
+}
+
 json ipcFromLsipc(int limit, bool with_proc, size_t& used, size_t budget, bool& truncated) {
     json shm = firstArray(runCmd("lsipc -m -J 2>/dev/null"), "sharedmemory");
     json msg = firstArray(runCmd("lsipc -q -J 2>/dev/null"), "messages");
@@ -504,16 +541,16 @@ json ipcFromProc(int limit, size_t& used, size_t budget, bool& truncated) {
 }
 
 json ipcPage(json o, const Options& opt) {
-    const char* kinds[3] = {"shm", "msg", "sem"};
+    const char* kinds[4] = {"shm", "msg", "sem", "posix"};
     json counts = json::object();
     int total = 0;
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         int n = o.contains(kinds[i]) && o[kinds[i]].is_array() ? (int)o[kinds[i]].size() : 0;
         counts[kinds[i]] = n;
         total += n;
     }
     std::string kind = opt.ipc_kind;
-    if (kind != "msg" && kind != "sem") kind = "shm";
+    if (kind != "msg" && kind != "sem" && kind != "posix") kind = "shm";
 
     std::string q = lowerText(opt.q);
     std::vector<json> rows;
@@ -521,17 +558,23 @@ json ipcPage(json o, const Options& opt) {
     for (auto& e : src) {
         if (!q.empty()) {
             std::string hay = jstr(e, "key") + " " + jstr(e, "id") + " " + jstr(e, "owner") + " " +
-                              jstr(e, "comm");
+                              jstr(e, "comm") + " " + jstr(e, "name");
             if (lowerText(hay).find(q) == std::string::npos) continue;
         }
         rows.push_back(e);
     }
-    std::sort(rows.begin(), rows.end(), [](const json& a, const json& b) {
-        int ia = atoi(jstr(a, "id").c_str());
-        int ib = atoi(jstr(b, "id").c_str());
-        if (ia != ib) return ia < ib;
-        return jstr(a, "id") < jstr(b, "id");
-    });
+    if (kind == "posix") {
+        std::sort(rows.begin(), rows.end(), [](const json& a, const json& b) {
+            return jstr(a, "name") < jstr(b, "name");
+        });
+    } else {
+        std::sort(rows.begin(), rows.end(), [](const json& a, const json& b) {
+            int ia = atoi(jstr(a, "id").c_str());
+            int ib = atoi(jstr(b, "id").c_str());
+            if (ia != ib) return ia < ib;
+            return jstr(a, "id") < jstr(b, "id");
+        });
+    }
 
     int matched = (int)rows.size();
     int page = 1, page_size = 10, pages = 1;
@@ -540,7 +583,7 @@ json ipcPage(json o, const Options& opt) {
 
     json pagearr = json::array();
     for (size_t i = begin; i < end; ++i) pagearr.push_back(rows[i]);
-    for (int i = 0; i < 3; ++i) o[kinds[i]] = json::array();
+    for (int i = 0; i < 4; ++i) o[kinds[i]] = json::array();
     o[kind] = pagearr;
     o["kind"] = kind;
     o["counts"] = counts;
@@ -557,20 +600,31 @@ json collectIpc(int limit, bool with_proc, size_t& used, size_t budget, bool& tr
     if (o["shm"].empty() && o["msg"].empty() && o["sem"].empty() && o["total"] == 0) {
         // 没有 lsipc 或解析失败：回退内核接口
         std::string probe = readFileText("/proc/sysvipc/shm", 64);
-        if (probe.empty()) {
+        bool have_proc = !probe.empty();
+        if (!have_proc) {
             std::string msg = readFileText("/proc/sysvipc/msg", 64);
             std::string sem = readFileText("/proc/sysvipc/sem", 64);
-            if (msg.empty() && sem.empty()) return o;
+            have_proc = !msg.empty() || !sem.empty();
         }
-        size_t used2 = 0;
-        bool tr2 = false;
-        json p = ipcFromProc(limit, used2, budget, tr2);
-        if (!p["shm"].empty() || !p["msg"].empty() || !p["sem"].empty() || p["total"] > 0) {
-            used += used2;
-            truncated = truncated || tr2;
-            return p;
+        if (have_proc) {
+            size_t used2 = 0;
+            bool tr2 = false;
+            json p = ipcFromProc(limit, used2, budget, tr2);
+            if (!p["shm"].empty() || !p["msg"].empty() || !p["sem"].empty() || p["total"] > 0) {
+                used += used2;
+                truncated = truncated || tr2;
+                o = p;
+            }
         }
     }
+
+    // SysV 之外再带一份 POSIX 共享内存，避免「有 /dev/shm 使用但 IPC 页全空」
+    json posix = posixShm(used, budget, truncated);
+    o["posix"] = posix;
+    o["total"] = (int)((o["shm"].is_array() ? o["shm"].size() : 0) +
+                       (o["msg"].is_array() ? o["msg"].size() : 0) +
+                       (o["sem"].is_array() ? o["sem"].size() : 0) + posix.size());
+    if (!o.contains("limits")) o["limits"] = json::array();
     return o;
 }
 

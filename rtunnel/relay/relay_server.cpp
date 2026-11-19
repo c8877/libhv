@@ -1408,8 +1408,11 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
                         for (auto& n : base["nics"]) {
                             auto ni = nm.find(n.value("name", ""));
                             if (ni == nm.end()) continue;
-                            if (ni->second.contains("ip")) n["ip"] = ni->second["ip"];
-                            if (ni->second.contains("up")) n["up"] = ni->second["up"];
+                            for (const char* k : {"ip", "netmask", "up", "mac", "mtu", "speed_mbps", "operstate",
+                                                  "carrier", "rx_bytes", "tx_bytes", "rx_errors", "tx_errors",
+                                                  "rx_dropped", "tx_dropped"}) {
+                                if (ni->second.contains(k)) n[k] = ni->second[k];
+                            }
                         }
                     }
                     e.json = base.dump();

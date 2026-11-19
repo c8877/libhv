@@ -294,25 +294,17 @@
         <h2>网络</h2>
         <span class="spacer" />
         <span v-if="netTs" class="muted">{{ netAgeText }}</span>
-        <el-button link type="primary" :loading="netLoading" @click="loadNet(false, true)">刷新</el-button>
-      </div>
-
-      <div class="net-ifs">
-        <span v-for="n in nics" :key="n.name" class="if-chip">
-          <b>{{ n.name }}</b>
-          <span class="mono">{{ n.ip || '—' }}</span>
-          <el-tag :type="n.up ? 'success' : 'info'" size="small">{{ n.up ? 'up' : 'down' }}</el-tag>
-        </span>
-        <span v-if="!nics.length" class="muted">暂无网卡信息</span>
+        <el-button link type="primary" :loading="netLoading" @click="onNetRefresh">刷新</el-button>
       </div>
 
       <el-alert v-if="netErr" :title="netErr" type="warning" :closable="false" show-icon class="net-alert" />
-      <div v-else-if="netCached" class="net-cached">
+      <div v-else-if="netCached && netScope !== 'nic'" class="net-cached">
         缓存快照<template v-if="netOffline"> · 设备离线</template><template v-if="netStale"> · 采集超时</template>
         · {{ time(netTs) }}
       </div>
 
       <el-tabs v-model="netScope" class="net-tabs" @tab-change="onNetTab">
+        <el-tab-pane :label="'网卡 ' + tabCount('nic')" name="nic" />
         <el-tab-pane :label="'TCP ' + tabCount('tcp')" name="tcp" />
         <el-tab-pane :label="'UDP ' + tabCount('udp')" name="udp" />
         <el-tab-pane :label="'UNIX ' + tabCount('unix')" name="unix" />
@@ -323,7 +315,7 @@
         <span class="net-sum">{{ netSummaryText }}</span>
         <span class="spacer" />
         <el-input v-if="netSearchable" v-model="netQ" size="small" clearable class="net-search"
-                  :placeholder="netScope === 'unix' ? '路径 / 进程' : netScope === 'ipc' ? '键 / 属主 / 进程' : '地址 / 端口 / 进程'" />
+                  :placeholder="netScope === 'nic' ? '名称 / IP / MAC' : netScope === 'unix' ? '路径 / 进程' : netScope === 'ipc' ? '键 / 属主 / 进程' : '地址 / 端口 / 进程'" />
         <el-checkbox v-if="netScope === 'tcp' || netScope === 'udp'" v-model="netOnlyListen" size="small">
           仅{{ netScope === 'tcp' ? '监听' : '未连接' }}
         </el-checkbox>
@@ -332,11 +324,70 @@
           <el-radio-button value="STREAM">STREAM</el-radio-button>
           <el-radio-button value="DGRAM">DGRAM</el-radio-button>
         </el-radio-group>
-        <el-checkbox v-model="netProc" size="small" @change="loadNet(false, true)">进程</el-checkbox>
+        <el-checkbox v-if="netScope !== 'nic'" v-model="netProc" size="small" @change="loadNet(false, true)">进程</el-checkbox>
       </div>
 
+      <!-- 网卡 -->
+      <template v-if="netScope === 'nic'">
+        <el-table v-if="!isPhone" :data="nicRows" size="small" class="net-table">
+          <el-table-column label="网卡" min-width="110">
+            <template #default="{ row }"><span class="mono strong">{{ row.name }}</span></template>
+          </el-table-column>
+          <el-table-column label="状态" width="118">
+            <template #default="{ row }">
+              <el-tag size="small" :type="nicLinkUp(row) ? 'success' : 'info'">
+                {{ row.operstate || (row.up ? 'up' : 'down') }}
+              </el-tag>
+              <span v-if="row.up === false" class="muted nic-sub">已禁用</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="IP / 掩码" min-width="180">
+            <template #default="{ row }">
+              <span class="mono">{{ row.ip || '—' }}</span>
+              <span v-if="row.netmask" class="muted"> / {{ row.netmask }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="MAC" width="152">
+            <template #default="{ row }"><span class="mono">{{ row.mac || '—' }}</span></template>
+          </el-table-column>
+          <el-table-column label="MTU" width="78" align="right">
+            <template #default="{ row }">{{ row.mtu || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="速率" width="90" align="right">
+            <template #default="{ row }">{{ row.speed_mbps ? row.speed_mbps + ' M' : '—' }}</template>
+          </el-table-column>
+          <el-table-column label="收 / 发" min-width="170">
+            <template #default="{ row }">
+              <span class="mono">↓ {{ bytes(row.rx_bytes) }} · ↑ {{ bytes(row.tx_bytes) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="错误" width="88" align="right">
+            <template #default="{ row }">
+              <span class="mono" :class="{ 'nic-err': (row.rx_errors || 0) + (row.tx_errors || 0) > 0 }">
+                {{ (row.rx_errors || 0) + (row.tx_errors || 0) }}
+              </span>
+            </template>
+          </el-table-column>
+          <template #empty><div class="muted">没有网卡信息</div></template>
+        </el-table>
+        <div v-else class="net-cards">
+          <div v-for="n in nicRows" :key="n.name" class="net-card">
+            <div class="nc-top">
+              <span class="mono strong">{{ n.name }}</span>
+              <el-tag size="small" :type="nicLinkUp(n) ? 'success' : 'info'">{{ n.operstate || (n.up ? 'up' : 'down') }}</el-tag>
+              <span class="spacer" />
+              <span class="muted">{{ n.speed_mbps ? n.speed_mbps + ' M' : '' }}</span>
+            </div>
+            <div class="nc-line mono">{{ n.ip || '—' }}<template v-if="n.netmask"> / {{ n.netmask }}</template></div>
+            <div class="nc-line mono muted">{{ n.mac || '—' }} · MTU {{ n.mtu || '—' }}</div>
+            <div class="nc-line">↓ {{ bytes(n.rx_bytes) }} · ↑ {{ bytes(n.tx_bytes) }}</div>
+          </div>
+          <div v-if="!nicRows.length" class="muted pad">没有网卡信息</div>
+        </div>
+      </template>
+
       <!-- TCP / UDP -->
-      <template v-if="netScope === 'tcp' || netScope === 'udp'">
+      <template v-else-if="netScope === 'tcp' || netScope === 'udp'">
         <el-table v-if="!isPhone" :data="netPageRows" v-loading="netLoading" size="small" class="net-table">
           <el-table-column label="本地地址" min-width="150">
             <template #default="{ row }"><span class="mono">{{ row.local_addr }}</span></template>
@@ -422,8 +473,12 @@
             <el-radio-button value="shm">共享内存 {{ ipcCount('shm') }}</el-radio-button>
             <el-radio-button value="msg">消息队列 {{ ipcCount('msg') }}</el-radio-button>
             <el-radio-button value="sem">信号量 {{ ipcCount('sem') }}</el-radio-button>
+            <el-radio-button value="posix">POSIX {{ ipcCount('posix') }}</el-radio-button>
           </el-radio-group>
-          <span class="muted">{{ ipcLimitText }}</span>
+          <span v-if="netIpcTab !== 'posix'" class="muted">{{ ipcLimitText }}</span>
+        </div>
+        <div v-if="sysvIpcEmpty && netIpcTab !== 'posix'" class="muted ipc-hint">
+          设备没有 SysV 共享内存/消息队列/信号量（lsipc 为空）；使用 /dev/shm 的 POSIX 对象请在「POSIX」中查看。
         </div>
 
         <el-table v-if="!isPhone" :data="netPageRows" v-loading="netLoading" size="small" class="net-table">
@@ -447,26 +502,36 @@
             <el-table-column label="最后接收" width="100"><template #default="{ row }">{{ row.lrpid || '—' }}</template></el-table-column>
             <el-table-column label="属主" min-width="110"><template #default="{ row }">{{ row.owner }}</template></el-table-column>
           </template>
-          <template v-else>
+          <template v-else-if="netIpcTab === 'sem'">
             <el-table-column label="键" width="130"><template #default="{ row }"><span class="mono">{{ row.key }}</span></template></el-table-column>
             <el-table-column label="ID" width="80"><template #default="{ row }"><span class="mono">{{ row.id }}</span></template></el-table-column>
             <el-table-column label="权限" width="110"><template #default="{ row }"><span class="mono">{{ row.perms }}</span></template></el-table-column>
             <el-table-column label="信号量" width="100"><template #default="{ row }">{{ row.nsems }}</template></el-table-column>
             <el-table-column label="属主" min-width="110"><template #default="{ row }">{{ row.owner }}</template></el-table-column>
           </template>
-          <template #empty><div class="muted">没有 {{ netIpcTab === 'shm' ? '共享内存段' : netIpcTab === 'msg' ? '消息队列' : '信号量' }}</div></template>
+          <template v-else>
+            <el-table-column label="名称" min-width="240"><template #default="{ row }"><span class="mono">{{ row.name }}</span></template></el-table-column>
+            <el-table-column label="大小" width="100"><template #default="{ row }">{{ row.size }}</template></el-table-column>
+            <el-table-column label="权限" width="100"><template #default="{ row }"><span class="mono">{{ row.perms }}</span></template></el-table-column>
+            <el-table-column label="属主" width="120"><template #default="{ row }">{{ row.owner }}</template></el-table-column>
+            <el-table-column label="修改时间" min-width="160"><template #default="{ row }">{{ time(row.mtime_ms) }}</template></el-table-column>
+          </template>
+          <template #empty>
+            <div class="muted">没有 {{ netIpcTab === 'shm' ? '共享内存段' : netIpcTab === 'msg' ? '消息队列' : netIpcTab === 'sem' ? '信号量' : '/dev/shm 对象' }}</div>
+          </template>
         </el-table>
         <div v-else class="net-cards" v-loading="netLoading">
           <div v-for="(r, i) in netPageRows" :key="i" class="net-card">
             <div class="nc-top">
-              <span class="mono strong">{{ r.key }}</span>
-              <span class="muted">#{{ r.id }}</span>
+              <span class="mono strong">{{ netIpcTab === 'posix' ? r.name : r.key }}</span>
+              <span v-if="netIpcTab !== 'posix'" class="muted">#{{ r.id }}</span>
               <span class="spacer" />
               <span class="mono">{{ r.perms }}</span>
             </div>
             <div class="nc-line" v-if="netIpcTab === 'shm'">大小 {{ r.size }} · 附加 {{ r.nattch }} · {{ r.owner }}</div>
             <div class="nc-line" v-else-if="netIpcTab === 'msg'">已用 {{ r.used }} · {{ r.msgs }} 条 · {{ r.owner }}</div>
-            <div class="nc-line" v-else>信号量 {{ r.nsems }} · {{ r.owner }}</div>
+            <div class="nc-line" v-else-if="netIpcTab === 'sem'">信号量 {{ r.nsems }} · {{ r.owner }}</div>
+            <div class="nc-line" v-else>大小 {{ r.size }} · {{ r.owner }} · {{ time(r.mtime_ms) }}</div>
             <div v-if="netIpcTab === 'shm'" class="nc-line muted">{{ procText(r) }}</div>
           </div>
           <div v-if="!netPageRows.length" class="muted pad">没有数据</div>
@@ -1238,7 +1303,7 @@ const nics = computed(() => (sys.value && sys.value.nics) || [])
 const net = ref(null)
 const netLoading = ref(false)
 const netErr = ref('')
-const netScope = ref('tcp')
+const netScope = ref('nic')
 const netQ = ref('')
 const netOnlyListen = ref(false)
 const netUnixType = ref('all')
@@ -1252,6 +1317,34 @@ const netPage = ref(1)
 const netPer = ref(10)
 const netPageSizes = [5, 10, 20, 50]
 const netSupported = computed(() => !!(detail.value && detail.value.caps_net === 1))
+// tab 上的计数保留最近一次已知值：切到 TCP 后 agent 不再返回 ipc 计数，
+// 不能让 IPC 标签变成「—」。首次进入页面时会单独拉一次汇总。
+const netCounts = reactive({ tcp: null, udp: null, unix: null, ipc: null })
+const ipcCounts = ref({})
+let netCountsLoaded = false
+
+function applyNetMeta(r) {
+  const s = r && r.summary
+  if (s) {
+    for (const k of ['tcp', 'udp', 'unix', 'ipc']) {
+      const n = Number(s[k])
+      if (s[k] != null && n >= 0) netCounts[k] = n
+    }
+  }
+  if (r && r.ipc && r.ipc.counts) ipcCounts.value = r.ipc.counts
+}
+
+// scope=ipc 的响应同时带 tcp/udp/unix/ipc 四类总数，一次请求即可把 tab 计数填满
+async function loadNetCounts() {
+  if (netCountsLoaded || !netSupported.value) return
+  netCountsLoaded = true
+  try {
+    const r = await Api.get(agentBase.value + '/net?scope=ipc&ipc_kind=posix&page=1&page_size=1&proc=0')
+    applyNetMeta(r)
+  } catch (e) {
+    netCountsLoaded = false
+  }
+}
 
 function procText(r) {
   if (!r) return '—'
@@ -1268,14 +1361,37 @@ function stateTone(st) {
   return 'info'
 }
 
+const nicRows = computed(() => {
+  const k = netQ.value.trim().toLowerCase()
+  const list = nics.value
+  if (!k) return list
+  return list.filter((n) =>
+    ((n.name || '') + ' ' + (n.ip || '') + ' ' + (n.mac || '') + ' ' + (n.netmask || ''))
+      .toLowerCase().includes(k))
+})
+
+// 网卡有 IFF_UP（管理态）和 operstate（链路态）两层状态，展示以链路态为准
+function nicLinkUp(n) {
+  if (!n) return false
+  if (n.operstate) return n.operstate === 'up'
+  return !!n.up
+}
+
 const netRows = computed(() => {
   const n = net.value
+  if (netScope.value === 'nic') return nicRows.value
   if (!n) return []
   if (netScope.value === 'ipc') return (n.ipc && n.ipc[netIpcTab.value]) || []
   return ((n[netScope.value] || {}).entries) || []
 })
-const netPageRows = computed(() => netRows.value)
+// 网卡数据在本地，自己分页；其余由 agent 按 page 返回，这里不再切
+const netPageRows = computed(() => {
+  if (netScope.value !== 'nic') return netRows.value
+  const begin = (netPage.value - 1) * netPer.value
+  return netRows.value.slice(begin, begin + netPer.value)
+})
 const netMatched = computed(() => {
+  if (netScope.value === 'nic') return nicRows.value.length
   const n = net.value
   if (!n) return 0
   if (netScope.value === 'ipc') {
@@ -1287,14 +1403,23 @@ const netMatched = computed(() => {
 })
 // 搜索框按未过滤的条目数决定是否出现，避免输入后结果变少导致搜索框消失
 const netSearchable = computed(() => {
+  if (netScope.value === 'nic') return nics.value.length > 0
   const n = net.value
   if (!n) return false
   if (netScope.value === 'ipc') return (Number(n.ipc && n.ipc.total) || 0) > 8
   return (Number((n[netScope.value] || {}).total) || 0) > 8
 })
 const netTruncated = computed(() => !!(net.value && net.value[netScope.value] && net.value[netScope.value].truncated))
+const sysvIpcEmpty = computed(() =>
+  (Number(ipcCounts.value.shm) || 0) === 0 &&
+  (Number(ipcCounts.value.msg) || 0) === 0 &&
+  (Number(ipcCounts.value.sem) || 0) === 0)
 
 const netSummaryText = computed(() => {
+  if (netScope.value === 'nic') {
+    const up = nics.value.filter((x) => x.up).length
+    return `${nics.value.length} 个网卡 · ${up} 个已启用` + (sysTs.value ? ` · 随系统信息刷新（${time(sysTs.value)}）` : '')
+  }
   const n = net.value
   if (!n) return ''
   if (netScope.value === 'ipc') {
@@ -1303,9 +1428,10 @@ const netSummaryText = computed(() => {
       shm: (ipc.shm || []).length,
       msg: (ipc.msg || []).length,
       sem: (ipc.sem || []).length,
+      posix: (ipc.posix || []).length,
     }
-    let text = `共享内存 ${c.shm || 0} · 消息队列 ${c.msg || 0} · 信号量 ${c.sem || 0}` +
-      (ipc.source ? ` · 来源 ${ipc.source}` : '')
+    let text = `SysV 共享内存 ${c.shm || 0} · 消息队列 ${c.msg || 0} · 信号量 ${c.sem || 0}` +
+      ` · POSIX ${c.posix || 0}` + (ipc.source ? ` · 来源 ${ipc.source}` : '')
     if (netMatched.value !== (Number(ipc.total) || 0)) text = `匹配 ${netMatched.value} · ` + text
     return text
   }
@@ -1321,22 +1447,22 @@ const netSummaryText = computed(() => {
 })
 
 function tabCount(kind) {
-  const s = net.value && net.value.summary
-  if (!s) return ''
-  const n = Number(s[kind])
-  return n >= 0 ? String(n) : '—'
+  if (kind === 'nic') return String(nics.value.length)
+  const n = netCounts[kind]
+  return n == null ? '' : String(n)
 }
 
 function ipcCount(kind) {
+  const c = ipcCounts.value || {}
+  if (c[kind] != null) return Number(c[kind]) || 0
   const ipc = net.value && net.value.ipc
-  if (!ipc) return 0
-  const c = ipc.counts || {}
-  return c[kind] == null ? (ipc[kind] || []).length : Number(c[kind]) || 0
+  return ipc ? (ipc[kind] || []).length : 0
 }
 
 const ipcLimitText = computed(() => {
   const ipc = net.value && net.value.ipc
   if (!ipc || !Array.isArray(ipc.limits)) return ''
+  if (netIpcTab.value === 'posix') return 'POSIX 对象位于 /dev/shm'
   const map = { shm: 'SHMMNI', msg: 'MSGMNI', sem: 'SEMMNI' }
   const it = ipc.limits.find((l) => l.resource === map[netIpcTab.value])
   if (!it) return ''
@@ -1344,6 +1470,11 @@ const ipcLimitText = computed(() => {
 })
 
 async function loadNet(silent, refresh) {
+  // 网卡数据随 sysinfo 一起拉取，不需要单独的采集请求
+  if (netScope.value === 'nic') {
+    netErr.value = ''
+    return
+  }
   if (!netSupported.value) {
     netErr.value = 'agent 版本过旧，升级后可查看网络与 IPC'
     return
@@ -1362,6 +1493,7 @@ async function loadNet(silent, refresh) {
       '&ipc_kind=' + encodeURIComponent(netIpcTab.value) +
       (refresh ? '&refresh=1' : ''))
     net.value = r || null
+    applyNetMeta(r)
     netTs.value = Number((r && r.ts) || 0)
     netCached.value = !!(r && r.cached)
     netOffline.value = !!(r && r.offline)
@@ -1387,7 +1519,16 @@ function onNetSize(size) {
   loadNet(false, false)
 }
 
-function onNetRefresh() { loadNet(false, true) }
+function onNetRefresh() {
+  // 网卡数据来自 sysinfo，单独拉一次全量
+  if (netScope.value === 'nic') {
+    sysFull = false
+    sysCached.value = false
+    loadSysinfo(false)
+    return
+  }
+  loadNet(false, true)
+}
 
 const netAgeText = computed(() => {
   if (!netTs.value) return ''
@@ -1397,6 +1538,14 @@ const netAgeText = computed(() => {
 
 function onNetTab() {
   netPage.value = 1
+  if (netScope.value === 'nic') {
+    netErr.value = ''
+    return
+  }
+  // 设备只有 POSIX 共享内存时，直接落到 POSIX 子页，避免先看到空的 SysV 页
+  if (netScope.value === 'ipc' && sysvIpcEmpty.value && ipcCount('posix') > 0) {
+    netIpcTab.value = 'posix'
+  }
   loadNet()
 }
 
@@ -1590,8 +1739,10 @@ function mergeSysinfo(p) {
   ;(p.nics || []).forEach((pn) => {
     const n = (sys.value.nics || []).find((x) => x.name === pn.name)
     if (!n) return
-    if (pn.ip != null) n.ip = pn.ip
-    if (pn.up != null) n.up = pn.up
+    for (const k of ['ip', 'netmask', 'up', 'mac', 'mtu', 'speed_mbps', 'operstate', 'carrier',
+                     'rx_bytes', 'tx_bytes', 'rx_errors', 'tx_errors', 'rx_dropped', 'tx_dropped']) {
+      if (pn[k] != null) n[k] = pn[k]
+    }
   })
   if (p.serial) sys.value.serial = p.serial
 }
@@ -1627,6 +1778,7 @@ async function loadAll(opts = {}) {
   }
   await loadSysinfo(silent)
   await loadNet(true)
+  loadNetCounts()
   if (featTab.value === 'proc') loadProcs(false, true)
   nowTick.value = Date.now()
   await pullSeries(!silent)
@@ -2545,7 +2697,7 @@ async function init() {
   netCached.value = false
   netOffline.value = false
   netStale.value = false
-  netScope.value = 'tcp'
+  netScope.value = 'nic'
   netQ.value = ''
   netOnlyListen.value = false
   netUnixType.value = 'all'
@@ -2553,6 +2705,12 @@ async function init() {
   netProc.value = true
   netPage.value = 1
   netPer.value = 10
+  netCounts.tcp = null
+  netCounts.udp = null
+  netCounts.unix = null
+  netCounts.ipc = null
+  ipcCounts.value = {}
+  netCountsLoaded = false
   if (sysRetry) { clearTimeout(sysRetry); sysRetry = null }
   Object.keys(cache).forEach((k) => delete cache[k])
   Object.keys(lastTs).forEach((k) => delete lastTs[k])
@@ -2869,18 +3027,9 @@ onBeforeUnmount(() => {
 }
 
 /* ---- 网络卡片 ---- */
-.net-ifs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
-.if-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 8px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 6px;
-  font-size: 12px;
-  background: var(--el-fill-color-lighter);
-}
-.if-chip b { font-weight: 600; }
+.nic-sub { margin-left: 6px; font-size: 12px; }
+.nic-err { color: #e5534b; }
+.ipc-hint { margin: -2px 0 10px; font-size: 12px; }
 .net-alert { margin: 8px 0; }
 .net-cached { margin: 6px 0 8px; font-size: 12px; color: #c98a12; }
 .net-tabs { margin-bottom: -6px; }
