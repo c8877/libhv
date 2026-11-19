@@ -382,7 +382,6 @@ const PermResDef kPermRes[] = {
     {"device.tty.write", "设备", "修改串口", "串口配置与 allow_tty 白名单"},
     {"device.metrics.write", "设备", "修改采样", "采样指标、间隔与保留点数"},
     {"device.kick", "设备", "断开连接", "强制下线设备或结束会话"},
-    {"device.bind", "设备", "绑定归属", "调整设备归属账号"},
 
     {"file.read", "文件", "查看文件", "仓库列表、下载、Hex 与尾部"},
     {"file.write", "文件", "写入文件", "上传、新建、编辑、移动"},
@@ -500,7 +499,43 @@ bool AdminDb::permSeed() {
         }
     }
 
-    // 2) 预置权限组 + 组资源
+    // 2) 清理代码里已删除的资源键，避免旧库在下拉和矩阵里残留
+    {
+        std::vector<std::string> stale;
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db_, "SELECT key FROM perm_resources", -1, &st, nullptr) == SQLITE_OK) {
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                std::string k = dbColText(st, 0);
+                bool known = false;
+                for (int i = 0; i < (int)(sizeof(kPermRes) / sizeof(kPermRes[0])); ++i) {
+                    if (k == kPermRes[i].key) {
+                        known = true;
+                        break;
+                    }
+                }
+                if (!known) stale.push_back(k);
+            }
+        }
+        sqlite3_finalize(st);
+        for (const auto& k : stale) {
+            st = nullptr;
+            if (sqlite3_prepare_v2(db_, "DELETE FROM perm_group_resources WHERE resource_key=?", -1, &st,
+                                   nullptr) == SQLITE_OK) {
+                sqlite3_bind_text(st, 1, k.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_step(st);
+            }
+            sqlite3_finalize(st);
+            st = nullptr;
+            if (sqlite3_prepare_v2(db_, "DELETE FROM perm_resources WHERE key=?", -1, &st, nullptr) ==
+                SQLITE_OK) {
+                sqlite3_bind_text(st, 1, k.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_step(st);
+            }
+            sqlite3_finalize(st);
+        }
+    }
+
+    // 3) 预置权限组 + 组资源
     for (const auto& g : kPermGroups) {
         sqlite3_stmt* st = nullptr;
         if (sqlite3_prepare_v2(db_,
@@ -589,8 +624,8 @@ bool AdminDb::permSeed() {
         sqlite3_finalize(st);
     }
 
-    // 3) 已有组成员关系的老账号视为显式分配，避免删组后回落到角色基线；
-    //    未入组账号不落库，由 permsOf 按 role 动态回落（设备沿用归属）
+    // 4) 已有组成员关系的老账号视为显式分配，避免删组后回落到角色基线；
+    //    未入组账号不落库，由 permsOf 按 role 动态回落（只回落资源，不含设备）
 
     exec("UPDATE users SET perm_explicit=1 WHERE perm_explicit=0 AND EXISTS("
          "SELECT 1 FROM perm_group_members m WHERE m.subject_type='user'"
@@ -1531,8 +1566,8 @@ std::string subjectPortsLocked(sqlite3* db, const char* type, const std::string&
     return joinRanges(rs);
 }
 
-// 未显式分配权限组时按 users.role 回落预置组；设备沿用旧归属
-void fallbackRoleLocked(sqlite3* db, long long user_id, const std::string& role, DbPermScope& out) {
+// 未显式分配权限组时按 users.role 回落预置组；设备只由权限组授权
+void fallbackRoleLocked(sqlite3* db, const std::string& role, DbPermScope& out) {
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db,
             "SELECT g.id,g.super,g.all_devices FROM perm_groups g WHERE g.builtin_key=?", -1, &st,
@@ -1558,16 +1593,6 @@ void fallbackRoleLocked(sqlite3* db, long long user_id, const std::string& role,
         }
         sqlite3_finalize(st);
     }
-    if (out.super || out.all_devices) return;
-    st = nullptr;
-    if (sqlite3_prepare_v2(db,
-            "SELECT d.devid FROM devices d LEFT JOIN res_devices rd ON rd.devid=d.devid"
-            " WHERE d.owner_id=? AND (rd.devid IS NULL OR rd.enabled=1)",
-            -1, &st, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int64(st, 1, user_id);
-        while (sqlite3_step(st) == SQLITE_ROW) out.devices.insert(dbColText(st, 0));
-    }
-    sqlite3_finalize(st);
 }
 
 } // namespace
@@ -1590,7 +1615,7 @@ bool AdminDb::permScopeOfUser(long long user_id, const std::string& role, DbPerm
     sqlite3_finalize(st);
     scopeFromGroupsLocked(db_, "user", std::to_string(user_id), out);
     if (out.has_groups || out.explicit_perm) return true;
-    fallbackRoleLocked(db_, user_id, role, out);
+    fallbackRoleLocked(db_, role, out);
     return true;
 }
 

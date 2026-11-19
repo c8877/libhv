@@ -138,7 +138,7 @@
             设备相关接口只能看到并操作组内设备，即使归属账号是 admin。
           </template>
           <template v-else>
-            未绑定分组，继承归属账号：admin / manager 可见全部设备；operator / viewer 仅名下设备。
+            未绑定分组，继承归属账号：admin / manager 可见全部设备；operator / viewer 只看得到权限组里授权的设备。
           </template>
         </div>
 

@@ -9,67 +9,54 @@
       </el-input>
     </div>
 
-    <el-table :data="filtered" v-loading="loading" row-class-name="row-click"
-              @row-click="openRow" @row-contextmenu="openContextMenu">
-      <el-table-column label="devid" min-width="140">
-        <template #default="{ row }"><b>{{ row.devid }}</b></template>
-      </el-table-column>
-      <el-table-column label="状态" width="90">
-        <template #default><el-tag type="success" size="small">在线</el-tag></template>
-      </el-table-column>
-      <el-table-column v-if="!isPhone" prop="remote_addr" label="远端地址" min-width="150" />
-      <el-table-column v-if="!isPhone" label="最近活跃" min-width="120">
-        <template #default="{ row }">{{ ago(row.last_seen_ms) }} 前活跃</template>
-      </el-table-column>
-      <el-table-column v-if="!isPhone" label="系统运行" min-width="110">
-        <template #default="{ row }">
-          <span v-if="row.boot_ms">{{ duration(nowMs - row.boot_ms) }}</span>
-          <span v-else class="muted">—</span>
-        </template>
-      </el-table-column>
-      <el-table-column v-if="!isPhone" label="在线时长" min-width="110">
-        <template #default="{ row }">
-          <span v-if="row.connected_at_ms">{{ duration(nowMs - row.connected_at_ms) }}</span>
-          <span v-else class="muted">—</span>
-        </template>
-      </el-table-column>
-      <el-table-column v-if="!isPhone" prop="streams" label="会话数" width="90" align="right" />
-      <el-table-column v-if="!isPhone" label="流量 ↓/↑" min-width="150">
-        <template #default="{ row }">{{ bytes(row.bytes_in) }} / {{ bytes(row.bytes_out) }}</template>
-      </el-table-column>
-      <el-table-column :min-width="isPhone ? 64 : 72" label="操作" align="center">
-        <template #default="{ row }">
-          <span @click.stop>
-            <el-dropdown trigger="click" @command="(c) => onAction(c, row)">
-              <el-button size="small" text class="more-btn" aria-label="更多操作">
-                <el-icon><MoreFilled /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="detail">详情</el-dropdown-item>
-                  <el-dropdown-item v-if="canOperate()" command="web" divided>Web</el-dropdown-item>
-                  <el-dropdown-item v-if="canOperate() && row.caps_shell !== 0" command="shell">Shell</el-dropdown-item>
-                  <el-dropdown-item v-if="canManage()" command="bind" divided>绑定</el-dropdown-item>
-                  <el-dropdown-item v-if="canManage()" command="kick">下线</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-          </span>
-        </template>
-      </el-table-column>
-      <template #empty><el-empty description="暂无在线设备" :image-size="70" /></template>
-    </el-table>
+    <div ref="tableWrap">
+      <el-table :data="filtered" v-loading="loading" row-class-name="row-click"
+                @row-click="openRow" @row-contextmenu="openContextMenu">
+        <el-table-column label="devid" min-width="140">
+          <template #default="{ row }"><b>{{ row.devid }}</b></template>
+        </el-table-column>
+        <el-table-column label="状态" width="90">
+          <template #default><el-tag type="success" size="small">在线</el-tag></template>
+        </el-table-column>
+        <el-table-column v-if="!isPhone" prop="remote_addr" label="远端地址" min-width="150" />
+        <el-table-column v-if="!isPhone" label="最近活跃" min-width="120">
+          <template #default="{ row }">{{ ago(row.last_seen_ms) }} 前活跃</template>
+        </el-table-column>
+        <el-table-column v-if="!isPhone" label="系统运行" min-width="110">
+          <template #default="{ row }">
+            <span v-if="row.boot_ms">{{ duration(nowMs - row.boot_ms) }}</span>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="!isPhone" label="在线时长" min-width="110">
+          <template #default="{ row }">
+            <span v-if="row.connected_at_ms">{{ duration(nowMs - row.connected_at_ms) }}</span>
+            <span v-else class="muted">—</span>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="!isPhone" prop="streams" label="会话数" width="90" align="right" />
+        <el-table-column v-if="!isPhone" label="流量 ↓/↑" min-width="150">
+          <template #default="{ row }">{{ bytes(row.bytes_in) }} / {{ bytes(row.bytes_out) }}</template>
+        </el-table-column>
+        <el-table-column :width="actionWidth" label="操作" align="center">
+          <template #default="{ row }">
+            <RowActions :items="actionsOf(row)" :dropdown-only="isPhone"
+                        @action="(c) => onAction(c, row)" />
+          </template>
+        </el-table-column>
+        <template #empty><el-empty description="暂无在线设备" :image-size="70" /></template>
+      </el-table>
+    </div>
 
     <teleport to="body">
       <div v-if="ctx.open" class="ctx-menu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }"
            @contextmenu.prevent @mousedown.stop>
         <div class="ctx-head">{{ ctx.row && ctx.row.devid }}</div>
         <button class="ctx-item" @click="ctxAction('detail')">详情</button>
-        <button v-if="canOperate()" class="ctx-item" @click="ctxAction('web')">打开 Web</button>
         <button v-if="canOperate() && ctx.row && ctx.row.caps_shell !== 0" class="ctx-item"
                 @click="ctxAction('shell')">打开 Shell</button>
+        <button v-if="canOperate()" class="ctx-item" @click="ctxAction('web')">打开 Web</button>
         <div v-if="canManage()" class="ctx-sep" />
-        <button v-if="canManage()" class="ctx-item" @click="ctxAction('bind')">绑定账号</button>
         <button v-if="canManage()" class="ctx-item danger" @click="ctxAction('kick')">强制下线</button>
       </div>
     </teleport>
@@ -79,6 +66,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import RowActions from '@/components/RowActions.vue'
 import { Api } from '@/shared/api.js'
 import { canManage, canOperate } from '@/shared/store.js'
 import { ago, bytes, duration } from '@/shared/utils.js'
@@ -90,6 +78,22 @@ const list = ref([])
 const q = ref('')
 const loading = ref(false)
 const nowMs = ref(Date.now())
+const tableWrap = ref(null)
+const tableW = ref(0)
+// 其余列的最小宽度合计；剩余空间给操作列，放不下时由 RowActions 收进 ...
+const OTHER_COL_MIN = 960
+const actionWidth = computed(() => {
+  if (isPhone.value) return 56
+  return Math.max(56, Math.min(210, tableW.value - OTHER_COL_MIN))
+})
+
+function actionsOf(row) {
+  const out = []
+  if (canOperate() && row.caps_shell !== 0) out.push({ key: 'shell', label: 'Shell' })
+  if (canOperate()) out.push({ key: 'web', label: 'Web' })
+  if (canManage()) out.push({ key: 'kick', label: '下线', danger: true })
+  return out
+}
 
 const filtered = computed(() => {
   const k = q.value.trim().toLowerCase()
@@ -116,7 +120,6 @@ function onAction(cmd, row) {
   if (cmd === 'detail') openRow(row)
   else if (cmd === 'web') openWeb(row)
   else if (cmd === 'shell') openShell(row)
-  else if (cmd === 'bind') bind(row)
   else if (cmd === 'kick') kick(row)
 }
 
@@ -166,25 +169,6 @@ async function openWeb(row) {
   window.open('/device/' + encodeURIComponent(row.devid) + '/' + encodeURIComponent(port) + '/', '_blank')
 }
 
-async function bind(row) {
-  let owner
-  try {
-    const r = await ElMessageBox.prompt('账号（留空 = 解绑）', '绑定设备 ' + row.devid, {
-      inputValue: row.owner || '',
-      confirmButtonText: '保存',
-      cancelButtonText: '取消',
-    })
-    owner = r.value
-  } catch (e) { return }
-  try {
-    await Api.put('/api/v1/devices/' + encodeURIComponent(row.devid) + '/owner', { username: owner })
-    ElMessage.success(owner ? '已绑定到 ' + owner : '已解绑')
-    refresh(true)
-  } catch (e) {
-    ElMessage.error('绑定失败：' + e.message)
-  }
-}
-
 async function kick(row) {
   try {
     await ElMessageBox.confirm(row.devid + ' 将下线并由 agent 退避重连。', '强制下线', {
@@ -203,6 +187,7 @@ async function kick(row) {
 }
 
 let timer = null
+let ro = null
 function onKeydown(e) {
   if (e.key === 'Escape') closeContextMenu()
 }
@@ -214,9 +199,17 @@ onMounted(() => {
   window.addEventListener('scroll', closeContextMenu, true)
   window.addEventListener('resize', closeContextMenu)
   window.addEventListener('keydown', onKeydown)
+  if (tableWrap.value) {
+    tableW.value = tableWrap.value.clientWidth
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver((es) => { tableW.value = es[0].contentRect.width })
+      ro.observe(tableWrap.value)
+    }
+  }
 })
 onBeforeUnmount(() => {
   if (timer) clearInterval(timer)
+  if (ro) ro.disconnect()
   window.removeEventListener('click', closeContextMenu)
   window.removeEventListener('scroll', closeContextMenu, true)
   window.removeEventListener('resize', closeContextMenu)
@@ -227,7 +220,6 @@ onBeforeUnmount(() => {
 <style scoped>
 .search { width: 240px; }
 :deep(.row-click) { cursor: pointer; }
-.more-btn { padding: 4px 6px; }
 .ctx-menu {
   position: fixed;
   z-index: 3000;

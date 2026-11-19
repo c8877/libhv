@@ -405,55 +405,15 @@ void AdminServer::handleUserRole(const HttpContextPtr& ctx, const AdminActor& ac
 void AdminServer::handleDeviceList(const HttpContextPtr& ctx) {
     std::string role;
     if (requirePerm(ctx, "device.view", role)) return;
-    std::vector<std::pair<std::string, long long>> ds;
+    std::vector<std::string> ds;
     db_.deviceList(ds);
-    if (scopeRestricted()) {
-        std::vector<std::pair<std::string, long long>> mine;
-        for (auto& d : ds) if (ownsDevid(d.first)) mine.push_back(d);
-        ds.swap(mine);
-    }
-    std::vector<DbUser> us;
-    db_.listUsers(us);
-    std::unordered_map<long long, std::string> names;
-    for (auto& u : us) names[u.id] = u.username;
     json arr = json::array();
     for (auto& d : ds) {
+        if (scopeRestricted() && !ownsDevid(d)) continue;
         json j;
-        j["devid"] = d.first;
-        j["owner_id"] = d.second;
-        j["owner"] = d.second ? names[d.second] : "";
+        j["devid"] = d;
         arr.push_back(j);
     }
     ctx->send(arr.dump());
 }
 
-void AdminServer::handleDeviceBind(const HttpContextPtr& ctx, const AdminActor& actor) {
-    // 路由已校验 device.bind
-    std::string devid = ctx->param("devid");
-    if (!ownsDevid(devid)) {
-        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
-        ctx->send("{\"error\":\"forbidden\"}");
-        return;
-    }
-    json req = json::parse(ctx->body(), nullptr, false);
-    std::string owner = req.value("username", "");
-    long long owner_id = 0;
-    if (!owner.empty()) {
-        DbUser u;
-        if (!db_.findUser(owner, u)) {
-            ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
-            ctx->send("{\"error\":\"no such account\"}");
-            return;
-        }
-        if (u.role == "superadmin") {
-            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
-            ctx->send("{\"error\":\"cannot bind to superadmin\"}");
-            return;
-        }
-        owner_id = u.id;
-    }
-    if (owner_id) db_.bindDevice(devid, owner_id);
-    else db_.unbindDevice(devid);
-    audit(actor.username, "device.bind", devid + " -> " + (owner.empty() ? "(none)" : owner));
-    ctx->send("{\"ok\":true}");
-}

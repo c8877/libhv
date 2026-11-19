@@ -169,11 +169,6 @@ bool AdminDb::migrate(std::string& err) {
         " sid_hash TEXT PRIMARY KEY,"
         " user_id INTEGER NOT NULL,"
         " expire_ms INTEGER NOT NULL);"
-        "CREATE TABLE IF NOT EXISTS devices("
-        " devid TEXT PRIMARY KEY,"
-        " owner_id INTEGER,"
-        " bound_ms INTEGER NOT NULL DEFAULT 0);"
-        "CREATE INDEX IF NOT EXISTS idx_dev_owner ON devices(owner_id);"
         "CREATE TABLE IF NOT EXISTS settings("
         " key TEXT PRIMARY KEY,"
         " value TEXT NOT NULL DEFAULT '',"
@@ -622,10 +617,6 @@ bool AdminDb::removeUser(long long id) {
     sqlite3_bind_int64(st, 1, id);
     sqlite3_step(st);
     sqlite3_finalize(st);
-    sqlite3_prepare_v2(db_, "UPDATE devices SET owner_id=NULL,bound_ms=0 WHERE owner_id=?", -1, &st, nullptr);
-    sqlite3_bind_int64(st, 1, id);
-    sqlite3_step(st);
-    sqlite3_finalize(st);
 
     // 删除账号时一并清理其 API Token 与分组绑定，避免留下可用凭据
     std::vector<long long> tids;
@@ -709,67 +700,14 @@ bool AdminDb::purgeExpiredSessions(long long now_ms) {
     return rc == SQLITE_DONE;
 }
 
-bool AdminDb::bindDevice(const std::string& devid, long long owner_id) {
-    std::lock_guard<std::mutex> lk(mu_);
-    sqlite3_stmt* st = nullptr;
-    const char* sql = "INSERT INTO devices(devid,owner_id,bound_ms) VALUES(?,?,?)"
-                      " ON CONFLICT(devid) DO UPDATE SET owner_id=excluded.owner_id,bound_ms=excluded.bound_ms";
-    if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
-    sqlite3_bind_text(st, 1, devid.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 2, owner_id);
-    sqlite3_bind_int64(st, 3, nowMs());
-    int rc = sqlite3_step(st);
-    sqlite3_finalize(st);
-    return rc == SQLITE_DONE;
-}
-
-bool AdminDb::unbindDevice(const std::string& devid) {
-    std::lock_guard<std::mutex> lk(mu_);
-    sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, "DELETE FROM devices WHERE devid=?", -1, &st, nullptr) != SQLITE_OK) return false;
-    sqlite3_bind_text(st, 1, devid.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_step(st);
-    sqlite3_finalize(st);
-    return true;
-}
-
-bool AdminDb::deviceOwner(const std::string& devid, long long& owner_id) {
-    std::lock_guard<std::mutex> lk(mu_);
-    owner_id = 0;
-    sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, "SELECT owner_id FROM devices WHERE devid=?", -1, &st, nullptr) != SQLITE_OK) return false;
-    sqlite3_bind_text(st, 1, devid.c_str(), -1, SQLITE_TRANSIENT);
-    if (sqlite3_step(st) == SQLITE_ROW) {
-        if (sqlite3_column_type(st, 0) != SQLITE_NULL) owner_id = sqlite3_column_int64(st, 0);
-    }
-    sqlite3_finalize(st);
-    return true;
-}
-
-bool AdminDb::ownedDevids(long long owner_id, std::vector<std::string>& out) {
+bool AdminDb::deviceList(std::vector<std::string>& out) {
     std::lock_guard<std::mutex> lk(mu_);
     out.clear();
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, "SELECT devid FROM devices WHERE owner_id=?", -1, &st, nullptr) != SQLITE_OK) return false;
-    sqlite3_bind_int64(st, 1, owner_id);
+    if (sqlite3_prepare_v2(db_, "SELECT devid FROM res_devices ORDER BY devid", -1, &st, nullptr) != SQLITE_OK)
+        return false;
     while (sqlite3_step(st) == SQLITE_ROW) out.push_back((const char*)sqlite3_column_text(st, 0));
     sqlite3_finalize(st);
     return true;
 }
 
-bool AdminDb::deviceList(std::vector<std::pair<std::string, long long>>& out) {
-    std::lock_guard<std::mutex> lk(mu_);
-    out.clear();
-    sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_,
-            "SELECT devid,COALESCE(owner_id,0) FROM devices"
-            " UNION"
-            " SELECT devid,0 FROM res_devices WHERE devid NOT IN (SELECT devid FROM devices)"
-            " ORDER BY devid",
-            -1, &st, nullptr) != SQLITE_OK) return false;
-    while (sqlite3_step(st) == SQLITE_ROW) {
-        out.push_back({(const char*)sqlite3_column_text(st, 0), sqlite3_column_int64(st, 1)});
-    }
-    sqlite3_finalize(st);
-    return true;
-}

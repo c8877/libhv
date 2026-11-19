@@ -455,14 +455,6 @@ void AdminServer::registerRoutes() {
         if (rc) return rc;
         handleDeviceList(ctx); return (int)ctx->response->status_code;
     });
-    service_.Handle("PUT", "/api/v1/devices/:devid/owner", [this](const HttpContextPtr& ctx) {
-        std::string role;
-        int rc = requirePerm(ctx, "device.bind", role);
-        if (rc) return rc;
-        handleDeviceBind(ctx, currentActor());
-        return 200;
-    });
-
     auto devproxy = [this](const HttpContextPtr& ctx) {
         handleDeviceProxy(ctx);
         return (int)ctx->response->status_code;

@@ -232,7 +232,6 @@ private:
     void handleAdminTokenRotate(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleAdminTokenDelete(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleDeviceList(const HttpContextPtr& ctx);
-    void handleDeviceBind(const HttpContextPtr& ctx, const AdminActor& actor);
     // api_proxy.cpp
     void handleDeviceProxy(const HttpContextPtr& ctx);
     void handleDeviceWsOpen(const WebSocketChannelPtr& channel, const HttpRequestPtr& req);

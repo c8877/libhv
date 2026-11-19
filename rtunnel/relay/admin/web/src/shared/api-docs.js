@@ -494,14 +494,8 @@ export const DOCS = [
   },
   {
     group: 'sys', method: 'GET', path: '/api/v1/devices', minRole: 'manager',
-    summary: '设备归属列表',
+    summary: '设备资源列表（含离线）',
     curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/devices"`,
-  },
-  {
-    group: 'sys', method: 'PUT', path: '/api/v1/devices/:devid/owner', minRole: 'manager',
-    summary: '绑定/解绑设备归属账号',
-    params: [{ name: 'devid', in: 'path', desc: '设备 ID' }],
-    curl: `curl -sS -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"username":"box01"}' "$RT/api/v1/devices/mp135/owner"`,
   },
   {
     group: 'sys', method: 'GET', path: '/api/v1/settings', minRole: 'viewer',

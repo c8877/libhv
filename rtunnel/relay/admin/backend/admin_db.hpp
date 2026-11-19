@@ -247,11 +247,7 @@ public:
                     std::string& path, int& baud, int& data_bits,
                     std::string& parity, int& stop_bits, bool& enabled);
 
-    bool bindDevice(const std::string& devid, long long owner_id);
-    bool unbindDevice(const std::string& devid);
-    bool deviceOwner(const std::string& devid, long long& owner_id);  // 0=未绑定
-    bool ownedDevids(long long owner_id, std::vector<std::string>& out);
-    bool deviceList(std::vector<std::pair<std::string, long long>>& out);
+    bool deviceList(std::vector<std::string>& out);
 
     // 工具
     static std::string hashPassword(const std::string& pass, std::string& err);

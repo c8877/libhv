@@ -18,7 +18,7 @@
       </div>
 
       <div class="cfg">
-        <el-input v-model="q" placeholder="搜索设备 / 归属" clearable class="w220">
+        <el-input v-model="q" placeholder="搜索设备" clearable class="w220">
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
         <el-input v-model="dir" placeholder="目标子目录（可选）" class="w220" />
@@ -36,19 +36,11 @@
       <el-table :data="pageRows" v-loading="loading" row-key="devid"
                 @selection-change="onSelect">
         <el-table-column type="selection" width="46" reserve-selection :selectable="(r) => r.online" />
-        <el-table-column prop="devid" label="设备" min-width="140">
-          <template #default="{ row }">
-            {{ row.devid }}
-            <div v-if="isPhone && row.owner" class="muted">{{ row.owner }}</div>
-          </template>
-        </el-table-column>
+        <el-table-column prop="devid" label="设备" min-width="140" />
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
             <el-tag :type="row.online ? 'success' : 'info'" size="small">{{ row.online ? '在线' : '离线' }}</el-tag>
           </template>
-        </el-table-column>
-        <el-table-column v-if="!isPhone" prop="owner" label="归属" min-width="120">
-          <template #default="{ row }">{{ row.owner || '—' }}</template>
         </el-table-column>
         <el-table-column v-if="!isPhone" prop="remote_addr" label="远端地址" min-width="150">
           <template #default="{ row }">{{ row.remote_addr || '—' }}</template>
@@ -95,8 +87,7 @@ const onlineCount = computed(() => devices.value.filter((d) => d.online).length)
 const filtered = computed(() => {
   const k = q.value.trim().toLowerCase()
   if (!k) return devices.value
-  return devices.value.filter((d) =>
-    String(d.devid).toLowerCase().includes(k) || String(d.owner || '').toLowerCase().includes(k))
+  return devices.value.filter((d) => String(d.devid).toLowerCase().includes(k))
 })
 const pageRows = computed(() => filtered.value.slice((page.value - 1) * per, page.value * per))
 
@@ -111,11 +102,10 @@ async function load() {
     ])
     const map = new Map()
     ;(agents || []).forEach((a) => map.set(a.devid, {
-      devid: a.devid, online: true, remote_addr: a.remote_addr || '', owner: '',
+      devid: a.devid, online: true, remote_addr: a.remote_addr || '',
     }))
     ;(devs || []).forEach((d) => {
-      if (!map.has(d.devid)) map.set(d.devid, { devid: d.devid, online: false, remote_addr: '', owner: d.owner || '' })
-      else map.get(d.devid).owner = d.owner || ''
+      if (!map.has(d.devid)) map.set(d.devid, { devid: d.devid, online: false, remote_addr: '' })
     })
     devices.value = Array.from(map.values()).sort((a, b) => (a.devid < b.devid ? -1 : a.devid > b.devid ? 1 : 0))
   } catch (e) {
