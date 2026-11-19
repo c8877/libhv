@@ -53,4 +53,18 @@ setUnauthorizedHandler(() => {
   if (location.hash !== '#/login') router.replace('/login')
 })
 
+// 管理台重新部署后旧 chunk 文件名已不存在，停留在旧页面的标签页点菜单会加载失败。
+// 这里整页重载一次拿新入口；用 sessionStorage 标记防止持续失败时反复刷新。
+router.onError((err) => {
+  const msg = String((err && err.message) || err)
+  if (!/dynamically imported module|Importing a module script failed|error loading dynamically imported module/i.test(msg)) return
+  if (sessionStorage.getItem('chunk-reload')) return
+  sessionStorage.setItem('chunk-reload', '1')
+  location.reload()
+})
+
+router.afterEach(() => {
+  sessionStorage.removeItem('chunk-reload')
+})
+
 export default router
