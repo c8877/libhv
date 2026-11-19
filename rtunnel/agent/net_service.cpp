@@ -621,6 +621,7 @@ json collectIpc(int limit, bool with_proc, size_t& used, size_t budget, bool& tr
     // SysV 之外再带一份 POSIX 共享内存，避免「有 /dev/shm 使用但 IPC 页全空」
     json posix = posixShm(used, budget, truncated);
     o["posix"] = posix;
+    o["source"] = (o.value("source", std::string()) + "+/dev/shm");
     o["total"] = (int)((o["shm"].is_array() ? o["shm"].size() : 0) +
                        (o["msg"].is_array() ? o["msg"].size() : 0) +
                        (o["sem"].is_array() ? o["sem"].size() : 0) + posix.size());
