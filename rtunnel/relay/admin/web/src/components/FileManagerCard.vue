@@ -4,7 +4,7 @@
       <h2 v-if="!embedded">文件管理</h2>
       <el-tag v-if="sys && fsOn" :type="writable ? 'success' : 'info'" size="small">{{ writable ? '读写' : '只读' }}</el-tag>
       <span class="spacer" />
-      <el-button type="primary" size="small" :disabled="!sys || !fsOn" @click="toggle">{{ expanded ? '收起文件管理' : '打开文件管理' }}</el-button>
+      <el-button v-if="!embedded" type="primary" size="small" :disabled="!sys || !fsOn" @click="toggle">{{ expanded ? '收起文件管理' : '打开文件管理' }}</el-button>
     </div>
     <div class="fs-card">
       <div class="mono fs-line">
@@ -18,7 +18,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { bytes } from '@/shared/utils.js'
 import editorUrl from '../../../../../shared/web/cm-editor.bundle.js?url'
 import '../../../../../shared/web/fs-ui.js'
@@ -79,9 +79,22 @@ function toggle() {
   nextTick(() => { if (fsHost.value) fsHost.value.scrollIntoView({ block: 'nearest' }) })
 }
 
+// 嵌在 tab 里时，切换到该 tab 就等于打开文件管理
+function autoOpen() {
+  if (!props.embedded || !props.devid || !fsOn.value) return
+  ensureManager()
+  if (!expanded.value) {
+    expanded.value = true
+    fm.open()
+  }
+}
+
 // 能力配置里有文件管理时只更新状态，不自动展开；列表在首次展开时才连接加载
 watch(fsOn, (on) => {
-  if (on) return
+  if (on) {
+    nextTick(autoOpen)
+    return
+  }
   space.value = null
   if (fm) {
     fm.close()
@@ -93,10 +106,14 @@ watch(fsOn, (on) => {
 watch(() => props.devid, () => {
   space.value = null
   expanded.value = false
-  if (!fm) return
-  fm.destroy()
-  fm = null
+  if (fm) {
+    fm.destroy()
+    fm = null
+  }
+  nextTick(autoOpen)
 })
+
+onMounted(() => { nextTick(autoOpen) })
 
 onBeforeUnmount(() => {
   if (fm) {

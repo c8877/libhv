@@ -55,13 +55,17 @@
             <span class="spacer" />
             <el-input v-model="procQuery" size="small" clearable class="proc-search"
                       placeholder="PID / 名称 / 命令行 / 用户" />
-            <el-select v-model="procSort" size="small" class="proc-sort" @change="loadProcs(true)">
+            <el-select v-model="procSort" size="small" class="proc-sort" @change="onProcSort">
               <el-option label="按 CPU" value="cpu" />
               <el-option label="按内存" value="mem" />
               <el-option label="按 PID" value="pid" />
               <el-option label="按启动" value="start" />
             </el-select>
             <el-checkbox v-model="procShowKernel" size="small">内核线程</el-checkbox>
+            <el-select v-model="procPeriod" size="small" class="proc-auto" @change="onProcPeriod">
+              <el-option label="自动刷新关" :value="0" />
+              <el-option v-for="p in [1, 2, 3, 5, 10, 20, 30]" :key="p" :label="p + 's 自动刷新'" :value="p" />
+            </el-select>
             <el-button size="small" @click="loadProcs(true)">刷新</el-button>
           </div>
 
@@ -120,9 +124,11 @@
             <div v-if="!procPageRows.length" class="muted pad">没有匹配的进程</div>
           </div>
 
-          <div v-if="procVisible.length > procPer" class="net-pager">
-            <el-pagination small layout="total, prev, pager, next" :total="procVisible.length"
-                           :page-size="procPer" v-model:current-page="procPage" />
+          <div v-if="procTotal > 5" class="net-pager">
+            <el-pagination small background layout="total, sizes, prev, pager, next"
+                           :total="procTotal" :page-sizes="procPageSizes"
+                           :page-size="procPer" v-model:current-page="procPage"
+                           @size-change="onProcSize" @current-change="onProcPage" />
           </div>
         </el-tab-pane>
         <el-tab-pane label="能力" name="caps">
@@ -466,11 +472,13 @@
         </div>
       </template>
 
-      <div v-if="netRows.length > netPer" class="net-pager">
-        <el-pagination small layout="total, prev, pager, next" :total="netRows.length"
-                       :page-size="netPer" v-model:current-page="netPage" />
+      <div v-if="netMatched > 5" class="net-pager">
+        <el-pagination small background layout="total, sizes, prev, pager, next"
+                       :total="netMatched" :page-sizes="netPageSizes"
+                       :page-size="netPer" v-model:current-page="netPage"
+                       @size-change="onNetSize" @current-change="onNetPage" />
       </div>
-      <div v-if="netTruncated" class="muted net-foot">结果已截断，仅显示前 {{ netRows.length }} 条</div>
+      <div v-if="netTruncated" class="muted net-foot">结果已截断，可搜索缩小范围</div>
     </div>
 
     <div class="panel">
@@ -571,7 +579,7 @@
             <span class="spacer" />
             <el-button v-if="canEdit" size="small" @click="openAddMetric">+ 添加指标</el-button>
           </div>
-          <el-table ref="metricTable" class="row-edit-table" :data="seriesCfg" size="small" row-key="series" :show-header="!isPhone" @row-click="onMetricRow">
+          <el-table ref="metricTable" class="row-edit-table" :data="metricPageRows" size="small" row-key="series" :show-header="!isPhone" @row-click="onMetricRow">
             <el-table-column type="expand">
               <template #default="{ row }">
                 <div class="metric-edit" @click.stop>
@@ -653,6 +661,12 @@
             </el-table-column>
             <template #empty><div class="muted">暂无配置</div></template>
           </el-table>
+          <div v-if="seriesCfg.length > 5" class="net-pager">
+            <el-pagination small background layout="total, sizes, prev, pager, next"
+                           :total="seriesCfg.length" :page-sizes="metricPageSizes"
+                           :page-size="metricPer" v-model:current-page="metricPage"
+                           @size-change="metricPage = 1" />
+          </div>
         </el-tab-pane>
         <el-tab-pane label="串口配置" name="tty">
           <div class="tab-bar">
@@ -666,7 +680,7 @@
             <el-button v-if="canEdit" size="small" @click="manualAddTty">手动添加</el-button>
           </div>
           <div v-show="ttyTab === 'config'">
-              <el-table ref="ttyTable" class="row-edit-table" :data="filteredTtys" size="small" row-key="path" :show-header="!isPhone"
+              <el-table ref="ttyTable" class="row-edit-table" :data="ttyPageRows" size="small" row-key="path" :show-header="!isPhone"
                         @row-click="onTtyRow" @expand-change="onTtyExpand">
                 <el-table-column type="expand">
                   <template #default="{ row }">
@@ -783,9 +797,15 @@
                 </el-table-column>
                 <template #empty><div class="muted">暂无已配置串口</div></template>
               </el-table>
+              <div v-if="filteredTtys.length > 5" class="net-pager">
+                <el-pagination small background layout="total, sizes, prev, pager, next"
+                               :total="filteredTtys.length" :page-sizes="ttyPageSizes"
+                               :page-size="ttyPer" v-model:current-page="ttyPage"
+                               @size-change="ttyPage = 1" />
+              </div>
           </div>
           <div v-show="ttyTab === 'unconfig'">
-              <el-table ref="ttyAddTable" class="row-edit-table" :data="filteredUnconfigured" size="small" row-key="path" :show-header="!isPhone"
+              <el-table ref="ttyAddTable" class="row-edit-table" :data="ttyAddPageRows" size="small" row-key="path" :show-header="!isPhone"
                         @row-click="onTtyAddRow" @expand-change="onTtyAddExpand">
                 <el-table-column type="expand">
                   <template #default="{ row }">
@@ -886,6 +906,12 @@
                 </el-table-column>
                 <template #empty><div class="muted">{{ ttyQuery ? '没有匹配的串口' : '没有未配置的串口' }}</div></template>
               </el-table>
+              <div v-if="filteredUnconfigured.length > 5" class="net-pager">
+                <el-pagination small background layout="total, sizes, prev, pager, next"
+                               :total="filteredUnconfigured.length" :page-sizes="ttyPageSizes"
+                               :page-size="ttyPer" v-model:current-page="ttyAddPage"
+                               @size-change="ttyAddPage = 1" />
+              </div>
           </div>
         </el-tab-pane>
       </el-tabs>
@@ -896,7 +922,7 @@
         <h2>会话</h2>
         <span class="muted">共 {{ streams.length }} 条</span>
       </div>
-      <el-table :data="streams" size="small">
+      <el-table :data="sessionPageRows" size="small">
         <el-table-column label="A 用户:sid" min-width="160">
           <template #default="{ row }">{{ row.a_user }}:{{ row.a_sid }}</template>
         </el-table-column>
@@ -913,6 +939,12 @@
         </el-table-column>
         <template #empty><div class="muted">当前无会话</div></template>
       </el-table>
+      <div v-if="streams.length > 5" class="net-pager">
+        <el-pagination small background layout="total, sizes, prev, pager, next"
+                       :total="streams.length" :page-sizes="sessionPageSizes"
+                       :page-size="sessionPer" v-model:current-page="sessionPage"
+                       @size-change="sessionPage = 1" />
+      </div>
     </div>
 
     <el-dialog v-model="addMetricOpen" title="添加采样指标" width="420px">
@@ -1107,7 +1139,10 @@ const procLoading = ref(false)
 const procErr = ref('')
 const procTs = ref(0)
 const procPage = ref(1)
-const procPer = 20
+const procPer = ref(10)
+const procPeriod = ref(0)
+const procTimer = ref(null)
+const procPageSizes = [5, 10, 20, 50]
 const procDetailOpen = ref(false)
 const procDetail = ref(null)
 const procSignalOpen = ref(false)
@@ -1115,6 +1150,7 @@ const procSignalSending = ref(false)
 const procSignal = reactive({ pid: 0, comm: '', signal: 15 })
 const procCtx = reactive({ open: false, x: 0, y: 0, row: null })
 let procQueryTimer = null
+let procBusy = false
 const PROC_SIGNALS = [
   { value: 15, label: 'SIGTERM (15) 优雅结束' },
   { value: 9, label: 'SIGKILL (9) 强制结束' },
@@ -1156,6 +1192,16 @@ const ttyTable = ref(null)
 const ttyAddTable = ref(null)
 const ttyExpandedPath = ref('')
 const ttyAddPath = ref('')
+const ttyPage = ref(1)
+const ttyAddPage = ref(1)
+const ttyPer = ref(10)
+const ttyPageSizes = [5, 10, 20, 50]
+const metricPage = ref(1)
+const metricPer = ref(10)
+const metricPageSizes = [5, 10, 20, 50]
+const sessionPage = ref(1)
+const sessionPer = ref(10)
+const sessionPageSizes = [5, 10, 20, 50]
 const bauds = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
 const ttyEditing = reactive({
   isNew: true, path: '', alias: '', baud: 115200, data_bits: 8,
@@ -1201,7 +1247,8 @@ const netCached = ref(false)
 const netOffline = ref(false)
 const netStale = ref(false)
 const netPage = ref(1)
-const netPer = 20
+const netPer = ref(10)
+const netPageSizes = [5, 10, 20, 50]
 const netSupported = computed(() => !!(detail.value && detail.value.caps_net === 1))
 
 function procText(r) {
@@ -1222,39 +1269,26 @@ function stateTone(st) {
 const netRows = computed(() => {
   const n = net.value
   if (!n) return []
-  const k = netQ.value.trim().toLowerCase()
+  if (netScope.value === 'ipc') return (n.ipc && n.ipc[netIpcTab.value]) || []
+  return ((n[netScope.value] || {}).entries) || []
+})
+const netPageRows = computed(() => netRows.value)
+const netMatched = computed(() => {
+  const n = net.value
+  if (!n) return 0
   if (netScope.value === 'ipc') {
-    const ipc = n.ipc || {}
-    let rows = ipc[netIpcTab.value] || []
-    if (k) {
-      rows = rows.filter((r) =>
-        ((r.key || '') + ' ' + (r.owner || '') + ' ' + (r.comm || '') + ' ' + (r.id || ''))
-          .toLowerCase().includes(k))
-    }
-    return rows
+    if (!n.ipc || n.ipc.matched == null) return netRows.value.length
+    return Number(n.ipc.matched) || 0
   }
   const sec = n[netScope.value] || {}
-  let rows = sec.entries || []
-  if (netScope.value === 'unix') {
-    if (netUnixType.value !== 'all') rows = rows.filter((r) => r.type === netUnixType.value)
-    if (k) rows = rows.filter((r) => ((r.path || '') + ' ' + (r.comm || '') + ' ' + (r.pid || '')).toLowerCase().includes(k))
-  } else {
-    if (netOnlyListen.value) rows = rows.filter((r) => r.state === (netScope.value === 'tcp' ? 'LISTEN' : 'UNCONN'))
-    if (k) {
-      rows = rows.filter((r) =>
-        ((r.local_addr || '') + ':' + r.local_port + ' ' + (r.remote_addr || '') + ':' + r.remote_port +
-          ' ' + (r.comm || '') + ' ' + (r.pid || '')).toLowerCase().includes(k))
-    }
-  }
-  return rows
+  return sec.matched == null ? netRows.value.length : (Number(sec.matched) || 0)
 })
-const netPageRows = computed(() => netRows.value.slice((netPage.value - 1) * netPer, netPage.value * netPer))
 // 搜索框按未过滤的条目数决定是否出现，避免输入后结果变少导致搜索框消失
 const netSearchable = computed(() => {
   const n = net.value
   if (!n) return false
-  if (netScope.value === 'ipc') return ((n.ipc && n.ipc[netIpcTab.value]) || []).length > 8
-  return (((n[netScope.value] || {}).entries) || []).length > 8
+  if (netScope.value === 'ipc') return (Number(n.ipc && n.ipc.total) || 0) > 8
+  return (Number((n[netScope.value] || {}).total) || 0) > 8
 })
 const netTruncated = computed(() => !!(net.value && net.value[netScope.value] && net.value[netScope.value].truncated))
 
@@ -1263,17 +1297,25 @@ const netSummaryText = computed(() => {
   if (!n) return ''
   if (netScope.value === 'ipc') {
     const ipc = n.ipc || {}
-    return `共享内存 ${(ipc.shm || []).length} · 消息队列 ${(ipc.msg || []).length} · 信号量 ${(ipc.sem || []).length}` +
+    const c = ipc.counts || {
+      shm: (ipc.shm || []).length,
+      msg: (ipc.msg || []).length,
+      sem: (ipc.sem || []).length,
+    }
+    let text = `共享内存 ${c.shm || 0} · 消息队列 ${c.msg || 0} · 信号量 ${c.sem || 0}` +
       (ipc.source ? ` · 来源 ${ipc.source}` : '')
+    if (netMatched.value !== (Number(ipc.total) || 0)) text = `匹配 ${netMatched.value} · ` + text
+    return text
   }
   const sec = n[netScope.value] || {}
   const total = Number(sec.total) || 0
   const listen = Number(sec.listening) || 0
   const conn = Number(sec.connected) || 0
+  const head = netMatched.value !== total ? `匹配 ${netMatched.value} / 共 ${total}` : `共 ${total}`
   if (netScope.value === 'unix') {
-    return `共 ${total} · 监听 ${listen} · 已连接 ${conn} · STREAM ${sec.stream || 0} / DGRAM ${sec.dgram || 0}`
+    return `${head} · 监听 ${listen} · 已连接 ${conn} · STREAM ${sec.stream || 0} / DGRAM ${sec.dgram || 0}`
   }
-  return `共 ${total} · ${netScope.value === 'udp' ? '未连接' : '监听'} ${listen} · 已连接 ${conn}`
+  return `${head} · ${netScope.value === 'udp' ? '未连接' : '监听'} ${listen} · 已连接 ${conn}`
 })
 
 function tabCount(kind) {
@@ -1285,7 +1327,9 @@ function tabCount(kind) {
 
 function ipcCount(kind) {
   const ipc = net.value && net.value.ipc
-  return ipc ? (ipc[kind] || []).length : 0
+  if (!ipc) return 0
+  const c = ipc.counts || {}
+  return c[kind] == null ? (ipc[kind] || []).length : Number(c[kind]) || 0
 }
 
 const ipcLimitText = computed(() => {
@@ -1302,11 +1346,19 @@ async function loadNet(silent, refresh) {
     netErr.value = 'agent 版本过旧，升级后可查看网络与 IPC'
     return
   }
+  if (netBusy && silent) return
+  netBusy = true
   netLoading.value = true
   if (!silent) netErr.value = ''
   try {
+    const q = encodeURIComponent(netQ.value.trim())
     const r = await Api.get(agentBase.value + '/net?scope=' + netScope.value +
-      '&proc=' + (netProc.value ? '1' : '0') + (refresh ? '&refresh=1' : ''))
+      '&proc=' + (netProc.value ? '1' : '0') +
+      '&page=' + netPage.value + '&page_size=' + netPer.value +
+      '&q=' + q + '&listen=' + (netOnlyListen.value ? '1' : '0') +
+      '&utype=' + encodeURIComponent(netUnixType.value) +
+      '&ipc_kind=' + encodeURIComponent(netIpcTab.value) +
+      (refresh ? '&refresh=1' : ''))
     net.value = r || null
     netTs.value = Number((r && r.ts) || 0)
     netCached.value = !!(r && r.cached)
@@ -1320,9 +1372,19 @@ async function loadNet(silent, refresh) {
     else if (e.status === 504) netErr.value = '采集超时，请稍后重试'
     else netErr.value = '网络信息加载失败：' + e.message
   } finally {
+    netBusy = false
     netLoading.value = false
   }
 }
+
+function onNetPage() { loadNet(false, false) }
+
+function onNetSize() {
+  netPage.value = 1
+  loadNet(false, false)
+}
+
+function onNetRefresh() { loadNet(false, true) }
 
 const netAgeText = computed(() => {
   if (!netTs.value) return ''
@@ -1335,8 +1397,34 @@ function onNetTab() {
   loadNet()
 }
 
-watch([netQ, netOnlyListen, netUnixType, netIpcTab], () => { netPage.value = 1 })
+let netQueryTimer = null
+let netBusy = false
+watch(netQ, () => {
+  netPage.value = 1
+  if (netQueryTimer) clearTimeout(netQueryTimer)
+  netQueryTimer = setTimeout(() => loadNet(false, false), 300)
+})
+watch([netOnlyListen, netUnixType, netIpcTab], () => {
+  netPage.value = 1
+  loadNet(false, false)
+})
+
+watch(ttyQuery, () => {
+  ttyPage.value = 1
+  ttyAddPage.value = 1
+})
+watch(ttyTab, () => {
+  if (ttyTab.value === 'config') ttyPage.value = 1
+  else ttyAddPage.value = 1
+})
 const streams = computed(() => (detail.value && detail.value.streams) || [])
+watch(() => [filteredTtys.value.length, filteredUnconfigured.value.length, seriesCfg.value.length, streams.value.length], () => {
+  const clamp = (page, total, per) => Math.max(1, Math.min(page, Math.ceil(total / per) || 1))
+  ttyPage.value = clamp(ttyPage.value, filteredTtys.value.length, ttyPer.value)
+  ttyAddPage.value = clamp(ttyAddPage.value, filteredUnconfigured.value.length, ttyPer.value)
+  metricPage.value = clamp(metricPage.value, seriesCfg.value.length, metricPer.value)
+  sessionPage.value = clamp(sessionPage.value, streams.value.length, sessionPer.value)
+})
 const caps = computed(() => (sys.value && sys.value.caps) || {})
 const capsChips = computed(() => {
   const c = caps.value
@@ -1437,6 +1525,10 @@ const filteredUnconfigured = computed(() => unconfigured.value.filter((d) => {
   if (!ttyQ.value) return true
   return (d.path || '').toLowerCase().includes(ttyQ.value)
 }))
+const ttyPageRows = computed(() => filteredTtys.value.slice((ttyPage.value - 1) * ttyPer.value, ttyPage.value * ttyPer.value))
+const ttyAddPageRows = computed(() => filteredUnconfigured.value.slice((ttyAddPage.value - 1) * ttyPer.value, ttyAddPage.value * ttyPer.value))
+const metricPageRows = computed(() => seriesCfg.value.slice((metricPage.value - 1) * metricPer.value, metricPage.value * metricPer.value))
+const sessionPageRows = computed(() => streams.value.slice((sessionPage.value - 1) * sessionPer.value, sessionPage.value * sessionPer.value))
 const addCandidates = computed(() => {
   const existing = new Set(seriesCfg.value.map((c) => c.series))
   const out = ['cpu', 'mem', 'load']
@@ -1769,8 +1861,10 @@ function renderCharts() {
 function onFeatTab(name) {
   if (name === 'proc') {
     loadProcs(true)
+    startProcTimer()
     return
   }
+  stopProcTimer()
   if (name !== 'caps') return
   if (sys.value) fillCapsFromSys()
   loadDicts()
@@ -1784,14 +1878,19 @@ function kbText(kb) {
 }
 
 const procEntries = computed(() => (procs.value && procs.value.entries) || [])
-const procVisible = computed(() => procEntries.value.filter((p) => procShowKernel.value || !p.kernel))
-const procPageRows = computed(() => procVisible.value.slice((procPage.value - 1) * procPer, procPage.value * procPer))
+const procPageRows = computed(() => procEntries.value)
+const procTotal = computed(() => {
+  const n = procs.value
+  if (!n) return 0
+  return n.matched == null ? procEntries.value.length : (Number(n.matched) || 0)
+})
 const procTruncated = computed(() => !!(procs.value && procs.value.truncated))
 const procSummaryText = computed(() => {
   const s = procs.value && procs.value.summary
   if (!s) return ''
   const f = (v) => (Number(v) || 0).toFixed(2)
-  return `${s.total} 进程 · ${s.threads} 线程 · 负载 ${f(s.load1)} / ${f(s.load5)} / ${f(s.load15)} · 内存 ${kbText(s.mem_used_kb)} / ${kbText(s.mem_total_kb)}`
+  const base = `${s.total} 进程 · ${s.threads} 线程 · 负载 ${f(s.load1)} / ${f(s.load5)} / ${f(s.load15)} · 内存 ${kbText(s.mem_used_kb)} / ${kbText(s.mem_total_kb)}`
+  return procQuery.value.trim() || !procShowKernel.value ? base + ` · 匹配 ${procTotal.value}` : base
 })
 
 function procStateTone(row) {
@@ -1804,23 +1903,59 @@ function procStateTone(row) {
 
 async function loadProcs(refresh, silent) {
   if (!can('device.proc.read')) return
+  if (procBusy && silent) return
+  procBusy = true
   if (!silent) procLoading.value = true
   try {
     const q = encodeURIComponent(procQuery.value.trim())
-    const r = await Api.get(agentBase.value + '/procs?sort=' + procSort.value + '&q=' + q + '&limit=300')
+    const r = await Api.get(agentBase.value + '/procs?sort=' + procSort.value + '&q=' + q +
+      '&kernel=' + (procShowKernel.value ? '1' : '0') +
+      '&page=' + procPage.value + '&page_size=' + procPer.value)
     procs.value = r
     procTs.value = Date.now()
     procErr.value = ''
-    if (procPage.value > 1 && !procPageRows.value.length) procPage.value = 1
+    const pages = Number(r && r.pages) || 1
+    if (procPage.value > pages) procPage.value = pages
   } catch (e) {
     if (e.status === 501) procErr.value = 'agent 版本过旧，升级后可查看进程'
     else if (e.status === 404) procErr.value = '设备离线，无法读取进程'
     else if (e.status === 504) procErr.value = '采集超时，请稍后重试'
     else procErr.value = '进程加载失败：' + e.message
   } finally {
+    procBusy = false
     procLoading.value = false
   }
 }
+
+function onProcPage() { loadProcs(true, true) }
+
+function onProcSort() {
+  procPage.value = 1
+  loadProcs(true)
+}
+
+function onProcSize() {
+  procPage.value = 1
+  loadProcs(true, true)
+}
+
+function stopProcTimer() {
+  if (procTimer.value) {
+    clearInterval(procTimer.value)
+    procTimer.value = null
+  }
+}
+
+function startProcTimer() {
+  stopProcTimer()
+  const sec = Number(procPeriod.value) || 0
+  if (sec <= 0 || featTab.value !== 'proc' || !can('device.proc.read')) return
+  procTimer.value = setInterval(() => {
+    if (featTab.value === 'proc' && !document.hidden) loadProcs(false, true)
+  }, sec * 1000)
+}
+
+function onProcPeriod() { startProcTimer() }
 
 function openProcMenu(row, column, event) {
   const e = event
@@ -1910,7 +2045,10 @@ watch(procQuery, () => {
   if (procQueryTimer) clearTimeout(procQueryTimer)
   procQueryTimer = setTimeout(() => loadProcs(true, true), 300)
 })
-watch(procShowKernel, () => { procPage.value = 1 })
+watch(procShowKernel, () => {
+  procPage.value = 1
+  loadProcs(true, true)
+})
 
 function onObsTab(name) {
   // 切回曲线时 canvas 可能刚从 display:none 恢复，尺寸为 0，需要重画
@@ -2356,6 +2494,13 @@ async function init() {
   ttyTab.value = 'config'
   ttyExpandedPath.value = ''
   ttyAddPath.value = ''
+  ttyPage.value = 1
+  ttyAddPage.value = 1
+  ttyPer.value = 10
+  metricPage.value = 1
+  metricPer.value = 10
+  sessionPage.value = 1
+  sessionPer.value = 10
   addMetricOpen.value = false
   featTab.value = 'storage'
   obsTab.value = 'series'
@@ -2366,6 +2511,8 @@ async function init() {
   procSort.value = 'cpu'
   procShowKernel.value = false
   procPage.value = 1
+  procPeriod.value = 0
+  stopProcTimer()
   procCtx.open = false
   seriesPopOpen.value = false
   net.value = null
@@ -2381,6 +2528,7 @@ async function init() {
   netIpcTab.value = 'shm'
   netProc.value = true
   netPage.value = 1
+  netPer.value = 10
   if (sysRetry) { clearTimeout(sysRetry); sysRetry = null }
   Object.keys(cache).forEach((k) => delete cache[k])
   Object.keys(lastTs).forEach((k) => delete lastTs[k])
@@ -2416,6 +2564,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', closeProcMenu)
   window.removeEventListener('keydown', onProcKeydown)
   if (procQueryTimer) { clearTimeout(procQueryTimer); procQueryTimer = null }
+  if (netQueryTimer) { clearTimeout(netQueryTimer); netQueryTimer = null }
+  stopProcTimer()
   stopTimer()
   stopSample()
   if (seriesRO) { seriesRO.disconnect(); seriesRO = null }
@@ -2428,6 +2578,7 @@ onBeforeUnmount(() => {
 /* ---- 进程 tab ---- */
 .proc-search { width: 240px; }
 .proc-sort { width: 108px; }
+.proc-auto { width: 136px; }
 .proc-ts { display: flex; gap: 6px; }
 .pcmd { font-size: 12px; }
 .pctx-menu {

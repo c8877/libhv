@@ -51,32 +51,6 @@
         return m + '分';
     }
 
-    var ACTIVE_RANK = { failed: 0, activating: 1, reloading: 1, deactivating: 1, active: 2, inactive: 3 };
-    var FILE_RANK = {
-        enabled: 0, 'enabled-runtime': 1, static: 2, indirect: 3,
-        disabled: 4, 'masked-runtime': 5, masked: 6
-    };
-
-    function cmpStr(a, b) {
-        a = (a || '').toLowerCase();
-        b = (b || '').toLowerCase();
-        return a < b ? -1 : a > b ? 1 : 0;
-    }
-
-    // 空值/负值始终排在最后，其余按 dir 排序
-    function cmpMissing(a, b, dir) {
-        var x = (a === null || a === undefined || a < 0) ? -1 : a;
-        var y = (b === null || b === undefined || b < 0) ? -1 : b;
-        if (x < 0 && y < 0) return 0;
-        if (x < 0) return 1;
-        if (y < 0) return -1;
-        return (x - y) * dir;
-    }
-
-    function rank(map, v) {
-        return map[v] === undefined ? 9 : map[v];
-    }
-
     function statusOf(s) {
         var active = s.active || '';
         if (active === 'failed') {
@@ -244,10 +218,13 @@
         this.total = 0;
         this.running = 0;
         this.failed = 0;
+        this.stopped = 0;
+        this.matched = 0;
+        this.pages = 1;
         this.filter = '';
         this.tab = 'all';
         this.page = 1;
-        this.pageSize = 5;
+        this.pageSize = 10;
         this.sortKey = '';
         this.sortDir = 1;
         this.expanded = '';
@@ -258,6 +235,7 @@
         this.err = '';
         this.busy = false;
         this.timer = null;
+        this.filterTimer = null;
         this.logTimer = null;
         this.visible = false;
         this.seq = 0;
@@ -310,7 +288,8 @@
         this.q.q.addEventListener('input', function () {
             self.filter = this.value.trim().toLowerCase();
             self.page = 1;
-            self.render();
+            if (self.filterTimer) clearTimeout(self.filterTimer);
+            self.filterTimer = setTimeout(function () { self.load(); }, 300);
         });
         bar.appendChild(this.q.q);
 
@@ -319,7 +298,7 @@
         [['all', '全部'], ['running', '运行中'], ['failed', '失败'], ['stopped', '已停止']].forEach(function (t) {
             var b = h('button', '', t[1]);
             b.dataset.tab = t[0];
-            b.addEventListener('click', function () { self.tab = t[0]; self.page = 1; self.render(); });
+            b.addEventListener('click', function () { self.tab = t[0]; self.page = 1; self.load(); });
             tabs.appendChild(b);
             self.q.tabs[t[0]] = b;
         });
@@ -376,7 +355,7 @@
         pager.appendChild(this.q.pcount);
         var psz = h('span', '', '每页 ');
         this.q.psize = document.createElement('select');
-        [5, 10, 20, 50, 100].forEach(function (n) {
+        [5, 10, 20, 50].forEach(function (n) {
             var o = document.createElement('option');
             o.value = String(n);
             o.textContent = String(n);
@@ -384,9 +363,9 @@
         });
         this.q.psize.value = String(this.pageSize);
         this.q.psize.addEventListener('change', function () {
-            self.pageSize = Number(this.value) || 5;
+            self.pageSize = Number(this.value) || 10;
             self.page = 1;
-            self.render();
+            self.load();
         });
         psz.appendChild(this.q.psize);
         psz.appendChild(document.createTextNode(' 条'));
@@ -395,7 +374,7 @@
         this.q.prev = h('button', 'btn', '‹');
         this.q.prev.title = '上一页';
         this.q.prev.addEventListener('click', function () {
-            if (self.page > 1) { self.page--; self.render(); }
+            if (self.page > 1) { self.page--; self.load(); }
         });
         pager.appendChild(this.q.prev);
         this.q.pnums = h('span', 'pnums');
@@ -403,7 +382,7 @@
             var b = e.target && e.target.closest ? e.target.closest('button[data-page]') : null;
             if (!b) return;
             self.page = Number(b.dataset.page) || 1;
-            self.render();
+            self.load();
         });
         pager.appendChild(this.q.pnums);
         this.q.pcur = h('span', 'pcur', '');
@@ -411,7 +390,7 @@
         this.q.next = h('button', 'btn', '›');
         this.q.next.title = '下一页';
         this.q.next.addEventListener('click', function () {
-            if (self.page < self.pages) { self.page++; self.render(); }
+            if (self.page < self.pages) { self.page++; self.load(); }
         });
         pager.appendChild(this.q.next);
         this.win.appendChild(pager);
@@ -570,6 +549,10 @@
             this.total = msg.total || 0;
             this.running = msg.running || 0;
             this.failed = msg.failed || 0;
+            this.stopped = msg.stopped || 0;
+            this.matched = msg.matched == null ? this.services.length : msg.matched;
+            this.pages = msg.pages || 1;
+            this.page = msg.page || 1;
             this.setError('');
             this.render();
             var d = new Date();
@@ -610,7 +593,14 @@
     Manager.prototype.load = function (manual) {
         if (manual) this.q.refresh.disabled = true;
         if (!this.connected) this.connect();
-        this.request('list', {});
+        this.request('list', {
+            page: this.page,
+            page_size: this.pageSize,
+            sort: this.sortKey,
+            dir: this.sortDir,
+            q: this.filter,
+            tab: this.tab
+        });
     };
 
     Manager.prototype.setError = function (text) {
@@ -619,64 +609,19 @@
         this.q.err.hidden = !this.err;
     };
 
-    Manager.prototype.filtered = function () {
-        var f = this.filter, tab = this.tab;
-        return this.services.filter(function (s) {
-            if (tab === 'running' && s.active !== 'active') return false;
-            if (tab === 'failed' && s.active !== 'failed') return false;
-            if (tab === 'stopped' && s.active !== 'inactive') return false;
-            if (!f) return true;
-            return (s.name || '').toLowerCase().indexOf(f) >= 0 ||
-                (s.description || '').toLowerCase().indexOf(f) >= 0;
-        });
-    };
-
     Manager.prototype.sortBy = function (key) {
         if (this.sortKey === key) this.sortDir = -this.sortDir;
         else { this.sortKey = key; this.sortDir = 1; }
         this.page = 1;
-        this.render();
-    };
-
-    Manager.prototype.sorted = function (list) {
-        var key = this.sortKey, dir = this.sortDir;
-        var arr = list.slice();
-        arr.sort(function (a, b) {
-            var c;
-            if (key === 'mem') {
-                c = cmpMissing(a.mem, b.mem, dir);
-            }
-            else if (key === 'uptime') {
-                c = cmpMissing(a.active === 'active' ? a.active_ms : -1,
-                                b.active === 'active' ? b.active_ms : -1, dir);
-            }
-            else if (key === 'name') {
-                c = cmpStr(a.name, b.name) * dir;
-            }
-            else if (key === 'start') {
-                c = (rank(FILE_RANK, a.file_state) - rank(FILE_RANK, b.file_state)) * dir;
-            }
-            else if (key === 'status') {
-                c = (rank(ACTIVE_RANK, a.active) - rank(ACTIVE_RANK, b.active)) * dir;
-            }
-            else {
-                c = rank(ACTIVE_RANK, a.active) - rank(ACTIVE_RANK, b.active);
-            }
-            return c || cmpStr(a.name, b.name);
-        });
-        return arr;
+        this.load();
     };
 
     Manager.prototype.render = function () {
         var self = this;
-        var stopped = 0;
-        for (var i = 0; i < this.services.length; i++) {
-            if (this.services[i].active === 'inactive') stopped++;
-        }
         this.q.tabs.all.textContent = '全部 ' + this.total;
         this.q.tabs.running.textContent = '运行中 ' + this.running;
         this.q.tabs.failed.textContent = '失败 ' + this.failed;
-        this.q.tabs.stopped.textContent = '已停止 ' + stopped;
+        this.q.tabs.stopped.textContent = '已停止 ' + this.stopped;
         for (var k in this.q.tabs) this.q.tabs[k].classList.toggle('on', k === this.tab);
         this.q.sum.textContent = 'systemd · ' + this.total + ' 个服务';
         this.q.mode.textContent = this.writable ? '可控制' : '只读';
@@ -690,15 +635,12 @@
             this.q.arw[k2].textContent = this.sortKey === k2 ? (this.sortDir > 0 ? '▲' : '▼') : '';
         }
 
-        var list = this.sorted(this.filtered());
-        this.q.empty.hidden = list.length > 0;
+        var rows = this.services;
+        this.q.empty.hidden = rows.length > 0;
 
-        var pages = Math.max(1, Math.ceil(list.length / this.pageSize));
+        var pages = this.pages || 1;
         if (this.page > pages) this.page = pages;
         if (this.page < 1) this.page = 1;
-        this.pages = pages;
-        var start = (this.page - 1) * this.pageSize;
-        var rows = list.slice(start, start + this.pageSize);
 
         var frag = document.createDocumentFragment();
         var still = false;
@@ -716,7 +658,7 @@
         this.q.tbody.textContent = '';
         this.q.tbody.appendChild(frag);
 
-        this.q.pcount.textContent = '共 ' + list.length + ' 个';
+        this.q.pcount.textContent = '共 ' + this.matched + ' 个';
         this.q.prev.disabled = this.page <= 1;
         this.q.next.disabled = this.page >= pages;
         this.q.pcur.textContent = this.page + ' / ' + pages;

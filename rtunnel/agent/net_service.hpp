@@ -19,10 +19,18 @@ struct Options {
     std::string scope = "all"; // tcp|udp|unix|ipc|all
     bool with_proc = true;     // 反查 socket 占用进程
     bool with_ipc = true;      // 是否执行 IPC 采集（需要 fork lsipc，开销较大）
-    int limit = 200;           // 每类条目上限
+    int page = 1;              // 从 1 开始
+    int page_size = 10;        // 1..200
+    std::string q;             // 地址/端口/路径/进程关键字
+    bool listen_only = false;  // TCP LISTEN / UDP UNCONN
+    std::string utype;         // UNIX: STREAM|DGRAM|all
+    std::string ipc_kind = "shm"; // shm|msg|sem
 };
 
 bool scopeValid(const std::string& s);
+
+// 把完整 IPC 快照按 ipc_kind/q/page 切成一页；其他 kind 的数组会置空，counts 保留。
+nlohmann::json pageIpc(nlohmann::json ipc, const Options& opt);
 
 // 返回 {"scope","ts","summary":{tcp,udp,unix,ipc},"tcp":{...},"udp":{...},"unix":{...},"ipc":{...}}
 // summary.ipc = -1 表示本次未采集（调用方可用缓存补齐）。

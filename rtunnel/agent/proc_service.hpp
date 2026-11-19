@@ -19,7 +19,9 @@ namespace rtproc {
 struct Options {
     std::string sort = "cpu"; // cpu|mem|pid|start
     std::string q;            // 匹配 pid / 名称 / 命令行 / 用户
-    int limit = 200;
+    bool kernel = false;      // 是否包含内核线程
+    int page = 1;             // 从 1 开始
+    int page_size = 10;       // 1..200
 };
 
 // {"ts","sample_ms","summary":{...},"entries":[...],"truncated":bool}

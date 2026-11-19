@@ -2306,10 +2306,12 @@ void AgentApp::handleNetReq(const rtnp::Frame* f) {
     opt.scope = rj.value("scope", std::string("all"));
     if (!rtnet::scopeValid(opt.scope)) opt.scope = "all";
     opt.with_proc = rj.value("proc", true);
-    int limit = rj.value("limit", 200);
-    if (limit < 1) limit = 1;
-    if (limit > 500) limit = 500;
-    opt.limit = limit;
+    opt.page = rj.value("page", 1);
+    opt.page_size = rj.value("page_size", 10);
+    opt.q = rj.value("q", std::string());
+    opt.listen_only = rj.value("listen", false);
+    opt.utype = rj.value("utype", std::string("all"));
+    opt.ipc_kind = rj.value("ipc_kind", std::string("shm"));
     bool refresh = rj.value("refresh", false);
     bool want_ipc = (opt.scope == "ipc" || opt.scope == "all");
 
@@ -2345,11 +2347,15 @@ void AgentApp::handleNetReq(const rtnp::Frame* f) {
         nlohmann::json out = rtnet::collect(opt, err);
         if (!err.empty()) out["error"] = err;
         if (out.contains("ipc")) {
-            std::lock_guard<std::mutex> lk(net_mu_);
-            net_ipc_cache_ = out["ipc"];
-            net_ipc_ts_ = wallMs();
+            nlohmann::json full = out["ipc"];
+            {
+                std::lock_guard<std::mutex> lk(net_mu_);
+                net_ipc_cache_ = full;
+                net_ipc_ts_ = wallMs();
+            }
+            out["ipc"] = rtnet::pageIpc(full, opt);
         } else if (fresh) {
-            out["ipc"] = cached;
+            out["ipc"] = rtnet::pageIpc(cached, opt);
             if (out.contains("summary")) out["summary"]["ipc"] = cached.value("total", 0);
         }
         std::string body = out.dump();
@@ -2413,7 +2419,9 @@ void AgentApp::handleProcReq(const rtnp::Frame* f) {
     rtproc::Options opt;
     opt.sort = rj.value("sort", std::string("cpu"));
     opt.q = rj.value("q", std::string());
-    opt.limit = rj.value("limit", 200);
+    opt.kernel = rj.value("kernel", false);
+    opt.page = rj.value("page", 1);
+    opt.page_size = rj.value("page_size", 10);
 
     if (proc_inflight_.fetch_add(1) > 2) {
         proc_inflight_.fetch_sub(1);

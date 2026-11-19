@@ -1,6 +1,7 @@
 #include "svc_service.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
@@ -144,6 +145,113 @@ int unitRank(const std::string& active) {
     return 4;
 }
 
+int fileRank(const std::string& st) {
+    if (st == "enabled") return 0;
+    if (st == "enabled-runtime") return 1;
+    if (st == "static") return 2;
+    if (st == "indirect") return 3;
+    if (st == "disabled") return 4;
+    if (st == "masked-runtime") return 5;
+    if (st == "masked") return 6;
+    return 9;
+}
+
+std::string lowerStr(const std::string& s) {
+    std::string o = s;
+    for (size_t i = 0; i < o.size(); ++i) o[i] = (char)tolower((unsigned char)o[i]);
+    return o;
+}
+
+int cmpText(const std::string& a, const std::string& b) {
+    std::string x = lowerStr(a), y = lowerStr(b);
+    return x < y ? -1 : x > y ? 1 : 0;
+}
+
+// 空值/负值始终排在最后，其余按 dir 排序
+int cmpMissing(long long a, long long b, int dir) {
+    if (a < 0 && b < 0) return 0;
+    if (a < 0) return 1;
+    if (b < 0) return -1;
+    long long d = a - b;
+    return d < 0 ? -dir : d > 0 ? dir : 0;
+}
+
+nlohmann::json applyListPage(const nlohmann::json& full, const ListOptions& opt) {
+    using nlohmann::json;
+    json out = full;
+    json base = full.contains("services") && full["services"].is_array() ? full["services"] : json::array();
+    int stopped = 0;
+    for (auto& s : base) {
+        if (s.value("active", "") == "inactive") ++stopped;
+    }
+    out["total"] = full.value("total", (int)base.size());
+    out["running"] = full.value("running", 0);
+    out["failed"] = full.value("failed", 0);
+    out["stopped"] = stopped;
+
+    std::string tab = opt.tab.empty() ? "all" : opt.tab;
+    std::string q = lowerStr(opt.q);
+    std::vector<json> rows;
+    for (auto& s : base) {
+        std::string active = s.value("active", "");
+        if (tab == "running" && active != "active") continue;
+        if (tab == "failed" && active != "failed") continue;
+        if (tab == "stopped" && active != "inactive") continue;
+        if (!q.empty()) {
+            std::string hay = lowerStr(s.value("name", "") + " " + s.value("description", ""));
+            if (hay.find(q) == std::string::npos) continue;
+        }
+        rows.push_back(s);
+    }
+
+    std::string key = opt.sort;
+    int dir = opt.dir < 0 ? -1 : 1;
+    std::stable_sort(rows.begin(), rows.end(), [&](const json& a, const json& b) {
+        int c = 0;
+        if (key == "mem") {
+            c = cmpMissing(a.value("mem", -1LL), b.value("mem", -1LL), dir);
+        } else if (key == "uptime") {
+            long long ua = a.value("active", "") == "active" ? a.value("active_ms", -1LL) : -1;
+            long long ub = b.value("active", "") == "active" ? b.value("active_ms", -1LL) : -1;
+            c = cmpMissing(ua, ub, dir);
+        } else if (key == "name") {
+            c = cmpText(a.value("name", ""), b.value("name", "")) * dir;
+        } else if (key == "start") {
+            c = (fileRank(a.value("file_state", "")) - fileRank(b.value("file_state", ""))) * dir;
+        } else if (key == "status") {
+            c = (unitRank(a.value("active", "")) - unitRank(b.value("active", ""))) * dir;
+        } else {
+            c = unitRank(a.value("active", "")) - unitRank(b.value("active", ""));
+        }
+        if (c == 0) c = cmpText(a.value("name", ""), b.value("name", ""));
+        return c < 0;
+    });
+
+    int matched = (int)rows.size();
+    int page_size = opt.page_size > 0 ? opt.page_size : 10;
+    if (page_size > 200) page_size = 200;
+    int pages = matched > 0 ? (matched + page_size - 1) / page_size : 1;
+    int page = opt.page > 0 ? opt.page : 1;
+    if (page > pages) page = pages;
+
+    json pagearr = json::array();
+    size_t begin = (size_t)(page - 1) * (size_t)page_size;
+    size_t end = begin + (size_t)page_size;
+    if (begin > rows.size()) begin = rows.size();
+    if (end > rows.size()) end = rows.size();
+    for (size_t i = begin; i < end; ++i) pagearr.push_back(rows[i]);
+
+    out["services"] = pagearr;
+    out["matched"] = matched;
+    out["page"] = page;
+    out["page_size"] = page_size;
+    out["pages"] = pages;
+    out["sort"] = key;
+    out["dir"] = dir;
+    out["tab"] = tab;
+    return out;
+}
+
 void parseShow(const std::string& text, double uptime_sec, std::vector<nlohmann::json>& out,
                UnitStat& stat) {
     std::map<std::string, std::string> kv;
@@ -271,8 +379,8 @@ void Service::workerLoop() {
     }
 }
 
-void Service::listAsync(Callback cb) {
-    post([this, cb]() {
+void Service::listAsync(const ListOptions& opt, Callback cb) {
+    post([this, opt, cb]() {
         nlohmann::json r;
         if (!enabled_) {
             r["ok"] = false;
@@ -288,7 +396,7 @@ void Service::listAsync(Callback cb) {
         }
         long long now = nowMs();
         if (!list_cache_.is_null() && now - list_cache_ms_ < 10000) {
-            cb(list_cache_);
+            cb(applyListPage(list_cache_, opt));
             return;
         }
         double up = readUptimeSec();
@@ -367,7 +475,7 @@ void Service::listAsync(Callback cb) {
         r["failed"] = stat.failed;
         list_cache_ = r;
         list_cache_ms_ = now;
-        cb(r);
+        cb(applyListPage(r, opt));
     });
 }
 

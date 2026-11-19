@@ -22,6 +22,15 @@ struct UnitStat {
     int failed = 0;
 };
 
+struct ListOptions {
+    int page = 1;
+    int page_size = 10;
+    std::string sort;   // name|status|start|mem|uptime，空=按状态
+    int dir = 1;        // 1 升序，-1 降序
+    std::string q;      // 服务名/描述
+    std::string tab;    // all|running|failed|stopped
+};
+
 class Service {
 public:
     using Callback = std::function<void(const nlohmann::json&)>;
@@ -43,7 +52,7 @@ public:
     bool systemd() const { return systemd_; }
 
     // 在后台线程执行，cb 也在后台线程调用
-    void listAsync(Callback cb);
+    void listAsync(const ListOptions& opt, Callback cb);
     void logsAsync(const std::string& unit, int lines, Callback cb);
     void actionAsync(const std::string& unit, const std::string& verb, Callback cb);
 

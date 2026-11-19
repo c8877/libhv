@@ -61,7 +61,7 @@ sleep 777 &
 SLEEP_PID=$!
 sleep 0.3
 
-curl -fsS -b "$T/c" "$A/api/v1/agents/tproc/procs?sort=cpu&limit=200" >"$T/list.json"
+curl -fsS -b "$T/c" "$A/api/v1/agents/tproc/procs?sort=cpu&page=1&page_size=50" >"$T/list.json"
 python3 - "$T/list.json" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
@@ -72,6 +72,8 @@ for k in ("total", "running", "sleeping", "threads", "load1", "mem_total_kb", "m
     assert k in s, k
 assert s["total"] > 0 and s["threads"] > 0, s
 assert d["sample_ms"] == 300, d["sample_ms"]
+assert d["page"] == 1 and d["page_size"] == 50, (d.get("page"), d.get("page_size"))
+assert d["pages"] >= 1 and d["matched"] == s["matched"], (d.get("pages"), d.get("matched"))
 e = d["entries"]
 assert e, "no entries"
 for x in e[:20]:
@@ -94,7 +96,7 @@ print("search ok:", hits[0]["comm"], hits[0]["cmd"])
 PY
 
 # 排序：按内存降序
-curl -fsS -b "$T/c" "$A/api/v1/agents/tproc/procs?sort=mem&limit=20" >"$T/mem.json"
+curl -fsS -b "$T/c" "$A/api/v1/agents/tproc/procs?sort=mem&page=1&page_size=20" >"$T/mem.json"
 python3 - "$T/mem.json" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))

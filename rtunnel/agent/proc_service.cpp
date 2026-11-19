@@ -23,6 +23,7 @@ namespace {
 
 const int kSampleMs = 300;
 const size_t kMaxCmd = 1024;
+const size_t kListCmd = 256; // 列表只回传命令前缀，详情页再读完整命令行
 const size_t kBudget = 26000; // 单帧 payload 上限 32KB，留出 JSON 外壳余量
 
 uint64_t wallMs() {
@@ -246,7 +247,13 @@ nlohmann::json collect(const Options& opt, std::string& err) {
         readStatus(pids[i], r.ss);
         r.cmd = readCmdline(pids[i]);
         r.kernel = r.cmd.empty();
-        if (r.kernel) r.cmd = "[" + r.st.comm + "]";
+        if (r.kernel) {
+            r.cmd = "[" + r.st.comm + "]";
+        } else if (r.cmd.size() > kListCmd) {
+            size_t cut = kListCmd;
+            while (cut > 0 && ((unsigned char)r.cmd[cut] & 0xC0) == 0x80) --cut;
+            r.cmd = r.cmd.substr(0, cut) + "...";
+        }
         auto u = users.find(r.ss.uid);
         if (u != users.end()) r.user = u->second;
         else if (r.ss.uid >= 0) r.user = std::to_string(r.ss.uid);
@@ -278,6 +285,7 @@ nlohmann::json collect(const Options& opt, std::string& err) {
     std::string q = lower(opt.q);
     std::vector<size_t> hits;
     for (size_t i = 0; i < rows.size(); ++i) {
+        if (!opt.kernel && rows[i].kernel) continue;
         if (!q.empty()) {
             std::string hay = std::to_string(rows[i].st.pid) + " " + rows[i].st.comm + " " +
                               rows[i].cmd + " " + rows[i].user;
@@ -302,18 +310,23 @@ nlohmann::json collect(const Options& opt, std::string& err) {
                          [&](size_t a, size_t b) { return rows[a].cpu > rows[b].cpu; });
     }
 
-    int limit = opt.limit;
-    if (limit < 1) limit = 1;
-    if (limit > 500) limit = 500;
+    int page_size = opt.page_size;
+    if (page_size < 1) page_size = 10;
+    if (page_size > 200) page_size = 200;
+    int matched = (int)hits.size();
+    int pages = matched > 0 ? (matched + page_size - 1) / page_size : 1;
+    int page = opt.page;
+    if (page < 1) page = 1;
+    if (page > pages) page = pages;
+    size_t begin = (size_t)(page - 1) * (size_t)page_size;
+    size_t end = begin + (size_t)page_size;
+    if (begin > hits.size()) begin = hits.size();
+    if (end > hits.size()) end = hits.size();
 
     json entries = json::array();
     size_t used = 0;
     bool truncated = false;
-    for (size_t k = 0; k < hits.size(); ++k) {
-        if ((int)k >= limit) {
-            truncated = true;
-            break;
-        }
+    for (size_t k = begin; k < end; ++k) {
         Row& r = rows[hits[k]];
         json e;
         e["pid"] = r.st.pid;
@@ -365,6 +378,7 @@ nlohmann::json collect(const Options& opt, std::string& err) {
     summary["mem_total_kb"] = mem_total;
     summary["mem_used_kb"] = mem_total > mem_avail ? mem_total - mem_avail : 0;
     summary["uptime_sec"] = (long long)uptime;
+    summary["matched"] = matched;
 
     json out;
     out["ts"] = wallMs();
@@ -373,6 +387,10 @@ nlohmann::json collect(const Options& opt, std::string& err) {
     out["summary"] = summary;
     out["entries"] = std::move(entries);
     out["truncated"] = truncated;
+    out["page"] = page;
+    out["page_size"] = page_size;
+    out["pages"] = pages;
+    out["matched"] = matched;
     return out;
 }
 

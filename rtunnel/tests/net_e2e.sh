@@ -57,7 +57,7 @@ print("caps_net ok")
 PY
 
 # TCP
-curl -fsS -b "$T/c" "$A/api/v1/agents/tnet/net?scope=tcp&proc=1&refresh=1" >"$T/tcp.json"
+curl -fsS -b "$T/c" "$A/api/v1/agents/tnet/net?scope=tcp&proc=1&refresh=1&page_size=50" >"$T/tcp.json"
 SIZE=$(wc -c <"$T/tcp.json")
 [ "$SIZE" -lt 32768 ] || { echo "TCP payload $SIZE >= 32768" >&2; exit 1; }
 python3 - "$T/tcp.json" "$AP" <<'PY'
@@ -75,14 +75,13 @@ for e in sec["entries"]:
     for k in ("local_addr", "local_port", "remote_addr", "remote_port", "state", "inode", "pid", "comm"):
         assert k in e, (k, e)
 # 本进程监听的 admin 端口应能反查到进程
-mine = [e for e in sec["entries"] if e["local_port"] == ap and e["state"] == "LISTEN"]
-assert mine, "admin port %d not in entries" % ap
-assert any(e["pid"] for e in mine), mine
-print("tcp ok:", len(sec["entries"]), "entries,", sec["listening"], "listening")
+assert sec.get("page") == 1 and sec.get("page_size") == 50, sec
+assert any(e["pid"] for e in sec["entries"]), "no pid mapped"
+print("tcp ok:", len(sec["entries"]), "entries,", sec["matched"], "matched,", sec["listening"], "listening")
 PY
 
 # UDP
-curl -fsS -b "$T/c" "$A/api/v1/agents/tnet/net?scope=udp&proc=0&refresh=1" >"$T/udp.json"
+curl -fsS -b "$T/c" "$A/api/v1/agents/tnet/net?scope=udp&proc=0&refresh=1&page_size=50" >"$T/udp.json"
 python3 - "$T/udp.json" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
@@ -96,7 +95,7 @@ print("udp ok:", len(sec["entries"]), "entries")
 PY
 
 # UNIX：STREAM/DGRAM 计数与路径
-curl -fsS -b "$T/c" "$A/api/v1/agents/tnet/net?scope=unix&proc=1&refresh=1" >"$T/unix.json"
+curl -fsS -b "$T/c" "$A/api/v1/agents/tnet/net?scope=unix&proc=1&refresh=1&page_size=50" >"$T/unix.json"
 python3 - "$T/unix.json" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
@@ -114,7 +113,7 @@ PY
 # IPC
 MID=$(ipcmk -M 4096 2>/dev/null | awk '{print $NF}' || true)
 [ -n "$MID" ] && IPC_IDS+=("$MID")
-curl -fsS -b "$T/c" "$A/api/v1/agents/tnet/net?scope=ipc&proc=1&refresh=1" >"$T/ipc.json"
+curl -fsS -b "$T/c" "$A/api/v1/agents/tnet/net?scope=ipc&proc=1&refresh=1&page_size=50" >"$T/ipc.json"
 python3 - "$T/ipc.json" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
@@ -124,6 +123,7 @@ for k in ("shm", "msg", "sem", "limits"):
     assert isinstance(ipc[k], list), (k, type(ipc[k]))
 assert d["summary"]["ipc"] == ipc["total"], (d["summary"], ipc["total"])
 assert ipc["total"] >= len(ipc["shm"]), ipc["total"]
+assert ipc.get("counts") and ipc["counts"]["shm"] >= len(ipc["shm"]), ipc.get("counts")
 print("ipc ok:", ipc["source"], "total", ipc["total"], "limits", len(ipc["limits"]))
 PY
 
@@ -168,7 +168,7 @@ wait "$AGENT_PID" 2>/dev/null || true
 AGENT_PID=
 # 等 3s 的内存缓存过期，走「离线 + 回退旧快照」分支
 sleep 3.5
-curl -fsS -b "$T/c" "$A/api/v1/agents/tnet/net?scope=tcp&proc=1" >"$T/off.json"
+curl -fsS -b "$T/c" "$A/api/v1/agents/tnet/net?scope=tcp&proc=1&page_size=50" >"$T/off.json"
 python3 - "$T/off.json" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))

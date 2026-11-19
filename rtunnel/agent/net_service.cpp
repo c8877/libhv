@@ -248,6 +248,27 @@ size_t sectionBudget(const Options& opt, const char* kind) {
     return 4000; // ipc
 }
 
+std::string lowerText(const std::string& s) {
+    std::string o = s;
+    for (size_t i = 0; i < o.size(); ++i) o[i] = (char)tolower((unsigned char)o[i]);
+    return o;
+}
+
+void pageBounds(int matched, const Options& opt, int& page, int& page_size, int& pages, size_t& begin,
+                size_t& end) {
+    page_size = opt.page_size;
+    if (page_size < 1) page_size = 10;
+    if (page_size > 200) page_size = 200;
+    pages = matched > 0 ? (matched + page_size - 1) / page_size : 1;
+    page = opt.page;
+    if (page < 1) page = 1;
+    if (page > pages) page = pages;
+    begin = (size_t)(page - 1) * (size_t)page_size;
+    end = begin + (size_t)page_size;
+    if (begin > (size_t)matched) begin = (size_t)matched;
+    if (end > (size_t)matched) end = (size_t)matched;
+}
+
 bool pushEntry(json& arr, const json& e, size_t& used, size_t budget, bool& truncated) {
     size_t n = e.dump().size() + 1;
     if (used + n > budget) {
@@ -482,6 +503,55 @@ json ipcFromProc(int limit, size_t& used, size_t budget, bool& truncated) {
     return o;
 }
 
+json ipcPage(json o, const Options& opt) {
+    const char* kinds[3] = {"shm", "msg", "sem"};
+    json counts = json::object();
+    int total = 0;
+    for (int i = 0; i < 3; ++i) {
+        int n = o.contains(kinds[i]) && o[kinds[i]].is_array() ? (int)o[kinds[i]].size() : 0;
+        counts[kinds[i]] = n;
+        total += n;
+    }
+    std::string kind = opt.ipc_kind;
+    if (kind != "msg" && kind != "sem") kind = "shm";
+
+    std::string q = lowerText(opt.q);
+    std::vector<json> rows;
+    json src = o.contains(kind) && o[kind].is_array() ? o[kind] : json::array();
+    for (auto& e : src) {
+        if (!q.empty()) {
+            std::string hay = jstr(e, "key") + " " + jstr(e, "id") + " " + jstr(e, "owner") + " " +
+                              jstr(e, "comm");
+            if (lowerText(hay).find(q) == std::string::npos) continue;
+        }
+        rows.push_back(e);
+    }
+    std::sort(rows.begin(), rows.end(), [](const json& a, const json& b) {
+        int ia = atoi(jstr(a, "id").c_str());
+        int ib = atoi(jstr(b, "id").c_str());
+        if (ia != ib) return ia < ib;
+        return jstr(a, "id") < jstr(b, "id");
+    });
+
+    int matched = (int)rows.size();
+    int page = 1, page_size = 10, pages = 1;
+    size_t begin = 0, end = 0;
+    pageBounds(matched, opt, page, page_size, pages, begin, end);
+
+    json pagearr = json::array();
+    for (size_t i = begin; i < end; ++i) pagearr.push_back(rows[i]);
+    for (int i = 0; i < 3; ++i) o[kinds[i]] = json::array();
+    o[kind] = pagearr;
+    o["kind"] = kind;
+    o["counts"] = counts;
+    o["total"] = total;
+    o["matched"] = matched;
+    o["page"] = page;
+    o["page_size"] = page_size;
+    o["pages"] = pages;
+    return o;
+}
+
 json collectIpc(int limit, bool with_proc, size_t& used, size_t budget, bool& truncated) {
     json o = ipcFromLsipc(limit, with_proc, used, budget, truncated);
     if (o["shm"].empty() && o["msg"].empty() && o["sem"].empty() && o["total"] == 0) {
@@ -521,10 +591,50 @@ json sockSection(const std::vector<SockEntry>& all, bool want_entries, const Opt
     if (!want_entries) {
         sec["entries"] = arr;
         sec["truncated"] = false;
+        sec["matched"] = 0;
+        sec["page"] = 1;
+        sec["page_size"] = opt.page_size;
+        sec["pages"] = 1;
         return sec;
     }
 
-    std::vector<SockEntry> rows = all;
+    std::string q = lowerText(opt.q);
+    std::vector<SockEntry> rows;
+    rows.reserve(all.size());
+    for (auto& e : all) {
+        if (opt.listen_only) {
+            bool listen = tcp ? e.state_code == 0x0A : e.state_code == 0x07;
+            if (!listen) continue;
+        }
+        rows.push_back(e);
+    }
+    // 搜索进程名需要先反查 owner；只在有关键字时做一次全量映射
+    std::map<unsigned long, std::pair<int, std::string>> searched_owners;
+    if (!q.empty() && opt.with_proc) {
+        std::set<unsigned long> want;
+        for (auto& e : rows)
+            if (e.inode) want.insert(e.inode);
+        mapSocketOwners(want, searched_owners);
+        for (auto& e : rows) {
+            auto it = searched_owners.find(e.inode);
+            if (it != searched_owners.end()) {
+                e.pid = it->second.first;
+                e.comm = it->second.second;
+            }
+        }
+    }
+    if (!q.empty()) {
+        std::vector<SockEntry> kept;
+        kept.reserve(rows.size());
+        for (auto& e : rows) {
+            std::string hay = e.local_addr + ":" + std::to_string(e.local_port) + " " + e.remote_addr +
+                              ":" + std::to_string(e.remote_port) + " " + e.state + " " + e.comm + " " +
+                              std::to_string(e.pid);
+            if (lowerText(hay).find(q) != std::string::npos) kept.push_back(e);
+        }
+        rows.swap(kept);
+    }
+
     std::sort(rows.begin(), rows.end(), [tcp](const SockEntry& a, const SockEntry& b) {
         bool la = tcp ? a.state_code == 0x0A : a.state_code == 0x07;
         bool lb = tcp ? b.state_code == 0x0A : b.state_code == 0x07;
@@ -534,18 +644,19 @@ json sockSection(const std::vector<SockEntry>& all, bool want_entries, const Opt
         return a.remote_port < b.remote_port;
     });
 
-    int limit = opt.limit > 0 ? opt.limit : 200;
-    if ((int)rows.size() > limit) {
-        rows.resize((size_t)limit);
-        truncated = true;
-    }
-    if (opt.with_proc) {
+    int matched = (int)rows.size();
+    int page = 1, page_size = 10, pages = 1;
+    size_t begin = 0, end = 0;
+    pageBounds(matched, opt, page, page_size, pages, begin, end);
+    std::vector<SockEntry> sliced(rows.begin() + begin, rows.begin() + end);
+
+    if (opt.with_proc && q.empty()) {
         std::set<unsigned long> want;
-        for (auto& e : rows)
+        for (auto& e : sliced)
             if (e.inode) want.insert(e.inode);
         std::map<unsigned long, std::pair<int, std::string>> owners;
         mapSocketOwners(want, owners);
-        for (auto& e : rows) {
+        for (auto& e : sliced) {
             auto it = owners.find(e.inode);
             if (it != owners.end()) {
                 e.pid = it->second.first;
@@ -553,7 +664,7 @@ json sockSection(const std::vector<SockEntry>& all, bool want_entries, const Opt
             }
         }
     }
-    for (auto& e : rows) {
+    for (auto& e : sliced) {
         json j;
         j["local_addr"] = e.local_addr;
         j["local_port"] = e.local_port;
@@ -568,6 +679,10 @@ json sockSection(const std::vector<SockEntry>& all, bool want_entries, const Opt
     }
     sec["entries"] = arr;
     sec["truncated"] = truncated;
+    sec["matched"] = matched;
+    sec["page"] = page;
+    sec["page_size"] = page_size;
+    sec["pages"] = pages;
     return sec;
 }
 
@@ -589,10 +704,45 @@ json unixSection(const std::vector<UnixEntry>& all, bool want_entries, const Opt
     if (!want_entries) {
         sec["entries"] = arr;
         sec["truncated"] = false;
+        sec["matched"] = 0;
+        sec["page"] = 1;
+        sec["page_size"] = opt.page_size;
+        sec["pages"] = 1;
         return sec;
     }
 
-    std::vector<UnixEntry> rows = all;
+    std::string q = lowerText(opt.q);
+    std::vector<UnixEntry> rows;
+    rows.reserve(all.size());
+    for (auto& e : all) {
+        if ((opt.utype == "STREAM" || opt.utype == "DGRAM") && e.type != opt.utype) continue;
+        rows.push_back(e);
+    }
+    if (!q.empty() && opt.with_proc) {
+        std::set<unsigned long> want;
+        for (auto& e : rows)
+            if (e.inode) want.insert(e.inode);
+        std::map<unsigned long, std::pair<int, std::string>> owners;
+        mapSocketOwners(want, owners);
+        for (auto& e : rows) {
+            auto it = owners.find(e.inode);
+            if (it != owners.end()) {
+                e.pid = it->second.first;
+                e.comm = it->second.second;
+            }
+        }
+    }
+    if (!q.empty()) {
+        std::vector<UnixEntry> kept;
+        kept.reserve(rows.size());
+        for (auto& e : rows) {
+            std::string hay = e.path + " " + e.type + " " + e.state + " " + e.comm + " " +
+                              std::to_string(e.pid) + " " + std::to_string(e.inode);
+            if (lowerText(hay).find(q) != std::string::npos) kept.push_back(e);
+        }
+        rows.swap(kept);
+    }
+
     std::sort(rows.begin(), rows.end(), [](const UnixEntry& a, const UnixEntry& b) {
         bool la = a.state_code == 0x01;
         bool lb = b.state_code == 0x01;
@@ -601,19 +751,20 @@ json unixSection(const std::vector<UnixEntry>& all, bool want_entries, const Opt
         return a.inode < b.inode;
     });
 
-    int limit = opt.limit > 0 ? opt.limit : 200;
-    if ((int)rows.size() > limit) {
-        rows.resize((size_t)limit);
-        truncated = true;
-    }
+    int matched = (int)rows.size();
+    int page = 1, page_size = 10, pages = 1;
+    size_t begin = 0, end = 0;
+    pageBounds(matched, opt, page, page_size, pages, begin, end);
+    std::vector<UnixEntry> sliced(rows.begin() + begin, rows.begin() + end);
+
     std::map<unsigned long, std::pair<int, std::string>> owners;
-    if (opt.with_proc) {
+    if (opt.with_proc && q.empty()) {
         std::set<unsigned long> want;
-        for (auto& e : rows)
+        for (auto& e : sliced)
             if (e.inode) want.insert(e.inode);
         mapSocketOwners(want, owners);
     }
-    for (auto& e : rows) {
+    for (auto& e : sliced) {
         json j;
         j["path"] = e.path;
         j["abstract"] = e.abstract;
@@ -627,10 +778,18 @@ json unixSection(const std::vector<UnixEntry>& all, bool want_entries, const Opt
     }
     sec["entries"] = arr;
     sec["truncated"] = truncated;
+    sec["matched"] = matched;
+    sec["page"] = page;
+    sec["page_size"] = page_size;
+    sec["pages"] = pages;
     return sec;
 }
 
 } // namespace
+
+json pageIpc(json ipc, const Options& opt) {
+    return ipcPage(std::move(ipc), opt);
+}
 
 bool scopeValid(const std::string& s) {
     return s == "tcp" || s == "udp" || s == "unix" || s == "ipc" || s == "all";
@@ -684,8 +843,7 @@ json collect(const Options& opt, std::string& err) {
     if (opt.with_ipc) {
         used = 0;
         truncated = false;
-        json ipc = collectIpc(opt.limit > 0 ? opt.limit : 200, opt.with_proc, used,
-                              sectionBudget(opt, "ipc"), truncated);
+        json ipc = collectIpc(2000, opt.with_proc, used, 1024 * 1024, truncated);
         summary["ipc"] = ipc.value("total", 0);
         out["ipc"] = ipc;
         any_trunc = any_trunc || truncated;
@@ -695,7 +853,8 @@ json collect(const Options& opt, std::string& err) {
     truncated = any_trunc;
     out["summary"] = summary;
     out["truncated"] = truncated;
-    out["limit"] = opt.limit;
+    out["page"] = opt.page;
+    out["page_size"] = opt.page_size;
     return out;
 }
 

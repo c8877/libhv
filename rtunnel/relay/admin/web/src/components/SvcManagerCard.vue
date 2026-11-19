@@ -4,7 +4,7 @@
       <h2 v-if="!embedded">服务管理</h2>
       <el-tag v-if="sys && svcOn" :type="writable ? 'success' : 'info'" size="small">{{ writable ? '可控制' : '只读' }}</el-tag>
       <span class="spacer" />
-      <el-button type="primary" size="small" :disabled="!sys || !svcOn" @click="toggle">{{ expanded ? '收起服务管理' : '打开服务管理' }}</el-button>
+      <el-button v-if="!embedded" type="primary" size="small" :disabled="!sys || !svcOn" @click="toggle">{{ expanded ? '收起服务管理' : '打开服务管理' }}</el-button>
     </div>
     <div class="svc-card">
       <div class="mono svc-line">
@@ -18,7 +18,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import '../../../../../shared/web/svc-ui.js'
 
 const RtunnelSvc = window.RtunnelSvc
@@ -64,19 +64,38 @@ function toggle() {
   nextTick(() => { if (svcHost.value) svcHost.value.scrollIntoView({ block: 'nearest' }) })
 }
 
+// 嵌在 tab 里时，切换到该 tab 就等于打开服务管理
+function autoOpen() {
+  if (!props.embedded || !props.devid || !svcOn.value) return
+  ensureManager()
+  if (!expanded.value) {
+    expanded.value = true
+    sm.open()
+  }
+}
+
 // 设备不支持时收起；同一路由组件在设备之间复用，换设备时重建会话
 watch(svcOn, (on) => {
-  if (on || !sm) return
-  sm.close()
-  expanded.value = false
-})
+  if (on) {
+    nextTick(autoOpen)
+    return
+  }
+  if (sm) {
+    sm.close()
+    expanded.value = false
+  }
+}, { immediate: true })
 
 watch(() => props.devid, () => {
   expanded.value = false
-  if (!sm) return
-  sm.destroy()
-  sm = null
+  if (sm) {
+    sm.destroy()
+    sm = null
+  }
+  nextTick(autoOpen)
 })
+
+onMounted(() => { nextTick(autoOpen) })
 
 onBeforeUnmount(() => {
   if (sm) {

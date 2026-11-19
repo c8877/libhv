@@ -122,11 +122,18 @@ void Session::handleHello(const nlohmann::json& j, uint32_t id) {
     sendJson(w);
 }
 
-void Session::handleList(const nlohmann::json&, uint32_t id) {
+void Session::handleList(const nlohmann::json& j, uint32_t id) {
+    rtvs::ListOptions opt;
+    opt.page = j.value("page", 1);
+    opt.page_size = j.value("page_size", 10);
+    opt.sort = j.value("sort", std::string());
+    opt.dir = j.value("dir", 1);
+    opt.q = j.value("q", std::string());
+    opt.tab = j.value("tab", std::string("all"));
     auto core = core_;
     Sink* sink = sink_;
     hloop_t* loop = loop_;
-    svc_->listAsync([core, sink, loop, id](const nlohmann::json& r) {
+    svc_->listAsync(opt, [core, sink, loop, id](const nlohmann::json& r) {
         nlohmann::json out = r;
         out["op"] = "list";
         out["id"] = id;

@@ -274,6 +274,9 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
 - 存储：按分区横向条，条长 = 分区总量 / 最大分区总量，条内按已用/空闲分色
 - 网卡、系统（架构/内核/CPU/板卡/采集时间）、运行时（版本/能力/启动参数）
 - 「能力」行展示 TCP 端口、Shell、SYSINFO、mTLS、OTA；manager/admin 可在线编辑
+- 表格默认 10 行/页，支持 5/10/20/50；进程/网络/服务列表的分页与排序在 agent 端完成，
+  只回传当前页
+- 文件/服务 tab 切换到即建立会话；进程 tab 支持 1/2/3/5/10/20/30 秒自动刷新
 
 采集与配置：
 
@@ -289,16 +292,16 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
   （设备详情页「存储」用 `used_kb`/`avail_kb` 计算，使用率口径与 `df` 的 Use% 一致；
   同一文件系统的 bind mount 只上报最短路径；设备离线或回帧超时时返回带 `cached:true`
   的缓存快照，等待回帧在后台线程进行，不阻塞管理台其它请求）
-- 网络与 IPC 快照：`GET /api/v1/agents/{devid}/net?scope=tcp|udp|unix|ipc|all&proc=1`
+- 网络与 IPC 快照：`GET /api/v1/agents/{devid}/net?scope=tcp|udp|unix|ipc|all&proc=1&page=1&page_size=10`
   （agent 读 `/proc/net/{tcp,tcp6,udp,udp6,unix}` 与 `lsipc -m|-q|-s -J`，
   缺失 lsipc 时回退 `/proc/sysvipc`；`proc=1` 扫 `/proc/<pid>/fd` 反查占用进程。
-  每类条目受 `limit` 与 26KB 预算限制，relay 缓存 3s，`refresh=1` 绕过；
+  过滤、分页在 agent 完成，只回传当前页；relay 缓存 3s，`refresh=1` 绕过；
   agent 低于 1.4.28 返回 501）
-- 进程：`GET /api/v1/agents/{devid}/procs?sort=cpu|mem|pid|start&q=&limit=`、
+- 进程：`GET /api/v1/agents/{devid}/procs?sort=cpu|mem|pid|start&q=&page=1&page_size=10`、
   `GET .../procs/{pid}`、`POST .../procs/signal {pid,signal}`
   （agent 扫 `/proc/<pid>/{stat,status,cmdline}`，CPU 用 300ms 双采样的单核百分比；
-  PID 1 与 agent 自身拒绝发信号；列表按 26KB 预算截断。查看需要 `device.proc.read`，
-  信号需要 `device.proc.signal`，两者都受账号设备范围限制）
+  PID 1 与 agent 自身拒绝发信号；分页与排序在 agent 完成，只回传当前页。查看需要
+  `device.proc.read`，信号需要 `device.proc.signal`，两者都受账号设备范围限制）
 - 文件分发：文件页「分发」选择设备与时间窗，创建 `POST /api/v1/distributions`，
   `GET /api/v1/distributions` 查询进度；经 RTNP 推到设备 `--file-dir/dir`
   （默认 `/opt/data/files`），32KiB 分片、256KiB 窗口、sha256 校验、断点续传、

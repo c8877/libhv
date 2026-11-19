@@ -436,10 +436,20 @@ int AdminServer::handleAgentNet(const HttpContextPtr& ctx) {
     }
     bool with_proc = ctx->param("proc") != "0";
     bool refresh = ctx->param("refresh") == "1";
-    int limit = atoi(ctx->param("limit").c_str());
-    if (limit <= 0) limit = 200;
-    if (limit > 500) limit = 500;
-    std::string key = devid + "|" + scope + "|" + (with_proc ? "1" : "0") + "|" + std::to_string(limit);
+    int page = atoi(ctx->param("page").c_str());
+    if (page <= 0) page = 1;
+    int page_size = atoi(ctx->param("page_size").c_str());
+    if (page_size <= 0) page_size = 10;
+    if (page_size > 50) page_size = 50;
+    std::string q = ctx->param("q");
+    bool listen_only = ctx->param("listen") == "1";
+    std::string utype = ctx->param("utype");
+    if (utype.empty()) utype = "all";
+    std::string ipc_kind = ctx->param("ipc_kind");
+    if (ipc_kind != "msg" && ipc_kind != "sem") ipc_kind = "shm";
+    std::string key = devid + "|" + scope + "|" + (with_proc ? "1" : "0") + "|" + std::to_string(page) +
+                      "|" + std::to_string(page_size) + "|" + q + "|" + (listen_only ? "1" : "0") + "|" +
+                      utype + "|" + ipc_kind;
 
     if (!refresh) {
         std::string cj;
@@ -499,7 +509,12 @@ int AdminServer::handleAgentNet(const HttpContextPtr& ctx) {
     json req;
     req["scope"] = scope;
     req["proc"] = with_proc;
-    req["limit"] = limit;
+    req["page"] = page;
+    req["page_size"] = page_size;
+    req["q"] = q;
+    req["listen"] = listen_only;
+    req["utype"] = utype;
+    req["ipc_kind"] = ipc_kind;
     req["refresh"] = refresh;
     std::string payload = req.dump();
     uint32_t rid = 0;
@@ -622,10 +637,14 @@ int AdminServer::handleAgentProcs(const HttpContextPtr& ctx) {
     if (sort != "mem" && sort != "pid" && sort != "start") sort = "cpu";
     req["sort"] = sort;
     req["q"] = ctx->param("q");
-    int limit = atoi(ctx->param("limit").c_str());
-    if (limit <= 0) limit = 200;
-    if (limit > 500) limit = 500;
-    req["limit"] = limit;
+    req["kernel"] = ctx->param("kernel") == "1";
+    int page = atoi(ctx->param("page").c_str());
+    if (page <= 0) page = 1;
+    int page_size = atoi(ctx->param("page_size").c_str());
+    if (page_size <= 0) page_size = 10;
+    if (page_size > 50) page_size = 50;
+    req["page"] = page;
+    req["page_size"] = page_size;
     return proxyAgentProc(ctx, devid, req);
 }
 
