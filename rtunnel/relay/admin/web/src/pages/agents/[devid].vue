@@ -815,7 +815,7 @@ const disks = computed(() => {
     const avail = Number(m.avail_kb) || 0
     const pair = kbPair(used, total)
     const base = used + avail
-    const pct = base > 0 ? Math.min(100, Math.max(0, Math.round((used * 100) / base))) : 0
+    const pct = base > 0 ? Math.min(100, Math.max(0, Math.ceil((used * 100) / base))) : 0
     return {
       mount: m.mount,
       fstype: m.fstype || '',
