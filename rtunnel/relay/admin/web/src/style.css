@@ -81,6 +81,13 @@ body {
   flex: 1;
 }
 
+/* 通用弹性占位：工具条右对齐控件。子组件是 scoped 样式，
+   .spacer 放在子组件里不会自动生效，这里统一兜底。 */
+.spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .muted {
   color: var(--el-text-color-secondary);
   font-size: 12px;

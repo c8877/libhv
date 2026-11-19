@@ -21,8 +21,8 @@
         <el-descriptions-item label="接入时间">{{ time(detail.connected_at_ms) }}</el-descriptions-item>
         <el-descriptions-item label="在线时长">{{ onlineFor }}</el-descriptions-item>
         <el-descriptions-item label="最近活跃">{{ ago(detail.last_seen_ms) }} 前</el-descriptions-item>
-        <el-descriptions-item label="流量 ↓/↑">
-          {{ bytes(detail.bytes_in) }} / {{ bytes(detail.bytes_out) }}
+        <el-descriptions-item label="流量">
+          <span class="traffic mono">↓ {{ bytes(detail.bytes_in) }} · ↑ {{ bytes(detail.bytes_out) }}</span>
         </el-descriptions-item>
       </el-descriptions>
     </div>
@@ -63,7 +63,7 @@
             </el-select>
             <el-checkbox v-model="procShowKernel" size="small">内核线程</el-checkbox>
             <el-select v-model="procPeriod" size="small" class="proc-auto" @change="onProcPeriod">
-              <el-option label="自动刷新关" :value="0" />
+              <el-option label="不自动刷新" :value="0" />
               <el-option v-for="p in [1, 2, 3, 5, 10, 20, 30]" :key="p" :label="p + 's 自动刷新'" :value="p" />
             </el-select>
             <el-button size="small" @click="loadProcs(true)">刷新</el-button>
@@ -304,11 +304,21 @@
       </div>
 
       <el-tabs v-model="netScope" class="net-tabs" @tab-change="onNetTab">
-        <el-tab-pane :label="'网卡 ' + tabCount('nic')" name="nic" />
-        <el-tab-pane :label="'TCP ' + tabCount('tcp')" name="tcp" />
-        <el-tab-pane :label="'UDP ' + tabCount('udp')" name="udp" />
-        <el-tab-pane :label="'UNIX ' + tabCount('unix')" name="unix" />
-        <el-tab-pane :label="'IPC ' + tabCount('ipc')" name="ipc" />
+        <el-tab-pane name="nic">
+          <template #label>网卡 <span v-if="tabCount('nic')" class="tab-n">{{ tabCount('nic') }}</span></template>
+        </el-tab-pane>
+        <el-tab-pane name="tcp">
+          <template #label>TCP <span v-if="tabCount('tcp')" class="tab-n">{{ tabCount('tcp') }}</span></template>
+        </el-tab-pane>
+        <el-tab-pane name="udp">
+          <template #label>UDP <span v-if="tabCount('udp')" class="tab-n">{{ tabCount('udp') }}</span></template>
+        </el-tab-pane>
+        <el-tab-pane name="unix">
+          <template #label>UNIX <span v-if="tabCount('unix')" class="tab-n">{{ tabCount('unix') }}</span></template>
+        </el-tab-pane>
+        <el-tab-pane name="ipc">
+          <template #label>IPC <span v-if="tabCount('ipc')" class="tab-n">{{ tabCount('ipc') }}</span></template>
+        </el-tab-pane>
       </el-tabs>
 
       <div class="net-bar">
@@ -556,6 +566,10 @@
         <el-descriptions-item label="核心数">{{ sys.cpu_count || 0 }} 核</el-descriptions-item>
         <el-descriptions-item label="板卡型号">{{ sys.board || '—' }}</el-descriptions-item>
         <el-descriptions-item label="开机时长">{{ upFor }}</el-descriptions-item>
+        <el-descriptions-item label="mTLS">
+          <el-tag v-if="sys.mtls" type="success" size="small" effect="plain">已启用</el-tag>
+          <span v-else class="muted">未启用</span>
+        </el-descriptions-item>
         <el-descriptions-item label="采集时间">
           <span v-if="sysCached" class="cached-tag">缓存（设备未响应）</span>
           <template v-else>{{ time(sysTs) }}</template>
@@ -565,9 +579,10 @@
       <el-skeleton v-else :rows="2" animated />
     </div>
 
-    <div class="panel">
+    <!-- 未启用 mTLS 时不占一整块面板，状态在「系统信息」里 -->
+    <div v-if="sys && sys.mtls" class="panel">
       <div class="panel-head"><h2>证书</h2></div>
-      <el-descriptions v-if="sys && sys.mtls" :column="descCols" size="small" border>
+      <el-descriptions :column="descCols" size="small" border>
         <el-descriptions-item label="证书主体"><span class="mono">{{ sys.cert_subject || '—' }}</span></el-descriptions-item>
         <el-descriptions-item label="签发者"><span class="mono">{{ sys.cert_issuer || '—' }}</span></el-descriptions-item>
         <el-descriptions-item label="序列号"><span class="mono">{{ sys.cert_serial || '—' }}</span></el-descriptions-item>
@@ -577,8 +592,6 @@
           </el-tag>
         </el-descriptions-item>
       </el-descriptions>
-      <div v-else-if="sys" class="muted">未启用 mTLS</div>
-      <el-skeleton v-else :rows="2" animated />
     </div>
 
     <div class="panel feat-panel obs-panel">
@@ -1418,7 +1431,9 @@ const sysvIpcEmpty = computed(() =>
 const netSummaryText = computed(() => {
   if (netScope.value === 'nic') {
     const up = nics.value.filter((x) => x.up).length
-    return `${nics.value.length} 个网卡 · ${up} 个已启用` + (sysTs.value ? ` · 随系统信息刷新（${time(sysTs.value)}）` : '')
+    // 手机上时间戳会把单行说明挤成两行，省掉采集时间
+    const ts = !isPhone.value && sysTs.value ? ` · 随系统信息刷新（${time(sysTs.value)}）` : ''
+    return `${nics.value.length} 个网卡 · ${up} 个已启用` + ts
   }
   const n = net.value
   if (!n) return ''
@@ -2045,7 +2060,13 @@ const procSummaryText = computed(() => {
   if (!s) return ''
   const f = (v) => (Number(v) || 0).toFixed(2)
   const base = `${s.total} 进程 · ${s.threads} 线程 · 负载 ${f(s.load1)} / ${f(s.load5)} / ${f(s.load15)} · 内存 ${kbText(s.mem_used_kb)} / ${kbText(s.mem_total_kb)}`
-  return procQuery.value.trim() || !procShowKernel.value ? base + ` · 匹配 ${procTotal.value}` : base
+  const total = Number(s.total) || 0
+  const shown = Number(procTotal.value) || 0
+  const hiddenKernel = !procShowKernel.value ? total - shown : 0
+  if (procQuery.value.trim()) return base + ` · 匹配 ${shown}`
+  // 关掉「内核线程」后进程数会明显变少，必须说明少在哪，否则像数据缺失
+  if (hiddenKernel > 0) return base + ` · 显示 ${shown}（已隐藏 ${hiddenKernel} 个内核线程）`
+  return base
 })
 
 function procStateTone(row) {
@@ -3040,7 +3061,25 @@ onBeforeUnmount(() => {
   gap: 10px;
   margin: 6px 0 10px;
 }
-.net-sum { font-size: 12px; color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums; }
+.net-sum { font-size: 12px; color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tab-n {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--el-fill-color);
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  line-height: 17px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.net-tabs :deep(.el-tabs__item.is-active) .tab-n {
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+}
+.traffic { font-variant-numeric: tabular-nums; }
 .net-search { width: 220px; }
 .net-table { width: 100%; }
 .net-table .strong, .net-card .strong { font-weight: 600; }
@@ -3062,6 +3101,14 @@ onBeforeUnmount(() => {
 @media (max-width: 599px) {
   .net-search { width: 100%; }
   .net-bar { gap: 8px; }
-  .net-tabs :deep(.el-tabs__item) { padding: 0 10px; }
+  /* 五个 tab 加计数在 390px 下会溢出，收紧内边距和计数徽标 */
+  .net-tabs :deep(.el-tabs__item) { padding: 0 7px; }
+  .net-tabs .tab-n {
+    min-width: 15px;
+    margin-left: 2px;
+    padding: 0 4px;
+    font-size: 10px;
+    line-height: 15px;
+  }
 }
 </style>

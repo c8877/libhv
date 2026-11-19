@@ -335,9 +335,10 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
   .bar{gap:4px;padding:6px 8px}
   .bar .ibtn{width:30px;height:30px}
   .path{min-width:100px}
-  .search{width:110px;flex:1;min-width:90px}
+  .search{width:110px;flex:0 1 150px;min-width:90px}
   .meta{display:none}
   .tools .spacer{display:none}
+  .overlay.inline #fullscreen{display:none}
   th:nth-child(3),td:nth-child(3),th:nth-child(4),td:nth-child(4){display:none}
   .name .nm{max-width:150px}
   table.tree .name .nm{max-width:none}
@@ -1909,9 +1910,10 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         this.q.all.indeterminate = anyOn && !allOn;
         this.q.del.disabled = this.readonly || !this.rw || !this.caps.del || !selCount;
         this.q.pack.disabled = !selCount;
+        // 条目总数在底部 footer 已有，工具条只在筛选/搜索时补充计数
         this.q.meta.textContent = this._searchHits
             ? '搜索 ' + count + ' 项'
-            : (this.filter ? '筛选 ' + count + ' / ' + this.entries.length : '共 ' + this.entries.length + ' 项');
+            : (this.filter ? '筛选 ' + count + ' / ' + this.entries.length : '');
         var dest = (!this.readonly && this.rw && !this.caps.flat) ? this.targetDir() : '';
         this.q.dest.textContent = dest ? '上传到 ' + dest : '';
         this.q.upload.title = '上传到 ' + (dest || this.cwd);
