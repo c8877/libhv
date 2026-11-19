@@ -1074,6 +1074,11 @@ int RelayServer::agentOtaCap(const char* devid) {
     return it == caps_ota.end() ? -1 : it->second;
 }
 
+uint64_t RelayServer::agentBootMs(const char* devid) {
+    auto it = agent_boot_ms.find(devid);
+    return it == agent_boot_ms.end() ? 0 : it->second;
+}
+
 void RelayServer::onOtaAck(RelayConn* c, const rtnp::Frame* f) {
     auto it = ota_applies.find(f->sid);
     if (it == ota_applies.end()) return;
@@ -1318,6 +1323,16 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             if (!sj.is_discarded() && sj.contains("caps") && sj["caps"].contains("arch") &&
                 sj["caps"]["arch"].is_string()) {
                 caps_arch[c->devid] = sj["caps"]["arch"].get<std::string>();
+            }
+            // uptime 只出现在全量帧；用收帧时刻反推开机时间，列表可随时算当前时长
+            if (full && !sj.is_discarded()) {
+                if (sj.contains("uptime_sec") && sj["uptime_sec"].is_number_integer()) {
+                    long long up = sj["uptime_sec"].get<long long>();
+                    if (up >= 0) {
+                        agent_boot_ms[c->devid] =
+                            e.ts > (uint64_t)up * 1000 ? e.ts - (uint64_t)up * 1000 : e.ts;
+                    }
+                }
             }
         }
         return;

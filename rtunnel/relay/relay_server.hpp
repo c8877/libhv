@@ -170,6 +170,7 @@ public:
     std::unordered_map<std::string, int> caps_ota;      // devid -> 0/1（未知时无条目）
     std::unordered_map<std::string, std::string> caps_arch; // devid -> uname -m
     std::unordered_map<std::string, std::string> agent_versions;
+    std::unordered_map<std::string, uint64_t> agent_boot_ms;   // devid -> 系统开机时间（epoch ms）
     std::unordered_map<uint32_t, FilePush> pushes;
     std::unordered_map<uint32_t, std::string> push_results;
     uint32_t push_seq = 0;
@@ -255,6 +256,7 @@ private:
     std::string  agentVersion(const char* devid);
     std::string  agentArch(const char* devid);
     int          agentOtaCap(const char* devid);   // -1 未知 0 不支持 1 支持
+    uint64_t     agentBootMs(const char* devid);   // 系统开机时间（epoch ms），0 未知
     bool         startFileCheck(const char* devid, const char* dir, const char* name,
                                 uint32_t& cid, std::string& err);
     std::string  takeCheckResult(uint32_t cid);

@@ -2,6 +2,9 @@
   <div>
     <div class="panel">
       <div class="panel-head">
+        <el-button class="back" text @click="goBack">
+          <el-icon><ArrowLeft /></el-icon>返回列表
+        </el-button>
         <h2>{{ devid }}</h2>
         <el-tag type="success" size="small">在线</el-tag>
         <span class="spacer" />
@@ -16,6 +19,7 @@
       <el-descriptions v-if="detail" :column="descCols" size="small" border>
         <el-descriptions-item label="远端地址">{{ detail.remote_addr || '—' }}</el-descriptions-item>
         <el-descriptions-item label="接入时间">{{ time(detail.connected_at_ms) }}</el-descriptions-item>
+        <el-descriptions-item label="在线时长">{{ onlineFor }}</el-descriptions-item>
         <el-descriptions-item label="最近活跃">{{ ago(detail.last_seen_ms) }} 前</el-descriptions-item>
         <el-descriptions-item label="流量 ↓/↑">
           {{ bytes(detail.bytes_in) }} / {{ bytes(detail.bytes_out) }}
@@ -69,6 +73,7 @@
         <el-descriptions-item label="CPU 型号">{{ sys.cpu_model || '—' }}</el-descriptions-item>
         <el-descriptions-item label="核心数">{{ sys.cpu_count || 0 }} 核</el-descriptions-item>
         <el-descriptions-item label="板卡型号">{{ sys.board || '—' }}</el-descriptions-item>
+        <el-descriptions-item label="开机时长">{{ upFor }}</el-descriptions-item>
         <el-descriptions-item label="采集时间">
           <span v-if="sysCached" class="cached-tag">缓存（设备未响应）</span>
           <template v-else>{{ time(sysTs) }}</template>
@@ -720,11 +725,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Chart from 'chart.js/auto'
-import { ArrowRight } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { Api } from '@/shared/api.js'
 import { can, canManage } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
-import { ago, bytes, copyText, downloadJson, kbPair, time } from '@/shared/utils.js'
+import { ago, bytes, copyText, downloadJson, duration, kbPair, time } from '@/shared/utils.js'
 import FileManagerCard from '@/components/FileManagerCard.vue'
 import SvcManagerCard from '@/components/SvcManagerCard.vue'
 
@@ -746,6 +751,25 @@ const sys = ref(null)
 const sysTs = ref(0)
 const sysCached = ref(false)
 const sysErr = ref('')
+const nowTick = ref(Date.now())
+
+const onlineFor = computed(() => {
+  const t = Number(detail.value && detail.value.connected_at_ms) || 0
+  return t ? duration(Math.max(0, nowTick.value - t)) : '—'
+})
+
+// 开机时长以 sysinfo 的 uptime_sec 为准；非缓存时按采集时间做少量外推
+const upFor = computed(() => {
+  if (!sys.value) return '—'
+  const sec = Number(sys.value.uptime_sec) || 0
+  if (!sec) return '—'
+  const extra = sysCached.value || !sysTs.value ? 0 : Math.max(0, (nowTick.value - sysTs.value) / 1000)
+  return duration((sec + extra) * 1000)
+})
+
+function goBack() {
+  router.push('/agents')
+}
 const loading = ref(false)
 const auto = ref(false)
 const period = ref(10)
@@ -946,12 +970,14 @@ async function loadSysinfo(silent) {
 async function loadAll(opts = {}) {
   const { silent = false, notify = false } = opts
   if (!silent) loading.value = true
+  nowTick.value = Date.now()
   try {
     detail.value = await Api.get(agentBase.value)
   } catch (e) {
     if (!silent) ElMessage.error('设备详情加载失败：' + e.message)
   }
   await loadSysinfo(silent)
+  nowTick.value = Date.now()
   await pullSeries(!silent)
   if (!silent) loading.value = false
   if (notify) ElMessage.success('已刷新')
@@ -1653,6 +1679,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .period { width: 84px; }
+.back { margin-right: 2px; padding: 0 6px; }
+.back .el-icon { margin-right: 2px; }
 .cached-tag { color: #f5a623; }
 :deep(.el-table .cell) { white-space: nowrap; }
 .disk { padding: 8px 0; border-bottom: 1px solid var(--el-border-color-lighter); }

@@ -20,6 +20,18 @@
       <el-table-column v-if="!isPhone" label="最近活跃" min-width="120">
         <template #default="{ row }">{{ ago(row.last_seen_ms) }} 前活跃</template>
       </el-table-column>
+      <el-table-column v-if="!isPhone" label="系统运行" min-width="110">
+        <template #default="{ row }">
+          <span v-if="row.boot_ms">{{ duration(nowMs - row.boot_ms) }}</span>
+          <span v-else class="muted">—</span>
+        </template>
+      </el-table-column>
+      <el-table-column v-if="!isPhone" label="在线时长" min-width="110">
+        <template #default="{ row }">
+          <span v-if="row.connected_at_ms">{{ duration(nowMs - row.connected_at_ms) }}</span>
+          <span v-else class="muted">—</span>
+        </template>
+      </el-table-column>
       <el-table-column v-if="!isPhone" prop="streams" label="会话数" width="90" align="right" />
       <el-table-column v-if="!isPhone" label="流量 ↓/↑" min-width="150">
         <template #default="{ row }">{{ bytes(row.bytes_in) }} / {{ bytes(row.bytes_out) }}</template>
@@ -55,7 +67,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Api } from '@/shared/api.js'
 import { canManage, canOperate } from '@/shared/store.js'
-import { ago, bytes } from '@/shared/utils.js'
+import { ago, bytes, duration } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 
 const router = useRouter()
@@ -63,6 +75,7 @@ const { isPhone } = useBreakpoint()
 const list = ref([])
 const q = ref('')
 const loading = ref(false)
+const nowMs = ref(Date.now())
 
 const filtered = computed(() => {
   const k = q.value.trim().toLowerCase()
@@ -74,8 +87,10 @@ const filtered = computed(() => {
 
 async function refresh(silent) {
   if (!silent) loading.value = true
+  nowMs.value = Date.now()
   try {
     list.value = await Api.get('/api/v1/agents')
+    nowMs.value = Date.now()
   } catch (e) {
     if (!silent) ElMessage.error('加载失败：' + e.message)
   } finally {

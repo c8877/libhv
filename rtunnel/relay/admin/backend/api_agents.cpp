@@ -51,6 +51,7 @@ void AdminServer::handleAgents(const HttpContextPtr& ctx) {
                 auto vt = relay_->agent_versions.find(c->devid);
                 j["version"] = vt == relay_->agent_versions.end() ? "" : vt->second;
             }
+            j["boot_ms"] = relay_->agentBootMs(c->devid);
             fillConnCommon(c, j);
             seen.emplace_back(c->devid, j.value("version", std::string()));
             arr.push_back(j);
@@ -86,6 +87,7 @@ void AdminServer::handleAgentDetail(const HttpContextPtr& ctx) {
         j["devid"] = c->devid;
         j["online"] = true;
         fillConnCommon(c, j);
+        j["boot_ms"] = relay_->agentBootMs(c->devid);
         j["streams"] = json::array();
         for (RelayStream* s = c->streams; s; s = s->next_c) {
             json st;
