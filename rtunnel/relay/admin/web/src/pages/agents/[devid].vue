@@ -1570,13 +1570,6 @@ watch(ttyTab, () => {
   else ttyAddPage.value = 1
 })
 const streams = computed(() => (detail.value && detail.value.streams) || [])
-watch(() => [filteredTtys.value.length, filteredUnconfigured.value.length, seriesCfg.value.length, streams.value.length], () => {
-  const clamp = (page, total, per) => Math.max(1, Math.min(page, Math.ceil(total / per) || 1))
-  ttyPage.value = clamp(ttyPage.value, filteredTtys.value.length, ttyPer.value)
-  ttyAddPage.value = clamp(ttyAddPage.value, filteredUnconfigured.value.length, ttyPer.value)
-  metricPage.value = clamp(metricPage.value, seriesCfg.value.length, metricPer.value)
-  sessionPage.value = clamp(sessionPage.value, streams.value.length, sessionPer.value)
-})
 const caps = computed(() => (sys.value && sys.value.caps) || {})
 const capsChips = computed(() => {
   const c = caps.value
@@ -1680,6 +1673,13 @@ const filteredUnconfigured = computed(() => unconfigured.value.filter((d) => {
 const ttyPageRows = computed(() => filteredTtys.value.slice((ttyPage.value - 1) * ttyPer.value, ttyPage.value * ttyPer.value))
 const ttyAddPageRows = computed(() => filteredUnconfigured.value.slice((ttyAddPage.value - 1) * ttyPer.value, ttyAddPage.value * ttyPer.value))
 const metricPageRows = computed(() => seriesCfg.value.slice((metricPage.value - 1) * metricPer.value, metricPage.value * metricPer.value))
+watch(() => [filteredTtys.value.length, filteredUnconfigured.value.length, seriesCfg.value.length, streams.value.length], () => {
+  const clamp = (page, total, per) => Math.max(1, Math.min(page, Math.ceil(total / per) || 1))
+  ttyPage.value = clamp(ttyPage.value, filteredTtys.value.length, ttyPer.value)
+  ttyAddPage.value = clamp(ttyAddPage.value, filteredUnconfigured.value.length, ttyPer.value)
+  metricPage.value = clamp(metricPage.value, seriesCfg.value.length, metricPer.value)
+  sessionPage.value = clamp(sessionPage.value, streams.value.length, sessionPer.value)
+})
 const sessionPageRows = computed(() => streams.value.slice((sessionPage.value - 1) * sessionPer.value, sessionPage.value * sessionPer.value))
 const addCandidates = computed(() => {
   const existing = new Set(seriesCfg.value.map((c) => c.series))
