@@ -1,5 +1,6 @@
 // A/C 连接列表与设备详情（在 relay 线程内取快照，JSON 序列化后回 admin 线程）
 #include "admin_server.hpp"
+#include "cpputil/hasync.h"
 #include "cpputil/json.hpp"
 
 #include <atomic>
@@ -331,62 +332,82 @@ void AdminServer::handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& a
     ctx->send(ack);
 }
 
-void AdminServer::handleAgentSysinfo(const HttpContextPtr& ctx) {
+int AdminServer::handleAgentSysinfo(const HttpContextPtr& ctx) {
     std::string devid = ctx->param("devid");
     if (!ownsDevid(devid)) {
         ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
         ctx->send("{\"error\":\"forbidden\"}");
-        return;
+        return HTTP_STATUS_FORBIDDEN;
     }
     bool inc = ctx->param("mode") == "inc";
     std::string cached;
-    uint64_t ts = 0;
-    cached = callRelay([this, &devid, &ts]() { return relay_->sysinfoOf(devid.c_str(), &ts); });
+    uint64_t cache_ts = 0;
+    cached = callRelay([this, &devid, &cache_ts]() { return relay_->sysinfoOf(devid.c_str(), &cache_ts); });
     if (cached.empty()) inc = false;
     bool online = callRelay([this, &devid]() {
                       return relay_->agentOnline(devid.c_str()) ? std::string("1") : std::string("0");
                   }) == "1";
     if (!online) {
-        // 设备离线：直接回缓存，不为一个不可能到达的请求阻塞 2s
+        // 设备离线：直接回缓存，不为一个不可能到达的请求等待
         if (cached.empty()) {
+            ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+            ctx->send("{\"error\":\"device offline or no response\"}");
+            return HTTP_STATUS_NOT_FOUND;
+        }
+        ctx->send("{\"ts\":" + std::to_string(cache_ts) + ",\"mode\":\"full\",\"cached\":true,\"sysinfo\":" + cached + "}");
+        return HTTP_STATUS_OK;
+    }
+
+    uint64_t start_ms = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    bool sent = callRelay([this, &devid, inc]() {
+                    return relay_->sendSysinfoReq(devid.c_str(), inc ? 1 : 0) ? std::string("1") : std::string("0");
+                }) == "1";
+    if (!sent) {
+        if (cached.empty()) {
+            ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+            ctx->send("{\"error\":\"device offline or no response\"}");
+            return HTTP_STATUS_NOT_FOUND;
+        }
+        ctx->send("{\"ts\":" + std::to_string(cache_ts) + ",\"mode\":\"full\",\"cached\":true,\"sysinfo\":" + cached + "}");
+        return HTTP_STATUS_OK;
+    }
+
+    // 等 agent 回帧最多 sysinfo_wait_ms。管理台只有一个 HTTP 线程，这里不能阻塞，
+    // 否则一个慢设备会卡住整个管理台；放到线程池等，回帧后直接写响应。
+    int wait_ms = settingInt("proxy.sysinfo_wait_ms", 2000);
+    if (wait_ms < 0) wait_ms = 0;
+    hv::async([this, ctx, devid, inc, cached, cache_ts, start_ms, wait_ms]() {
+        std::string js;
+        uint64_t ts = 0;
+        int waits = wait_ms / 50;
+        for (int i = 0; i < waits; ++i) {
+            usleep(50000);
+            js = callRelay([this, &devid, &ts]() { return relay_->sysinfoOf(devid.c_str(), &ts); });
+            if (!js.empty() && ts >= start_ms) break;
+            js.clear();
+        }
+        bool stale = false;
+        if (js.empty()) {
+            js = cached;
+            ts = cache_ts;
+            stale = !js.empty();
+        }
+        if (js.empty()) {
             ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
             ctx->send("{\"error\":\"device offline or no response\"}");
             return;
         }
-        ctx->send("{\"ts\":0,\"mode\":\"full\",\"cached\":true,\"sysinfo\":" + cached + "}");
-        return;
-    }
-    uint64_t start_ms = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-    callRelay([this, &devid, inc]() { return relay_->sendSysinfoReq(devid.c_str(), inc ? 1 : 0) ? std::string("1") : std::string("0"); });
-    std::string js;
-    int waits = settingInt("proxy.sysinfo_wait_ms", 2000) / 50;
-    for (int i = 0; i < waits; ++i) {
-        usleep(50000);
-        js = callRelay([this, &devid, &ts]() { return relay_->sysinfoOf(devid.c_str(), &ts); });
-        if (!js.empty() && ts >= start_ms) break;
-        js.clear();
-    }
-    bool stale = false;
-    if (js.empty()) {
-        js = cached;
-        ts = 0;
-        stale = !js.empty();
-    }
-    if (js.empty()) {
-        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
-        ctx->send("{\"error\":\"device offline or no response\"}");
-        return;
-    }
-    bool last_full = true;
-    uint64_t last_ts = 0;
-    std::string last = callRelay([this, &devid, &last_full, &last_ts]() { return relay_->sysinfoLastOf(devid.c_str(), &last_full, &last_ts); });
-    if (inc && !stale && !last.empty() && !last_full) {
-        ctx->send("{\"ts\":" + std::to_string(last_ts) + ",\"mode\":\"inc\",\"sysinfo\":" + last + "}");
-        return;
-    }
-    std::string out = "{\"ts\":" + std::to_string(ts) + ",\"mode\":\"full\"" + (stale ? ",\"cached\":true" : "") +
-                      ",\"sysinfo\":" + js + "}";
-    ctx->send(out);
+        bool last_full = true;
+        uint64_t last_ts = 0;
+        std::string last = callRelay([this, &devid, &last_full, &last_ts]() { return relay_->sysinfoLastOf(devid.c_str(), &last_full, &last_ts); });
+        if (inc && !stale && !last.empty() && !last_full) {
+            ctx->send("{\"ts\":" + std::to_string(last_ts) + ",\"mode\":\"inc\",\"sysinfo\":" + last + "}");
+            return;
+        }
+        ctx->send("{\"ts\":" + std::to_string(ts) + ",\"mode\":\"full\"" + (stale ? ",\"cached\":true" : "") +
+                  ",\"sysinfo\":" + js + "}");
+    });
+    return HTTP_STATUS_NEXT;
 }
 
 void AdminServer::handleClients(const HttpContextPtr& ctx) {

@@ -53,6 +53,8 @@ assert d["mode"] == "full", d["mode"]
 assert not d.get("cached"), d
 mounts = s.get("mounts") or []
 assert mounts, "no mounts"
+names = [m["mount"] for m in mounts]
+assert len(names) == len(set(names)), "duplicate mount path: %s" % names
 for m in mounts:
     assert "total_kb" in m and "used_kb" in m and "avail_kb" in m, m
     assert "free_kb" not in m, m
@@ -73,6 +75,30 @@ for m in mounts:
 print("incremental mounts ok:", len(mounts))
 PY
 
+# 慢设备不能卡住管理台：暂停 agent（TCP 仍在），sysinfo 等回帧期间其它接口应仍然秒回
+kill -STOP "$AGENT_PID"
+T0=$(date +%s%N)
+curl -fsS -b "$T/c" "$A/api/v1/agents/tdisk/sysinfo?mode=full" >"$T/slow.json" &
+SLOW=$!
+sleep 0.3
+F0=$(date +%s%N)
+curl -fsS -b "$T/c" "$A/api/v1/agents" >/dev/null
+F1=$(date +%s%N)
+wait $SLOW
+T1=$(date +%s%N)
+kill -CONT "$AGENT_PID"
+SLOWMS=$(( (T1 - T0) / 1000000 ))
+FASTMS=$(( (F1 - F0) / 1000000 ))
+python3 - "$T/slow.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d.get("cached") is True, d
+assert d["sysinfo"].get("mounts"), "cached sysinfo empty"
+PY
+[ "$FASTMS" -lt 800 ] || { echo "管理台被 sysinfo 等待阻塞: ${FASTMS}ms" >&2; exit 1; }
+[ "$SLOWMS" -ge 1500 ] || { echo "sysinfo 等待时间异常: ${SLOWMS}ms" >&2; exit 1; }
+echo "non-blocking ok: slow=${SLOWMS}ms fast=${FASTMS}ms"
+
 kill "$AGENT_PID" 2>/dev/null || true
 wait "$AGENT_PID" 2>/dev/null || true
 AGENT_PID=
@@ -83,7 +109,7 @@ import json, sys
 d = json.load(open(sys.argv[1]))
 assert d["mode"] == "full", d["mode"]
 assert d.get("cached") is True, d
-assert d["ts"] == 0, d["ts"]
+assert d["ts"] > 0, d["ts"]
 assert d["sysinfo"].get("mounts"), "cached sysinfo empty"
 print("offline cache ok")
 PY

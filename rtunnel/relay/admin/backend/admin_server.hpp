@@ -115,7 +115,7 @@ private:
     void handleOverview(const HttpContextPtr& ctx);
     void handleAgents(const HttpContextPtr& ctx);
     void handleAgentDetail(const HttpContextPtr& ctx);
-    void handleAgentSysinfo(const HttpContextPtr& ctx);
+    int  handleAgentSysinfo(const HttpContextPtr& ctx); // 返回 HTTP_STATUS_NEXT 表示异步回包
     void handleTtyList(const HttpContextPtr& ctx);
     void handleTtyPut(const HttpContextPtr& ctx);
     void handleTtyDelete(const HttpContextPtr& ctx);

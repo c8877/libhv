@@ -1991,11 +1991,30 @@ nlohmann::json AgentApp::buildSysinfo() {
         std::ifstream mf("/proc/mounts");
         std::string line;
         std::set<std::string> seen;
+        std::map<std::string, size_t> by_source; // 同一设备的 bind mount 只保留最短路径
         while (std::getline(mf, line)) {
             std::istringstream is(line);
-            std::string dev, mnt, fstype;
+            std::string dev, mnt, fstype, opts;
             if (!(is >> dev >> mnt >> fstype)) continue;
+            is >> opts;
             if (mountIgnored(fstype, mnt) || !seen.insert(mnt).second) continue;
+            // bind mount 与源挂载是同一个文件系统（st_dev 相同），只保留最短路径；
+            // btrfs 子卷共用 superblock，但属于不同挂载，按 subvol 区分
+            struct stat mst;
+            std::string key = stat(mnt.c_str(), &mst) == 0 ? "dev:" + std::to_string((unsigned long long)mst.st_dev)
+                                                           : "src:" + dev;
+            size_t sv = opts.find("subvol=");
+            if (sv != std::string::npos) {
+                size_t end = opts.find(',', sv);
+                key += "|" + opts.substr(sv, end == std::string::npos ? std::string::npos : end - sv);
+            }
+            auto dup = by_source.find(key);
+            if (dup != by_source.end()) {
+                if (mnt.size() < mounts[dup->second]["mount"].get<std::string>().size()) {
+                    mounts[dup->second]["mount"] = mnt;
+                }
+                continue;
+            }
             struct statvfs vfs;
             if (statvfs(mnt.c_str(), &vfs) != 0) continue;
             unsigned long long total = (unsigned long long)vfs.f_blocks * vfs.f_frsize / 1024;
@@ -2008,6 +2027,7 @@ nlohmann::json AgentApp::buildSysinfo() {
             // 使用率按 used/(used+avail) 计算，与 df 的 Use% 一致。
             m["used_kb"] = (unsigned long long)(vfs.f_blocks - vfs.f_bfree) * vfs.f_frsize / 1024;
             m["avail_kb"] = (unsigned long long)vfs.f_bavail * vfs.f_frsize / 1024;
+            by_source[key] = mounts.size();
             mounts.push_back(m);
         }
         j["mounts"] = mounts;

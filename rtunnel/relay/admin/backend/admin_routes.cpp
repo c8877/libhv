@@ -30,7 +30,13 @@ void AdminServer::registerRoutes() {
     access("device.tty.write", "DELETE", "/api/v1/agents/:devid/ttys", &AdminServer::handleTtyDelete);
     access("device.tty.read", "GET", "/api/v1/agents/:devid/ttys/discovered", &AdminServer::handleTtyDiscovered);
     access("device.tty.read", "GET", "/api/v1/ttylogs/:name", &AdminServer::handleTtyLogDownload);
-    access("device.view", "GET", "/api/v1/agents/:devid/sysinfo", &AdminServer::handleAgentSysinfo);
+    // sysinfo 要等设备回帧，放到线程池里等，避免阻塞管理台唯一的 HTTP 线程
+    service_.Handle("GET", "/api/v1/agents/:devid/sysinfo", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "device.view", role);
+        if (rc) return rc;
+        return handleAgentSysinfo(ctx);
+    });
     service_.Handle("PUT", "/api/v1/settings", [this](const HttpContextPtr& ctx) {
         std::string role;
         int rc = requirePerm(ctx, "settings.write", role);

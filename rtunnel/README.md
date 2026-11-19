@@ -107,7 +107,7 @@ python3 rtunnel/tests/e2e_failover.py    # 双 relay 故障切换
 python3 rtunnel/tests/e2e_alerts.py      # 告警（本地 webhook sink）
 bash rtunnel/tests/ota_e2e.sh            # OTA 安装/重启/版本确认 + 错误架构拒绝
 bash rtunnel/tests/dist_scope_e2e.sh     # 分发/OTA 的设备范围授权
-bash rtunnel/tests/sysinfo_e2e.sh        # 存储统计全量/增量 + 离线缓存
+bash rtunnel/tests/sysinfo_e2e.sh        # 存储统计全量/增量 + 离线缓存 + 管理台不阻塞
 build/bin/rtunnel-endpoint-test          # --server 地址解析单测
 ```
 
@@ -283,7 +283,8 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
   直接展示该结果（含配置文件路径、是否从文件加载、端口/OTA/文件/服务/串口白名单）
 - API：`GET /api/v1/agents/{devid}/sysinfo?mode=full|inc`、`PUT /api/v1/agents/{devid}/caps`
   （设备详情页「存储」用 `used_kb`/`avail_kb` 计算，使用率口径与 `df` 的 Use% 一致；
-  设备离线时接口直接返回带 `cached:true` 的缓存快照）
+  同一文件系统的 bind mount 只上报最短路径；设备离线或回帧超时时返回带 `cached:true`
+  的缓存快照，等待回帧在后台线程进行，不阻塞管理台其它请求）
 - 文件分发：文件页「分发」选择设备与时间窗，创建 `POST /api/v1/distributions`，
   `GET /api/v1/distributions` 查询进度；经 RTNP 推到设备 `--file-dir/dir`
   （默认 `/opt/data/files`），32KiB 分片、256KiB 窗口、sha256 校验、断点续传、
