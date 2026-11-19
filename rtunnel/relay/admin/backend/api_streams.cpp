@@ -42,6 +42,7 @@ void AdminServer::handleStreams(const HttpContextPtr& ctx) {
                 st["state"] = !s->opened ? "OPENING"
                               : (s->a_closed || s->c_closed) ? "HALF_CLOSED" : "OPEN";
                 st["opened_at_ms"] = s->opened_at_ms;
+                st["last_active_ms"] = s->last_active_ms;
                 arr.push_back(st);
             }
         }

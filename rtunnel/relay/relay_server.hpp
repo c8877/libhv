@@ -54,7 +54,8 @@ struct RelayStream {
     int          a_closed = 0;
     int          c_closed = 0;
     int          opened = 0;             // OPEN_OK 经过 relay 时置位
-    uint64_t     opened_at_ms = 0;
+    uint64_t     opened_at_ms = 0;       // 建流时间（管理台展示）
+    uint64_t     last_active_ms = 0;     // 最近一次转发帧，空闲回收用
     RelayStream* next_a = nullptr;   // a->streams
     RelayStream* next_c = nullptr;   // c->streams
 };
@@ -203,6 +204,7 @@ public:
     int         draining = 0;
     uint64_t    drain_deadline = 0;
     uint32_t    drain_timeout_ms = 10000;
+    uint32_t    stream_idle_timeout_ms = 1800000;  // 流空闲回收（0 = 关闭）
 
 private:
     int          aclCheck(const char* user, const char* devid);
@@ -216,6 +218,7 @@ private:
     void         addPending(RelayConn* a, uint32_t a_sid, const char* devid, uint16_t port, uint16_t flags);
     void         completePending(const char* devid);
     void         sweepPending();
+    void         sweepStreams();          // 回收长时间无数据的已建流
     void         dropPendingFor(RelayConn* a);
     void         aclAddTo(AclEntry** head, const char* user, const char* patterns);
     void         aclFree(AclEntry** head);

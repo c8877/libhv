@@ -26,6 +26,9 @@
       <el-table-column v-if="!isPhone" label="开启于" min-width="120">
         <template #default="{ row }">{{ ago(row.opened_at_ms) }} 前</template>
       </el-table-column>
+      <el-table-column v-if="!isPhone" label="最近活动" min-width="120">
+        <template #default="{ row }">{{ row.last_active_ms ? ago(row.last_active_ms) + ' 前' : '—' }}</template>
+      </el-table-column>
       <el-table-column label="操作" width="90">
         <template #default="{ row }">
           <el-button size="small" type="danger" plain @click="kick(row)">踢掉</el-button>

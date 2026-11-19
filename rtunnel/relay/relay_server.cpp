@@ -151,6 +151,7 @@ void RelayServer::completePending(const char* devid) {
         auto* s = new RelayStream{};
         s->a = p->a; s->a_sid = p->a_sid;
         s->c = agent; s->c_sid = ++agent->next_c_sid;
+        s->opened_at_ms = s->last_active_ms = hloop_now_ms(loop);
         s->next_a = p->a->streams; p->a->streams = s;
         s->next_c = agent->streams; agent->streams = s;
 
@@ -174,6 +175,36 @@ void RelayServer::sweepPending() {
         }
         logf_("[relay] OPEN_SHELL %s: spawn timeout", p->devid);
         delete p;
+    }
+}
+
+void RelayServer::sweepStreams() {
+    if (stream_idle_timeout_ms == 0) return;
+    uint64_t now = hloop_now_ms(loop);
+    // 先收集再删除：streamRemove 会同时改两侧链表
+    std::vector<RelayStream*> dead;
+    for (RelayConn* c = agents; c; c = c->reg_next) {
+        for (RelayStream* s = c->streams; s; s = s->next_c) {
+            if (now >= s->last_active_ms && now - s->last_active_ms >= stream_idle_timeout_ms) {
+                dead.push_back(s);
+            }
+        }
+    }
+    for (auto* s : dead) {
+        uint64_t idle_s = (now - s->last_active_ms) / 1000;
+        if (verbose) {
+            logf_("[relay] stream idle %llus, reset: a=%s a_sid=%u c=%s c_sid=%u",
+                  (unsigned long long)idle_s, s->a ? s->a->user : "", s->a_sid,
+                  s->c ? s->c->devid : "", s->c_sid);
+        }
+        if (s->a && s->a->io && !hio_is_closed(s->a->io)) {
+            sendErr(s->a->io, rtnp::RESET, s->a_sid, rtnp::TIMEOUT, "stream idle timeout");
+        }
+        if (s->c && s->c->io && !hio_is_closed(s->c->io)) {
+            sendErr(s->c->io, rtnp::RESET, s->c_sid, rtnp::TIMEOUT, "stream idle timeout");
+        }
+        s->a_closed = s->c_closed = 1;
+        streamRemove(s);
     }
 }
 
@@ -1550,6 +1581,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             auto* s = new RelayStream{};
             s->a = c; s->a_sid = f->sid;
             s->c = agent; s->c_sid = ++agent->next_c_sid;
+            s->opened_at_ms = s->last_active_ms = hloop_now_ms(loop);
             s->next_a = c->streams; c->streams = s;
             s->next_c = agent->streams; agent->streams = s;
             tokenSessionAdd(c);
@@ -1584,6 +1616,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
                 return;
             }
             forward(s->c, f->type, s->c_sid, f->payload, f->len, f->flags);
+            s->last_active_ms = hloop_now_ms(loop);
             if (f->type == rtnp::DATA) tokenAddBytes(c, f->len);
             if (f->type == rtnp::CLOSE) s->a_closed = 1;
             if (f->type == rtnp::RESET) { s->a_closed = s->c_closed = 1; }
@@ -1604,7 +1637,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         if (s == NULL) return;
         if (f->type == rtnp::OPEN_OK && !s->opened) {
             s->opened = 1;
-            s->opened_at_ms = hloop_now_ms(loop);
+            s->last_active_ms = hloop_now_ms(loop);
         }
         forward(s->a, f->type, s->a_sid, f->payload, f->len, f->flags);
         if (f->type == rtnp::OPEN_FAIL) { s->a_closed = s->c_closed = 1; streamRemove(s); }
@@ -1621,6 +1654,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             return;
         }
         forward(s->a, f->type, s->a_sid, f->payload, f->len, f->flags);
+        s->last_active_ms = hloop_now_ms(loop);
         if (f->type == rtnp::DATA) tokenAddBytes(s->a, f->len);
         if (f->type == rtnp::CLOSE) s->c_closed = 1;
         if (f->type == rtnp::RESET) { s->a_closed = s->c_closed = 1; }
@@ -1843,6 +1877,8 @@ int RelayServer::run(int argc, char** argv) {
             snprintf(acl_file_path, sizeof(acl_file_path), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--drain-timeout") == 0 && i + 1 < argc) {
             drain_timeout_ms = (uint32_t)atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--stream-idle") == 0 && i + 1 < argc) {
+            stream_idle_timeout_ms = (uint32_t)atoi(argv[++i]) * 1000;
         } else if (strcmp(argv[i], "--admin") == 0 && i + 1 < argc) {
             admin_addr = argv[++i];
         } else if (strcmp(argv[i], "--admin-token") == 0 && i + 1 < argc) {
@@ -1862,7 +1898,7 @@ int RelayServer::run(int argc, char** argv) {
         } else {
             fprintf(stderr,
                 "Usage: %s [--host H] [--port P] [--acl user=devid[,devid|*]] [--allow-all]\n"
-                "          [--acl-file PATH] [--drain-timeout MS]\n"
+                "          [--acl-file PATH] [--drain-timeout MS] [--stream-idle SEC]\n"
                 "          [--tls-cert crt --tls-key key [--tls-ca ca]] [--verbose]\n"
                 "          [--client-users F] [--client-token T] [--shell-users u1,u2]\n"
                 "          [--admin 127.0.0.1:9443 [--admin-token T] [--admin-db PATH]\n"
@@ -1990,6 +2026,9 @@ int RelayServer::run(int argc, char** argv) {
     hevent_set_userdata(sig, this);
     htimer_t* sweeper = htimer_add(loop, [](htimer_t* t) { ((RelayServer*)hevent_userdata(t))->sweepPending(); }, 1000, INFINITE);
     hevent_set_userdata(sweeper, this);
+    // 已建流的空闲回收：客户端异常挂住时不至于白占 token 会话配额
+    htimer_t* ssweeper = htimer_add(loop, [](htimer_t* t) { ((RelayServer*)hevent_userdata(t))->sweepStreams(); }, 5000, INFINITE);
+    hevent_set_userdata(ssweeper, this);
     htimer_t* t = htimer_add(loop, statsCb, 60000, INFINITE);
     hevent_set_userdata(t, this);
     // 过期 / 配额的兜底扫描（限流与计量本身在收发路径上实时完成）

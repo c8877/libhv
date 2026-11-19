@@ -108,6 +108,7 @@ python3 rtunnel/tests/e2e_alerts.py      # 告警（本地 webhook sink）
 bash rtunnel/tests/ota_e2e.sh            # OTA 安装/重启/版本确认 + 错误架构拒绝
 bash rtunnel/tests/dist_scope_e2e.sh     # 分发/OTA 的设备范围授权
 bash rtunnel/tests/sysinfo_e2e.sh        # 存储统计全量/增量 + 离线缓存 + 管理台不阻塞
+python3 rtunnel/tests/stream_idle_e2e.py # 流空闲回收：闲置 RESET、活跃流保留
 build/bin/rtunnel-endpoint-test          # --server 地址解析单测
 ```
 
@@ -128,6 +129,8 @@ build/bin/rtunnel-endpoint-test          # --server 地址解析单测
   `kill -HUP <pid>` 生效；只影响新 OPEN，不动已建立会话。整文件解析失败保留旧表。
 - **优雅退出**：`SIGTERM`/`SIGINT` 停止 accept，等现有连接收尾（`--drain-timeout`，默认 10s）
   后退出；第二次信号立即强退。A/C 断线后按既有退避重连。
+- **流空闲回收**：每 5s 扫描一次已建流，`--stream-idle` 秒内没有任何帧就向两侧发
+  `RESET(stream idle timeout)` 并释放会话配额；端口映射这类正常空闲业务请调大或设 0 关闭。
 - **统计**：每 60s 一条 `[relay] stats:` 日志（agents/clients/streams/bytes_in/bytes_out）。
 
 ## 管理台（admin）
@@ -448,6 +451,7 @@ http://B:9443/device/<devid>/<port>/<path>
 | `--admin-tls-selfsigned [--admin-tls-dir D] [--admin-tls-days N]` | 管理台 HTTPS：自签并自动续期 |
 | `--admin-file-dir` / `--admin-docroot` | 文件管理目录 / 前端磁盘目录 |
 | `--drain-timeout` | 优雅退出等待时长，默认 10000ms |
+| `--stream-idle SEC` | 流空闲回收：超过 SEC 秒没有任何帧就 RESET 并释放会话配额，默认 1800，0 关闭 |
 
 **client（A）**
 
