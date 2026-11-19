@@ -27,14 +27,12 @@
       <div class="panel">
         <div class="panel-head">
           <h2>存储</h2>
-          <span class="spacer" />
-          <span class="muted">条形按最大分区归一</span>
         </div>
         <div v-for="d in disks" :key="d.mount" class="disk">
           <div class="disk-top">
             <span class="mount">{{ d.mount }}</span>
             <span v-if="d.fstype" class="fs">{{ d.fstype }}</span>
-            <span class="pct" :class="toneOf(d.pct)">{{ d.pct }}%</span>
+            <span class="pct" :class="diskTone(d.pct)">{{ d.pct }}%</span>
           </div>
           <el-progress :percentage="d.pct" :stroke-width="6" :show-text="false" :color="diskColor(d.pct)" />
           <div class="size">{{ d.used }} / {{ d.total }} {{ d.unit }}</div>
@@ -71,7 +69,10 @@
         <el-descriptions-item label="CPU 型号">{{ sys.cpu_model || '—' }}</el-descriptions-item>
         <el-descriptions-item label="核心数">{{ sys.cpu_count || 0 }} 核</el-descriptions-item>
         <el-descriptions-item label="板卡型号">{{ sys.board || '—' }}</el-descriptions-item>
-        <el-descriptions-item label="采集时间">{{ time(sysTs) }}</el-descriptions-item>
+        <el-descriptions-item label="采集时间">
+          <span v-if="sysCached" class="cached-tag">缓存（设备未响应）</span>
+          <template v-else>{{ time(sysTs) }}</template>
+        </el-descriptions-item>
       </el-descriptions>
       <el-alert v-else-if="sysErr" :title="sysErr" type="warning" :closable="false" show-icon />
       <el-skeleton v-else :rows="2" animated />
@@ -743,6 +744,7 @@ const canOpenCaps = computed(() => canCaps.value || canOta.value || canTty.value
 const detail = ref(null)
 const sys = ref(null)
 const sysTs = ref(0)
+const sysCached = ref(false)
 const sysErr = ref('')
 const loading = ref(false)
 const auto = ref(false)
@@ -809,13 +811,15 @@ const disks = computed(() => {
   const mounts = (sys.value && sys.value.mounts) || []
   return mounts.map((m) => {
     const total = Number(m.total_kb) || 0
-    const free = Number(m.free_kb) || 0
-    const used = total - free
+    const used = Number(m.used_kb) || 0
+    const avail = Number(m.avail_kb) || 0
     const pair = kbPair(used, total)
+    const base = used + avail
+    const pct = base > 0 ? Math.min(100, Math.max(0, Math.round((used * 100) / base))) : 0
     return {
       mount: m.mount,
       fstype: m.fstype || '',
-      pct: total > 0 ? Math.round((used * 100) / total) : 0,
+      pct,
       used: pair.used,
       total: pair.total,
       unit: pair.unit,
@@ -870,11 +874,13 @@ const addCandidates = computed(() => {
   return [...new Set(out)].filter((x) => !existing.has(x))
 })
 
-function toneOf(p) {
-  return p >= 85 ? 'bad' : p >= 70 ? 'warn' : ''
+const DISK_WARN = 70
+const DISK_BAD = 85
+function diskTone(p) {
+  return p >= DISK_BAD ? 'bad' : p >= DISK_WARN ? 'warn' : ''
 }
 function diskColor(p) {
-  return p >= 85 ? '#e5534b' : p >= 70 ? '#f5a623' : '#3b82f6'
+  return { bad: '#e5534b', warn: '#f5a623' }[diskTone(p)] || '#3b82f6'
 }
 
 function unitOf(name) {
@@ -904,7 +910,9 @@ function mergeSysinfo(p) {
   if (p.swap_free_kb != null) sys.value.swap_free_kb = p.swap_free_kb
   ;(p.mounts || []).forEach((pm) => {
     const m = (sys.value.mounts || []).find((x) => x.mount === pm.mount)
-    if (m && pm.free_kb != null) m.free_kb = pm.free_kb
+    if (!m) return
+    if (pm.used_kb != null) m.used_kb = pm.used_kb
+    if (pm.avail_kb != null) m.avail_kb = pm.avail_kb
   })
   ;(p.nics || []).forEach((pn) => {
     const n = (sys.value.nics || []).find((x) => x.name === pn.name)
@@ -924,7 +932,8 @@ async function loadSysinfo(silent) {
       sys.value = r.sysinfo
       sysFull = true
     }
-    sysTs.value = r.ts || Date.now()
+    sysCached.value = !!r.cached
+    sysTs.value = r.ts || 0
     sysErr.value = ''
     if (sys.value && !sys.value.cpu_count && !sysRetry) {
       sysRetry = setTimeout(() => { sysRetry = null; loadSysinfo(true) }, 1200)
@@ -1226,6 +1235,7 @@ async function refreshCaps() {
   capsRefreshing.value = true
   try {
     sysFull = false
+    sysCached.value = false
     await loadSysinfo(true)
     fillCapsFromSys()
   } finally {
@@ -1298,6 +1308,7 @@ async function saveCaps() {
     else ElMessage.success('能力已更新')
     // 能力位不在增量 sysinfo 里，强制拉一次全量，卡片/入口立即跟着变
     sysFull = false
+    sysCached.value = false
     await loadAll({ silent: true })
   } catch (e) {
     ElMessage.error('失败：' + e.message)
@@ -1597,6 +1608,7 @@ async function init() {
   detail.value = null
   sys.value = null
   sysErr.value = ''
+  sysCached.value = false
   sysFull = false
   seriesCfg.value = []
   selected.value = []
@@ -1641,6 +1653,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .period { width: 84px; }
+.cached-tag { color: #f5a623; }
 :deep(.el-table .cell) { white-space: nowrap; }
 .disk { padding: 8px 0; border-bottom: 1px solid var(--el-border-color-lighter); }
 .disk:last-child { border-bottom: 0; }

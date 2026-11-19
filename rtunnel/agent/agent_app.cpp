@@ -23,6 +23,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <vector>
 #if defined(WITH_OPENSSL)
@@ -1907,6 +1908,27 @@ void AgentApp::seriesTick() {
     }
 }
 
+// 存储统计只采集本地文件系统：伪文件系统没有意义，
+// 网络/FUSE 挂载上的 statvfs 可能长时间阻塞事件循环。
+static bool mountIgnored(const std::string& fstype, const std::string& mnt) {
+    static const char* kPseudo[] = {"proc", "sysfs", "devtmpfs", "devpts", "cgroup", "cgroup2", "pstore",
+        "debugfs", "securityfs", "tracefs", "configfs", "mqueue", "hugetlbfs", "fusectl",
+        "binfmt_misc", "autofs", "efivarfs", "bpf", "squashfs"};
+    static const char* kRemote[] = {"nfs", "cifs", "smb", "fuse", "9p", "ceph",
+        "glusterfs", "afs", "davfs", "sshfs", "ncpfs", "lustre"};
+    for (const char* t : kPseudo) {
+        if (fstype == t) return true;
+    }
+    for (const char* t : kRemote) {
+        if (fstype.rfind(t, 0) == 0) return true;
+    }
+    if (fstype == "overlay" && mnt != "/") return true;
+    if (mnt == "/run" || mnt.rfind("/run/", 0) == 0) return true;
+    if (mnt == "/dev/shm" || mnt.rfind("/dev/shm/", 0) == 0) return true;
+    if (mnt == "/sys" || mnt.rfind("/sys/", 0) == 0) return true;
+    return false;
+}
+
 nlohmann::json AgentApp::buildSysinfo() {
     using nlohmann::json;
     json j;
@@ -1968,16 +1990,12 @@ nlohmann::json AgentApp::buildSysinfo() {
         nlohmann::json mounts = nlohmann::json::array();
         std::ifstream mf("/proc/mounts");
         std::string line;
-        std::string last_dev;
+        std::set<std::string> seen;
         while (std::getline(mf, line)) {
             std::istringstream is(line);
             std::string dev, mnt, fstype;
             if (!(is >> dev >> mnt >> fstype)) continue;
-            if (fstype == "squashfs" || (fstype == "overlay" && mnt != "/") || mnt.rfind("/run", 0) == 0 || mnt.rfind("/dev/shm", 0) == 0 ||
-                mnt.rfind("/sys", 0) == 0 || fstype == "proc" || fstype == "sysfs" || fstype == "devtmpfs" || fstype == "devpts" ||
-                fstype.rfind("cgroup", 0) == 0 || fstype == "pstore" || fstype == "debugfs" || fstype == "securityfs" || fstype == "tracefs" ||
-                fstype == "configfs" || fstype == "mqueue" || fstype == "hugetlbfs" || fstype == "fusectl" || fstype == "binfmt_misc")
-                continue;
+            if (mountIgnored(fstype, mnt) || !seen.insert(mnt).second) continue;
             struct statvfs vfs;
             if (statvfs(mnt.c_str(), &vfs) != 0) continue;
             unsigned long long total = (unsigned long long)vfs.f_blocks * vfs.f_frsize / 1024;
@@ -1986,7 +2004,10 @@ nlohmann::json AgentApp::buildSysinfo() {
             m["mount"] = mnt;
             m["fstype"] = fstype;
             m["total_kb"] = total;
-            m["free_kb"] = (unsigned long long)vfs.f_bavail * vfs.f_frsize / 1024;
+            // used 用 f_bfree（真实已用），avail 用 f_bavail（非特权可用）；
+            // 使用率按 used/(used+avail) 计算，与 df 的 Use% 一致。
+            m["used_kb"] = (unsigned long long)(vfs.f_blocks - vfs.f_bfree) * vfs.f_frsize / 1024;
+            m["avail_kb"] = (unsigned long long)vfs.f_bavail * vfs.f_frsize / 1024;
             mounts.push_back(m);
         }
         j["mounts"] = mounts;
@@ -2199,7 +2220,7 @@ void AgentApp::sendSysinfo(int mode) {
         out["full"] = false;
         out["swap_free_kb"] = j["swap_free_kb"];
         out["mounts"] = nlohmann::json::array();
-        for (auto& m : j["mounts"]) out["mounts"].push_back({{"mount", m["mount"]}, {"free_kb", m["free_kb"]}});
+        for (auto& m : j["mounts"]) out["mounts"].push_back({{"mount", m["mount"]}, {"used_kb", m["used_kb"]}, {"avail_kb", m["avail_kb"]}});
         out["nics"] = nlohmann::json::array();
         for (auto& n : j["nics"]) out["nics"].push_back({{"name", n["name"]}, {"ip", n["ip"]}, {"up", n["up"]}});
         out["serial"] = j["serial"];

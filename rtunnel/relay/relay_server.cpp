@@ -1239,11 +1239,16 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
                     if (base.is_discarded()) base = nlohmann::json::object();
                     if (part.contains("swap_free_kb")) base["swap_free_kb"] = part["swap_free_kb"];
                     if (part.contains("mounts") && base.contains("mounts")) {
-                        std::map<std::string, uint64_t> free_kb;
-                        for (auto& m : part["mounts"]) free_kb[m.value("mount", "")] = m.value("free_kb", (uint64_t)0);
+                        std::map<std::string, std::pair<uint64_t, uint64_t>> usage;
+                        for (auto& m : part["mounts"]) {
+                            usage[m.value("mount", "")] =
+                                std::make_pair(m.value("used_kb", (uint64_t)0), m.value("avail_kb", (uint64_t)0));
+                        }
                         for (auto& m : base["mounts"]) {
-                            auto fi = free_kb.find(m.value("mount", ""));
-                            if (fi != free_kb.end()) m["free_kb"] = fi->second;
+                            auto fi = usage.find(m.value("mount", ""));
+                            if (fi == usage.end()) continue;
+                            m["used_kb"] = fi->second.first;
+                            m["avail_kb"] = fi->second.second;
                         }
                     }
                     if (part.contains("serial")) base["serial"] = part["serial"];

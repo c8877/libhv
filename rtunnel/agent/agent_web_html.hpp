@@ -226,8 +226,8 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 0 0}
 
     var mounts = d.mounts || [];
     $('#disks').innerHTML = mounts.length ? mounts.map(function (m) {
-      var t = toNum(m.total_kb), used = Math.max(0, t - toNum(m.free_kb));
-      var p = t ? Math.round(used * 100 / t) : 0, cls = tone(p);
+      var t = toNum(m.total_kb), used = toNum(m.used_kb), avail = toNum(m.avail_kb);
+      var base = used + avail, p = base ? Math.round(used * 100 / base) : 0, cls = tone(p);
       return '<div class="disk"><div class="disk-top"><b>' + esc(m.mount) + '</b><span class="muted">' +
              esc(m.fstype || '') + '</span><span class="pct ' + cls + '">' + p + '%</span></div>' +
              '<div class="bar"><i class="' + cls + '" style="width:' + p + '%"></i></div>' +

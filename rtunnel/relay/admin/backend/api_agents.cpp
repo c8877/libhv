@@ -343,6 +343,19 @@ void AdminServer::handleAgentSysinfo(const HttpContextPtr& ctx) {
     uint64_t ts = 0;
     cached = callRelay([this, &devid, &ts]() { return relay_->sysinfoOf(devid.c_str(), &ts); });
     if (cached.empty()) inc = false;
+    bool online = callRelay([this, &devid]() {
+                      return relay_->agentOnline(devid.c_str()) ? std::string("1") : std::string("0");
+                  }) == "1";
+    if (!online) {
+        // 设备离线：直接回缓存，不为一个不可能到达的请求阻塞 2s
+        if (cached.empty()) {
+            ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+            ctx->send("{\"error\":\"device offline or no response\"}");
+            return;
+        }
+        ctx->send("{\"ts\":0,\"mode\":\"full\",\"cached\":true,\"sysinfo\":" + cached + "}");
+        return;
+    }
     uint64_t start_ms = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     callRelay([this, &devid, inc]() { return relay_->sendSysinfoReq(devid.c_str(), inc ? 1 : 0) ? std::string("1") : std::string("0"); });
     std::string js;
@@ -353,9 +366,11 @@ void AdminServer::handleAgentSysinfo(const HttpContextPtr& ctx) {
         if (!js.empty() && ts >= start_ms) break;
         js.clear();
     }
+    bool stale = false;
     if (js.empty()) {
         js = cached;
         ts = 0;
+        stale = !js.empty();
     }
     if (js.empty()) {
         ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
@@ -365,11 +380,12 @@ void AdminServer::handleAgentSysinfo(const HttpContextPtr& ctx) {
     bool last_full = true;
     uint64_t last_ts = 0;
     std::string last = callRelay([this, &devid, &last_full, &last_ts]() { return relay_->sysinfoLastOf(devid.c_str(), &last_full, &last_ts); });
-    if (inc && !last.empty() && !last_full) {
+    if (inc && !stale && !last.empty() && !last_full) {
         ctx->send("{\"ts\":" + std::to_string(last_ts) + ",\"mode\":\"inc\",\"sysinfo\":" + last + "}");
         return;
     }
-    std::string out = "{\"ts\":" + std::to_string(ts) + ",\"mode\":\"full\",\"sysinfo\":" + js + "}";
+    std::string out = "{\"ts\":" + std::to_string(ts) + ",\"mode\":\"full\"" + (stale ? ",\"cached\":true" : "") +
+                      ",\"sysinfo\":" + js + "}";
     ctx->send(out);
 }
 
