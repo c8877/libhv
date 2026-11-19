@@ -1927,7 +1927,7 @@ async function loadProcs(refresh, silent) {
   }
 }
 
-function onProcPage() { loadProcs(true, true) }
+function onProcPage() { loadProcs(true, false) }
 
 function onProcSort() {
   procPage.value = 1
@@ -1936,7 +1936,7 @@ function onProcSort() {
 
 function onProcSize() {
   procPage.value = 1
-  loadProcs(true, true)
+  loadProcs(true, false)
 }
 
 function stopProcTimer() {
@@ -2043,11 +2043,11 @@ async function killProc(row) {
 watch(procQuery, () => {
   procPage.value = 1
   if (procQueryTimer) clearTimeout(procQueryTimer)
-  procQueryTimer = setTimeout(() => loadProcs(true, true), 300)
+  procQueryTimer = setTimeout(() => loadProcs(true, false), 300)
 })
 watch(procShowKernel, () => {
   procPage.value = 1
-  loadProcs(true, true)
+  loadProcs(true, false)
 })
 
 function onObsTab(name) {
