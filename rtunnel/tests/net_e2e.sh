@@ -118,7 +118,7 @@ python3 - "$T/ipc.json" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
 ipc = d["ipc"]
-assert ipc["source"] in ("lsipc", "proc"), ipc["source"]
+assert ipc["source"] in ("lsipc+/dev/shm", "proc+/dev/shm", "lsipc", "proc"), ipc["source"]
 for k in ("shm", "msg", "sem", "limits"):
     assert isinstance(ipc[k], list), (k, type(ipc[k]))
 assert d["summary"]["ipc"] == ipc["total"], (d["summary"], ipc["total"])
