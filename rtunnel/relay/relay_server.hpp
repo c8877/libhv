@@ -169,6 +169,8 @@ public:
     std::unordered_map<std::string, std::string> caps_file_dir;
     std::unordered_map<std::string, int> caps_ota;      // devid -> 0/1（未知时无条目）
     std::unordered_map<std::string, std::string> caps_arch; // devid -> uname -m
+    std::unordered_map<std::string, std::vector<int>> caps_ports; // devid -> 允许转发端口
+    std::unordered_map<std::string, std::string> caps_local_web;  // devid -> 本地页监听地址
     std::unordered_map<std::string, std::string> agent_versions;
     std::unordered_map<std::string, uint64_t> agent_boot_ms;   // devid -> 系统开机时间（epoch ms）
     std::unordered_map<uint32_t, FilePush> pushes;
@@ -255,6 +257,8 @@ private:
     bool         cancelOtaApply(uint32_t tid);
     std::string  agentVersion(const char* devid);
     std::string  agentArch(const char* devid);
+    std::vector<int> agentPorts(const char* devid); // 允许转发的端口，未知时为空
+    std::string  agentLocalWeb(const char* devid);
     int          agentOtaCap(const char* devid);   // -1 未知 0 不支持 1 支持
     uint64_t     agentBootMs(const char* devid);   // 系统开机时间（epoch ms），0 未知
     bool         startFileCheck(const char* devid, const char* dir, const char* name,

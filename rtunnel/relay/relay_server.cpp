@@ -1069,6 +1069,16 @@ std::string RelayServer::agentArch(const char* devid) {
     return std::string();
 }
 
+std::vector<int> RelayServer::agentPorts(const char* devid) {
+    auto it = caps_ports.find(devid);
+    return it == caps_ports.end() ? std::vector<int>() : it->second;
+}
+
+std::string RelayServer::agentLocalWeb(const char* devid) {
+    auto it = caps_local_web.find(devid);
+    return it == caps_local_web.end() ? std::string() : it->second;
+}
+
 int RelayServer::agentOtaCap(const char* devid) {
     auto it = caps_ota.find(devid);
     return it == caps_ota.end() ? -1 : it->second;
@@ -1323,6 +1333,18 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             if (!sj.is_discarded() && sj.contains("caps") && sj["caps"].contains("arch") &&
                 sj["caps"]["arch"].is_string()) {
                 caps_arch[c->devid] = sj["caps"]["arch"].get<std::string>();
+            }
+            if (!sj.is_discarded() && sj.contains("caps") && sj["caps"].contains("ports") &&
+                sj["caps"]["ports"].is_array()) {
+                std::vector<int> ports;
+                for (auto& p : sj["caps"]["ports"]) {
+                    if (p.is_number_integer()) ports.push_back(p.get<int>());
+                }
+                caps_ports[c->devid] = ports;
+            }
+            if (!sj.is_discarded() && sj.contains("caps") && sj["caps"].contains("local_web") &&
+                sj["caps"]["local_web"].is_string()) {
+                caps_local_web[c->devid] = sj["caps"]["local_web"].get<std::string>();
             }
             // uptime 只出现在全量帧；用收帧时刻反推开机时间，列表可随时算当前时长
             if (full && !sj.is_discarded()) {

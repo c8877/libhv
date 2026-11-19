@@ -48,6 +48,8 @@ void AdminServer::handleAgents(const HttpContextPtr& ctx) {
                 auto it = relay_->caps_ota.find(c->devid);
                 j["caps_ota"] = it == relay_->caps_ota.end() ? -1 : it->second;
                 j["caps_arch"] = relay_->agentArch(c->devid);
+                j["caps_ports"] = relay_->agentPorts(c->devid);
+                j["caps_local_web"] = relay_->agentLocalWeb(c->devid);
                 auto vt = relay_->agent_versions.find(c->devid);
                 j["version"] = vt == relay_->agent_versions.end() ? "" : vt->second;
             }
@@ -88,6 +90,8 @@ void AdminServer::handleAgentDetail(const HttpContextPtr& ctx) {
         j["online"] = true;
         fillConnCommon(c, j);
         j["boot_ms"] = relay_->agentBootMs(c->devid);
+        j["caps_ports"] = relay_->agentPorts(c->devid);
+        j["caps_local_web"] = relay_->agentLocalWeb(c->devid);
         j["streams"] = json::array();
         for (RelayStream* s = c->streams; s; s = s->next_c) {
             json st;

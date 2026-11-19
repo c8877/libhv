@@ -48,6 +48,37 @@
       </el-table>
     </div>
 
+    <el-dialog v-model="webDlg" :title="'打开 Web · ' + (webRow ? webRow.devid : '')"
+               :width="isPhone ? '92%' : '520px'" append-to-body @closed="webRow = null">
+      <div v-loading="webLoading" class="web-pick">
+        <div class="web-tip muted">选择 agent 已开放的转发端口</div>
+        <div v-if="webChips.length" class="web-chips">
+          <span v-for="c in webChips" :key="c.port" class="web-chip"
+                :class="{ on: Number(webPort) === c.port }" role="button" tabindex="0"
+                :title="'打开 ' + c.port + ' 端口'"
+                @click="webPort = String(c.port)"
+                @keydown.enter.prevent="webPort = String(c.port)">
+            <span class="web-check">{{ Number(webPort) === c.port ? '✓' : '' }}</span>
+            <span class="web-label">{{ c.label }}</span>
+            <span v-if="c.sub" class="web-sub">{{ c.sub }}</span>
+          </span>
+        </div>
+        <div v-else-if="!webLoading" class="web-empty muted">
+          该设备尚未上报开放端口，可直接输入端口号
+        </div>
+        <el-input v-model="webPort" size="small" class="web-input" placeholder="例如 80">
+          <template #prepend>端口</template>
+        </el-input>
+        <div v-if="validPort" class="web-note muted">
+          将在新标签页打开 <code>/device/{{ webRow && webRow.devid }}/{{ webPort }}/</code>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="webDlg = false">取消</el-button>
+        <el-button type="primary" :disabled="!validPort" @click="confirmWeb">打开</el-button>
+      </template>
+    </el-dialog>
+
     <teleport to="body">
       <div v-if="ctx.open" class="ctx-menu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }"
            @contextmenu.prevent @mousedown.stop>
@@ -68,7 +99,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import RowActions from '@/components/RowActions.vue'
 import { Api } from '@/shared/api.js'
-import { canManage, canOperate } from '@/shared/store.js'
+import { can, canManage, canOperate } from '@/shared/store.js'
 import { ago, bytes, duration } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 
@@ -155,18 +186,77 @@ function openShell(row) {
   router.push('/terminal/' + encodeURIComponent(row.devid))
 }
 
-async function openWeb(row) {
-  let port
+const webDlg = ref(false)
+const webRow = ref(null)
+const webPort = ref('')
+const webChips = ref([])
+const webLoading = ref(false)
+const validPort = computed(() => {
+  const p = Number(webPort.value)
+  return Number.isInteger(p) && p >= 1 && p <= 65535
+})
+
+// 字典里的端口 -> 名称，用于 chip 显示；无 dict.read 时静默跳过
+async function portNames() {
+  const names = new Map()
+  if (!can('dict.read')) return names
   try {
-    const r = await ElMessageBox.prompt('端口（需在 agent --allow 列表）', '设备 Web 端口', {
-      inputValue: '80',
-      confirmButtonText: '打开',
-      cancelButtonText: '取消',
+    const d = await Api.get('/api/v1/permission/dicts?kind=ports&page=1&page_size=200')
+    for (const it of d.items || []) {
+      const v = String(it.value || '')
+      const m = v.match(/^(\d+)(?:-(\d+))?$/)
+      if (!m || !it.name) continue
+      names.set([Number(m[1]), Number(m[2] || m[1])], it.name)
+    }
+  } catch (e) { /* 无权限或接口异常时只显示端口号 */ }
+  return names
+}
+
+function nameOfPort(names, port) {
+  for (const [range, name] of names) {
+    if (port >= range[0] && port <= range[1]) return name
+  }
+  return ''
+}
+
+async function openWeb(row) {
+  webRow.value = row
+  webDlg.value = true
+  webLoading.value = true
+  webChips.value = []
+  webPort.value = ''
+  try {
+    let ports = Array.isArray(row.caps_ports) ? row.caps_ports.slice() : null
+    if (!ports) {
+      // 老列表数据或刚上线：向设备要一次全量 sysinfo 拿 caps.ports
+      try {
+        const r = await Api.get('/api/v1/agents/' + encodeURIComponent(row.devid) + '/sysinfo?mode=full')
+        const c = (r.sysinfo && r.sysinfo.caps) || {}
+        ports = Array.isArray(c.ports) ? c.ports : []
+      } catch (e) {
+        ports = []
+      }
+    }
+    const list = Array.from(new Set(ports.map(Number).filter((p) => p >= 1 && p <= 65535)))
+    list.sort((a, b) => a - b)
+    const names = await portNames()
+    webChips.value = list.map((p) => {
+      const name = nameOfPort(names, p)
+      return { port: p, label: name || String(p), sub: name ? String(p) : '' }
     })
-    port = r.value
-  } catch (e) { return }
-  if (!port) return
-  window.open('/device/' + encodeURIComponent(row.devid) + '/' + encodeURIComponent(port) + '/', '_blank')
+    const first = list.includes(80) ? 80 : list[0]
+    if (!webPort.value) webPort.value = first ? String(first) : ''
+  } finally {
+    webLoading.value = false
+  }
+}
+
+function confirmWeb() {
+  if (!validPort.value || !webRow.value) return
+  const url = '/device/' + encodeURIComponent(webRow.value.devid) + '/' +
+    encodeURIComponent(webPort.value) + '/'
+  webDlg.value = false
+  window.open(url, '_blank')
 }
 
 async function kick(row) {
@@ -255,8 +345,31 @@ onBeforeUnmount(() => {
 .ctx-item:hover { background: var(--el-fill-color-light, #f5f7fa); }
 .ctx-item.danger { color: var(--el-color-danger, #f56c6c); }
 .ctx-sep { height: 1px; margin: 4px 6px; background: var(--el-border-color-lighter, #ebeef5); }
+.web-pick { min-height: 96px; }
+.web-tip { font-size: 12px; margin-bottom: 8px; }
+.web-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.web-chip {
+  display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 10px;
+  border: 1px solid var(--el-border-color); border-radius: 13px;
+  background: var(--el-fill-color-light); color: var(--el-text-color-regular);
+  font-size: 12px; line-height: 1; cursor: pointer; user-select: none;
+}
+.web-chip:hover { border-color: var(--el-color-primary-light-5); }
+.web-chip:focus-visible { outline: 2px solid var(--el-color-primary-light-5); outline-offset: 1px; }
+.web-chip.on {
+  background: var(--el-color-primary-light-9); border-color: var(--el-color-primary-light-5);
+  color: var(--el-color-primary);
+}
+.web-check { width: 10px; font-size: 11px; font-weight: 700; }
+.web-label { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.web-sub { font-size: 11px; opacity: .75; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.web-empty { font-size: 12px; margin-bottom: 8px; }
+.web-input { margin-bottom: 8px; }
+.web-note { font-size: 12px; line-height: 1.5; }
+.web-note code { font-family: ui-monospace, Menlo, Consolas, monospace; }
 @media (max-width: 599px) {
   .search { width: 100%; }
   .panel-head { flex-wrap: wrap; }
+  .web-label { max-width: 110px; }
 }
 </style>
