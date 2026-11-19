@@ -116,6 +116,7 @@ private:
     void handleAgents(const HttpContextPtr& ctx);
     void handleAgentDetail(const HttpContextPtr& ctx);
     int  handleAgentSysinfo(const HttpContextPtr& ctx); // 返回 HTTP_STATUS_NEXT 表示异步回包
+    int  handleAgentNet(const HttpContextPtr& ctx);     // 网络/IPC 快照，返回 HTTP_STATUS_NEXT
     void handleTtyList(const HttpContextPtr& ctx);
     void handleTtyPut(const HttpContextPtr& ctx);
     void handleTtyDelete(const HttpContextPtr& ctx);

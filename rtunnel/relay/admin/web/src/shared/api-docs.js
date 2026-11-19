@@ -49,6 +49,20 @@ export const DOCS = [
     resp: `{ "ts": 1763349000123, "mode": "full", "sysinfo": { "cpu": 12.5, "mem": { "used": 182, "total": 512 } } }`,
   },
   {
+    group: 'device', method: 'GET', path: '/api/v1/agents/:devid/net', minRole: 'viewer',
+    summary: '网络与 IPC 快照（TCP/UDP/UNIX/IPC）',
+    params: [
+      { name: 'devid', in: 'path', desc: '设备 ID' },
+      { name: 'scope', in: 'query', desc: 'tcp / udp / unix / ipc / all，默认 tcp' },
+      { name: 'proc', in: 'query', desc: '1=反查占用进程（默认），0=关闭' },
+      { name: 'refresh', in: 'query', desc: '1=绕过 relay 3s 缓存' },
+      { name: 'limit', in: 'query', desc: '每类条目上限，默认 200，最大 500' },
+    ],
+    note: '设备离线时返回最后一次快照（cached=true）；agent < 1.4.28 返回 501',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" \\\n     "$RT/api/v1/agents/mp135/net?scope=tcp&proc=1"`,
+    resp: `{ "ts": 1763349000123, "scope": "tcp", "cached": false, "summary": { "tcp": 12, "udp": 6, "unix": 41, "ipc": 3 }, "tcp": { "total": 12, "listening": 5, "connected": 6, "entries": [{ "local_addr": "0.0.0.0", "local_port": 22, "remote_addr": "0.0.0.0", "remote_port": 0, "state": "LISTEN", "pid": 812, "comm": "sshd" }] } }`,
+  },
+  {
     group: 'device', method: 'GET', path: '/api/v1/agents/:devid/metrics/series', minRole: 'viewer',
     summary: '读取指标时间序列',
     params: [

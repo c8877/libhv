@@ -50,6 +50,7 @@ void AdminServer::handleAgents(const HttpContextPtr& ctx) {
                 j["caps_arch"] = relay_->agentArch(c->devid);
                 j["caps_ports"] = relay_->agentPorts(c->devid);
                 j["caps_local_web"] = relay_->agentLocalWeb(c->devid);
+                j["caps_net"] = relay_->agentNetCap(c->devid);
                 auto vt = relay_->agent_versions.find(c->devid);
                 j["version"] = vt == relay_->agent_versions.end() ? "" : vt->second;
             }
@@ -92,6 +93,7 @@ void AdminServer::handleAgentDetail(const HttpContextPtr& ctx) {
         j["boot_ms"] = relay_->agentBootMs(c->devid);
         j["caps_ports"] = relay_->agentPorts(c->devid);
         j["caps_local_web"] = relay_->agentLocalWeb(c->devid);
+        j["caps_net"] = relay_->agentNetCap(c->devid);
         j["streams"] = json::array();
         for (RelayStream* s = c->streams; s; s = s->next_c) {
             json st;
@@ -412,6 +414,140 @@ int AdminServer::handleAgentSysinfo(const HttpContextPtr& ctx) {
         }
         ctx->send("{\"ts\":" + std::to_string(ts) + ",\"mode\":\"full\"" + (stale ? ",\"cached\":true" : "") +
                   ",\"sysinfo\":" + js + "}");
+    });
+    return HTTP_STATUS_NEXT;
+}
+
+int AdminServer::handleAgentNet(const HttpContextPtr& ctx) {
+    std::string devid = ctx->param("devid");
+    if (!ownsDevid(devid)) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return HTTP_STATUS_FORBIDDEN;
+    }
+    std::string scope = ctx->param("scope");
+    if (scope.empty()) scope = "tcp";
+    if (scope != "tcp" && scope != "udp" && scope != "unix" && scope != "ipc" && scope != "all") {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"bad scope\"}");
+        return HTTP_STATUS_BAD_REQUEST;
+    }
+    bool with_proc = ctx->param("proc") != "0";
+    bool refresh = ctx->param("refresh") == "1";
+    int limit = atoi(ctx->param("limit").c_str());
+    if (limit <= 0) limit = 200;
+    if (limit > 500) limit = 500;
+    std::string key = devid + "|" + scope + "|" + (with_proc ? "1" : "0") + "|" + std::to_string(limit);
+
+    if (!refresh) {
+        std::string cj;
+        uint64_t cts = 0;
+        bool hit = callRelay([this, &key, &cj, &cts]() {
+                       return relay_->netCacheGet(key, 3000, cj, cts) ? std::string("1") : std::string("0");
+                   }) == "1";
+        if (hit) {
+            json j = json::parse(cj, nullptr, false);
+            if (!j.is_discarded()) {
+                j["cached"] = true;
+                j["cache_age_ms"] = (uint64_t)time(NULL) * 1000 - cts;
+                ctx->send(j.dump());
+            } else {
+                ctx->send(cj);
+            }
+            return HTTP_STATUS_OK;
+        }
+    }
+
+    bool online = callRelay([this, &devid]() {
+                      return relay_->agentOnline(devid.c_str()) ? std::string("1") : std::string("0");
+                  }) == "1";
+    if (!online) {
+        // 离线时给最后一次快照，不限制时长，前端会标出数据时间
+        std::string cj;
+        uint64_t cts = 0;
+        bool hit = callRelay([this, &key, &cj, &cts]() {
+                       return relay_->netCacheGet(key, ~0ULL, cj, cts) ? std::string("1") : std::string("0");
+                   }) == "1";
+        if (hit) {
+            json j = json::parse(cj, nullptr, false);
+            if (!j.is_discarded()) {
+                j["cached"] = true;
+                j["offline"] = true;
+            }
+            ctx->send(j.is_discarded() ? cj : j.dump());
+            return HTTP_STATUS_OK;
+        }
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"device offline or no response\"}");
+        return HTTP_STATUS_NOT_FOUND;
+    }
+
+    int cap = -1;
+    callRelay([this, &devid, &cap]() {
+        cap = relay_->agentNetCap(devid.c_str());
+        return std::string("1");
+    });
+    if (cap != 1) {
+        ctx->response->status_code = HTTP_STATUS_NOT_IMPLEMENTED;
+        ctx->send("{\"error\":\"agent version too old, upgrade to 1.4.28+\",\"caps_net\":" +
+                  std::to_string(cap) + "}");
+        return HTTP_STATUS_NOT_IMPLEMENTED;
+    }
+
+    json req;
+    req["scope"] = scope;
+    req["proc"] = with_proc;
+    req["limit"] = limit;
+    req["refresh"] = refresh;
+    std::string payload = req.dump();
+    uint32_t rid = 0;
+    std::string err;
+    bool sent = callRelay([this, &devid, &payload, &rid, &err]() {
+                    return relay_->startNetQuery(devid.c_str(), payload, rid, err) ? std::string("1")
+                                                                                   : std::string("0");
+                }) == "1";
+    if (!sent) {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"" + (err.empty() ? std::string("device offline") : err) + "\"}");
+        return HTTP_STATUS_NOT_FOUND;
+    }
+
+    int wait_ms = settingInt("proxy.net_wait_ms", 3000);
+    if (wait_ms < 0) wait_ms = 0;
+    hv::async([this, ctx, key, rid, wait_ms]() {
+        std::string js;
+        int waits = wait_ms / 50;
+        for (int i = 0; i < waits; ++i) {
+            usleep(50000);
+            js = callRelay([this, rid]() { return relay_->takeNetResult(rid); });
+            if (!js.empty()) break;
+        }
+        if (js.empty()) {
+            std::string cj;
+            uint64_t cts = 0;
+            bool hit = callRelay([this, &key, &cj, &cts]() {
+                           return relay_->netCacheGet(key, ~0ULL, cj, cts) ? std::string("1") : std::string("0");
+                       }) == "1";
+            if (hit) {
+                json j = json::parse(cj, nullptr, false);
+                if (!j.is_discarded()) {
+                    j["cached"] = true;
+                    j["stale"] = true;
+                }
+                ctx->send(j.is_discarded() ? cj : j.dump());
+                return;
+            }
+            ctx->response->status_code = HTTP_STATUS_GATEWAY_TIMEOUT;
+            ctx->send("{\"error\":\"timeout\"}");
+            return;
+        }
+        callRelay([this, &key, &js]() {
+            relay_->netCachePut(key, js);
+            return std::string("1");
+        });
+        json j = json::parse(js, nullptr, false);
+        if (!j.is_discarded()) j["cached"] = false;
+        ctx->send(j.is_discarded() ? js : j.dump());
     });
     return HTTP_STATUS_NEXT;
 }

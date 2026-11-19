@@ -1084,6 +1084,55 @@ int RelayServer::agentOtaCap(const char* devid) {
     return it == caps_ota.end() ? -1 : it->second;
 }
 
+int RelayServer::agentNetCap(const char* devid) {
+    auto it = caps_net.find(devid);
+    return it == caps_net.end() ? -1 : it->second;
+}
+
+bool RelayServer::startNetQuery(const char* devid, const std::string& json, uint32_t& rid, std::string& err) {
+    RelayConn* a = findAgent(devid);
+    if (!a || !a->io) {
+        err = "device offline";
+        return false;
+    }
+    rid = ++net_seq;
+    rtnp::Writer w;
+    w.str(json.c_str());
+    rtnp::send(a->io, rtnp::NET_REQ, rid, w.data, (uint16_t)w.len);
+    return true;
+}
+
+std::string RelayServer::takeNetResult(uint32_t rid) {
+    auto it = net_results.find(rid);
+    if (it == net_results.end()) return std::string();
+    std::string s = it->second;
+    net_results.erase(it);
+    return s;
+}
+
+bool RelayServer::netCacheGet(const std::string& key, uint64_t max_age_ms, std::string& out, uint64_t& ts) {
+    auto it = net_cache.find(key);
+    if (it == net_cache.end()) return false;
+    uint64_t now = (uint64_t)time(NULL) * 1000;
+    if (now - it->second.ts > max_age_ms) return false;
+    out = it->second.json;
+    ts = it->second.ts;
+    return true;
+}
+
+void RelayServer::netCachePut(const std::string& key, const std::string& json) {
+    NetCache c;
+    c.json = json;
+    c.ts = (uint64_t)time(NULL) * 1000;
+    net_cache[key] = c;
+    if (net_cache.size() > 512) {
+        for (auto it = net_cache.begin(); it != net_cache.end();) {
+            if (c.ts - it->second.ts > 60000) it = net_cache.erase(it);
+            else ++it;
+        }
+    }
+}
+
 uint64_t RelayServer::agentBootMs(const char* devid) {
     auto it = agent_boot_ms.find(devid);
     return it == agent_boot_ms.end() ? 0 : it->second;
@@ -1225,6 +1274,13 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         if (!rr.err) tty_list_results[f->sid] = std::string(tb);
         return;
     }
+    case rtnp::NET_INFO: {
+        rtnp::Reader rr(f->payload, f->len);
+        static char nb[64 * 1024];
+        rr.str(nb, sizeof nb);
+        if (!rr.err) net_results[f->sid] = std::string(nb);
+        return;
+    }
     case rtnp::FILE_CHECK_ACK: {
         rtnp::Reader rr(f->payload, f->len);
         static char buf[1024];
@@ -1345,6 +1401,9 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             if (!sj.is_discarded() && sj.contains("caps") && sj["caps"].contains("local_web") &&
                 sj["caps"]["local_web"].is_string()) {
                 caps_local_web[c->devid] = sj["caps"]["local_web"].get<std::string>();
+            }
+            if (!sj.is_discarded() && sj.contains("caps") && sj["caps"].contains("net")) {
+                caps_net[c->devid] = sj["caps"]["net"].get<bool>() ? 1 : 0;
             }
             // uptime 只出现在全量帧；用收帧时刻反推开机时间，列表可随时算当前时长
             if (full && !sj.is_discarded()) {

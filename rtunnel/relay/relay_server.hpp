@@ -171,6 +171,7 @@ public:
     std::unordered_map<std::string, std::string> caps_arch; // devid -> uname -m
     std::unordered_map<std::string, std::vector<int>> caps_ports; // devid -> 允许转发端口
     std::unordered_map<std::string, std::string> caps_local_web;  // devid -> 本地页监听地址
+    std::unordered_map<std::string, int> caps_net;                 // devid -> 支持 NET_REQ
     std::unordered_map<std::string, std::string> agent_versions;
     std::unordered_map<std::string, uint64_t> agent_boot_ms;   // devid -> 系统开机时间（epoch ms）
     std::unordered_map<uint32_t, FilePush> pushes;
@@ -181,6 +182,10 @@ public:
     std::unordered_map<uint32_t, std::string> check_results;
     uint32_t check_seq = 0;
     std::unordered_map<uint32_t, std::string> tty_list_results;
+    std::unordered_map<uint32_t, std::string> net_results;
+    uint32_t net_seq = 0;
+    struct NetCache { std::string json; uint64_t ts = 0; };
+    std::unordered_map<std::string, NetCache> net_cache;
     std::unordered_map<uint32_t, std::string> metric_data_results;
     std::unordered_map<std::string, std::string> metric_status;
     uint32_t metric_query_seq = 0;
@@ -260,12 +265,17 @@ private:
     std::vector<int> agentPorts(const char* devid); // 允许转发的端口，未知时为空
     std::string  agentLocalWeb(const char* devid);
     int          agentOtaCap(const char* devid);   // -1 未知 0 不支持 1 支持
+    int          agentNetCap(const char* devid);   // -1 未知 0 不支持 1 支持
     uint64_t     agentBootMs(const char* devid);   // 系统开机时间（epoch ms），0 未知
     bool         startFileCheck(const char* devid, const char* dir, const char* name,
                                 uint32_t& cid, std::string& err);
     std::string  takeCheckResult(uint32_t cid);
     bool         startTtyList(const char* devid, uint32_t& rid, std::string& err);
     std::string  takeTtyListResult(uint32_t rid);
+    bool         startNetQuery(const char* devid, const std::string& json, uint32_t& rid, std::string& err);
+    std::string  takeNetResult(uint32_t rid);
+    bool         netCacheGet(const std::string& key, uint64_t max_age_ms, std::string& out, uint64_t& ts);
+    void         netCachePut(const std::string& key, const std::string& json);
     bool         pushTtyCfg(const char* devid, const std::string& json);
     bool         pushMetricCfg(const char* devid, const std::string& json);
     bool         startMetricQuery(const char* devid, const std::string& json, uint32_t& rid, std::string& err);

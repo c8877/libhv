@@ -12,6 +12,7 @@
 #include <map>
 #include <set>
 #include <mutex>
+#include <atomic>
 #include <cstdio>
 
 #include "cpputil/json.hpp"
@@ -112,6 +113,10 @@ protected:
 private:
     std::mutex web_mu_;
     std::string web_body_;    // refreshWebSnapshot 生成，webSnapshot 复制
+    std::mutex net_mu_;
+    nlohmann::json net_ipc_cache_;   // 最近一次 IPC 采集结果
+    uint64_t net_ipc_ts_ = 0;
+    std::atomic<int> net_inflight_{0};
     uint64_t started_ms_ = 0; // loop 启动时刻（单调时钟，算 agent 运行时长）
     rtfs::Service fs_;
     rtvs::Service svc_;
@@ -141,6 +146,7 @@ private:
     void handleConfigSet(const rtnp::Frame* f);
     void handleFileFrame(const rtnp::Frame* f);
     void handleOtaApply(const rtnp::Frame* f);
+    void handleNetReq(const rtnp::Frame* f);
     static bool otaProbe(const std::string& path, const std::string& expect, std::string& out);
     bool hasOtaPending();
     void clearOtaPending();

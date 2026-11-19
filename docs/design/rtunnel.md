@@ -342,6 +342,8 @@ sequenceDiagram
 | `0x20` | `FILE_ACK` | C→B | `str json {ok,received,error}` |
 | `0x21` | `FILE_CHECK_REQ` | B→C | `str dir + str name` |
 | `0x22` | `FILE_CHECK_ACK` | C→B | `str json {exists,size,sha256,error}` |
+| `0x33` | `NET_REQ` | B→C | `str json {scope,proc,limit,refresh}`，sid 为请求号 |
+| `0x34` | `NET_INFO` | C→B | `str json`：TCP/UDP/UNIX/IPC 快照，sid 回显 |
 
 **会话级（stream_id > 0）**
 
@@ -520,6 +522,8 @@ operator（Shell、Web、文件上传下载）/ viewer（概览、设备列表�
 ### 13.2 系统信息与能力配置
 
 - `SYSINFO_REQ(0x19)` / `SYSINFO(0x1A, str json)`：B 按需请求，C 返回运行时/系统快照；
+- `NET_REQ(0x33, str json {scope,proc,limit})` / `NET_INFO(0x34, str json)`：B 按需请求
+  网络与 IPC 快照，C 在后台线程采集后回帧（sid 回显请求号）；
   relay 仅内存缓存，详情页打开时刷新一次，不周期上报
 - 快照字段：version/args/caps、uname/CPU/内存/分区/负载/网卡、证书（mTLS 未配置则 `mtls=false`）
 - `CONFIG_SET(0x1B)` / `CONFIG_ACK(0x1C, sid 回显)`：在线修改 `ports` 与 `shell`；
@@ -533,6 +537,7 @@ operator（Shell、Web、文件上传下载）/ viewer（概览、设备列表�
 | GET | `/api/v1/overview` | 汇总（agents/clients/streams/bytes/version） |
 | GET | `/api/v1/agents`、`/api/v1/agents/{devid}` | 设备列表/详情 |
 | GET | `/api/v1/agents/{devid}/{sysinfo,ttys,metrics/series}` | 设备运行信息、串口、指标 |
+| GET | `/api/v1/agents/{devid}/net` | 网络与 IPC 快照（scope/proc/limit/refresh） |
 | PUT | `/api/v1/agents/{devid}/caps` | 在线改端口与 Shell（Shell 仅 admin） |
 | POST | `/api/v1/agents/{devid}/kick` | 强制设备下线（agent 自动重连） |
 | GET | `/api/v1/clients`、`/api/v1/streams` | 客户端与流列表 |

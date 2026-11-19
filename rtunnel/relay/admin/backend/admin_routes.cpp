@@ -37,6 +37,12 @@ void AdminServer::registerRoutes() {
         if (rc) return rc;
         return handleAgentSysinfo(ctx);
     });
+    service_.Handle("GET", "/api/v1/agents/:devid/net", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "device.view", role);
+        if (rc) return rc;
+        return handleAgentNet(ctx);
+    });
     service_.Handle("PUT", "/api/v1/settings", [this](const HttpContextPtr& ctx) {
         std::string role;
         int rc = requirePerm(ctx, "settings.write", role);

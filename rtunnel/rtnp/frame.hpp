@@ -59,6 +59,8 @@ enum Type : uint8_t {
     OTA_APPLY      = 0x30,   // B→C：str json {path,version,size,sha256}；sid=安装号
     OTA_APPLY_ACK  = 0x31,   // C→B：str json {ok,phase,error}（phase=verified|installed）
     OTA_CANCEL     = 0x32,   // B→C：无载荷（安装开始前有效）
+    NET_REQ        = 0x33,   // B→C：str json {scope,proc,limit}；sid=请求号
+    NET_INFO       = 0x34,   // C→B：str json 网络/IPC 快照；sid 回显请求号
 };
 
 // 错误码

@@ -5,6 +5,7 @@
 #include "common/logging.hpp"
 #include "common/shell_spawn.hpp"
 #include "fs_session.hpp"
+#include "net_service.hpp"
 #include "ota_pkg.hpp"
 #ifdef RTUNNEL_AGENT_WEB
 #include "agent_web.hpp"
@@ -23,8 +24,10 @@
 #include <string.h>
 #include <unistd.h>
 #include <fstream>
+#include <chrono>
 #include <set>
 #include <sstream>
+#include <thread>
 #include <vector>
 #if defined(WITH_OPENSSL)
 #include "openssl/evp.h"
@@ -2123,6 +2126,7 @@ nlohmann::json AgentApp::buildSysinfo() {
         caps["svc_token"] = svc_.tokenRequired();
         caps["ota"] = allow_ota != 0;
         caps["ota_pkg"] = "tar.gz"; // 支持 install.sh 部署包
+        caps["net"] = true;         // 支持 NET_REQ 网络/IPC 快照
         caps["allow_tty"] = nlohmann::json::array();
         {
             std::string list = allow_tty;
@@ -2256,6 +2260,108 @@ void AgentApp::sendSysinfo(int mode) {
     rtnp::send(io, rtnp::SYSINFO, 0, w.data, (uint16_t)w.len);
 }
 
+namespace {
+
+uint64_t wallMs() {
+    return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+}
+
+// NET_INFO 必须回到 loop 线程再写，避免连接已重连时往旧 io 发送
+struct NetPost {
+    hevent_t ev;
+    AgentApp* app = nullptr;
+    uint32_t sid = 0;
+    std::string body;
+};
+
+void netPostCb(hevent_t* ev) {
+    NetPost* p = static_cast<NetPost*>(hevent_userdata(ev));
+    if (p->app && p->app->io) {
+        rtnp::Writer w;
+        w.str(p->body.c_str());
+        rtnp::send(p->app->io, rtnp::NET_INFO, p->sid, w.data, (uint16_t)w.len);
+    }
+    delete p;
+}
+
+} // namespace
+
+void AgentApp::handleNetReq(const rtnp::Frame* f) {
+    using nlohmann::json;
+    uint32_t sid = f->sid;
+    std::string req;
+    if (f->len) {
+        rtnp::Reader r(f->payload, f->len);
+        req = r.strBytes();
+    }
+    json rj = json::parse(req, nullptr, false);
+    if (rj.is_discarded() || !rj.is_object()) rj = json::object();
+
+    rtnet::Options opt;
+    opt.scope = rj.value("scope", std::string("all"));
+    if (!rtnet::scopeValid(opt.scope)) opt.scope = "all";
+    opt.with_proc = rj.value("proc", true);
+    int limit = rj.value("limit", 200);
+    if (limit < 1) limit = 1;
+    if (limit > 500) limit = 500;
+    opt.limit = limit;
+    bool refresh = rj.value("refresh", false);
+    bool want_ipc = (opt.scope == "ipc" || opt.scope == "all");
+
+    // 采集要扫 /proc 与 fork lsipc，最多允许 3 个并发，其余直接拒绝
+    if (net_inflight_.fetch_add(1) > 2) {
+        net_inflight_.fetch_sub(1);
+        json e;
+        e["error"] = "busy";
+        e["scope"] = opt.scope;
+        e["summary"] = {{"tcp", -1}, {"udp", -1}, {"unix", -1}, {"ipc", -1}};
+        std::string body = e.dump();
+        rtnp::Writer w;
+        w.str(body.c_str());
+        rtnp::send(io, rtnp::NET_INFO, sid, w.data, (uint16_t)w.len);
+        return;
+    }
+
+    // IPC 采集要 fork 三次，30s 内复用上次结果；tcp/udp/unix 每次都实时读
+    json cached;
+    bool fresh = false;
+    if (want_ipc && !refresh) {
+        std::lock_guard<std::mutex> lk(net_mu_);
+        if (!net_ipc_cache_.is_null() && wallMs() - net_ipc_ts_ < 30000) {
+            cached = net_ipc_cache_;
+            fresh = true;
+        }
+    }
+    opt.with_ipc = want_ipc && !fresh;
+
+    hloop_t* lp = loop;
+    std::thread([this, sid, opt, cached, fresh, lp]() {
+        std::string err;
+        nlohmann::json out = rtnet::collect(opt, err);
+        if (!err.empty()) out["error"] = err;
+        if (out.contains("ipc")) {
+            std::lock_guard<std::mutex> lk(net_mu_);
+            net_ipc_cache_ = out["ipc"];
+            net_ipc_ts_ = wallMs();
+        } else if (fresh) {
+            out["ipc"] = cached;
+            if (out.contains("summary")) out["summary"]["ipc"] = cached.value("total", 0);
+        }
+        std::string body = out.dump();
+        NetPost* t = new NetPost;
+        memset(&t->ev, 0, sizeof t->ev);
+        t->ev.cb = netPostCb;
+        t->ev.userdata = t;
+        t->app = this;
+        t->sid = sid;
+        t->body = body;
+        hloop_post_event(lp, &t->ev);
+        net_inflight_.fetch_sub(1);
+    }).detach();
+}
+
 void AgentApp::onFrame(rtnp::Frame* f) {
     switch (f->type) {
     case rtnp::SYSINFO_REQ: {
@@ -2273,6 +2379,7 @@ void AgentApp::onFrame(rtnp::Frame* f) {
     case rtnp::FILE_END: handleFileFrame(f); return;
     case rtnp::OTA_APPLY:
     case rtnp::OTA_CANCEL: handleOtaApply(f); return;
+    case rtnp::NET_REQ: handleNetReq(f); return;
     case rtnp::TTY_LIST_REQ: {
         nlohmann::json arr = nlohmann::json::array();
         DIR* d = opendir("/dev");

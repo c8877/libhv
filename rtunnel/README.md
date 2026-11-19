@@ -108,6 +108,7 @@ python3 rtunnel/tests/e2e_alerts.py      # 告警（本地 webhook sink）
 bash rtunnel/tests/ota_e2e.sh            # OTA 安装/重启/版本确认 + 错误架构拒绝
 bash rtunnel/tests/dist_scope_e2e.sh     # 分发/OTA 的设备范围授权
 bash rtunnel/tests/sysinfo_e2e.sh        # 存储统计全量/增量 + 离线缓存 + 管理台不阻塞
+bash rtunnel/tests/net_e2e.sh            # 网络/IPC 快照、进程归属、缓存与离线回退
 python3 rtunnel/tests/stream_idle_e2e.py # 流空闲回收：闲置 RESET、活跃流保留
 build/bin/rtunnel-endpoint-test          # --server 地址解析单测
 ```
@@ -287,6 +288,11 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
   （设备详情页「存储」用 `used_kb`/`avail_kb` 计算，使用率口径与 `df` 的 Use% 一致；
   同一文件系统的 bind mount 只上报最短路径；设备离线或回帧超时时返回带 `cached:true`
   的缓存快照，等待回帧在后台线程进行，不阻塞管理台其它请求）
+- 网络与 IPC 快照：`GET /api/v1/agents/{devid}/net?scope=tcp|udp|unix|ipc|all&proc=1`
+  （agent 读 `/proc/net/{tcp,tcp6,udp,udp6,unix}` 与 `lsipc -m|-q|-s -J`，
+  缺失 lsipc 时回退 `/proc/sysvipc`；`proc=1` 扫 `/proc/<pid>/fd` 反查占用进程。
+  每类条目受 `limit` 与 26KB 预算限制，relay 缓存 3s，`refresh=1` 绕过；
+  agent 低于 1.4.28 返回 501）
 - 文件分发：文件页「分发」选择设备与时间窗，创建 `POST /api/v1/distributions`，
   `GET /api/v1/distributions` 查询进度；经 RTNP 推到设备 `--file-dir/dir`
   （默认 `/opt/data/files`），32KiB 分片、256KiB 窗口、sha256 校验、断点续传、
