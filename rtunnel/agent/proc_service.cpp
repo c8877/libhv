@@ -267,8 +267,9 @@ bool sample(Snapshot& out, std::string& err, int window_ms) {
 
     for (const Row& r : rows) {
         uint64_t cpu_ms = (uint64_t)((r.st.utime + r.st.stime) * 1000 / hz);
-        uint64_t started = boot_ms + (uint64_t)(r.st.starttime * 1000 / hz);
-        out.ticks[r.st.pid] = {cpu_ms, started};
+        // 用原始 starttime(ticks) 判断是否同一个进程；换算成绝对毫秒会因
+        // uptime 与墙钟的取整误差在两次快照间抖动几毫秒，导致匹配失败
+        out.ticks[r.st.pid] = {cpu_ms, (uint64_t)r.st.starttime};
     }
 
     // 第二次采样算 CPU%；window_ms == 0 时留给 diffCpu 用旧快照算

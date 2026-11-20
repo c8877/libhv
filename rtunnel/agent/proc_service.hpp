@@ -33,7 +33,7 @@ struct Snapshot {
     nlohmann::json summary = nlohmann::json::object();
     uint64_t ts = 0;
     int sample_ms = 300; // 本次 CPU% 的统计窗口
-    // pid -> {累计 CPU 毫秒, 启动时间}，用于跨快照算 CPU%
+    // pid -> {累计 CPU 毫秒, 启动时间(ticks)}，用于跨快照算 CPU%
     std::map<int, std::pair<uint64_t, uint64_t>> ticks;
 };
 
