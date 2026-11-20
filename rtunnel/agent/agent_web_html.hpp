@@ -33,12 +33,19 @@ h1{font-size:18px;line-height:1.25;margin:0;font-weight:650}
 .head .ver{font-variant-numeric:tabular-nums}
 .actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}
 .actions label{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:13px;cursor:pointer;user-select:none}
-select,.btn{height:32px;border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:8px;padding:0 10px;font-size:13px;cursor:pointer;font-family:inherit}
+select,.btn{height:32px;border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:6px;padding:0 10px;font-size:13px;cursor:pointer;font-family:inherit}
+.actions .sw{position:relative;display:inline-flex;align-items:center;gap:7px}
+.actions .sw input{position:absolute;opacity:0;width:0;height:0}
+.actions .sw i{width:34px;height:18px;border-radius:999px;background:var(--bar-bg);border:1px solid var(--line);position:relative;transition:background .2s,border-color .2s}
+.actions .sw i::after{content:"";position:absolute;top:1px;left:1px;width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);transition:transform .2s}
+.actions .sw input:checked+i{background:var(--brand);border-color:var(--brand)}
+.actions .sw input:checked+i::after{transform:translateX(16px)}
 select{padding-right:6px}
 .btn:hover{border-color:var(--brand);color:var(--brand)}
 .btn.ghost{background:transparent}
 .head-meta{display:flex;flex-wrap:wrap;align-items:center;gap:3px 14px;margin-top:8px;font-size:12px;color:var(--muted)}
 .head-meta span{white-space:nowrap}
+.head-meta .ts{margin-left:auto}
 .tabs{display:flex;gap:2px;margin-top:8px;padding:4px;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);overflow-x:auto;scrollbar-width:none}
 .tabs::-webkit-scrollbar{display:none}
 .tabs button{flex:none;border:0;background:transparent;padding:7px 15px;border-radius:7px;font:inherit;font-size:13px;color:var(--muted);cursor:pointer;white-space:nowrap}
@@ -50,30 +57,39 @@ select{padding-right:6px}
 .tag.warn{background:rgba(201,138,24,.14);color:var(--warn)}
 .tag.bad{background:rgba(217,83,79,.13);color:var(--bad)}
 .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:12px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px 15px;box-shadow:var(--shadow);min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;box-shadow:var(--shadow);min-width:0}
 .card .ck{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px}
 .card .ck .cs{margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.card .cv{font-size:28px;line-height:1.15;font-weight:650;letter-spacing:-.02em;margin-top:5px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .cv{font-size:30px;line-height:1.1;font-weight:650;letter-spacing:-.02em;margin-top:6px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .card .cv small{font-size:14px;font-weight:500;color:var(--muted);margin-left:2px}
-.card .cv.sm{font-size:16px;padding:9px 0 6px}
-.card .cs2{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .cv.sm{font-size:16px;padding:11px 0 8px}
+.card .cs2{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
 .bar{height:6px;border-radius:999px;background:var(--bar-bg);overflow:hidden;margin-top:9px}
 .bar i{display:block;height:100%;border-radius:999px;background:var(--brand);transition:width .35s}
 .bar i.warn{background:var(--warn)}.bar i.bad{background:var(--bad)}
-.grid-main{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:12px;margin-bottom:12px;align-items:start}
-.grid2{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:12px;align-items:stretch}
-.nic-card{display:flex;flex-direction:column}
-.nic-card #ovNics{flex:1}
-.nic-card .more{margin-top:10px;align-self:flex-start;padding:0;font-size:12px}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow);min-width:0}
+.grid-main{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:12px;margin-bottom:12px;align-items:stretch}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;box-shadow:var(--shadow);min-width:0}
 .panel-head{display:flex;align-items:center;gap:10px;min-height:24px;margin-bottom:8px}
 h2{font-size:14px;margin:0;font-weight:650}
 .hint{color:var(--muted);font-size:12px;margin-left:auto;white-space:nowrap}
 .link{border:0;background:transparent;color:var(--brand);font:inherit;font-size:12px;cursor:pointer;padding:0 0 0 10px;white-space:nowrap}
 #chart{display:block;width:100%;height:150px}
-.legend{display:flex;gap:14px;align-items:center;color:var(--muted);font-size:12px;margin-top:2px;padding-left:34px}
-.legend i{width:16px;height:3px;border-radius:2px;display:inline-block;margin-right:5px}
-.legend .c1{background:#3b6ef5}.legend .c2{background:#e08a2e}
+.legend-inline{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.legend-inline b{font-weight:500;color:var(--text)}
+.legend-inline .dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-left:6px}
+.legend-inline .dot.cpu{background:#4a9eff}
+.legend-inline .dot.mem{background:#f5a623}
+.odisk+.odisk{margin-top:10px}
+.odisk-top{display:flex;align-items:baseline;gap:10px;font-size:12px;margin-bottom:4px}
+.odisk-top .muted{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.odisk-top .pct{margin-left:auto;font-weight:600;font-variant-numeric:tabular-nums;color:var(--muted)}
+.odisk-top .pct.warn{color:var(--warn)}.odisk-top .pct.bad{color:var(--bad)}
+.bar.slim{height:4px;margin-top:0}
+.sess{display:flex;align-items:center;gap:8px;padding:7px 0;font-size:12px;min-width:0;border-bottom:1px solid var(--line)}
+.sess:last-child{border-bottom:none}
+.sess>span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sess .muted{white-space:nowrap}
 .kv{display:grid;grid-template-columns:68px minmax(0,1fr);gap:5px 10px;font-size:12px;line-height:18px}
 .kv .k{color:var(--muted)}
 .kv .v{min-width:0;overflow-wrap:anywhere}
@@ -92,7 +108,6 @@ h2{font-size:14px;margin:0;font-weight:650}
 .nic .nm{font-family:ui-monospace,Menlo,monospace;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}
 .nic .ip{text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
 .nic .io{grid-column:1/-1;color:var(--muted);font-variant-numeric:tabular-nums}
-.nic .meta{grid-column:1/-1;color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .emptyp{color:var(--muted);font-size:12px;padding:14px 0}
 .table-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse}
@@ -135,9 +150,13 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
 .chartbox canvas{display:block;width:100%;height:170px}
 .legend.mon{padding-left:0;flex-wrap:wrap;gap:6px 14px;margin:2px 0 0}
 .mon-empty{padding:28px 0;text-align:center}
+@media (max-width:1100px){
+  .grid3{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
 @media (max-width:900px){
   .kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .grid-main,.grid2{grid-template-columns:1fr}
+  .grid-main,.grid3{grid-template-columns:1fr}
+  .legend-inline{display:none}
 }
 @media (max-width:640px){
   .page{padding:10px 12px 30px}
@@ -176,7 +195,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
         <span class="tag" id="state">加载中</span>
         <span class="tag ver" id="ver" hidden></span>
         <div class="actions">
-          <label><input type="checkbox" id="auto" checked> 自动刷新</label>
+          <label class="sw"><input type="checkbox" id="auto" checked><i></i>自动刷新</label>
           <select id="period" title="自动刷新间隔">
             <option value="2000">2s</option>
             <option value="5000">5s</option>
@@ -206,25 +225,32 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
       <div class="kpis" id="kpis"></div>
       <div class="grid-main">
         <div class="panel">
-          <div class="panel-head"><h2>资源趋势</h2><span class="hint">CPU / 内存 · 最近 2 分钟</span></div>
+          <div class="panel-head">
+            <h2>资源趋势</h2>
+            <span class="legend-inline"><i class="dot cpu"></i>CPU <b id="ovCpuVal">—</b>%<i class="dot mem"></i>内存 <b id="ovMemVal">—</b>%</span>
+            <span class="spacer"></span>
+            <button class="link" type="button" data-go="monitor">查看监控 →</button>
+          </div>
           <canvas id="chart" height="150"></canvas>
-          <div class="legend"><span><i class="c1"></i>CPU</span><span><i class="c2"></i>内存</span></div>
         </div>
         <div class="panel">
-          <div class="panel-head"><h2>系统信息</h2><span class="hint" id="sysHint"></span></div>
-          <div class="kv" id="sysinfo"></div>
-          <div class="cert" id="cert" hidden></div>
-        </div>
-      </div>
-      <div class="grid2">
-        <div class="panel">
-          <div class="panel-head"><h2>存储</h2><span class="hint" id="ovDiskHint"></span><button class="link" type="button" data-go="storage">全部 →</button></div>
+          <div class="panel-head"><h2>存储</h2><span class="spacer"></span><span class="hint" id="ovDiskHint"></span><button class="link" type="button" data-go="storage">全部 →</button></div>
           <div id="ovDisks"></div>
         </div>
-        <div class="panel nic-card">
-          <div class="panel-head"><h2>网卡</h2><span class="hint" id="nicHint"></span></div>
+      </div>
+      <div class="grid3">
+        <div class="panel">
+          <div class="panel-head"><h2>网卡</h2><span class="spacer"></span><button class="link" type="button" data-go="net">全部 →</button></div>
           <div id="ovNics"></div>
-          <button class="link more" type="button" data-go="net">查看网络详情 →</button>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>会话</h2><span class="spacer"></span><span class="hint" id="sessHint"></span></div>
+          <div id="ovSess"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>系统信息</h2><span class="spacer"></span></div>
+          <div class="kv" id="sysinfo"></div>
+          <div class="cert" id="cert" hidden></div>
         </div>
       </div>
     </section>
@@ -365,6 +391,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
   var TABS = ['overview', 'storage', 'file', 'service', 'proc', 'net', 'monitor', 'tty', 'caps'];
   var state = {
     data: null, hist: [], timer: null, period: 2000, tab: 'overview',
+    ovProc: null, ovProcTs: 0, ovProcLoading: false,
     proc: { data: null, page: 1, per: 10, sort: 'cpu', q: '', kernel: false, auto: 0, timer: null },
     net: { scope: 'nic', page: 1, per: 10, q: '', listen: false, ipcKind: 'shm', data: null, counts: null },
     mon: { range: 900000, selected: [], data: {}, timer: null }
@@ -447,7 +474,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     }
     if (name !== 'proc') stopProcAuto();
     if (name !== 'monitor') stopMonAuto();
-    if (name === 'overview') setTimeout(drawChart, 0);
+    if (name === 'overview') { setTimeout(drawChart, 0); ensureOvProcs(); }
     else if (name === 'file') ensureFs();
     else if (name === 'service') ensureSvc();
     else if (name === 'proc') ensureProc();
@@ -464,6 +491,80 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
   window.addEventListener('popstate', function () { setTab(tabFromHash(), false); });
   window.addEventListener('hashchange', function () { setTab(tabFromHash(), false); });
 
+  // ---------------------------------------------------------------- 概览
+  var OV_PROC_TTL = 15000;
+  function cpuText(v) {
+    var n = toNum(v);
+    return Number.isInteger(n) ? String(n) : n.toFixed(1);
+  }
+  function ovProcText() {
+    var p = state.ovProc;
+    return p ? toNum(p.total) + ' 进程 · ' + toNum(p.threads) + ' 线程' : '';
+  }
+  function renderKpis(d) {
+    if (!d) return;
+    var mp = memPct(d), la = Array.isArray(d.loadavg) ? d.loadavg : [];
+    var total = toNum(d.mem_total_kb), avail = memAvail(d);
+    var nics = d.nics || [];
+    var upCount = nics.filter(nicUp).length;
+    var rx = 0, tx = 0;
+    nics.forEach(function (n) { rx += toNum(n.rx_bytes); tx += toNum(n.tx_bytes); });
+    var cpu = toNum(d.cpu_usage), cpuPct = Math.max(0, Math.min(100, cpu));
+    var kpis = [
+      { k: 'CPU', v: cpuText(cpu) + '<small>%</small>', s: toNum(d.cpu_count) + ' 核', p: cpuPct },
+      { k: '内存', v: Math.round(mp) + '<small>%</small>', s: fmtKB(Math.max(0, total - avail)) + ' / ' + fmtKB(total), p: mp },
+      { k: '负载', v: la.length ? la.slice(0, 3).map(function (x) { return toNum(x).toFixed(2); }).join(' / ') : '—', s: '1 / 5 / 15 分钟', sub: ovProcText(), sm: true },
+      { k: '网络', v: '↓ ' + fmtBytesShort(rx) + ' · ↑ ' + fmtBytesShort(tx), s: nics.length + ' 个 · ' + upCount + ' 个已连接', sub: '累计流量', sm: true }
+    ];
+    $('#kpis').innerHTML = kpis.map(function (c) {
+      return '<div class="card"><div class="ck"><span>' + esc(c.k) + '</span><span class="cs">' + esc(c.s) +
+        '</span></div><div class="cv' + (c.sm ? ' sm mono' : '') + '">' + c.v + '</div>' +
+        (c.sub ? '<div class="cs2">' + esc(c.sub) + '</div>' : '') +
+        (c.p != null ? '<div class="bar"><i class="' + tone(c.p) + '" style="width:' + Math.max(0, Math.min(100, c.p)) + '%"></i></div>' : '') +
+        '</div>';
+    }).join('');
+    $('#ovCpuVal').textContent = cpuText(cpu);
+    $('#ovMemVal').textContent = Math.round(mp);
+  }
+
+  // 负载卡要显示进程/线程数，按 15s 节流拉一次进程摘要
+  function ensureOvProcs() {
+    if (state.ovProcLoading) return;
+    if (state.ovProc && Date.now() - state.ovProcTs < OV_PROC_TTL) return;
+    state.ovProcLoading = true;
+    fetch('api/v1/procs?page=1&page_size=1', { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d && d.summary) {
+          state.ovProc = d.summary;
+          state.ovProcTs = Date.now();
+          renderKpis(state.data);
+        }
+      })
+      .catch(function () {})
+      .then(function () { state.ovProcLoading = false; });
+  }
+
+  function diskCompact(m) {
+    var used = toNum(m.used_kb), total = toNum(m.total_kb), p = diskPct(m), cls = tone(p);
+    return '<div class="odisk"><div class="odisk-top"><span class="mono">' + esc(m.mount) + '</span>' +
+      '<span class="muted">' + fmtKB(used) + ' / ' + fmtKB(total) + '</span>' +
+      '<span class="pct ' + cls + '">' + p + '%</span></div>' +
+      '<div class="bar slim"><i class="' + cls + '" style="width:' + p + '%"></i></div></div>';
+  }
+
+  function sessHtml(list) {
+    if (!list.length) return '<div class="emptyp">当前无会话</div>';
+    var names = { fs: '文件', svc: '服务', shell: 'Shell', tty: '串口', tcp: 'TCP' };
+    return list.map(function (s) {
+      var label = names[s.kind] || s.kind || '会话';
+      var when = s.opened_ms ? new Date(toNum(s.opened_ms)).toLocaleTimeString() : '—';
+      return '<div class="sess"><span class="mono">' + esc(label) + ' · ' + toNum(s.sid) + '</span>' +
+        '<span class="spacer"></span><span class="tag sm ok">活跃</span>' +
+        '<span class="muted">' + esc(when) + '</span></div>';
+    }).join('');
+  }
+
   // ---------------------------------------------------------------- render
   function render(d) {
     state.data = d;
@@ -474,71 +575,51 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     ver.textContent = d.version ? 'v' + d.version : '';
 
     var on = !!d.online, st = $('#state');
-    st.textContent = on ? 'relay 已连接' : 'relay 未连接';
+    st.textContent = on ? '在线' : '离线';
+    st.title = on ? 'relay 已连接' : 'relay 未连接';
     st.className = 'tag ' + (on ? 'ok' : 'warn');
 
+    var nics0 = d.nics || [], rx0 = 0, tx0 = 0;
+    nics0.forEach(function (n) { rx0 += toNum(n.rx_bytes); tx0 += toNum(n.tx_bytes); });
     var meta = [];
-    if (d.machine || d.kernel) meta.push('<span>' + esc([d.machine, d.kernel].filter(Boolean).join(' · ')) + '</span>');
     if (d.relay) meta.push('<span class="mono">' + esc(d.relay) + '</span>');
     meta.push('<span>运行 ' + esc(fmtDur(d.uptime_sec)) + '</span>');
-    if (d.ts) meta.push('<span class="hide-sm">采集 ' + esc(new Date(d.ts).toLocaleTimeString()) + '</span>');
+    meta.push('<span class="hide-sm">↓ ' + fmtBytes(rx0) + ' · ↑ ' + fmtBytes(tx0) + '</span>');
+    if (d.ts) meta.push('<span class="ts hide-sm">采集 ' + esc(new Date(d.ts).toLocaleTimeString()) + '</span>');
     $('#meta').innerHTML = meta.join('');
 
-    var mp = memPct(d), la = Array.isArray(d.loadavg) ? d.loadavg : [];
-    var total = toNum(d.mem_total_kb), avail = memAvail(d);
-    var nics = d.nics || [];
-    var upCount = nics.filter(nicUp).length;
-    var rx = 0, tx = 0;
-    nics.forEach(function (n) { rx += toNum(n.rx_bytes); tx += toNum(n.tx_bytes); });
-
-    var kpis = [
-      { k: 'CPU 使用率', v: toNum(d.cpu_usage).toFixed(1) + '<small>%</small>', s: toNum(d.cpu_count) + ' 核', p: toNum(d.cpu_usage) },
-      { k: '内存', v: mp.toFixed(1) + '<small>%</small>', s: fmtKB(Math.max(0, total - avail)) + ' / ' + fmtKB(total), p: mp },
-      { k: '负载', v: la.length ? la.slice(0, 3).map(function (x) { return toNum(x).toFixed(2); }).join(' / ') : '—', s: '1 / 5 / 15 分钟', sm: true },
-      { k: '网络', v: '↓ ' + fmtBytesShort(rx) + ' · ↑ ' + fmtBytesShort(tx), s: nics.length + ' / ' + upCount + ' 已连接', sm: true }
-    ];
-    $('#kpis').innerHTML = kpis.map(function (c) {
-      return '<div class="card"><div class="ck"><span>' + esc(c.k) + '</span><span class="cs">' +
-        esc(c.s) + '</span></div><div class="cv' + (c.sm ? ' sm mono' : '') + '">' + c.v + '</div>' +
-        (c.p != null ? '<div class="bar"><i class="' + tone(c.p) + '" style="width:' + Math.max(0, Math.min(100, c.p)) + '%"></i></div>' : '') +
-        '</div>';
-    }).join('');
+    renderKpis(d);
+    if (state.tab === 'overview') ensureOvProcs();
 
     var mounts = sortedMounts(d);
     $('#ovDisks').innerHTML = mounts.length
-      ? mounts.slice(0, 3).map(function (m) { return diskHtml(m, false); }).join('')
-      : '<div class="emptyp">无挂载点信息</div>';
-    $('#ovDiskHint').textContent = mounts.length > 3 ? '共 ' + mounts.length + ' 个挂载点' : '';
+      ? mounts.slice(0, 3).map(diskCompact).join('')
+      : '<div class="emptyp">无挂载点</div>';
+    $('#ovDiskHint').textContent = mounts.length ? mounts.length + ' 个挂载点' : '';
     $('#disks').innerHTML = mounts.length
       ? mounts.map(function (m) { return diskHtml(m, true); }).join('')
       : '<div class="emptyp">无挂载点信息</div>';
     $('#diskHint').textContent = mounts.length ? mounts.length + ' 个挂载点' : '';
 
+    var nics = d.nics || [];
     var ovNics = nics.slice(0, 4);
     $('#ovNics').innerHTML = ovNics.length
       ? ovNics.map(function (n) {
-          var p = n.up ? 'ok' : 'bad';
-          var meta = [];
-          if (n.mac) meta.push('MAC ' + n.mac);
-          if (toNum(n.mtu)) meta.push('MTU ' + toNum(n.mtu));
-          if (toNum(n.speed_mbps)) meta.push(toNum(n.speed_mbps) + 'M');
-          meta.push('错误 ' + (toNum(n.rx_errors) + toNum(n.tx_errors)));
+          var p = nicUp(n) ? 'ok' : 'bad';
           return '<div class="nic"><span class="nm" title="' + esc(n.name) + '">' + esc(n.name) + '</span>' +
             '<span class="tag ' + p + '">' + esc(n.operstate || (n.up ? 'up' : 'down')) + '</span>' +
             '<span class="ip mono">' + esc(n.ip || '—') + '</span>' +
-            '<span class="io">↓ ' + fmtBytes(n.rx_bytes) + ' · ↑ ' + fmtBytes(n.tx_bytes) + '</span>' +
-            '<span class="meta mono">' + esc(meta.join(' · ')) + '</span></div>';
+            '<span class="io">↓ ' + fmtBytes(n.rx_bytes) + ' · ↑ ' + fmtBytes(n.tx_bytes) + '</span></div>';
         }).join('')
-      : '<div class="emptyp">暂无网卡信息</div>';
-    $('#nicHint').textContent = nics.length
-      ? (nics.length > 4 ? '共 ' + nics.length + ' 个 · ' : nics.length + ' 个 · ') + upCount + ' 个已连接'
-      : '';
+      : '<div class="emptyp">没有网卡信息</div>';
+
+    var streams = d.streams || [];
+    $('#sessHint').textContent = '共 ' + streams.length + ' 条';
+    $('#ovSess').innerHTML = sessHtml(streams);
 
     var rows = [
       ['架构', d.machine], ['内核', d.kernel], ['CPU', d.cpu_model],
-      ['核心数', d.cpu_count ? d.cpu_count + ' 核' : ''],
       ['板卡', d.board], ['开机', fmtDur(d.uptime_sec)],
-      ['agent', d.version ? 'v' + d.version + ' · ' + fmtDur(d.agent_uptime_sec) : ''],
       ['mTLS', d.mtls ? '已启用' : '未启用'],
       ['采集', d.ts ? new Date(d.ts).toLocaleString() : '']
     ];
@@ -613,20 +694,17 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
 
     var cs = getComputedStyle(document.documentElement);
     var line = cs.getPropertyValue('--line').trim() || '#e4e8f0';
-    var muted = cs.getPropertyValue('--muted').trim() || '#7b8494';
-    var pad = { l: 34, r: 8, t: 8, b: 16 };
+    var pad = { l: 0, r: 0, t: 10, b: 10 };
     var cw = Math.max(1, w - pad.l - pad.r), ch = Math.max(1, h - pad.t - pad.b);
 
-    ctx.font = '11px -apple-system,PingFang SC,sans-serif';
-    ctx.textBaseline = 'middle';
     ctx.lineWidth = 1;
+    ctx.setLineDash([3, 4]);
     [0, 50, 100].forEach(function (v) {
       var y = pad.t + ch * (1 - v / 100);
       ctx.strokeStyle = line;
       ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + cw, y); ctx.stroke();
-      ctx.fillStyle = muted;
-      ctx.fillText(v + '%', 4, y);
     });
+    ctx.setLineDash([]);
 
     function series(key, color) {
       var pts = state.hist;
@@ -642,8 +720,8 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
       }
       ctx.stroke();
     }
-    series('cpu', '#3b6ef5');
-    series('mem', '#e08a2e');
+    series('cpu', '#4a9eff');
+    series('mem', '#f5a623');
   }
 
   // ---------------------------------------------------------------- 文件 / 服务

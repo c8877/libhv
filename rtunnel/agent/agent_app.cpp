@@ -48,6 +48,8 @@
 
 namespace {
 
+uint64_t wallMs(); // 定义在文件后部的匿名命名空间
+
 // 把 FsSession 的输出装进 RTNP DATA：u8 kind + WebSocket 原始消息
 class FsTunnelSink : public rtfs::Sink {
 public:
@@ -331,6 +333,7 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
         s->connected = 1;
         s->is_fs = 1;
         had_stream = 1;
+        s->opened_ms = wallMs();
         s->next = streams;
         streams = s;
         auto* sink = new FsTunnelSink(this, f->sid);
@@ -361,6 +364,7 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
         s->connected = 1;
         s->is_svc = 1;
         had_stream = 1;
+        s->opened_ms = wallMs();
         s->next = streams;
         streams = s;
         s->svc_session = new rtvs::Session(&svc_, new SvcTunnelSink(this, f->sid), loop, devid, trusted, true);
@@ -433,6 +437,7 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
             m->is_monitor = 1;
             m->monitor_of = target->sid;
             m->tty_path = path;
+            m->opened_ms = wallMs();
             m->next = streams;
             streams = m;
             rtnp::Writer w;
@@ -508,6 +513,7 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
         s->sid = f->sid;
         s->credit = rtnp::DEFAULT_CREDIT;
         had_stream = 1;
+        s->opened_ms = wallMs();
         s->next = streams;
         streams = s;
         hio_t* io = hio_get(loop, fd);
@@ -543,6 +549,7 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
         s->credit = rtnp::DEFAULT_CREDIT;
         s->is_shell = 1;
         had_stream = 1;
+        s->opened_ms = wallMs();
         s->next = streams;
         streams = s;
         if (openShellStream(s) != 0) {
@@ -572,6 +579,7 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
     s->sid = f->sid;
     had_stream = 1;
     s->credit = rtnp::DEFAULT_CREDIT;
+    s->opened_ms = wallMs();
     s->next = streams;
     streams = s;
 
@@ -2098,6 +2106,23 @@ nlohmann::json AgentApp::buildSysinfo() {
             freeifaddrs(ifs);
         }
         j["nics"] = nics;
+    }
+    {
+        json arr = json::array();
+        for (LocalStream* s = streams; s; s = s->next) {
+            if (s->freed) continue;
+            const char* kind = s->is_fs ? "fs"
+                             : s->is_svc ? "svc"
+                             : s->is_shell ? "shell"
+                             : (!s->tty_path.empty() ? "tty" : "tcp");
+            json o;
+            o["sid"] = s->sid;
+            o["kind"] = kind;
+            o["opened_ms"] = (long long)s->opened_ms;
+            if (!s->tty_path.empty()) o["path"] = s->tty_path;
+            arr.push_back(o);
+        }
+        j["streams"] = arr;
     }
     {
         std::set<std::string> paths;

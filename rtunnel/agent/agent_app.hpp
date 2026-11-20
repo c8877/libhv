@@ -33,6 +33,7 @@ class Session;
 struct LocalStream {
     AgentApp* app = nullptr;
     uint32_t sid = 0;
+    uint64_t opened_ms = 0; // 会话建立时间，本地页「会话」卡片用
     hio_t* local = nullptr;
     int connected = 0;
     int local_eof = 0;
