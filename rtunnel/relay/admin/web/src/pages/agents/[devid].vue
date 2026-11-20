@@ -1,34 +1,185 @@
 <template>
   <div>
-    <div class="panel">
-      <div class="panel-head">
-        <el-button class="back" text @click="goBack">
-          <el-icon><ArrowLeft /></el-icon>返回列表
-        </el-button>
-        <h2>{{ devid }}</h2>
-        <el-tag type="success" size="small">在线</el-tag>
-        <span class="spacer" />
-        <el-switch v-model="auto" active-text="自动刷新" @change="onAutoChange" />
-        <el-select v-model="period" class="period" @change="onAutoChange">
-          <el-option v-for="p in [5, 10, 30]" :key="p" :label="p + 's'" :value="p" />
-        </el-select>
-        <el-button :loading="loading" @click="loadAll({ notify: true })">刷新</el-button>
-        <el-button @click="exportJson">导出 JSON</el-button>
+    <div class="dev-sticky">
+      <div class="panel dev-head">
+        <div class="dh-top">
+          <el-button class="back" text @click="goBack">
+            <el-icon><ArrowLeft /></el-icon>返回
+          </el-button>
+          <h2>{{ devid }}</h2>
+          <el-tag type="success" size="small">在线</el-tag>
+          <el-tag v-if="agentVersion" class="ver-tag" size="small" effect="plain">v{{ agentVersion }}</el-tag>
+          <span class="spacer" />
+          <template v-if="!isPhone">
+            <el-switch v-model="auto" active-text="自动刷新" @change="onAutoChange" />
+            <el-select v-model="period" class="period" @change="onAutoChange">
+              <el-option v-for="p in [5, 10, 30]" :key="p" :label="p + 's'" :value="p" />
+            </el-select>
+            <el-button :loading="loading" @click="loadAll({ notify: true })">刷新</el-button>
+            <el-button @click="exportJson">导出 JSON</el-button>
+          </template>
+          <template v-else>
+            <el-button text circle :loading="loading" aria-label="刷新" @click="loadAll({ notify: true })">
+              <el-icon><Refresh /></el-icon>
+            </el-button>
+            <el-dropdown trigger="click" @command="onHeadCmd">
+              <el-button text circle aria-label="更多操作">
+                <el-icon><MoreFilled /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="refresh">刷新数据</el-dropdown-item>
+                  <el-dropdown-item command="auto">{{ auto ? '关闭自动刷新' : '开启自动刷新' }}</el-dropdown-item>
+                  <el-dropdown-item v-for="p in [5, 10, 30]" :key="'p' + p" :command="'period-' + p">
+                    {{ p }} 秒自动刷新
+                  </el-dropdown-item>
+                  <el-dropdown-item divided command="export">导出 JSON</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </template>
+        </div>
+        <div v-if="detail" class="dh-meta">
+          <span class="mono">{{ detail.remote_addr || '—' }}</span>
+          <span>接入 {{ time(detail.connected_at_ms) }}</span>
+          <span>在线 {{ onlineFor }}</span>
+          <span>最近活跃 {{ agoText(detail.last_seen_ms) }}</span>
+          <span class="mono">↓ {{ bytes(detail.bytes_in) }} · ↑ {{ bytes(detail.bytes_out) }}</span>
+          <span v-if="sysTs" class="dh-ts">采集 {{ time(sysTs) }}</span>
+        </div>
       </div>
 
-      <el-descriptions v-if="detail" :column="descCols" size="small" border>
-        <el-descriptions-item label="远端地址">{{ detail.remote_addr || '—' }}</el-descriptions-item>
-        <el-descriptions-item label="接入时间">{{ time(detail.connected_at_ms) }}</el-descriptions-item>
-        <el-descriptions-item label="在线时长">{{ onlineFor }}</el-descriptions-item>
-        <el-descriptions-item label="最近活跃">{{ ago(detail.last_seen_ms) }} 前</el-descriptions-item>
-        <el-descriptions-item label="流量">
-          <span class="traffic mono">↓ {{ bytes(detail.bytes_in) }} · ↑ {{ bytes(detail.bytes_out) }}</span>
-        </el-descriptions-item>
-      </el-descriptions>
+      <nav class="dev-tabs" role="tablist" aria-label="设备视图">
+        <button v-for="t in MAIN_TABS" :key="t.name" role="tab" type="button"
+                :aria-selected="mainTab === t.name" :class="{ on: mainTab === t.name }"
+                @click="switchMainTab(t.name)">{{ t.label }}</button>
+      </nav>
     </div>
 
-    <div class="panel feat-panel">
-      <el-tabs v-model="featTab" class="feat-tabs" @tab-change="onFeatTab">
+    <!-- 概览 -->
+    <div v-if="mainTab === 'overview'" class="ov-wrap">
+      <div class="ov-kpis">
+        <div class="ov-card ov-kpi">
+          <div class="ov-k-head"><span>CPU</span><span class="ov-sub">{{ sys && sys.cpu_count ? sys.cpu_count + ' 核' : '—' }}</span></div>
+          <div class="ov-k-val">{{ ovCpuText }}<small>%</small></div>
+          <div class="ov-bar"><i :style="{ width: ovCpuPct + '%' }" /></div>
+        </div>
+        <div class="ov-card ov-kpi">
+          <div class="ov-k-head"><span>内存</span><span class="ov-sub">{{ ovMemText }}</span></div>
+          <div class="ov-k-val">{{ ovMemPct }}<small>%</small></div>
+          <div class="ov-bar"><i :style="{ width: ovMemPct + '%' }" /></div>
+        </div>
+        <div class="ov-card ov-kpi">
+          <div class="ov-k-head"><span>负载</span><span class="ov-sub">1 / 5 / 15 分钟</span></div>
+          <div class="ov-k-val sm mono">{{ ovLoadText }}</div>
+          <div class="ov-sub">{{ ovProcText }}</div>
+        </div>
+        <div class="ov-card ov-kpi">
+          <div class="ov-k-head"><span>网络</span><span class="ov-sub">{{ ovNicText }}</span></div>
+          <div class="ov-k-val sm mono">↓ {{ ovNetRx }} · ↑ {{ ovNetTx }}</div>
+          <div class="ov-sub">累计流量</div>
+        </div>
+      </div>
+
+      <div class="ov-grid">
+        <div class="ov-card">
+          <div class="ov-head">
+            <span class="ov-title">资源趋势</span>
+            <span class="ov-legend"><i class="ov-dot cpu" />CPU {{ ovCpuText }}%<i class="ov-dot mem" />内存 {{ ovMemPct }}%</span>
+            <span class="spacer" />
+            <el-button link type="primary" size="small" @click="switchMainTab('monitor')">查看监控 →</el-button>
+          </div>
+          <div v-if="ovCpuPath || ovMemPath" class="ov-spark">
+            <svg viewBox="0 0 600 120" preserveAspectRatio="none" role="img" aria-label="CPU 与内存趋势">
+              <line x1="0" y1="10" x2="600" y2="10" class="ov-grid-line" />
+              <line x1="0" y1="60" x2="600" y2="60" class="ov-grid-line" />
+              <line x1="0" y1="110" x2="600" y2="110" class="ov-grid-line" />
+              <polyline v-if="ovMemPath" :points="ovMemPath" class="ov-line mem" />
+              <polyline v-if="ovCpuPath" :points="ovCpuPath" class="ov-line cpu" />
+            </svg>
+          </div>
+          <div v-else class="ov-empty ov-wait">{{ enabledCfg.length ? '等待采样数据…' : '未启用采样指标' }}</div>
+        </div>
+
+        <div class="ov-card">
+          <div class="ov-head">
+            <span class="ov-title">存储</span>
+            <span class="spacer" />
+            <span class="ov-sub">{{ disks.length }} 个挂载点</span>
+            <el-button link type="primary" size="small" @click="switchMainTab('storage')">全部 →</el-button>
+          </div>
+          <div v-for="d in ovDisks" :key="d.mount" class="ov-disk">
+            <div class="ov-disk-top">
+              <span class="mono">{{ d.mount }}</span>
+              <span class="ov-sub">{{ d.used }} / {{ d.total }} {{ d.unit }}</span>
+              <span class="ov-pct" :class="diskTone(d.pct)">{{ d.pct }}%</span>
+            </div>
+            <el-progress :percentage="d.pct" :stroke-width="4" :show-text="false" :color="diskColor(d.pct)" />
+          </div>
+          <div v-if="!ovDisks.length" class="ov-empty">无挂载点</div>
+        </div>
+      </div>
+
+      <div class="ov-grid3">
+        <div class="ov-card">
+          <div class="ov-head">
+            <span class="ov-title">网卡</span>
+            <span class="spacer" />
+            <el-button link type="primary" size="small" @click="switchMainTab('net')">全部 →</el-button>
+          </div>
+          <div v-for="n in ovNics" :key="n.name" class="ov-nic">
+            <span class="mono strong ov-nic-name" :title="n.name">{{ n.name }}</span>
+            <el-tag size="small" :type="nicLinkUp(n) ? 'success' : 'info'">{{ n.operstate || (n.up ? 'up' : 'down') }}</el-tag>
+            <span class="mono ov-nic-ip">{{ n.ip || '—' }}</span>
+            <span class="mono ov-nic-io">↓ {{ bytes(n.rx_bytes) }} · ↑ {{ bytes(n.tx_bytes) }}</span>
+          </div>
+          <div v-if="!ovNics.length" class="ov-empty">没有网卡信息</div>
+        </div>
+
+        <div class="ov-card">
+          <div class="ov-head">
+            <span class="ov-title">会话</span>
+            <span class="spacer" />
+            <span class="ov-sub">共 {{ streams.length }} 条</span>
+          </div>
+          <div v-for="s in streams" :key="s.a_sid + '-' + s.c_sid" class="ov-sess">
+            <span class="mono">{{ s.a_user }}:{{ s.a_sid }}</span>
+            <span class="spacer" />
+            <el-tag size="small" :type="s.opened && !s.a_closed && !s.c_closed ? 'success' : 'info'">
+              {{ s.opened && !s.a_closed && !s.c_closed ? '活跃' : '关闭' }}
+            </el-tag>
+            <span class="ov-sub">{{ time(s.opened_at_ms) }}</span>
+          </div>
+          <div v-if="!streams.length" class="ov-empty">当前无会话</div>
+        </div>
+
+        <div class="ov-card">
+          <div class="ov-head">
+            <span class="ov-title">系统信息</span>
+            <span class="spacer" />
+            <span v-if="sysCached" class="ov-sub">缓存快照</span>
+          </div>
+          <div v-if="sys" class="ov-kv">
+            <span>架构</span><b>{{ sys.machine || '—' }}</b>
+            <span>内核</span><b>{{ sys.kernel || '—' }}</b>
+            <span>CPU</span><b>{{ sys.cpu_model || '—' }}</b>
+            <span>板卡</span><b>{{ sys.board || '—' }}</b>
+            <span>开机</span><b>{{ upFor }}</b>
+            <span>mTLS</span><b>{{ sys.mtls ? '已启用' : '未启用' }}</b>
+            <span>采集</span><b>{{ time(sysTs) }}</b>
+          </div>
+          <div v-else class="ov-empty">读取中…</div>
+          <div v-if="sys && sys.mtls" class="ov-cert">
+            <div><span class="ov-sub">证书</span> {{ sys.cert_valid ? '有效' : '已过期' }}</div>
+            <div class="mono">{{ sys.cert_subject || '—' }}</div>
+            <div class="mono ov-sub">{{ sys.cert_issuer || '—' }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div v-show="isFeatTab(mainTab)" class="panel feat-panel">
+      <el-tabs v-model="featTab" class="feat-tabs hide-nav" @tab-change="onFeatTab">
         <el-tab-pane label="存储" name="storage">
           <div v-for="d in disks" :key="d.mount" class="disk">
             <div class="disk-top">
@@ -289,11 +440,10 @@
       </el-tabs>
     </div>
 
-    <div class="panel net-panel">
-      <div class="panel-head">
-        <h2>网络</h2>
+    <div v-show="mainTab === 'net'" class="panel net-panel">
+      <div class="tab-bar">
+        <span class="muted">{{ netAgeText || '网络连接与监听' }}</span>
         <span class="spacer" />
-        <span v-if="netTs" class="muted">{{ netAgeText }}</span>
         <el-button link type="primary" :loading="netLoading" @click="onNetRefresh">刷新</el-button>
       </div>
 
@@ -557,45 +707,12 @@
       <div v-if="netTruncated" class="muted net-foot">结果已截断，可搜索缩小范围</div>
     </div>
 
-    <div class="panel">
-      <div class="panel-head"><h2>系统信息</h2></div>
-      <el-descriptions v-if="sys" :column="sysCols" size="small" border>
-        <el-descriptions-item label="架构">{{ sys.machine || '—' }}</el-descriptions-item>
-        <el-descriptions-item label="内核">{{ sys.kernel || '—' }}</el-descriptions-item>
-        <el-descriptions-item label="CPU 型号">{{ sys.cpu_model || '—' }}</el-descriptions-item>
-        <el-descriptions-item label="核心数">{{ sys.cpu_count || 0 }} 核</el-descriptions-item>
-        <el-descriptions-item label="板卡型号">{{ sys.board || '—' }}</el-descriptions-item>
-        <el-descriptions-item label="开机时长">{{ upFor }}</el-descriptions-item>
-        <el-descriptions-item label="mTLS">
-          <el-tag v-if="sys.mtls" type="success" size="small" effect="plain">已启用</el-tag>
-          <span v-else class="muted">未启用</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="采集时间">
-          <span v-if="sysCached" class="cached-tag">缓存（设备未响应）</span>
-          <template v-else>{{ time(sysTs) }}</template>
-        </el-descriptions-item>
-      </el-descriptions>
-      <el-alert v-else-if="sysErr" :title="sysErr" type="warning" :closable="false" show-icon />
-      <el-skeleton v-else :rows="2" animated />
-    </div>
-
-    <!-- 未启用 mTLS 时不占一整块面板，状态在「系统信息」里 -->
-    <div v-if="sys && sys.mtls" class="panel">
-      <div class="panel-head"><h2>证书</h2></div>
-      <el-descriptions :column="descCols" size="small" border>
-        <el-descriptions-item label="证书主体"><span class="mono">{{ sys.cert_subject || '—' }}</span></el-descriptions-item>
-        <el-descriptions-item label="签发者"><span class="mono">{{ sys.cert_issuer || '—' }}</span></el-descriptions-item>
-        <el-descriptions-item label="序列号"><span class="mono">{{ sys.cert_serial || '—' }}</span></el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <el-tag :type="sys.cert_valid ? 'success' : 'danger'" size="small">
-            {{ sys.cert_valid ? '有效' : '已过期' }}
-          </el-tag>
-        </el-descriptions-item>
-      </el-descriptions>
-    </div>
-
-    <div class="panel feat-panel obs-panel">
-      <el-tabs v-model="obsTab" class="feat-tabs" @tab-change="onObsTab">
+    <div v-show="mainTab === 'monitor' || mainTab === 'tty'" class="panel feat-panel obs-panel">
+      <div v-if="mainTab === 'monitor'" class="monitor-switch">
+        <button type="button" :class="{ on: monitorView === 'series' }" @click="setMonitorView('series')">曲线</button>
+        <button type="button" :class="{ on: monitorView === 'metric' }" @click="setMonitorView('metric')">采样配置</button>
+      </div>
+      <el-tabs v-model="obsTab" class="feat-tabs hide-nav" @tab-change="onObsTab">
         <el-tab-pane label="采样曲线" name="series">
           <div class="tab-bar">
             <el-switch v-model="sampleAuto" active-text="自动采集" @change="onSampleAuto" />
@@ -996,36 +1113,6 @@
       </el-tabs>
     </div>
 
-    <div class="panel">
-      <div class="panel-head">
-        <h2>会话</h2>
-        <span class="muted">共 {{ streams.length }} 条</span>
-      </div>
-      <el-table :data="sessionPageRows" size="small">
-        <el-table-column label="A 用户:sid" min-width="160">
-          <template #default="{ row }">{{ row.a_user }}:{{ row.a_sid }}</template>
-        </el-table-column>
-        <el-table-column v-if="!isPhone" prop="c_sid" label="c_sid" min-width="100" />
-        <el-table-column label="状态" width="90">
-          <template #default="{ row }">
-            <el-tag :type="row.opened && !row.a_closed && !row.c_closed ? 'success' : 'info'" size="small">
-              {{ row.opened && !row.a_closed && !row.c_closed ? '活跃' : '关闭' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column v-if="!isPhone" label="开启于" min-width="150">
-          <template #default="{ row }">{{ time(row.opened_at_ms) }}</template>
-        </el-table-column>
-        <template #empty><div class="muted">当前无会话</div></template>
-      </el-table>
-      <div v-if="streams.length > 5" class="net-pager">
-        <el-pagination small background layout="total, sizes, prev, pager, next"
-                       :total="streams.length" :page-sizes="sessionPageSizes"
-                       :page-size="sessionPer" v-model:current-page="sessionPage"
-                       @size-change="onSessionSize" />
-      </div>
-    </div>
-
     <el-dialog v-model="addMetricOpen" title="添加采样指标" width="420px">
       <el-checkbox-group v-model="addMetricPick" class="cand-list">
         <el-checkbox v-for="c in addCandidates" :key="c" :value="c">{{ c }}</el-checkbox>
@@ -1137,7 +1224,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Chart from 'chart.js/auto'
-import { ArrowLeft } from '@element-plus/icons-vue'
+import { ArrowLeft, MoreFilled, Refresh } from '@element-plus/icons-vue'
 import { Api } from '@/shared/api.js'
 import { can, canManage } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
@@ -1179,6 +1266,13 @@ const upFor = computed(() => {
   return duration((sec + extra) * 1000)
 })
 
+const agentVersion = computed(() => (sys.value && sys.value.caps && sys.value.caps.version) || '')
+
+function agoText(ms) {
+  const s = ago(ms)
+  return s === '刚刚' || s === '—' ? s : s + '前'
+}
+
 function goBack() {
   router.push('/agents')
 }
@@ -1209,6 +1303,19 @@ const loadEl = ref(null)
 const rateEl = ref(null)
 const charts = {}
 
+const mainTab = ref('overview')
+const monitorView = ref('series')
+const MAIN_TABS = [
+  { name: 'overview', label: '概览' },
+  { name: 'storage', label: '存储' },
+  { name: 'file', label: '文件' },
+  { name: 'service', label: '服务' },
+  { name: 'proc', label: '进程' },
+  { name: 'net', label: '网络' },
+  { name: 'monitor', label: '监控' },
+  { name: 'tty', label: '串口' },
+  { name: 'caps', label: '能力' },
+]
 const featTab = ref('storage')
 const procSort = ref('cpu')
 const procQuery = ref('')
@@ -1430,10 +1537,10 @@ const sysvIpcEmpty = computed(() =>
 
 const netSummaryText = computed(() => {
   if (netScope.value === 'nic') {
-    const up = nics.value.filter((x) => x.up).length
+    const up = nics.value.filter((x) => nicLinkUp(x)).length
     // 手机上时间戳会把单行说明挤成两行，省掉采集时间
     const ts = !isPhone.value && sysTs.value ? ` · 随系统信息刷新（${time(sysTs.value)}）` : ''
-    return `${nics.value.length} 个网卡 · ${up} 个已启用` + ts
+    return `${nics.value.length} 个网卡 · ${up} 个已连接` + ts
   }
   const n = net.value
   if (!n) return ''
@@ -1720,6 +1827,147 @@ function diskColor(p) {
   return { bad: '#e5534b', warn: '#f5a623' }[diskTone(p)] || '#3b82f6'
 }
 
+// ---------------------------------------------------------------- 概览
+function lastSeriesValue(name) {
+  const pts = cache[name]
+  if (!Array.isArray(pts) || !pts.length) return null
+  const p = pts[pts.length - 1]
+  if (!p || p.v == null) return null
+  const v = Number(p.v)
+  return Number.isFinite(v) ? v : null
+}
+
+const ovCpuPct = computed(() => {
+  const fromSeries = lastSeriesValue('cpu')
+  const raw = fromSeries != null ? fromSeries : Number(sys.value && sys.value.cpu_usage)
+  const v = Number.isFinite(raw) ? Math.max(0, Math.min(100, raw)) : 0
+  return Math.round(v * 10) / 10
+})
+const ovCpuText = computed(() => (Number.isInteger(ovCpuPct.value) ? String(ovCpuPct.value) : ovCpuPct.value.toFixed(1)))
+
+const ovMemTotal = computed(() => Number(sys.value && sys.value.mem_total_kb) || 0)
+const ovMemUsed = computed(() => {
+  const s = sys.value || {}
+  const total = Number(s.mem_total_kb) || 0
+  const avail = Number(s.mem_available_kb != null ? s.mem_available_kb : s.mem_free_kb) || 0
+  return total ? Math.max(0, total - avail) : 0
+})
+const ovMemPct = computed(() => {
+  const fromSeries = lastSeriesValue('mem')
+  const v = fromSeries != null
+    ? fromSeries
+    : (ovMemTotal.value ? (ovMemUsed.value / ovMemTotal.value) * 100 : 0)
+  return Math.round(Math.max(0, Math.min(100, v)))
+})
+const ovMemText = computed(() => (ovMemTotal.value ? kbText(ovMemUsed.value) + ' / ' + kbText(ovMemTotal.value) : '—'))
+
+const ovLoadText = computed(() => {
+  const s = sys.value || {}
+  const ps = procs.value && procs.value.summary
+  const la = ps
+    ? [ps.load1, ps.load5, ps.load15]
+    : (Array.isArray(s.loadavg) && s.loadavg.length ? s.loadavg : [])
+  if (!la.length) return '—'
+  return la.slice(0, 3).map((x) => (Number(x) || 0).toFixed(2)).join(' / ')
+})
+const ovProcText = computed(() => {
+  const s = procs.value && procs.value.summary
+  return s ? `${s.total} 进程 · ${s.threads} 线程` : ''
+})
+
+const ovNics = computed(() => nics.value.slice(0, 3))
+const ovNicText = computed(() => `${nics.value.length} 个 · ${nics.value.filter((n) => nicLinkUp(n)).length} 个已连接`)
+const ovNetRx = computed(() => bytes(nics.value.reduce((a, n) => a + (Number(n.rx_bytes) || 0), 0)))
+const ovNetTx = computed(() => bytes(nics.value.reduce((a, n) => a + (Number(n.tx_bytes) || 0), 0)))
+
+const ovDisks = computed(() => disks.value.slice().sort((a, b) => b.pct - a.pct).slice(0, 3))
+
+function sparkPoints(name) {
+  const pts = cache[name]
+  if (!Array.isArray(pts) || !pts.length) return ''
+  if (pts.length === 1) {
+    const y = (110 - Math.max(0, Math.min(100, Number(pts[0].v) || 0))).toFixed(1)
+    return '0,' + y + ' 600,' + y
+  }
+  const arr = pts.slice(-120)
+  const t0 = Number(arr[0].ts) || 0
+  const t1 = Number(arr[arr.length - 1].ts) || 0
+  const span = Math.max(1, t1 - t0)
+  const out = []
+  for (const p of arr) {
+    const x = ((Number(p.ts) - t0) / span) * 600
+    const v = Math.max(0, Math.min(100, Number(p.v) || 0))
+    const y = 110 - (v / 100) * 100
+    out.push(x.toFixed(1) + ',' + y.toFixed(1))
+  }
+  return out.join(' ')
+}
+const ovCpuPath = computed(() => sparkPoints('cpu'))
+const ovMemPath = computed(() => sparkPoints('mem'))
+
+// ---------------------------------------------------------------- 主 tab
+function isFeatTab(name) {
+  return name === 'storage' || name === 'file' || name === 'service' || name === 'proc' || name === 'caps'
+}
+
+function scrollPageTop() {
+  const el = document.querySelector('.page')
+  if (el && el.scrollTop > 0) el.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function switchMainTab(name) {
+  if (mainTab.value === name) return
+  mainTab.value = name
+  scrollPageTop()
+  if (isFeatTab(name)) {
+    featTab.value = name
+    onFeatTab(name)
+    return
+  }
+  stopProcTimer()
+  if (name === 'net') {
+    netErr.value = ''
+    if (!net.value) onNetTab()
+    return
+  }
+  if (name === 'monitor') {
+    obsTab.value = monitorView.value === 'metric' ? 'metric' : 'series'
+    if (obsTab.value === 'series') nextTick(renderCharts)
+    return
+  }
+  if (name === 'tty') {
+    obsTab.value = 'tty'
+    loadTtys()
+  }
+}
+
+function setMonitorView(v) {
+  monitorView.value = v
+  obsTab.value = v === 'metric' ? 'metric' : 'series'
+  if (v === 'series') nextTick(renderCharts)
+}
+
+function onHeadCmd(cmd) {
+  if (cmd === 'refresh') {
+    loadAll({ notify: true })
+    return
+  }
+  if (cmd === 'export') {
+    exportJson()
+    return
+  }
+  if (cmd === 'auto') {
+    auto.value = !auto.value
+    onAutoChange()
+    return
+  }
+  if (String(cmd).indexOf('period-') === 0) {
+    period.value = Number(String(cmd).slice(7)) || 10
+    if (!auto.value) auto.value = true
+    onAutoChange()
+  }
+}
+
 function unitOf(name) {
   if (name === 'cpu' || name === 'mem') return 'percent'
   if (name === 'load') return 'load'
@@ -1745,6 +1993,9 @@ function metricHint(row) {
 function mergeSysinfo(p) {
   if (!p || !sys.value) return
   if (p.swap_free_kb != null) sys.value.swap_free_kb = p.swap_free_kb
+  for (const k of ['cpu_usage', 'cpu_cores', 'loadavg', 'mem_free_kb', 'mem_available_kb']) {
+    if (p[k] != null) sys.value[k] = p[k]
+  }
   ;(p.mounts || []).forEach((pm) => {
     const m = (sys.value.mounts || []).find((x) => x.mount === pm.mount)
     if (!m) return
@@ -1794,7 +2045,8 @@ async function loadAll(opts = {}) {
   await loadSysinfo(silent)
   await loadNet(true)
   loadNetCounts()
-  if (featTab.value === 'proc') loadProcs(false, true)
+  if (mainTab.value === 'proc') loadProcs(false, true)
+  else if (mainTab.value === 'overview') loadProcs(true, true)
   nowTick.value = Date.now()
   await pullSeries(!silent)
   if (!silent) loading.value = false
@@ -1867,6 +2119,12 @@ async function pullSeriesNames(names, full) {
 
 async function pullSeries(full) {
   const names = selected.value.filter(Boolean)
+  // 概览/监控要画 cpu、mem，即使用户把它们在监控页取消勾选也保持缓存更新
+  if (mainTab.value === 'overview' || mainTab.value === 'monitor') {
+    for (const n of ['cpu', 'mem']) {
+      if (enabledCfg.value.some((c) => c.series === n) && !names.includes(n)) names.push(n)
+    }
+  }
   if (!names.length) {
     renderCharts()
     return
@@ -2144,9 +2402,9 @@ function stopProcTimer() {
 function startProcTimer() {
   stopProcTimer()
   const sec = Number(procPeriod.value) || 0
-  if (sec <= 0 || featTab.value !== 'proc' || !can('device.proc.read')) return
+  if (sec <= 0 || mainTab.value !== 'proc' || !can('device.proc.read')) return
   procTimer.value = setInterval(() => {
-    if (featTab.value === 'proc' && !document.hidden) loadProcs(true, true)
+    if (mainTab.value === 'proc' && !document.hidden) loadProcs(true, true)
   }, sec * 1000)
 }
 
@@ -2697,6 +2955,8 @@ async function init() {
   sessionPage.value = 1
   sessionPer.value = 10
   addMetricOpen.value = false
+  mainTab.value = 'overview'
+  monitorView.value = 'series'
   featTab.value = 'storage'
   obsTab.value = 'series'
   procs.value = null
@@ -2836,6 +3096,144 @@ onBeforeUnmount(() => {
 .feat-tabs :deep(.el-tabs__item) { padding: 0 18px; }
 .feat-tabs :deep(.el-tabs__item:first-child) { padding-left: 2px; }
 .feat-tabs :deep(.el-tabs__content) { padding-top: 2px; }
+
+/* ---- 设备摘要 + 主 tab + 概览 ---- */
+.dev-sticky {
+  position: sticky;
+  top: calc(-1 * var(--page-pad, 24px));
+  z-index: 30;
+  background: var(--el-bg-color-page);
+  padding-top: var(--page-pad, 24px);
+  margin-top: calc(-1 * var(--page-pad, 24px));
+}
+.dev-head { padding: 12px 18px; margin-bottom: 8px; }
+.dh-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dh-top h2 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: 0.01em; }
+.dh-top .back { padding-left: 0; }
+.ver-tag { font-variant-numeric: tabular-nums; }
+.dh-meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px;
+  margin-top: 8px; font-size: 12px; color: var(--el-text-color-secondary);
+}
+.dh-meta > span { white-space: nowrap; }
+.dh-ts { margin-left: auto; }
+.dev-tabs {
+  display: flex; gap: 2px; padding: 5px 6px; margin-bottom: 12px;
+  background: var(--el-bg-color); border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px; box-shadow: var(--app-shadow);
+  overflow-x: auto; scrollbar-width: none;
+}
+.dev-tabs::-webkit-scrollbar { display: none; }
+.dev-tabs button {
+  flex: none; border: 0; background: transparent; padding: 7px 15px;
+  border-radius: 7px; font: inherit; font-size: 14px; color: var(--el-text-color-regular);
+  cursor: pointer; white-space: nowrap;
+}
+.dev-tabs button:hover { background: var(--el-fill-color-light); color: var(--el-text-color-primary); }
+.dev-tabs button.on { background: var(--el-color-primary-light-9); color: var(--el-color-primary); font-weight: 600; }
+
+.feat-tabs.hide-nav :deep(.el-tabs__header) { display: none; }
+.feat-tabs.hide-nav :deep(.el-tabs__content) { padding-top: 0; }
+
+.monitor-switch {
+  display: inline-flex; gap: 2px; padding: 3px; margin-bottom: 12px;
+  background: var(--el-fill-color-light); border-radius: 8px;
+}
+.monitor-switch button {
+  border: 0; background: transparent; padding: 5px 14px; border-radius: 6px;
+  font: inherit; font-size: 12px; color: var(--el-text-color-secondary); cursor: pointer;
+}
+.monitor-switch button.on {
+  background: var(--el-bg-color); color: var(--el-text-color-primary);
+  font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.ov-wrap { display: flex; flex-direction: column; gap: 12px; }
+.ov-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.ov-card {
+  background: var(--el-bg-color); border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px; box-shadow: var(--app-shadow); padding: 14px 16px; min-width: 0;
+}
+.ov-k-head { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
+.ov-k-head .ov-sub { margin-left: auto; }
+.ov-k-val {
+  margin-top: 6px; font-size: 30px; font-weight: 650; line-height: 1.1;
+  letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+}
+.ov-k-val.sm { font-size: 16px; font-weight: 600; padding: 11px 0 8px; }
+.ov-k-val small { font-size: 14px; font-weight: 500; color: var(--el-text-color-secondary); margin-left: 2px; }
+.ov-bar { height: 6px; border-radius: 3px; background: var(--el-fill-color); overflow: hidden; margin-top: 10px; }
+.ov-bar i { display: block; height: 100%; border-radius: 3px; background: var(--el-color-primary); }
+.ov-sub { font-size: 12px; color: var(--el-text-color-secondary); }
+.ov-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 12px; }
+.ov-grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.ov-head { display: flex; align-items: center; gap: 10px; min-height: 24px; margin-bottom: 8px; }
+.ov-title { font-size: 14px; font-weight: 650; }
+.ov-legend {
+  display: flex; align-items: center; gap: 6px; font-size: 12px;
+  color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums;
+}
+.ov-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-left: 6px; }
+.ov-dot.cpu { background: #4a9eff; }
+.ov-dot.mem { background: #f5a623; }
+.ov-spark { height: 150px; }
+.ov-spark svg { width: 100%; height: 150px; display: block; }
+.ov-grid-line { stroke: var(--el-border-color-lighter); stroke-width: 1; vector-effect: non-scaling-stroke; stroke-dasharray: 3 4; }
+.ov-line { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.ov-line.cpu { stroke: #4a9eff; }
+.ov-line.mem { stroke: #f5a623; }
+.ov-empty { padding: 14px 0; font-size: 12px; color: var(--el-text-color-placeholder); }
+.ov-wait { padding: 62px 0; text-align: center; }
+.ov-nic-name { max-width: 132px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-disk + .ov-disk { margin-top: 10px; }
+.ov-disk-top { display: flex; align-items: baseline; gap: 10px; font-size: 12px; margin-bottom: 4px; }
+.ov-disk-top .ov-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-pct { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ov-pct.warn { color: #c98a12; }
+.ov-pct.bad { color: #e5534b; }
+.ov-nic {
+  display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 4px 8px; align-items: center;
+  padding: 7px 0; border-bottom: 1px solid var(--el-border-color-lighter); font-size: 12px;
+}
+.ov-nic:last-child { border-bottom: 0; }
+.ov-nic-ip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.ov-nic-io { grid-column: 1 / -1; color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums; }
+.ov-sess {
+  display: flex; align-items: center; gap: 8px; padding: 7px 0; font-size: 12px; min-width: 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.ov-sess:last-child { border-bottom: 0; }
+.ov-sess > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-kv { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 4px 10px; font-size: 12px; line-height: 18px; }
+.ov-kv span { color: var(--el-text-color-secondary); }
+.ov-kv b { font-weight: 500; word-break: break-word; }
+.ov-cert {
+  display: flex; flex-direction: column; gap: 3px; margin-top: 10px; padding-top: 9px;
+  border-top: 1px solid var(--el-border-color-lighter); font-size: 12px; word-break: break-all;
+}
+@media (max-width: 1100px) {
+  .ov-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ov-grid { grid-template-columns: 1fr; }
+  .ov-grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .dev-head { padding: 10px 12px; }
+  .dh-top h2 { font-size: 16px; }
+  .dh-meta { gap: 2px 10px; margin-top: 6px; }
+  .dev-tabs {
+    padding: 4px;
+    mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+  }
+  .dev-tabs button { padding: 7px 11px; font-size: 13px; }
+  .ov-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .ov-grid3 { grid-template-columns: 1fr; }
+  .ov-card { padding: 12px; }
+  .ov-k-val { font-size: 24px; }
+  .ov-k-val.sm { font-size: 14px; padding: 8px 0 7px; }
+  .ov-spark, .ov-spark svg { height: 120px; }
+  .ov-legend { display: none; }
+  .dh-ts { display: none; }
+}
 .period { width: 84px; }
 .back { margin-right: 2px; padding: 0 6px; }
 .back .el-icon { margin-right: 2px; }
@@ -3110,5 +3508,6 @@ onBeforeUnmount(() => {
     font-size: 10px;
     line-height: 15px;
   }
+  .net-tabs :deep(.el-tabs__item:not(.is-active)) .tab-n { display: none; }
 }
 </style>

@@ -351,7 +351,7 @@ html.dark .side {
 .caret { color: var(--el-text-color-secondary); }
 .who { display: flex; flex-direction: column; line-height: 1.5; }
 .who span { font-size: 12px; color: var(--el-text-color-secondary); }
-.page { flex: 1; padding: 24px; min-width: 0; overflow-y: auto; }
+.page { --page-pad: 24px; flex: 1; padding: var(--page-pad); min-width: 0; overflow-y: auto; }
 .nav-mask { display: none; }
 
 .theme-box { display: flex; flex-direction: column; gap: 12px; }
@@ -398,11 +398,11 @@ html.dark .side {
     background: rgba(0, 0, 0, 0.45);
   }
   .hamburger { display: inline-flex; }
-  .page { padding: 16px; }
+  .page { --page-pad: 16px; padding: var(--page-pad); }
 }
 @media (max-width: 599px) {
   .topbar { padding: 0 14px; gap: 8px; height: 56px; }
   .relay-info, .uname { display: none; }
-  .page { padding: 12px; }
+  .page { --page-pad: 12px; padding: var(--page-pad); }
 }
 </style>

@@ -2283,6 +2283,12 @@ void AgentApp::sendSysinfo(int mode) {
     if (mode == 1 && !sysinfo_sig.empty() && sigs == sysinfo_sig) {
         out["full"] = false;
         out["swap_free_kb"] = j["swap_free_kb"];
+        // 概览页要实时 CPU/负载/内存，不能只在全量帧里带
+        out["cpu_usage"] = j["cpu_usage"];
+        out["cpu_cores"] = j["cpu_cores"];
+        if (j.contains("loadavg")) out["loadavg"] = j["loadavg"];
+        out["mem_free_kb"] = j["mem_free_kb"];
+        out["mem_available_kb"] = j["mem_available_kb"];
         out["mounts"] = nlohmann::json::array();
         for (auto& m : j["mounts"]) out["mounts"].push_back({{"mount", m["mount"]}, {"used_kb", m["used_kb"]}, {"avail_kb", m["avail_kb"]}});
         out["nics"] = nlohmann::json::array();
