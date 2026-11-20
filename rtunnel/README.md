@@ -353,6 +353,7 @@ OTA 不另建传输通道：部署包走「文件上传 + 文件分发」落到�
 - 新版本连续 3 次没起来，或每次启动 45s 内没连上 relay：`agent-boot-check.sh` 把软链切回
   `state/previous`，任务因版本不匹配显示 `version not confirmed`；
 - 手动回滚：`/opt/rtunnel/agent/install.sh --rollback`，然后重启服务；
+- 设备只保留当前和上一个二进制（回滚只需这两个），更早的版本在安装时清理；
 - 查看当前/上一版本：`/opt/rtunnel/agent/install.sh --status`。
 
 设备侧前置条件与限制：
@@ -526,6 +527,8 @@ http://B:9443/device/<devid>/<port>/<path>
 - `procs` / `net` / `metrics` 与 relay 的 `PROC_REQ`、`NET_REQ`、`METRICS_QUERY`
   共用同一份查询实现：进程双采样、IPC 采集、指标 ring 读取都带缓存与并发上限；
   HTTP 处理函数在 `hv::async` 线程池执行，不阻塞 IO 线程和 WebSocket
+- 页面、`fs-ui.js`、`svc-ui.js`、`file-view.js`、`cm-editor.js` 在构建时压成 gzip 后以字节数组
+  嵌入二进制，运行时直接发压缩体（非 gzip 客户端按需解压一次），不再在堆里保留副本
 - 响应支持 gzip 协商（`Accept-Encoding: gzip`），HTML、sysinfo 与较大的 JSON 都会压缩，
   并带 `Vary: Accept-Encoding`
 - 数据由 agent 主循环采集并缓存，HTTP 线程只读快照或调用带锁的共享查询，不直接访问隧道状态

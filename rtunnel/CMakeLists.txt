@@ -69,34 +69,56 @@ set(RTUNNEL_AGENT_SOURCES agent/main.cpp agent/agent_app.cpp agent/ota_pkg.cpp
                            agent/svc_service.cpp agent/svc_session.cpp agent/net_service.cpp
                            agent/proc_service.cpp)
 # 共享前端：同一份 fs-ui.js / svc-ui.js / file-view.js 同时给本地 Web 和 relay-admin 使用。
-# 本地 Web 需要把 JS 嵌进二进制，这里在配置阶段生成头文件。
+# 本地 Web 在配置阶段把资源和设备页 HTML 压成 gzip，以字节数组嵌进二进制：
+# 运行时直接发压缩体，不再额外占堆保存副本。没有 gzip 命令的平台退回原文嵌入。
 set(RTUNNEL_FS_UI_JS "${CMAKE_CURRENT_SOURCE_DIR}/shared/web/fs-ui.js")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RTUNNEL_FS_UI_JS}")
-file(READ "${RTUNNEL_FS_UI_JS}" RTUNNEL_FS_UI_JS_CONTENT)
 set(RTUNNEL_SVC_UI_JS "${CMAKE_CURRENT_SOURCE_DIR}/shared/web/svc-ui.js")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RTUNNEL_SVC_UI_JS}")
-file(READ "${RTUNNEL_SVC_UI_JS}" RTUNNEL_SVC_UI_JS_CONTENT)
 set(RTUNNEL_FILE_VIEW_JS "${CMAKE_CURRENT_SOURCE_DIR}/shared/web/file-view.js")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RTUNNEL_FILE_VIEW_JS}")
-file(READ "${RTUNNEL_FILE_VIEW_JS}" RTUNNEL_FILE_VIEW_JS_CONTENT)
 # 编辑器组件（CodeMirror IIFE）：由 npm run build:editor 生成，缺失时本地页编辑功能不可用。
 set(RTUNNEL_CM_EDITOR_JS "${CMAKE_CURRENT_SOURCE_DIR}/shared/web/cm-editor.bundle.js")
-set(RTUNNEL_CM_EDITOR_JS_CONTENT "")
-if(EXISTS "${RTUNNEL_CM_EDITOR_JS}")
-    file(READ "${RTUNNEL_CM_EDITOR_JS}" RTUNNEL_CM_EDITOR_JS_CONTENT)
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RTUNNEL_CM_EDITOR_JS}")
-else()
+if(NOT EXISTS "${RTUNNEL_CM_EDITOR_JS}")
     message(WARNING "rtunnel-agent: cm-editor.bundle.js 未构建，本地页的编辑功能不可用（先在 relay/admin/web 执行 npm run build:editor）")
 endif()
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/fs_ui_js.hpp"
-    "#pragma once\n// 由 CMake 从 shared/web/fs-ui.js 生成，勿手改。\nstatic const char kFsUiJs[] = R\"RTFSJS(\n${RTUNNEL_FS_UI_JS_CONTENT}\n)RTFSJS\";\n")
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/svc_ui_js.hpp"
-    "#pragma once\n// 由 CMake 从 shared/web/svc-ui.js 生成，勿手改。\nstatic const char kSvcUiJs[] = R\"RTSVCJS(\n${RTUNNEL_SVC_UI_JS_CONTENT}\n)RTSVCJS\";\n")
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/file_view_js.hpp"
-    "#pragma once\n// 由 CMake 从 shared/web/file-view.js 生成，勿手改。\nstatic const char kFileViewJs[] = R\"RTFVJS(\n${RTUNNEL_FILE_VIEW_JS_CONTENT}\n)RTFVJS\";\n")
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/cm_editor_js.hpp"
-    "#pragma once\n// 由 CMake 从 shared/web/cm-editor.bundle.js 生成，勿手改。\nstatic const char kCmEditorJs[] = R\"RTCMJS(\n${RTUNNEL_CM_EDITOR_JS_CONTENT}\n)RTCMJS\";\n")
+
+find_program(RTUNNEL_GZIP_EXE gzip)
+# 生成 { blob, len, isGzip } 三件套；源文件缺失时生成空资源，调用方无需判断。
+function(rtunnel_embed_asset asset symbol header comment)
+    if(NOT EXISTS "${asset}")
+        file(WRITE "${header}" "#pragma once\n// ${comment} 缺失\nstatic const unsigned char ${symbol}[] = {0};\nstatic const unsigned int ${symbol}Len = 0;\nstatic const bool ${symbol}Gzip = false;\n")
+        return()
+    endif()
+    set(blob "${asset}")
+    set(is_gzip false)
+    if(RTUNNEL_GZIP_EXE)
+        set(gz "${CMAKE_CURRENT_BINARY_DIR}/generated/${symbol}.gz")
+        execute_process(COMMAND "${RTUNNEL_GZIP_EXE}" -9 -n -c "${asset}" OUTPUT_FILE "${gz}" RESULT_VARIABLE rc)
+        if(rc EQUAL 0)
+            set(blob "${gz}")
+            set(is_gzip true)
+        endif()
+    endif()
+    file(READ "${blob}" hex HEX)
+    string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," hex "${hex}")
+    file(SIZE "${blob}" blob_size)
+    set(tmp "${header}.tmp")
+    file(WRITE "${tmp}" "#pragma once\n// 由 CMake 从 ${comment} 生成，勿手改。\nstatic const unsigned char ${symbol}[] = {${hex}};\nstatic const unsigned int ${symbol}Len = ${blob_size};\nstatic const bool ${symbol}Gzip = ${is_gzip};\n")
+    # 内容不变时不更新时间戳，避免每次 configure 都重编 agent_web.cpp
+    execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different "${tmp}" "${header}")
+    file(REMOVE "${tmp}")
+endfunction()
+
+rtunnel_embed_asset("${RTUNNEL_FS_UI_JS}" kFsUiBlob "${CMAKE_CURRENT_BINARY_DIR}/generated/fs_ui_js.hpp" "shared/web/fs-ui.js")
+rtunnel_embed_asset("${RTUNNEL_SVC_UI_JS}" kSvcUiBlob "${CMAKE_CURRENT_BINARY_DIR}/generated/svc_ui_js.hpp" "shared/web/svc-ui.js")
+rtunnel_embed_asset("${RTUNNEL_FILE_VIEW_JS}" kFileViewBlob "${CMAKE_CURRENT_BINARY_DIR}/generated/file_view_js.hpp" "shared/web/file-view.js")
+rtunnel_embed_asset("${RTUNNEL_CM_EDITOR_JS}" kCmEditorBlob "${CMAKE_CURRENT_BINARY_DIR}/generated/cm_editor_js.hpp" "shared/web/cm-editor.bundle.js")
+set(RTUNNEL_AGENT_HTML "${CMAKE_CURRENT_SOURCE_DIR}/agent/web/index.html")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RTUNNEL_AGENT_HTML}")
+rtunnel_embed_asset("${RTUNNEL_AGENT_HTML}" kAgentWebBlob "${CMAKE_CURRENT_BINARY_DIR}/generated/agent_web_html.hpp" "agent/web/index.html")
+
 add_executable(rtunnel-agent ${RTUNNEL_AGENT_SOURCES})
 if (RTUNNEL_AGENT_WEB)
     target_sources(rtunnel-agent PRIVATE agent/agent_web.cpp)

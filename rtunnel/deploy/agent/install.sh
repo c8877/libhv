@@ -155,12 +155,12 @@ rm -f "$tmp"
 ln -s "$NEW_TARGET" "$tmp"
 mv -f "$tmp" "$BIN/rtunnel-agent"
 
-# 7. 清理：保留当前、上一个和最近 3 个
+# 7. 清理：只保留当前和上一个（回滚只需这两个）
 files=$(ls -1t "$BIN"/rtunnel-agent-*-* 2>/dev/null || true)
 i=0
 for f in $files; do
     i=$((i + 1))
-    if [ "$i" -le 3 ]; then continue; fi
+    if [ "$i" -le 2 ]; then continue; fi
     b=${f##*/}
     if [ "$b" = "$NEW_TARGET" ]; then continue; fi
     if [ -n "$OLD_TARGET" ] && [ "$b" = "$OLD_TARGET" ]; then continue; fi

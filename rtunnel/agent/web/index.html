@@ -1,9 +1,4 @@
-#pragma once
-// agent 本地设备详情页：单文件、无外部依赖（不引 CDN / 字体 / 图标），
-// 直接内嵌进二进制，适合离线设备。数据来自 GET /api/v1/sysinfo，
-// 进程/网络/采样按 tab 按需请求 /api/v1/procs、/api/v1/net、/api/v1/metrics。
-
-static const char kAgentWebHtml[] = R"AGENTWEB(<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
@@ -1563,4 +1558,3 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
 </script>
 </body>
 </html>
-)AGENTWEB";

@@ -197,6 +197,40 @@ bool sameOrigin(HttpRequest* req) {
     return rest == host;
 }
 
+// 内嵌前端资源：构建时已 gzip，浏览器直接拿压缩体；
+// 非 gzip 客户端首次访问时解压一份缓存，之后复用。
+struct WebAsset {
+    WebAsset(const unsigned char* b, unsigned int n, bool g) : blob(b), len(n), gzip(g) {}
+    const unsigned char* blob;
+    unsigned int len;
+    bool gzip;
+    std::mutex mu;
+    std::string plain;
+    bool plain_ready = false;
+};
+
+WebAsset g_html(kAgentWebBlob, kAgentWebBlobLen, kAgentWebBlobGzip);
+WebAsset g_fs(kFsUiBlob, kFsUiBlobLen, kFsUiBlobGzip);
+WebAsset g_svc(kSvcUiBlob, kSvcUiBlobLen, kSvcUiBlobGzip);
+WebAsset g_fileView(kFileViewBlob, kFileViewBlobLen, kFileViewBlobGzip);
+WebAsset g_editor(kCmEditorBlob, kCmEditorBlobLen, kCmEditorBlobGzip);
+
+void serveAsset(HttpRequest* req, HttpResponse* resp, WebAsset& a, http_content_type type) {
+    resp->content_type = type;
+    if (!a.gzip) {
+        resp->body.assign((const char*)a.blob, a.len);
+        return;
+    }
+    if (acceptsGzip(req)) {
+        resp->SetHeader("Content-Encoding", "gzip");
+        resp->body.assign((const char*)a.blob, a.len);
+        return;
+    }
+    std::lock_guard<std::mutex> lk(a.mu);
+    if (!a.plain_ready) a.plain_ready = gzipDecompress((const char*)a.blob, a.len, a.plain);
+    resp->body = a.plain;
+}
+
 } // namespace
 
 int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
@@ -205,51 +239,24 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
     int port = 0;
     if (!parseListen(listen, host, port, err)) return -1;
 
-    // 静态页面只压一次；JSON 快照每次请求再压（体积小，开销可忽略）
-    auto html_gz = std::make_shared<std::string>();
-    bool html_gz_ok = gzipCompress(kAgentWebHtml, *html_gz, 9);
-    auto fs_gz = std::make_shared<std::string>();
-    bool fs_gz_ok = gzipCompress(kFsUiJs, *fs_gz, 9);
-    auto svc_gz = std::make_shared<std::string>();
-    bool svc_gz_ok = gzipCompress(kSvcUiJs, *svc_gz, 9);
-    auto fv_gz = std::make_shared<std::string>();
-    bool fv_gz_ok = gzipCompress(kFileViewJs, *fv_gz, 9);
-    auto ed_gz = std::make_shared<std::string>();
-    bool ed_gz_ok = gzipCompress(kCmEditorJs, *ed_gz, 9);
-
-    // 内嵌 JS 都走同一套响应头；gzip 版本在启动时压好
-    auto serveJs = [](std::shared_ptr<std::string> gz, bool gz_ok, const char* body) {
-        return [gz, gz_ok, body](HttpRequest* req, HttpResponse* resp) {
-            resp->content_type = APPLICATION_JAVASCRIPT;
+    // 静态资源在构建时已压成 gzip，这里只按 Accept-Encoding 决定发压缩体还是解压后的正文
+    auto* service = new HttpService;
+    auto serveJsAsset = [](WebAsset& asset) {
+        return [&asset](HttpRequest* req, HttpResponse* resp) {
             resp->SetHeader("Cache-Control", "no-cache");
             resp->SetHeader("X-Content-Type-Options", "nosniff");
             resp->SetHeader("Vary", "Accept-Encoding");
-            if (gz_ok && acceptsGzip(req)) {
-                resp->SetHeader("Content-Encoding", "gzip");
-                resp->body = *gz;
-            }
-            else {
-                resp->body = body;
-            }
+            serveAsset(req, resp, asset, APPLICATION_JAVASCRIPT);
             return 200;
         };
     };
-
-    auto* service = new HttpService;
-    service->GET("/assets/cm-editor.js", serveJs(ed_gz, ed_gz_ok, kCmEditorJs));
-    service->GET("/assets/fs-ui.js", serveJs(fs_gz, fs_gz_ok, kFsUiJs));
-    service->GET("/assets/svc-ui.js", serveJs(svc_gz, svc_gz_ok, kSvcUiJs));
-    service->GET("/assets/file-view.js", serveJs(fv_gz, fv_gz_ok, kFileViewJs));
-    service->GET("/", [html_gz, html_gz_ok](HttpRequest* req, HttpResponse* resp) {
+    service->GET("/assets/cm-editor.js", serveJsAsset(g_editor));
+    service->GET("/assets/fs-ui.js", serveJsAsset(g_fs));
+    service->GET("/assets/svc-ui.js", serveJsAsset(g_svc));
+    service->GET("/assets/file-view.js", serveJsAsset(g_fileView));
+    service->GET("/", [](HttpRequest* req, HttpResponse* resp) {
         setNoCacheHeaders(resp);
-        resp->content_type = TEXT_HTML;
-        if (html_gz_ok && acceptsGzip(req)) {
-            resp->SetHeader("Content-Encoding", "gzip");
-            resp->body = *html_gz;
-        }
-        else {
-            resp->body = kAgentWebHtml;
-        }
+        serveAsset(req, resp, g_html, TEXT_HTML);
         return 200;
     });
     service->GET("/api/v1/sysinfo", [app](HttpRequest* req, HttpResponse* resp) {
