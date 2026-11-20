@@ -2675,6 +2675,8 @@ async function cancelMetric() {
 function openAddMetric() {
   addMetricPick.value = []
   addMetricOpen.value = true
+  // 串口候选来自已配置/已发现的串口，打开弹窗时再拉一次
+  loadTtys()
 }
 
 async function addMetrics() {
