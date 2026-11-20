@@ -157,14 +157,20 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 0 0}
 
   <footer id="foot">本地页面 · agent 采集</footer>
 </div>
-<script src="/assets/fs-ui.js"></script>
-<script src="/assets/svc-ui.js"></script>
-<script src="/assets/file-view.js"></script>
+<script src="assets/fs-ui.js"></script>
+<script src="assets/svc-ui.js"></script>
+<script src="assets/file-view.js"></script>
 <script>
 (function () {
   'use strict';
   var $ = function (s) { return document.querySelector(s); };
   var state = { data: null, hist: [], timer: null, period: 2000 };
+
+  // 相对路径：直接访问（/）和经 relay /device/<devid>/<port>/ 代理都能用
+  function wsUrl(path) {
+    var base = location.pathname.replace(/\/?$/, '/');
+    return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + base + path;
+  }
 
   function esc(v) {
     return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
@@ -390,7 +396,7 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 0 0}
   }
 
   function load() {
-    fetch('/api/v1/sysinfo', { cache: 'no-store' }).then(function (r) {
+    fetch('api/v1/sysinfo', { cache: 'no-store' }).then(function (r) {
       return r.json().then(function (d) {
         if (!r.ok || !d.ok) throw new Error(d.error || ('HTTP ' + r.status));
         pushHist(d);
@@ -445,7 +451,8 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 0 0}
       fm = window.RtunnelFs.createManager({
         inline: true,
         container: $('#fsHost'),
-        wsUrl: (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/fs',
+        wsUrl: wsUrl('ws/fs'),
+        editorUrl: 'assets/cm-editor.js',
         title: '文件管理 - ' + (d.devid || '设备'),
         onClose: function () { fsOpen = false; fsBtn.textContent = '打开文件管理'; },
         onSpace: function (s) { fsSpace = s; renderFsInfo(); }
@@ -471,7 +478,7 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 0 0}
       sm = window.RtunnelSvc.createManager({
         inline: true,
         container: $('#svcHost'),
-        wsUrl: (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/svc',
+        wsUrl: wsUrl('ws/svc'),
         title: '服务管理 - ' + (d.devid || '设备'),
         onClose: function () { svcOpen = false; svcBtn.textContent = '打开服务管理'; }
       });
