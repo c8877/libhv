@@ -2525,10 +2525,25 @@ std::string AgentApp::procsListJson(const nlohmann::json& rj) {
         }
     }
 
+    // 有 1s 以上的旧快照时，用两次快照的间隔算 CPU%，只采一次 /proc，
+    // 既不把本次扫描开销当成 agent 的高 CPU，也省掉 300ms 等待。
+    rtproc::Snapshot prev;
+    bool diff = false;
+    {
+        std::lock_guard<std::mutex> lk(proc_cache_mu_);
+        if (proc_cache_.ts && now_ms > proc_cache_.ts &&
+            now_ms - proc_cache_.ts >= 1000 && now_ms - proc_cache_.ts <= 35000) {
+            prev = proc_cache_;
+            diff = true;
+        }
+    }
+
     rtproc::Snapshot snap;
     std::string err;
     json out;
-    if (rtproc::sample(snap, err)) {
+    bool ok = diff ? rtproc::sample(snap, err, 0) : rtproc::sample(snap, err);
+    if (ok) {
+        if (diff) rtproc::diffCpu(snap, prev);
         out = rtproc::render(snap, opt, 0);
         {
             std::lock_guard<std::mutex> lk(proc_cache_mu_);

@@ -206,12 +206,14 @@ std::string lower(const std::string& s) {
 
 } // namespace
 
-bool sample(Snapshot& out, std::string& err) {
+bool sample(Snapshot& out, std::string& err, int window_ms) {
     using nlohmann::json;
     err.clear();
     out.rows = json::array();
     out.summary = json::object();
     out.ts = 0;
+    out.ticks.clear();
+    out.sample_ms = window_ms > 0 ? window_ms : 0;
 
     long hz = sysconf(_SC_CLK_TCK);
     if (hz <= 0) hz = 100;
@@ -263,14 +265,23 @@ bool sample(Snapshot& out, std::string& err) {
         rows.push_back(std::move(r));
     }
 
-    // 第二次采样算 CPU%
-    usleep(kSampleMs * 1000);
-    for (size_t i = 0; i < rows.size(); ++i) {
-        Stat s2;
-        if (!readStat(rows[i].st.pid, s2)) continue;
-        long long d = (s2.utime + s2.stime) - (rows[i].st.utime + rows[i].st.stime);
-        if (d < 0) d = 0;
-        rows[i].cpu = (double)d * 100.0 / (double)hz / ((double)kSampleMs / 1000.0);
+    for (const Row& r : rows) {
+        uint64_t cpu_ms = (uint64_t)((r.st.utime + r.st.stime) * 1000 / hz);
+        uint64_t started = boot_ms + (uint64_t)(r.st.starttime * 1000 / hz);
+        out.ticks[r.st.pid] = {cpu_ms, started};
+    }
+
+    // 第二次采样算 CPU%；window_ms == 0 时留给 diffCpu 用旧快照算
+    int win = window_ms > 0 ? window_ms : 0;
+    if (win > 0) {
+        usleep(win * 1000);
+        for (size_t i = 0; i < rows.size(); ++i) {
+            Stat s2;
+            if (!readStat(rows[i].st.pid, s2)) continue;
+            long long d = (s2.utime + s2.stime) - (rows[i].st.utime + rows[i].st.stime);
+            if (d < 0) d = 0;
+            rows[i].cpu = (double)d * 100.0 / (double)hz / ((double)win / 1000.0);
+        }
     }
 
     int running = 0, sleeping = 0, zombie = 0, stopped = 0, kernel = 0;
@@ -409,7 +420,7 @@ nlohmann::json render(const Snapshot& snap, const Options& opt, uint64_t age_ms)
 
     json out;
     out["ts"] = snap.ts;
-    out["sample_ms"] = kSampleMs;
+    out["sample_ms"] = snap.sample_ms;
     out["sort"] = sort;
     out["summary"] = std::move(summary);
     out["entries"] = std::move(entries);
@@ -421,6 +432,25 @@ nlohmann::json render(const Snapshot& snap, const Options& opt, uint64_t age_ms)
     out["cached"] = age_ms > 0;
     out["cache_age_ms"] = age_ms;
     return out;
+}
+
+void diffCpu(Snapshot& cur, const Snapshot& prev) {
+    if (!cur.ts || !prev.ts || cur.ts <= prev.ts) return;
+    double secs = (double)(cur.ts - prev.ts) / 1000.0;
+    if (secs <= 0) return;
+    for (auto& row : cur.rows) {
+        int pid = row.value("pid", 0);
+        double cpu = 0;
+        auto it = cur.ticks.find(pid);
+        auto pt = prev.ticks.find(pid);
+        if (it != cur.ticks.end() && pt != prev.ticks.end() &&
+            it->second.second == pt->second.second) {
+            long long d = (long long)it->second.first - (long long)pt->second.first;
+            if (d > 0) cpu = (double)d / 1000.0 / secs * 100.0;
+        }
+        row["cpu_pct"] = (double)((long long)(cpu * 10)) / 10.0;
+    }
+    cur.sample_ms = (int)(cur.ts - prev.ts);
 }
 
 nlohmann::json collect(const Options& opt, std::string& err) {
