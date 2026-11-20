@@ -166,6 +166,25 @@ void setNoCacheHeaders(HttpResponse* resp) {
 }
 
 // 浏览器 WS 会带 Origin；只允许与当前 Host 同源，避免跨站劫持。
+// 异步 JSON API 的统一响应：no-store + 可选 gzip。
+// 处理函数跑在 hv::async 线程池，进程双采样/IPC 采集阻塞不会卡住 HTTP 与 WebSocket。
+void sendJson(HttpRequest* req, const HttpResponseWriterPtr& writer, const std::string& body) {
+    writer->Begin();
+    writer->WriteHeader("Cache-Control", "no-store");
+    writer->WriteHeader("X-Content-Type-Options", "nosniff");
+    writer->WriteHeader("Vary", "Accept-Encoding");
+    writer->WriteHeader("Content-Type", "application/json");
+    if (body.size() > 2048 && acceptsGzip(req)) {
+        std::string gz;
+        if (gzipCompress(body, gz, 6)) {
+            writer->WriteHeader("Content-Encoding", "gzip");
+            writer->End(gz);
+            return;
+        }
+    }
+    writer->End(body);
+}
+
 bool sameOrigin(HttpRequest* req) {
     std::string origin = req->GetHeader("Origin");
     if (origin.empty()) return true;
@@ -247,6 +266,40 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
         }
         resp->body.swap(body);
         return 200;
+    });
+    service->GET("/api/v1/procs", [app](const HttpRequestPtr& req, const HttpResponseWriterPtr& writer) {
+        nlohmann::json q;
+        q["sort"] = req->GetParam("sort", "cpu");
+        q["q"] = req->GetParam("q");
+        q["kernel"] = req->GetParam("kernel", "0") == "1";
+        q["page"] = atoi(req->GetParam("page", "1").c_str());
+        q["page_size"] = atoi(req->GetParam("page_size", "10").c_str());
+        q["refresh"] = req->GetParam("refresh", "0") == "1";
+        sendJson(req.get(), writer, app->procsListJson(q));
+    });
+    service->GET("/api/v1/net", [app](const HttpRequestPtr& req, const HttpResponseWriterPtr& writer) {
+        nlohmann::json q;
+        q["scope"] = req->GetParam("scope", "all");
+        q["proc"] = req->GetParam("proc", "1") != "0";
+        q["page"] = atoi(req->GetParam("page", "1").c_str());
+        q["page_size"] = atoi(req->GetParam("page_size", "10").c_str());
+        q["q"] = req->GetParam("q");
+        q["listen"] = req->GetParam("listen", "0") == "1";
+        q["utype"] = req->GetParam("utype", "all");
+        q["ipc_kind"] = req->GetParam("ipc_kind", "shm");
+        q["refresh"] = req->GetParam("refresh", "0") == "1";
+        sendJson(req.get(), writer, app->netSnapshotJson(q));
+    });
+    service->GET("/api/v1/metrics", [app](const HttpRequestPtr& req, const HttpResponseWriterPtr& writer) {
+        std::string series = req->GetParam("series");
+        if (series.empty()) {
+            sendJson(req.get(), writer, "{\"error\":\"series required\"}");
+            return;
+        }
+        nlohmann::json q;
+        q["series"] = series;
+        q["since_ts"] = atoll(req->GetParam("since_ts", "0").c_str());
+        sendJson(req.get(), writer, app->metricPointsJson(q));
     });
     service->GET("/api/v1/health", [](HttpRequest*, HttpResponse* resp) {
         resp->content_type = APPLICATION_JSON;

@@ -104,6 +104,12 @@ public:
     void refreshWebSnapshot();
     std::string webSnapshot();
 
+    // 本地页与 relay 共用的同步查询；会阻塞（双采样 / fork lsipc），
+    // 必须在工作线程调用，不能跑在 loop 上。
+    std::string procsListJson(const nlohmann::json& req);
+    std::string netSnapshotJson(const nlohmann::json& req);
+    std::string metricPointsJson(const nlohmann::json& q);
+
 protected:
     uint8_t role() const override { return rtnp::ROLE_AGENT; }
     const char* identity() const override { return devid; }
@@ -185,6 +191,7 @@ private:
         int points = 720;
     };
     std::map<std::string, SeriesCfg> series_cfgs;
+    std::mutex series_mu_; // loop 写 ring，本地页 HTTP 线程读
     std::map<std::string, std::deque<std::string>> series_rings;
     std::map<std::string, long long> series_last_ms;
     int series_revision = 0;

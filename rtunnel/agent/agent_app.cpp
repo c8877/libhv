@@ -1895,6 +1895,7 @@ void AgentApp::sampleSeries(const std::string& name, const SeriesCfg& cfg) {
         return;
     }
     std::string line = j.dump();
+    std::lock_guard<std::mutex> lk(series_mu_);
     auto& ring = series_rings[name];
     ring.push_back(line);
     while ((int)ring.size() > cfg.points) ring.pop_front();
@@ -2336,17 +2337,44 @@ void asyncPostCb(hevent_t* ev) {
 
 } // namespace
 
-void AgentApp::handleNetReq(const rtnp::Frame* f) {
+// 指标点查询：relay 的 METRICS_QUERY 与本地页 /api/v1/metrics 共用。
+// ring 在 loop 线程写、HTTP 线程读，用 series_mu_ 保护。
+std::string AgentApp::metricPointsJson(const nlohmann::json& q) {
     using nlohmann::json;
-    uint32_t sid = f->sid;
-    std::string req;
-    if (f->len) {
-        rtnp::Reader r(f->payload, f->len);
-        req = r.strBytes();
+    std::string name = q.value("series", "");
+    long long since = q.value("since_ts", (long long)0);
+    long long oldest = 0, newest = 0;
+    json pts = json::array();
+    bool truncated = false;
+    {
+        std::lock_guard<std::mutex> lk(series_mu_);
+        auto it = series_rings.find(name);
+        if (it != series_rings.end()) {
+            for (auto& line : it->second) {
+                auto p = json::parse(line, nullptr, false);
+                if (p.is_discarded()) continue;
+                long long ts = p.value("ts", (long long)0);
+                if (!oldest) oldest = ts;
+                newest = ts;
+                if (since > 0 && ts <= since) continue;
+                if (since > 0 && oldest > since && ts == oldest) truncated = true;
+                pts.push_back(p);
+            }
+        }
     }
-    json rj = json::parse(req, nullptr, false);
-    if (rj.is_discarded() || !rj.is_object()) rj = json::object();
+    json out;
+    out["series"] = name;
+    out["oldest_ts"] = oldest;
+    out["newest_ts"] = newest;
+    out["truncated"] = truncated;
+    out["points"] = std::move(pts);
+    return out.dump();
+}
 
+// 同步采集一帧网络快照。relay 的 NET_REQ 与本地页 /api/v1/net 共用，
+// 会 fork lsipc，调用方必须放在工作线程。
+std::string AgentApp::netSnapshotJson(const nlohmann::json& rj) {
+    using nlohmann::json;
     rtnet::Options opt;
     opt.scope = rj.value("scope", std::string("all"));
     if (!rtnet::scopeValid(opt.scope)) opt.scope = "all";
@@ -2360,20 +2388,6 @@ void AgentApp::handleNetReq(const rtnp::Frame* f) {
     bool refresh = rj.value("refresh", false);
     bool want_ipc = (opt.scope == "ipc" || opt.scope == "all");
 
-    // 采集要扫 /proc 与 fork lsipc，最多允许 3 个并发，其余直接拒绝
-    if (net_inflight_.fetch_add(1) > 2) {
-        net_inflight_.fetch_sub(1);
-        json e;
-        e["error"] = "busy";
-        e["scope"] = opt.scope;
-        e["summary"] = {{"tcp", -1}, {"udp", -1}, {"unix", -1}, {"ipc", -1}};
-        std::string body = e.dump();
-        rtnp::Writer w;
-        w.str(body.c_str());
-        rtnp::send(io, rtnp::NET_INFO, sid, w.data, (uint16_t)w.len);
-        return;
-    }
-
     // IPC 采集要 fork 三次，30s 内复用上次结果；tcp/udp/unix 每次都实时读
     json cached;
     bool fresh = false;
@@ -2386,24 +2400,53 @@ void AgentApp::handleNetReq(const rtnp::Frame* f) {
     }
     opt.with_ipc = want_ipc && !fresh;
 
-    hloop_t* lp = loop;
-    std::thread([this, sid, opt, cached, fresh, lp]() {
-        std::string err;
-        nlohmann::json out = rtnet::collect(opt, err);
-        if (!err.empty()) out["error"] = err;
-        if (out.contains("ipc")) {
-            nlohmann::json full = out["ipc"];
-            {
-                std::lock_guard<std::mutex> lk(net_mu_);
-                net_ipc_cache_ = full;
-                net_ipc_ts_ = wallMs();
-            }
-            out["ipc"] = rtnet::pageIpc(full, opt);
-        } else if (fresh) {
-            out["ipc"] = rtnet::pageIpc(cached, opt);
-            if (out.contains("summary")) out["summary"]["ipc"] = cached.value("total", 0);
+    std::string err;
+    json out = rtnet::collect(opt, err);
+    if (!err.empty()) out["error"] = err;
+    if (out.contains("ipc")) {
+        json full = out["ipc"];
+        {
+            std::lock_guard<std::mutex> lk(net_mu_);
+            net_ipc_cache_ = full;
+            net_ipc_ts_ = wallMs();
         }
-        std::string body = out.dump();
+        out["ipc"] = rtnet::pageIpc(full, opt);
+    }
+    else if (fresh) {
+        out["ipc"] = rtnet::pageIpc(cached, opt);
+        if (out.contains("summary")) out["summary"]["ipc"] = cached.value("total", 0);
+    }
+    return out.dump();
+}
+
+void AgentApp::handleNetReq(const rtnp::Frame* f) {
+    using nlohmann::json;
+    uint32_t sid = f->sid;
+    std::string req;
+    if (f->len) {
+        rtnp::Reader r(f->payload, f->len);
+        req = r.strBytes();
+    }
+    json rj = json::parse(req, nullptr, false);
+    if (rj.is_discarded() || !rj.is_object()) rj = json::object();
+
+    // 采集要扫 /proc 与 fork lsipc，最多允许 3 个并发，其余直接拒绝
+    if (net_inflight_.fetch_add(1) > 2) {
+        net_inflight_.fetch_sub(1);
+        json e;
+        e["error"] = "busy";
+        e["scope"] = rj.value("scope", std::string("all"));
+        e["summary"] = {{"tcp", -1}, {"udp", -1}, {"unix", -1}, {"ipc", -1}};
+        std::string body = e.dump();
+        rtnp::Writer w;
+        w.str(body.c_str());
+        rtnp::send(io, rtnp::NET_INFO, sid, w.data, (uint16_t)w.len);
+        return;
+    }
+
+    hloop_t* lp = loop;
+    std::thread([this, sid, rj, lp]() {
+        std::string body = netSnapshotJson(rj);
         AsyncPost* t = new AsyncPost;
         memset(&t->ev, 0, sizeof t->ev);
         t->ev.cb = asyncPostCb;
@@ -2411,10 +2454,60 @@ void AgentApp::handleNetReq(const rtnp::Frame* f) {
         t->app = this;
         t->type = rtnp::NET_INFO;
         t->sid = sid;
-        t->body = body;
+        t->body = std::move(body);
         hloop_post_event(lp, &t->ev);
         net_inflight_.fetch_sub(1);
     }).detach();
+}
+
+// 同步取一页进程列表。relay 的 PROC_REQ 与本地页 /api/v1/procs 共用，
+// 缓存未命中时要双采样 300ms，调用方必须放在工作线程。
+std::string AgentApp::procsListJson(const nlohmann::json& rj) {
+    using nlohmann::json;
+    rtproc::Options opt;
+    opt.sort = rj.value("sort", std::string("cpu"));
+    opt.q = rj.value("q", std::string());
+    opt.kernel = rj.value("kernel", false);
+    opt.page = rj.value("page", 1);
+    opt.page_size = rj.value("page_size", 10);
+    bool force = rj.value("refresh", false); // 自动刷新/手动刷新要求重新采样
+
+    // 预热缓存命中：用已有采样渲染，省掉 300ms 双采样
+    uint64_t now_ms = wallMs();
+    if (!force) {
+        rtproc::Snapshot snap;
+        bool hit = false;
+        {
+            std::lock_guard<std::mutex> lk(proc_cache_mu_);
+            if (proc_cache_.ts && now_ms >= proc_cache_.ts && now_ms - proc_cache_.ts <= 35000) {
+                snap = proc_cache_;
+                hit = true;
+            }
+        }
+        if (hit) {
+            json out = rtproc::render(snap, opt, now_ms - snap.ts);
+            out["op"] = "list";
+            return out.dump();
+        }
+    }
+
+    rtproc::Snapshot snap;
+    std::string err;
+    json out;
+    if (rtproc::sample(snap, err)) {
+        out = rtproc::render(snap, opt, 0);
+        {
+            std::lock_guard<std::mutex> lk(proc_cache_mu_);
+            proc_cache_ = std::move(snap);
+        }
+        warm_next_ms_.store(wallMs() + 30000);
+    }
+    else {
+        out = json::object();
+        out["error"] = err;
+    }
+    out["op"] = "list";
+    return out.dump();
 }
 
 void AgentApp::handleProcReq(const rtnp::Frame* f) {
@@ -2429,7 +2522,7 @@ void AgentApp::handleProcReq(const rtnp::Frame* f) {
     if (rj.is_discarded() || !rj.is_object()) rj = json::object();
     std::string op = rj.value("op", std::string("list"));
 
-    // 信号操作很快，直接在 loop 里做；列表要两次采样，放后台线程
+    // 信号与详情很快，直接在 loop 里做；列表要两次采样，放后台线程
     if (op == "signal") {
         int pid = rj.value("pid", 0);
         int sig = rj.value("signal", SIGTERM);
@@ -2461,37 +2554,6 @@ void AgentApp::handleProcReq(const rtnp::Frame* f) {
         return;
     }
 
-    rtproc::Options opt;
-    opt.sort = rj.value("sort", std::string("cpu"));
-    opt.q = rj.value("q", std::string());
-    opt.kernel = rj.value("kernel", false);
-    opt.page = rj.value("page", 1);
-    opt.page_size = rj.value("page_size", 10);
-    bool force = rj.value("refresh", false); // 自动刷新/手动刷新要求重新采样
-
-    // 预热缓存命中：用已有采样渲染，省掉 300ms 双采样
-    uint64_t now_ms = wallMs();
-    if (!force) {
-        rtproc::Snapshot snap;
-        bool hit = false;
-        {
-            std::lock_guard<std::mutex> lk(proc_cache_mu_);
-            if (proc_cache_.ts && now_ms >= proc_cache_.ts && now_ms - proc_cache_.ts <= 35000) {
-                snap = proc_cache_;
-                hit = true;
-            }
-        }
-        if (hit) {
-            json out = rtproc::render(snap, opt, now_ms - snap.ts);
-            out["op"] = "list";
-            std::string body = out.dump();
-            rtnp::Writer w;
-            w.str(body.c_str());
-            rtnp::send(io, rtnp::PROC_INFO, sid, w.data, (uint16_t)w.len);
-            return;
-        }
-    }
-
     if (proc_inflight_.fetch_add(1) > 2) {
         proc_inflight_.fetch_sub(1);
         json e;
@@ -2505,23 +2567,8 @@ void AgentApp::handleProcReq(const rtnp::Frame* f) {
     }
 
     hloop_t* lp = loop;
-    std::thread([this, sid, opt, lp]() {
-        rtproc::Snapshot snap;
-        std::string err;
-        nlohmann::json out;
-        if (rtproc::sample(snap, err)) {
-            out = rtproc::render(snap, opt, 0);
-            {
-                std::lock_guard<std::mutex> lk(proc_cache_mu_);
-                proc_cache_ = std::move(snap);
-            }
-            warm_next_ms_.store(wallMs() + 30000);
-        } else {
-            out = nlohmann::json::object();
-            out["error"] = err;
-        }
-        out["op"] = "list";
-        std::string body = out.dump();
+    std::thread([this, sid, rj, lp]() {
+        std::string body = procsListJson(rj);
         AsyncPost* t = new AsyncPost;
         memset(&t->ev, 0, sizeof t->ev);
         t->ev.cb = asyncPostCb;
@@ -2529,7 +2576,7 @@ void AgentApp::handleProcReq(const rtnp::Frame* f) {
         t->app = this;
         t->type = rtnp::PROC_INFO;
         t->sid = sid;
-        t->body = body;
+        t->body = std::move(body);
         hloop_post_event(lp, &t->ev);
         proc_inflight_.fetch_sub(1);
     }).detach();
@@ -2693,9 +2740,12 @@ void AgentApp::onFrame(rtnp::Frame* f) {
             if (c.points < 60) c.points = 60;
             if (c.points > 86400) c.points = 86400;
             series_cfgs[name] = c;
-            auto it = series_rings.find(name);
-            if (it != series_rings.end()) {
-                while ((int)it->second.size() > c.points) it->second.pop_front();
+            {
+                std::lock_guard<std::mutex> lk(series_mu_);
+                auto it = series_rings.find(name);
+                if (it != series_rings.end()) {
+                    while ((int)it->second.size() > c.points) it->second.pop_front();
+                }
             }
         }
         // 采样配置属于能力配置，改完立即落盘，重启后仍生效
@@ -2718,30 +2768,8 @@ void AgentApp::onFrame(rtnp::Frame* f) {
         if (qr.err) return;
         auto q = nlohmann::json::parse(qb, nullptr, false);
         if (q.is_discarded() || !q.is_object()) return;
-        std::string name = q.value("series", "");
-        long long since = q.value("since_ts", (long long)0);
-        auto& ring = series_rings[name];
-        long long oldest = 0, newest = 0;
-        nlohmann::json pts = nlohmann::json::array();
-        bool truncated = false;
-        for (auto& line : ring) {
-            auto p = nlohmann::json::parse(line, nullptr, false);
-            if (p.is_discarded()) continue;
-            long long ts = p.value("ts", (long long)0);
-            if (!oldest) oldest = ts;
-            newest = ts;
-            if (since > 0 && ts <= since) continue;
-            if (since > 0 && oldest > since && ts == oldest) truncated = true;
-            pts.push_back(p);
-        }
-        nlohmann::json out;
-        out["series"] = name;
-        out["oldest_ts"] = oldest;
-        out["newest_ts"] = newest;
-        out["truncated"] = truncated;
-        out["points"] = pts;
-        std::string os = out.dump();
-        if (since == 0) {
+        std::string os = metricPointsJson(q);
+        if (q.value("since_ts", (long long)0) == 0) {
             std::string gz;
             if (gzipCompress(os, gz))
                 os = std::string(1, '\1') + gz;

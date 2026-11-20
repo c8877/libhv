@@ -517,12 +517,18 @@ http://B:9443/device/<devid>/<port>/<path>
 
 - `--local-web [ADDR:]PORT`：`8080` / `127.0.0.1:8080` 只监听本机；
   `:8080` / `0.0.0.0:8080` 监听所有网卡（页面会暴露设备型号、IP、串口等只读信息）
-- 页面内容与管理台设备详情同源：连接状态、CPU/内存/负载曲线、存储、网卡、
-  系统信息、能力配置、mTLS 证书、串口 TTY；每 2 秒刷新
-- HTTP 只读接口：`GET /`、`GET /api/v1/sysinfo`、`GET /api/v1/health`；
-  文件管理走 `GET /ws/fs`（WebSocket，见下节）
-- 响应支持 gzip 协商（`Accept-Encoding: gzip`），HTML 与 JSON 都会压缩，并带 `Vary: Accept-Encoding`
-- 数据由 agent 主循环采集并缓存，HTTP 线程只读快照，不直接访问隧道状态
+- 页面内容与管理台设备详情同源：单层 tab（概览 / 存储 / 文件 / 服务 / 进程 /
+  网络 / 监控 / 串口 / 能力），概览含 CPU/内存/负载/网络 KPI、趋势、存储、
+  网卡、系统信息与 mTLS 证书；非活动 tab 不请求数据，首次进入才加载
+- HTTP 接口：`GET /`、`GET /api/v1/sysinfo`、`GET /api/v1/procs`、
+  `GET /api/v1/net`、`GET /api/v1/metrics`、`GET /api/v1/health`；
+  文件与服务管理走 `GET /ws/fs`、`GET /ws/svc`（WebSocket，见下节）
+- `procs` / `net` / `metrics` 与 relay 的 `PROC_REQ`、`NET_REQ`、`METRICS_QUERY`
+  共用同一份查询实现：进程双采样、IPC 采集、指标 ring 读取都带缓存与并发上限；
+  HTTP 处理函数在 `hv::async` 线程池执行，不阻塞 IO 线程和 WebSocket
+- 响应支持 gzip 协商（`Accept-Encoding: gzip`），HTML、sysinfo 与较大的 JSON 都会压缩，
+  并带 `Vary: Accept-Encoding`
+- 数据由 agent 主循环采集并缓存，HTTP 线程只读快照或调用带锁的共享查询，不直接访问隧道状态
 - 两个构建变体：`rtunnel-agent`（带 Web）与 `rtunnel-agent-noweb`（纯隧道，体积更小）。
   两者共用一个 `rtunnel-agent.service`，变体只由 `bin/rtunnel-agent` 软链指向哪个版本决定；
   带 Web 的构建默认监听 `127.0.0.1:8080`，可在 `rtunnel-agent.json` 用
