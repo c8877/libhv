@@ -61,7 +61,10 @@ select{padding-right:6px}
 .bar i{display:block;height:100%;border-radius:999px;background:var(--brand);transition:width .35s}
 .bar i.warn{background:var(--warn)}.bar i.bad{background:var(--bad)}
 .grid-main{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(0,1fr);gap:12px;margin-bottom:12px;align-items:start}
-.grid2{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:12px;align-items:start}
+.grid2{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:12px;align-items:stretch}
+.nic-card{display:flex;flex-direction:column}
+.nic-card #ovNics{flex:1}
+.nic-card .more{margin-top:10px;align-self:flex-start;padding:0;font-size:12px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow);min-width:0}
 .panel-head{display:flex;align-items:center;gap:10px;min-height:24px;margin-bottom:8px}
 h2{font-size:14px;margin:0;font-weight:650}
@@ -89,6 +92,7 @@ h2{font-size:14px;margin:0;font-weight:650}
 .nic .nm{font-family:ui-monospace,Menlo,monospace;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}
 .nic .ip{text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
 .nic .io{grid-column:1/-1;color:var(--muted);font-variant-numeric:tabular-nums}
+.nic .meta{grid-column:1/-1;color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .emptyp{color:var(--muted);font-size:12px;padding:14px 0}
 .table-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse}
@@ -217,9 +221,10 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
           <div class="panel-head"><h2>存储</h2><span class="hint" id="ovDiskHint"></span><button class="link" type="button" data-go="storage">全部 →</button></div>
           <div id="ovDisks"></div>
         </div>
-        <div class="panel">
+        <div class="panel nic-card">
           <div class="panel-head"><h2>网卡</h2><span class="hint" id="nicHint"></span></div>
           <div id="ovNics"></div>
+          <button class="link more" type="button" data-go="net">查看网络详情 →</button>
         </div>
       </div>
     </section>
@@ -489,7 +494,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     var kpis = [
       { k: 'CPU 使用率', v: toNum(d.cpu_usage).toFixed(1) + '<small>%</small>', s: toNum(d.cpu_count) + ' 核', p: toNum(d.cpu_usage) },
       { k: '内存', v: mp.toFixed(1) + '<small>%</small>', s: fmtKB(Math.max(0, total - avail)) + ' / ' + fmtKB(total), p: mp },
-      { k: '负载', v: la.length ? toNum(la[0]).toFixed(2) : '—', s: la.length ? toNum(la[1]).toFixed(2) + ' / ' + toNum(la[2]).toFixed(2) : '—', sm: true },
+      { k: '负载', v: la.length ? la.slice(0, 3).map(function (x) { return toNum(x).toFixed(2); }).join(' / ') : '—', s: '1 / 5 / 15 分钟', sm: true },
       { k: '网络', v: '↓ ' + fmtBytesShort(rx) + ' · ↑ ' + fmtBytesShort(tx), s: nics.length + ' / ' + upCount + ' 已连接', sm: true }
     ];
     $('#kpis').innerHTML = kpis.map(function (c) {
@@ -513,10 +518,16 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     $('#ovNics').innerHTML = ovNics.length
       ? ovNics.map(function (n) {
           var p = n.up ? 'ok' : 'bad';
+          var meta = [];
+          if (n.mac) meta.push('MAC ' + n.mac);
+          if (toNum(n.mtu)) meta.push('MTU ' + toNum(n.mtu));
+          if (toNum(n.speed_mbps)) meta.push(toNum(n.speed_mbps) + 'M');
+          meta.push('错误 ' + (toNum(n.rx_errors) + toNum(n.tx_errors)));
           return '<div class="nic"><span class="nm" title="' + esc(n.name) + '">' + esc(n.name) + '</span>' +
             '<span class="tag ' + p + '">' + esc(n.operstate || (n.up ? 'up' : 'down')) + '</span>' +
             '<span class="ip mono">' + esc(n.ip || '—') + '</span>' +
-            '<span class="io">↓ ' + fmtBytes(n.rx_bytes) + ' · ↑ ' + fmtBytes(n.tx_bytes) + '</span></div>';
+            '<span class="io">↓ ' + fmtBytes(n.rx_bytes) + ' · ↑ ' + fmtBytes(n.tx_bytes) + '</span>' +
+            '<span class="meta mono">' + esc(meta.join(' · ')) + '</span></div>';
         }).join('')
       : '<div class="emptyp">暂无网卡信息</div>';
     $('#nicHint').textContent = nics.length
