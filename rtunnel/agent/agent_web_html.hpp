@@ -413,7 +413,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     var n = toNum(b), u = ['B', 'KB', 'MB', 'GB', 'TB'], i = 0;
     if (n <= 0) return '0 B';
     while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-    return (i === 0 ? n.toFixed(0) : n.toFixed(n >= 100 ? 0 : 1)) + ' ' + u[i];
+    return (i === 0 ? n.toFixed(0) : n.toFixed(n >= 100 ? 0 : n >= 10 ? 1 : 2)) + ' ' + u[i];
   }
   function fmtKB(kb) { return fmtBytes(toNum(kb) * 1024); }
   function fmtBytesShort(b) { return fmtBytes(b).replace(' ', ''); }
@@ -474,7 +474,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     }
     if (name !== 'proc') stopProcAuto();
     if (name !== 'monitor') stopMonAuto();
-    if (name === 'overview') { setTimeout(drawChart, 0); ensureOvProcs(); }
+    if (name === 'overview') { setTimeout(drawChart, 0); ensureOvProcs(); seedOvHist(); }
     else if (name === 'file') ensureFs();
     else if (name === 'service') ensureSvc();
     else if (name === 'proc') ensureProc();
@@ -527,6 +527,42 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     $('#ovMemVal').textContent = Math.round(mp);
   }
 
+  // 概览曲线默认只有本次打开后的历史；从 agent 的采样环补最近 2 分钟，
+  // 刷新页面后也能立刻看到与管理台一致的走势。取不到就退回实时累积。
+  var ovHistSeeded = false;
+  function seedOvHist() {
+    if (ovHistSeeded) return;
+    ovHistSeeded = true;
+    var base = Date.now() - 125000;
+    var got = {};
+    Promise.all(['cpu', 'mem'].map(function (n) {
+      return fetch('api/v1/metrics?series=' + n + '&since_ts=' + base, { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { got[n] = (d && d.points) || []; })
+        .catch(function () { got[n] = []; });
+    })).then(function () {
+      var byTs = {};
+      ['cpu', 'mem'].forEach(function (n) {
+        got[n].forEach(function (p) {
+          var t = toNum(p.ts), v = toNum(p.v);
+          if (!t) return;
+          if (!byTs[t]) byTs[t] = {};
+          byTs[t][n] = Math.max(0, Math.min(100, v));
+        });
+      });
+      var ts = Object.keys(byTs).map(Number).sort(function (a, b) { return a - b; }).slice(-60);
+      var hist = [];
+      ts.forEach(function (t) {
+        var o = byTs[t];
+        if (o.cpu == null || o.mem == null) return;
+        hist.push({ cpu: o.cpu, mem: o.mem });
+      });
+      if (hist.length <= state.hist.length) return;
+      state.hist = hist;
+      drawChart();
+    });
+  }
+
   // 负载卡要显示进程/线程数，按 15s 节流拉一次进程摘要
   function ensureOvProcs() {
     if (state.ovProcLoading) return;
@@ -545,10 +581,22 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
       .then(function () { state.ovProcLoading = false; });
   }
 
+  // 与管理台 kbPair 一致：两个数值共用最大单位，避免 679 MB / 946 MB 这类长文本
+  function kbPair(usedKb, totalKb) {
+    var k = toNum(totalKb), unit = 'K', div = 1;
+    if (k >= 100 * 1024) { unit = 'G'; div = 1024 * 1024; }
+    else if (k >= 1024) { unit = 'M'; div = 1024; }
+    function f(v) {
+      var n = toNum(v) / div;
+      return Math.abs(n) >= 10 ? n.toFixed(1) : n.toFixed(2);
+    }
+    return { used: f(usedKb), total: f(totalKb), unit: unit };
+  }
+
   function diskCompact(m) {
-    var used = toNum(m.used_kb), total = toNum(m.total_kb), p = diskPct(m), cls = tone(p);
+    var pair = kbPair(m.used_kb, m.total_kb), p = diskPct(m), cls = tone(p);
     return '<div class="odisk"><div class="odisk-top"><span class="mono">' + esc(m.mount) + '</span>' +
-      '<span class="muted">' + fmtKB(used) + ' / ' + fmtKB(total) + '</span>' +
+      '<span class="muted">' + pair.used + ' / ' + pair.total + ' ' + pair.unit + '</span>' +
       '<span class="pct ' + cls + '">' + p + '%</span></div>' +
       '<div class="bar slim"><i class="' + cls + '" style="width:' + p + '%"></i></div></div>';
   }
