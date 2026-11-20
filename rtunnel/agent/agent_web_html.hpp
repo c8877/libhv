@@ -822,6 +822,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
   var IPC_KINDS = [['shm', '共享内存'], ['msg', '消息队列'], ['sem', '信号量'], ['posix', 'POSIX']];
   var NET_PER = [10, 20, 50];
   var netSeq = 0;
+  var ipcTried = null; // 默认共享内存为空时，依次试探其它 IPC 类型
 
   function netCount(scope) {
     if (scope === 'nic') return state.data && state.data.nics ? state.data.nics.length : 0;
@@ -844,6 +845,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     if (state.net.scope === scope) return;
     state.net.scope = scope;
     state.net.page = 1;
+    ipcTried = null;
     state.net.q = '';
     state.net.listen = false;
     $('#netQ').value = '';
@@ -870,6 +872,32 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
         state.net.counts = d.summary;
         renderNetTabs();
       }).catch(function () {});
+  }
+
+  function syncIpcKind() {
+    $$('#ipcKinds button').forEach(function (x) {
+      x.classList.toggle('on', x.getAttribute('data-kind') === state.net.ipcKind);
+    });
+  }
+
+  // 设备可能只有 POSIX 共享内存（/dev/shm），SysV 三类全空。
+  // 当前类型没有条目但总数大于 0 时，自动换到下一种，避免默认页显示空表。
+  function tryNextIpcKind(ipc, list, kind) {
+    if (list.length || !toNum(ipc.total)) return false;
+    if (!ipcTried) ipcTried = {};
+    ipcTried[kind] = true;
+    for (var i = 0; i < IPC_KINDS.length; i++) {
+      var k = IPC_KINDS[i][0];
+      if (!ipcTried[k]) {
+        ipcTried[k] = true;
+        state.net.ipcKind = k;
+        state.net.page = 1;
+        syncIpcKind();
+        loadNet(false);
+        return true;
+      }
+    }
+    return false;
   }
 
   function loadNet(fresh) {
@@ -974,6 +1002,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
       pageData = ipc;
       var kind = ipc.kind || state.net.ipcKind;
       var list = ipc[kind] || [];
+      if (tryNextIpcKind(ipc, list, kind)) return;
       var heads = {
         shm: ['键', 'ID', '权限', '大小', '连接', '属主', '进程'],
         msg: ['键', 'ID', '权限', '已用', '消息', '属主'],
@@ -1323,6 +1352,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     loadNet(false);
   });
   $('#netRefresh').addEventListener('click', function () {
+    ipcTried = null;
     if (state.net.scope === 'nic') renderNicTable();
     else loadNet(true);
   });
@@ -1330,7 +1360,8 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     b.addEventListener('click', function () {
       state.net.ipcKind = b.getAttribute('data-kind');
       state.net.page = 1;
-      $$('#ipcKinds button').forEach(function (x) { x.classList.toggle('on', x === b); });
+      ipcTried = null;
+      syncIpcKind();
       loadNet(false);
     });
   });
