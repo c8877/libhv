@@ -577,6 +577,7 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
     auto* s = new LocalStream{};
     s->app = this;
     s->sid = f->sid;
+    s->target_port = port;
     had_stream = 1;
     s->credit = rtnp::DEFAULT_CREDIT;
     s->opened_ms = wallMs();
@@ -2108,9 +2109,17 @@ nlohmann::json AgentApp::buildSysinfo() {
         j["nics"] = nics;
     }
     {
+        // 通过 relay 的 /device/<devid>/10080/ 打开本页时，代理自身会占一条
+        // 到本地 Web 端口的 TCP 流；它不是用户会话，不能出现在卡片里。
+        int self_web_port = 0;
+        {
+            size_t p = web_listen.rfind(':');
+            if (p != std::string::npos) self_web_port = atoi(web_listen.c_str() + p + 1);
+        }
         json arr = json::array();
         for (LocalStream* s = streams; s; s = s->next) {
             if (s->freed) continue;
+            if (self_web_port && s->target_port == self_web_port) continue;
             const char* kind = s->is_fs ? "fs"
                              : s->is_svc ? "svc"
                              : s->is_shell ? "shell"

@@ -34,6 +34,7 @@ struct LocalStream {
     AgentApp* app = nullptr;
     uint32_t sid = 0;
     uint64_t opened_ms = 0; // 会话建立时间，本地页「会话」卡片用
+    int target_port = 0;     // 端口转发流的目标端口（本地页会话过滤用）
     hio_t* local = nullptr;
     int connected = 0;
     int local_eof = 0;
