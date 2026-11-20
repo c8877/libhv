@@ -1276,8 +1276,6 @@ const loadEl = ref(null)
 const rateEl = ref(null)
 const charts = {}
 
-const mainTab = ref('overview')
-const monitorView = ref('series')
 const MAIN_TABS = [
   { name: 'overview', label: '概览' },
   { name: 'storage', label: '存储' },
@@ -1289,6 +1287,13 @@ const MAIN_TABS = [
   { name: 'tty', label: '串口' },
   { name: 'caps', label: '能力' },
 ]
+const TAB_NAMES = new Set(MAIN_TABS.map((t) => t.name))
+function tabFromRoute() {
+  const t = route.query.tab
+  return typeof t === 'string' && TAB_NAMES.has(t) ? t : 'overview'
+}
+const mainTab = ref(tabFromRoute())
+const monitorView = ref('series')
 const NET_TABS = [
   { name: 'nic', label: '网卡' },
   { name: 'tcp', label: 'TCP' },
@@ -1894,12 +1899,19 @@ function scrollPageTop() {
   if (el && el.scrollTop > 0) el.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
-function switchMainTab(name) {
-  if (mainTab.value === name) return
+function prepareTab(name) {
   if (isFeatTab(name)) loadedTabs.feat = true
   else if (name === 'net') loadedTabs.net = true
   else if (name === 'monitor') loadedTabs.monitor = true
   else if (name === 'tty') loadedTabs.tty = true
+  if (isFeatTab(name)) featTab.value = name
+  if (name === 'monitor') obsTab.value = monitorView.value === 'metric' ? 'metric' : 'series'
+  if (name === 'tty') obsTab.value = 'tty'
+}
+
+function applyTab(name) {
+  if (mainTab.value === name) return
+  prepareTab(name)
   mainTab.value = name
   scrollPageTop()
   stopProcTimer()
@@ -1909,7 +1921,6 @@ function switchMainTab(name) {
     return
   }
   if (isFeatTab(name)) {
-    featTab.value = name
     onFeatTab(name)
     return
   }
@@ -1920,14 +1931,38 @@ function switchMainTab(name) {
     return
   }
   if (name === 'monitor') {
-    obsTab.value = monitorView.value === 'metric' ? 'metric' : 'series'
     if (obsTab.value === 'series') refreshSeriesView()
     return
   }
-  if (name === 'tty') {
-    obsTab.value = 'tty'
-    loadTtys()
+  if (name === 'tty') loadTtys()
+}
+
+function afterInitialLoad(name) {
+  if (isFeatTab(name)) {
+    if (name === 'proc') startProcTimer()
+    else if (name === 'caps') {
+      if (sys.value) fillCapsFromSys()
+      loadDicts()
+      loadTtys()
+    }
+    return
   }
+  if (name === 'net') loadNetCounts()
+  else if (name === 'monitor') refreshSeriesView()
+  else if (name === 'tty') loadTtys()
+}
+
+function switchMainTab(name) {
+  if (mainTab.value === name) return
+  const query = { ...route.query }
+  if (name === 'overview') delete query.tab
+  else query.tab = name
+  // 正常情况下由路由 watcher 应用；URL 已经是目标值时直接应用
+  if ((route.query.tab || 'overview') === name) {
+    applyTab(name)
+    return
+  }
+  router.push({ path: route.path, query }).catch(() => {})
 }
 
 function setMonitorView(v) {
@@ -2898,6 +2933,7 @@ function stopTimer() {
 async function init() {
   stopTimer()
   stopSample()
+  const startTab = tabFromRoute()
   auto.value = false
   sampleAuto.value = false
   detail.value = null
@@ -2919,7 +2955,7 @@ async function init() {
   metricPage.value = 1
   metricPer.value = 10
   addMetricOpen.value = false
-  mainTab.value = 'overview'
+  mainTab.value = startTab
   monitorView.value = 'series'
   loadedTabs.feat = false
   loadedTabs.net = false
@@ -2927,6 +2963,7 @@ async function init() {
   loadedTabs.tty = false
   featTab.value = 'storage'
   obsTab.value = 'series'
+  prepareTab(startTab)
   procs.value = null
   procErr.value = ''
   procTs.value = 0
@@ -2967,9 +3004,20 @@ async function init() {
   await fetchSeriesCfg()
   pickSeries()
   await loadAll()
+  // 加载期间 URL 可能被前进/后退改到别的 tab，以最新 URL 为准
+  const currentTab = tabFromRoute()
+  if (currentTab !== startTab) applyTab(currentTab)
+  else afterInitialLoad(startTab)
 }
 
-watch(() => route.params.devid, (v) => { if (v) init() })
+watch([() => route.params.devid, () => route.query.tab], ([dev], [oldDev]) => {
+  if (dev !== oldDev) {
+    if (dev) init()
+    return
+  }
+  const name = tabFromRoute()
+  if (name !== mainTab.value) applyTab(name)
+})
 watch([selected, isPhone, () => enabledCfg.value.length], () => nextTick(measureSeries), { deep: true })
 
 function onProcKeydown(e) {

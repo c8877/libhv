@@ -272,6 +272,7 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
 
 - 单层 tab：概览 / 存储 / 文件 / 服务 / 进程 / 网络 / 监控 / 串口 / 能力；
   非活动 tab 不挂载、不请求，首次进入才加载，之后保留状态
+- 一级 tab 同步到 URL 的 `?tab=`，刷新后保持当前 tab；浏览器前进/后退可切换 tab
 - 概览：CPU/内存/负载/网络累计流量四个 KPI、CPU/内存趋势、存储用量、网卡、
   会话、系统信息与 mTLS 证书状态
 - 顶部摘要条展示设备名、agent 版本、连接信息、流量与采集时间，和一级 tab 一起吸顶
