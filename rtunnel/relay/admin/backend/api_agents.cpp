@@ -50,8 +50,6 @@ void AdminServer::handleAgents(const HttpContextPtr& ctx) {
                 j["caps_arch"] = relay_->agentArch(c->devid);
                 j["caps_ports"] = relay_->agentPorts(c->devid);
                 j["caps_local_web"] = relay_->agentLocalWeb(c->devid);
-        j["caps_net"] = relay_->agentNetCap(c->devid);
-        j["caps_proc"] = relay_->agentProcCap(c->devid);
                 j["caps_net"] = relay_->agentNetCap(c->devid);
                 j["caps_proc"] = relay_->agentProcCap(c->devid);
                 auto vt = relay_->agent_versions.find(c->devid);
@@ -98,6 +96,8 @@ void AdminServer::handleAgentDetail(const HttpContextPtr& ctx) {
         j["boot_ms"] = relay_->agentBootMs(c->devid);
         j["caps_ports"] = relay_->agentPorts(c->devid);
         j["caps_local_web"] = relay_->agentLocalWeb(c->devid);
+        j["caps_net"] = relay_->agentNetCap(c->devid);
+        j["caps_proc"] = relay_->agentProcCap(c->devid);
         j["streams"] = json::array();
         for (RelayStream* s = c->streams; s; s = s->next_c) {
             json st;
