@@ -520,7 +520,7 @@ stateDiagram-v2
 | 代理响应 | chunked 流式，无大小上限 | 设备 Web |
 | SYSINFO 等待 | 2s | 管理台 |
 | CONFIG_ACK 等待 | 2s | 管理台 |
-| sparkline 采样 | 5s × 60 点 | 前端 |
+| 概览趋势 | 最近 120 个采样点 | 前端 |
 | 文件仓库上传上限 | 默认 32 MiB（可配置） | 管理台 |
 | 设备文件上传上限 | 默认 512 MiB（`--file-max-mb`） | agent |
 | 文件传输分块 | 30 KiB | 文件 WS |

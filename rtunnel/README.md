@@ -270,13 +270,17 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
 
 设备详情页（operator 及以上，viewer 可看自己名下设备）：
 
-- 内存/CPU sparkline（可选「每 5s 刷新」，浏览器本地累积 60 点）
-- 存储：按分区横向条，条长 = 分区总量 / 最大分区总量，条内按已用/空闲分色
-- 网卡、系统（架构/内核/CPU/板卡/采集时间）、运行时（版本/能力/启动参数）
-- 「能力」行展示 TCP 端口、Shell、SYSINFO、mTLS、OTA；manager/admin 可在线编辑
+- 单层 tab：概览 / 存储 / 文件 / 服务 / 进程 / 网络 / 监控 / 串口 / 能力；
+  非活动 tab 不挂载、不请求，首次进入才加载，之后保留状态
+- 概览：CPU/内存/负载/网络累计流量四个 KPI、CPU/内存趋势、存储用量、网卡、
+  会话、系统信息与 mTLS 证书状态
+- 顶部摘要条展示设备名、agent 版本、连接信息、流量与采集时间，和一级 tab 一起吸顶
+- 「能力」tab 展示 TCP 端口、Shell、SYSINFO、mTLS、OTA、文件/服务能力与串口白名单；
+  manager/admin 可在线编辑
 - 表格默认 10 行/页，支持 5/10/20/50；进程/网络/服务列表的分页与排序在 agent 端完成，
   只回传当前页
-- 文件/服务 tab 切换到即建立会话；进程 tab 支持 1/2/3/5/10/20/30 秒自动刷新
+- 文件/服务 tab 首次打开时建立会话；进程 tab 支持 1/2/3/5/10/20/30 秒自动刷新
+- 监控 tab 内切换「曲线 / 采样配置」；串口配置独立为一级 tab
 
 采集与配置：
 
@@ -286,7 +290,7 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
 - 能力配置加载顺序：`--config-file` 指定文件（默认 `/opt/data/etc/rtunnel-agent.json`）→
   文件不存在时使用命令行参数；文件中未出现的字段沿用命令行值，文件中的值优先。
   首次在线修改能力或采样配置时创建该文件；采样配置也随能力配置一起落盘
-- relay 通过 `SYSINFO` 的 `caps` 获取 agent 的**运行时**能力，设备详情页「能力」表格
+- relay 通过 `SYSINFO` 的 `caps` 获取 agent 的**运行时**能力，设备详情页「能力」tab
   直接展示该结果（含配置文件路径、是否从文件加载、端口/OTA/文件/服务/串口白名单）
 - API：`GET /api/v1/agents/{devid}/sysinfo?mode=full|inc`、`PUT /api/v1/agents/{devid}/caps`
   （设备详情页「存储」用 `used_kb`/`avail_kb` 计算，使用率口径与 `df` 的 Use% 一致；
@@ -297,9 +301,8 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
   缺失 lsipc 时回退 `/proc/sysvipc`；IPC 额外扫 `/dev/shm` 上报 POSIX 共享内存
   （`ipc_kind=posix`），否则只跑 SysV 的机器会看起来完全没有 IPC 对象。
   `proc=1` 扫 `/proc/<pid>/fd` 反查占用进程。
-  过滤、分页在 agent 完成，只回传当前页；relay 缓存 3s，`refresh=1` 绕过；
-  agent 低于 1.4.28 返回 501）
-  设备详情「网络」卡片把网卡与 TCP/UDP/UNIX/IPC 放在同一组 tab；网卡数据来自
+  过滤、分页在 agent 完成，只回传当前页；relay 缓存 3s，`refresh=1` 绕过）
+  网络 tab 把网卡与 TCP/UDP/UNIX/IPC 放在子 tab；网卡数据来自
   sysinfo（名称/IP/掩码/MAC/MTU/速率/收发字节/错误），在页面本地分页与搜索。
 - 进程：`GET /api/v1/agents/{devid}/procs?sort=cpu|mem|pid|start&q=&page=1&page_size=10`、
   `GET .../procs/{pid}`、`POST .../procs/signal {pid,signal}`

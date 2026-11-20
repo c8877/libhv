@@ -168,6 +168,7 @@
             <span>mTLS</span><b>{{ sys.mtls ? '已启用' : '未启用' }}</b>
             <span>采集</span><b>{{ time(sysTs) }}</b>
           </div>
+          <div v-else-if="sysErr" class="ov-empty">{{ sysErr }}</div>
           <div v-else class="ov-empty">读取中…</div>
           <div v-if="sys && sys.mtls" class="ov-cert">
             <div><span class="ov-sub">证书</span> {{ sys.cert_valid ? '有效' : '已过期' }}</div>
@@ -178,9 +179,9 @@
       </div>
     </div>
 
-    <div v-show="isFeatTab(mainTab)" class="panel feat-panel">
+    <div v-if="loadedTabs.feat" v-show="isFeatTab(mainTab)" class="panel feat-panel">
       <el-tabs v-model="featTab" class="feat-tabs hide-nav" @tab-change="onFeatTab">
-        <el-tab-pane label="存储" name="storage">
+        <el-tab-pane label="存储" name="storage" lazy>
           <div v-for="d in disks" :key="d.mount" class="disk">
             <div class="disk-top">
               <span class="mount">{{ d.mount }}</span>
@@ -226,7 +227,7 @@
             <span v-if="procTruncated" class="muted">· 结果已截断，可搜索缩小范围</span>
           </div>
 
-          <el-table v-if="!isPhone" :data="procPageRows" v-loading="procLoading" size="small"
+          <el-table v-if="!isPhone" :data="procEntries" v-loading="procLoading" size="small"
                     @row-contextmenu="openProcMenu" @row-dblclick="showProcDetail">
             <el-table-column label="PID" width="82">
               <template #default="{ row }"><span class="mono">{{ row.pid }}</span></template>
@@ -261,7 +262,7 @@
           </el-table>
 
           <div v-else class="net-cards" v-loading="procLoading">
-            <div v-for="r in procPageRows" :key="r.pid" class="net-card">
+            <div v-for="r in procEntries" :key="r.pid" class="net-card">
               <div class="nc-top">
                 <span class="mono strong">{{ r.pid }}</span>
                 <span class="muted">{{ r.comm }}</span>
@@ -273,17 +274,17 @@
               <div class="nc-line">CPU {{ r.cpu_pct.toFixed(1) }}% · 内存 {{ kbText(r.rss_kb) }} · {{ r.threads }} 线程</div>
               <div class="nc-line muted">{{ r.user }} · {{ time(r.start_ms) }}</div>
             </div>
-            <div v-if="!procPageRows.length" class="muted pad">没有匹配的进程</div>
+            <div v-if="!procEntries.length" class="muted pad">没有匹配的进程</div>
           </div>
 
           <div v-if="procTotal > 5" class="net-pager">
             <el-pagination small background layout="total, sizes, prev, pager, next"
-                           :total="procTotal" :page-sizes="procPageSizes"
+                           :total="procTotal" :page-sizes="PAGE_SIZES"
                            :page-size="procPer" v-model:current-page="procPage"
                            @size-change="onProcSize" @current-change="onProcPage" />
           </div>
         </el-tab-pane>
-        <el-tab-pane label="能力" name="caps">
+        <el-tab-pane label="能力" name="caps" lazy>
           <div v-if="sys" class="kv-rows">
             <div class="kv-row">
               <span class="caret" />
@@ -306,11 +307,10 @@
             <div v-if="sys" class="caps-edit">
                 <div class="caps-runtime">
                   <span class="muted">运行时配置</span>
-                  <code class="mono">{{ (sys.caps && sys.caps.config_file) || '—' }}</code>
-                  <el-tag v-if="!sys.caps || !sys.caps.config_file" size="small" type="info" effect="plain">agent 未上报</el-tag>
-                  <el-tag v-else-if="sys.caps.config_loaded" size="small" type="success" effect="plain">已从文件加载</el-tag>
+                  <code class="mono">{{ sys.caps.config_file || '—' }}</code>
+                  <el-tag v-if="sys.caps.config_loaded" size="small" type="success" effect="plain">已从文件加载</el-tag>
                   <el-tag v-else size="small" type="warning" effect="plain">使用命令行参数</el-tag>
-                  <span class="muted">agent {{ (sys.caps && sys.caps.version) || '—' }}</span>
+                  <span class="muted">agent {{ sys.caps.version || '—' }}</span>
                   <span class="spacer" />
                   <el-button link size="small" :loading="capsRefreshing" @click="refreshCaps">刷新运行时</el-button>
                 </div>
@@ -352,56 +352,50 @@
                         <div class="vform-note">升级包存放目录；文件根目录留空时也用它</div>
                       </div>
                     </div>
-                    <template v-if="capsForm.fsSupported">
-                      <div class="vform-row">
-                        <span class="vlabel">启用文件管理</span>
-                        <div class="vcontrol">
-                          <el-checkbox v-model="capsForm.fs" :disabled="!canCaps">启用</el-checkbox>
-                        </div>
+                    <div class="vform-row">
+                      <span class="vlabel">启用文件管理</span>
+                      <div class="vcontrol">
+                        <el-checkbox v-model="capsForm.fs" :disabled="!canCaps">启用</el-checkbox>
                       </div>
-                      <div class="vform-row">
-                        <span class="vlabel">允许写入</span>
-                        <div class="vcontrol">
-                          <el-switch v-model="capsForm.fs_rw" :disabled="!canCaps || !capsForm.fs" />
-                          <span class="muted">关闭后只读</span>
-                        </div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">允许写入</span>
+                      <div class="vcontrol">
+                        <el-switch v-model="capsForm.fs_rw" :disabled="!canCaps || !capsForm.fs" />
+                        <span class="muted">关闭后只读</span>
                       </div>
-                      <div class="vform-row span2">
-                        <span class="vlabel">文件根目录</span>
-                        <div class="vcontrol">
-                          <el-input v-model="capsForm.fs_root" size="small" :disabled="!canCaps || !capsForm.fs"
-                                    placeholder="/opt/data/files" />
-                        </div>
+                    </div>
+                    <div class="vform-row span2">
+                      <span class="vlabel">文件根目录</span>
+                      <div class="vcontrol">
+                        <el-input v-model="capsForm.fs_root" size="small" :disabled="!canCaps || !capsForm.fs"
+                                  placeholder="/opt/data/files" />
                       </div>
-                      <div class="vform-row">
-                        <span class="vlabel">单文件上限</span>
-                        <div class="vcontrol">
-                          <el-input-number v-model="capsForm.fs_max_mb" :min="1" :max="10240"
-                                           :disabled="!canCaps || !capsForm.fs" size="small" />
-                          <span class="vunit">MB</span>
-                        </div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">单文件上限</span>
+                      <div class="vcontrol">
+                        <el-input-number v-model="capsForm.fs_max_mb" :min="1" :max="10240"
+                                         :disabled="!canCaps || !capsForm.fs" size="small" />
+                        <span class="vunit">MB</span>
                       </div>
-                    </template>
-                    <div v-else class="vform-note muted span2">当前 agent 版本不支持文件管理配置，升级 agent 后可在此开启</div>
+                    </div>
 
                     <div class="vform-section span2">服务管理</div>
-                    <template v-if="capsForm.svcSupported">
-                      <div class="vform-row">
-                        <span class="vlabel">启用服务管理</span>
-                        <div class="vcontrol">
-                          <el-checkbox v-model="capsForm.svc" :disabled="!canCaps">启用</el-checkbox>
-                          <span class="muted">systemd 状态与日志</span>
-                        </div>
+                    <div class="vform-row">
+                      <span class="vlabel">启用服务管理</span>
+                      <div class="vcontrol">
+                        <el-checkbox v-model="capsForm.svc" :disabled="!canCaps">启用</el-checkbox>
+                        <span class="muted">systemd 状态与日志</span>
                       </div>
-                      <div class="vform-row">
-                        <span class="vlabel">允许控制</span>
-                        <div class="vcontrol">
-                          <el-switch v-model="capsForm.svc_rw" :disabled="!canCaps || !capsForm.svc" />
-                          <span class="muted">关闭后只读</span>
-                        </div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">允许控制</span>
+                      <div class="vcontrol">
+                        <el-switch v-model="capsForm.svc_rw" :disabled="!canCaps || !capsForm.svc" />
+                        <span class="muted">关闭后只读</span>
                       </div>
-                    </template>
-                    <div v-else class="vform-note muted span2">当前 agent 版本不支持服务管理配置</div>
+                    </div>
 
                     <div class="vform-section span2">串口白名单</div>
                     <div class="vform-row span2">
@@ -440,7 +434,7 @@
       </el-tabs>
     </div>
 
-    <div v-show="mainTab === 'net'" class="panel net-panel">
+    <div v-if="loadedTabs.net" v-show="mainTab === 'net'" class="panel net-panel">
       <div class="tab-bar">
         <span class="muted">{{ netAgeText || '网络连接与监听' }}</span>
         <span class="spacer" />
@@ -454,20 +448,8 @@
       </div>
 
       <el-tabs v-model="netScope" class="net-tabs" @tab-change="onNetTab">
-        <el-tab-pane name="nic">
-          <template #label>网卡 <span v-if="tabCount('nic')" class="tab-n">{{ tabCount('nic') }}</span></template>
-        </el-tab-pane>
-        <el-tab-pane name="tcp">
-          <template #label>TCP <span v-if="tabCount('tcp')" class="tab-n">{{ tabCount('tcp') }}</span></template>
-        </el-tab-pane>
-        <el-tab-pane name="udp">
-          <template #label>UDP <span v-if="tabCount('udp')" class="tab-n">{{ tabCount('udp') }}</span></template>
-        </el-tab-pane>
-        <el-tab-pane name="unix">
-          <template #label>UNIX <span v-if="tabCount('unix')" class="tab-n">{{ tabCount('unix') }}</span></template>
-        </el-tab-pane>
-        <el-tab-pane name="ipc">
-          <template #label>IPC <span v-if="tabCount('ipc')" class="tab-n">{{ tabCount('ipc') }}</span></template>
+        <el-tab-pane v-for="t in NET_TABS" :key="t.name" :name="t.name">
+          <template #label>{{ t.label }} <span v-if="tabCount(t.name)" class="tab-n">{{ tabCount(t.name) }}</span></template>
         </el-tab-pane>
       </el-tabs>
 
@@ -700,14 +682,14 @@
 
       <div v-if="netMatched > 5" class="net-pager">
         <el-pagination small background layout="total, sizes, prev, pager, next"
-                       :total="netMatched" :page-sizes="netPageSizes"
+                       :total="netMatched" :page-sizes="PAGE_SIZES"
                        :page-size="netPer" v-model:current-page="netPage"
                        @size-change="onNetSize" @current-change="onNetPage" />
       </div>
       <div v-if="netTruncated" class="muted net-foot">结果已截断，可搜索缩小范围</div>
     </div>
 
-    <div v-show="mainTab === 'monitor' || mainTab === 'tty'" class="panel feat-panel obs-panel">
+    <div v-if="loadedTabs.monitor || loadedTabs.tty" v-show="mainTab === 'monitor' || mainTab === 'tty'" class="panel feat-panel obs-panel">
       <div v-if="mainTab === 'monitor'" class="monitor-switch">
         <button type="button" :class="{ on: monitorView === 'series' }" @click="setMonitorView('series')">曲线</button>
         <button type="button" :class="{ on: monitorView === 'metric' }" @click="setMonitorView('metric')">采样配置</button>
@@ -769,7 +751,7 @@
             </div>
           </template>
         </el-tab-pane>
-        <el-tab-pane label="采样配置" name="metric">
+        <el-tab-pane label="采样配置" name="metric" lazy>
           <div class="tab-bar">
             <span class="muted">{{ seriesCfg.length }} 项 · {{ unsyncedCount }} 项未同步</span>
             <span class="spacer" />
@@ -859,12 +841,12 @@
           </el-table>
           <div v-if="seriesCfg.length > 5" class="net-pager">
             <el-pagination small background layout="total, sizes, prev, pager, next"
-                           :total="seriesCfg.length" :page-sizes="metricPageSizes"
+                           :total="seriesCfg.length" :page-sizes="PAGE_SIZES"
                            :page-size="metricPer" v-model:current-page="metricPage"
                            @size-change="onMetricSize" />
           </div>
         </el-tab-pane>
-        <el-tab-pane label="串口配置" name="tty">
+        <el-tab-pane label="串口配置" name="tty" lazy>
           <div class="tab-bar">
             <el-radio-group v-model="ttyTab" size="small">
               <el-radio-button value="config">已配置 {{ ttys.length }}</el-radio-button>
@@ -906,7 +888,7 @@
                           <span class="vlabel">波特率</span>
                           <div class="vcontrol">
                             <el-select v-model="ttyEditing.baud" size="small" :disabled="!canEdit">
-                              <el-option v-for="b in bauds" :key="b" :label="b" :value="b" />
+                              <el-option v-for="b in TTY_BAUDS" :key="b" :label="b" :value="b" />
                             </el-select>
                           </div>
                         </div>
@@ -914,7 +896,7 @@
                           <span class="vlabel">数据位</span>
                           <div class="vcontrol">
                             <el-select v-model="ttyEditing.data_bits" size="small" :disabled="!canEdit">
-                              <el-option v-for="b in [5, 6, 7, 8]" :key="b" :label="b" :value="b" />
+                              <el-option v-for="b in TTY_DATA_BITS" :key="b" :label="b" :value="b" />
                             </el-select>
                           </div>
                         </div>
@@ -922,9 +904,7 @@
                           <span class="vlabel">校验</span>
                           <div class="vcontrol">
                             <el-select v-model="ttyEditing.parity" size="small" :disabled="!canEdit">
-                              <el-option label="无 (N)" value="N" />
-                              <el-option label="偶 (E)" value="E" />
-                              <el-option label="奇 (O)" value="O" />
+                              <el-option v-for="p in TTY_PARITIES" :key="p.value" :label="p.label" :value="p.value" />
                             </el-select>
                           </div>
                         </div>
@@ -932,8 +912,7 @@
                           <span class="vlabel">停止位</span>
                           <div class="vcontrol">
                             <el-select v-model="ttyEditing.stop_bits" size="small" :disabled="!canEdit">
-                              <el-option :label="1" :value="1" />
-                              <el-option :label="2" :value="2" />
+                              <el-option v-for="b in TTY_STOP_BITS" :key="b" :label="b" :value="b" />
                             </el-select>
                           </div>
                         </div>
@@ -995,7 +974,7 @@
               </el-table>
               <div v-if="filteredTtys.length > 5" class="net-pager">
                 <el-pagination small background layout="total, sizes, prev, pager, next"
-                               :total="filteredTtys.length" :page-sizes="ttyPageSizes"
+                               :total="filteredTtys.length" :page-sizes="PAGE_SIZES"
                                :page-size="ttyPer" v-model:current-page="ttyPage"
                                @size-change="onTtySize" />
               </div>
@@ -1027,7 +1006,7 @@
                           <span class="vlabel">波特率</span>
                           <div class="vcontrol">
                             <el-select v-model="ttyAddForm.baud" size="small" :disabled="!canEdit">
-                              <el-option v-for="b in bauds" :key="b" :label="b" :value="b" />
+                              <el-option v-for="b in TTY_BAUDS" :key="b" :label="b" :value="b" />
                             </el-select>
                           </div>
                         </div>
@@ -1035,7 +1014,7 @@
                           <span class="vlabel">数据位</span>
                           <div class="vcontrol">
                             <el-select v-model="ttyAddForm.data_bits" size="small" :disabled="!canEdit">
-                              <el-option v-for="b in [5, 6, 7, 8]" :key="b" :label="b" :value="b" />
+                              <el-option v-for="b in TTY_DATA_BITS" :key="b" :label="b" :value="b" />
                             </el-select>
                           </div>
                         </div>
@@ -1043,9 +1022,7 @@
                           <span class="vlabel">校验</span>
                           <div class="vcontrol">
                             <el-select v-model="ttyAddForm.parity" size="small" :disabled="!canEdit">
-                              <el-option label="无 (N)" value="N" />
-                              <el-option label="偶 (E)" value="E" />
-                              <el-option label="奇 (O)" value="O" />
+                              <el-option v-for="p in TTY_PARITIES" :key="p.value" :label="p.label" :value="p.value" />
                             </el-select>
                           </div>
                         </div>
@@ -1053,8 +1030,7 @@
                           <span class="vlabel">停止位</span>
                           <div class="vcontrol">
                             <el-select v-model="ttyAddForm.stop_bits" size="small" :disabled="!canEdit">
-                              <el-option :label="1" :value="1" />
-                              <el-option :label="2" :value="2" />
+                              <el-option v-for="b in TTY_STOP_BITS" :key="b" :label="b" :value="b" />
                             </el-select>
                           </div>
                         </div>
@@ -1104,7 +1080,7 @@
               </el-table>
               <div v-if="filteredUnconfigured.length > 5" class="net-pager">
                 <el-pagination small background layout="total, sizes, prev, pager, next"
-                               :total="filteredUnconfigured.length" :page-sizes="ttyPageSizes"
+                               :total="filteredUnconfigured.length" :page-sizes="PAGE_SIZES"
                                :page-size="ttyPer" v-model:current-page="ttyAddPage"
                                @size-change="onTtySize" />
               </div>
@@ -1130,12 +1106,12 @@
         <label>路径<el-input v-model="ttyEditing.path" :disabled="!ttyEditing.isNew" placeholder="/dev/ttyS0" /></label>
         <label>波特率
           <el-select v-model="ttyEditing.baud">
-            <el-option v-for="b in bauds" :key="b" :label="b" :value="b" />
+            <el-option v-for="b in TTY_BAUDS" :key="b" :label="b" :value="b" />
           </el-select>
         </label>
         <label>数据位
           <el-select v-model="ttyEditing.data_bits">
-            <el-option v-for="b in [5, 6, 7, 8]" :key="b" :label="b" :value="b" />
+            <el-option v-for="b in TTY_DATA_BITS" :key="b" :label="b" :value="b" />
           </el-select>
         </label>
         <label>校验
@@ -1235,11 +1211,9 @@ import DictChips from '@/components/DictChips.vue'
 
 const route = useRoute()
 const router = useRouter()
-const { isPhone, isTablet } = useBreakpoint()
+const { isPhone } = useBreakpoint()
 const devid = computed(() => decodeURIComponent(route.params.devid || ''))
 const agentBase = computed(() => '/api/v1/agents/' + encodeURIComponent(devid.value))
-const descCols = computed(() => (isPhone.value ? 1 : isTablet.value ? 2 : 4))
-const sysCols = computed(() => (isPhone.value ? 1 : 3))
 const canEdit = computed(() => canManage())
 const canCaps = computed(() => can('device.caps.write'))
 const canOta = computed(() => can('device.ota.write'))
@@ -1280,7 +1254,6 @@ const loading = ref(false)
 const auto = ref(false)
 const period = ref(10)
 let sysFull = false
-let sysRetry = null
 
 const seriesCfg = ref([])
 const enabledCfg = computed(() => seriesCfg.value.filter((c) => c.enabled))
@@ -1316,6 +1289,15 @@ const MAIN_TABS = [
   { name: 'tty', label: '串口' },
   { name: 'caps', label: '能力' },
 ]
+const NET_TABS = [
+  { name: 'nic', label: '网卡' },
+  { name: 'tcp', label: 'TCP' },
+  { name: 'udp', label: 'UDP' },
+  { name: 'unix', label: 'UNIX' },
+  { name: 'ipc', label: 'IPC' },
+]
+// 面板首次进入才挂载，之后用 v-show 保留状态
+const loadedTabs = reactive({ feat: false, net: false, monitor: false, tty: false })
 const featTab = ref('storage')
 const procSort = ref('cpu')
 const procQuery = ref('')
@@ -1329,7 +1311,7 @@ const procPage = ref(1)
 const procPer = ref(10)
 const procPeriod = ref(0)
 const procTimer = ref(null)
-const procPageSizes = [5, 10, 20, 50]
+const PAGE_SIZES = [5, 10, 20, 50]
 const procDetailOpen = ref(false)
 const procDetail = ref(null)
 const procSignalOpen = ref(false)
@@ -1352,8 +1334,8 @@ const obsTab = ref('series')
 const capsSaving = ref(false)
 const capsForm = reactive({
   ports: [], file_dir: '', shell: false, ota: false, allow_tty: [],
-  fsSupported: false, fs: false, fs_root: '', fs_rw: false, fs_max_mb: 512,
-  svcSupported: false, svc: false, svc_rw: false,
+  fs: false, fs_root: '', fs_rw: false, fs_max_mb: 512,
+  svc: false, svc_rw: false,
 })
 // 没有字典读权限时退化成自由输入；portsRaw 只在该模式下使用
 const dictOk = ref(true)
@@ -1382,21 +1364,23 @@ const ttyAddPath = ref('')
 const ttyPage = ref(1)
 const ttyAddPage = ref(1)
 const ttyPer = ref(10)
-const ttyPageSizes = [5, 10, 20, 50]
 const metricPage = ref(1)
 const metricPer = ref(10)
-const metricPageSizes = [5, 10, 20, 50]
-const sessionPage = ref(1)
-const sessionPer = ref(10)
-const sessionPageSizes = [5, 10, 20, 50]
-const bauds = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
+const TTY_BAUDS = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600]
+const TTY_DATA_BITS = [5, 6, 7, 8]
+const TTY_PARITIES = [
+  { label: '无 (N)', value: 'N' },
+  { label: '偶 (E)', value: 'E' },
+  { label: '奇 (O)', value: 'O' },
+]
+const TTY_STOP_BITS = [1, 2]
+function ttyDefaults() {
+  return { alias: '', baud: 115200, data_bits: 8, parity: 'N', stop_bits: 1, enabled: true }
+}
 const ttyEditing = reactive({
-  isNew: true, path: '', alias: '', baud: 115200, data_bits: 8,
-  parity: 'N', stop_bits: 1, enabled: true, roles: 'operator,manager,admin',
+  isNew: true, path: '', ...ttyDefaults(), roles: 'operator,manager,admin',
 })
-const ttyAddForm = reactive({
-  alias: '', baud: 115200, data_bits: 8, parity: 'N', stop_bits: 1, enabled: true,
-})
+const ttyAddForm = reactive(ttyDefaults())
 
 const disks = computed(() => {
   const mounts = (sys.value && sys.value.mounts) || []
@@ -1435,13 +1419,12 @@ const netOffline = ref(false)
 const netStale = ref(false)
 const netPage = ref(1)
 const netPer = ref(10)
-const netPageSizes = [5, 10, 20, 50]
-const netSupported = computed(() => !!(detail.value && detail.value.caps_net === 1))
 // tab 上的计数保留最近一次已知值：切到 TCP 后 agent 不再返回 ipc 计数，
-// 不能让 IPC 标签变成「—」。首次进入页面时会单独拉一次汇总。
+// 不能让 IPC 标签变成「—」。首次进入网络 tab 时单独拉一次汇总。
 const netCounts = reactive({ tcp: null, udp: null, unix: null, ipc: null })
 const ipcCounts = ref({})
 let netCountsLoaded = false
+let netCountsPromise = null
 
 function applyNetMeta(r) {
   const s = r && r.summary
@@ -1455,15 +1438,17 @@ function applyNetMeta(r) {
 }
 
 // scope=ipc 的响应同时带 tcp/udp/unix/ipc 四类总数，一次请求即可把 tab 计数填满
-async function loadNetCounts() {
-  if (netCountsLoaded || !netSupported.value) return
-  netCountsLoaded = true
-  try {
-    const r = await Api.get(agentBase.value + '/net?scope=ipc&ipc_kind=posix&page=1&page_size=1&proc=0')
-    applyNetMeta(r)
-  } catch (e) {
-    netCountsLoaded = false
-  }
+function loadNetCounts() {
+  if (netCountsLoaded) return Promise.resolve()
+  if (netCountsPromise) return netCountsPromise
+  netCountsPromise = Api.get(agentBase.value + '/net?scope=ipc&ipc_kind=posix&page=1&page_size=1&proc=0')
+    .then((r) => {
+      applyNetMeta(r)
+      netCountsLoaded = true
+    })
+    .catch(() => {})
+    .finally(() => { netCountsPromise = null })
+  return netCountsPromise
 }
 
 function procText(r) {
@@ -1496,6 +1481,7 @@ function nicLinkUp(n) {
   if (n.operstate) return n.operstate === 'up'
   return !!n.up
 }
+const nicUpCount = computed(() => nics.value.filter((n) => nicLinkUp(n)).length)
 
 const netRows = computed(() => {
   const n = net.value
@@ -1537,10 +1523,9 @@ const sysvIpcEmpty = computed(() =>
 
 const netSummaryText = computed(() => {
   if (netScope.value === 'nic') {
-    const up = nics.value.filter((x) => nicLinkUp(x)).length
     // 手机上时间戳会把单行说明挤成两行，省掉采集时间
     const ts = !isPhone.value && sysTs.value ? ` · 随系统信息刷新（${time(sysTs.value)}）` : ''
-    return `${nics.value.length} 个网卡 · ${up} 个已连接` + ts
+    return `${nics.value.length} 个网卡 · ${nicUpCount.value} 个已连接` + ts
   }
   const n = net.value
   if (!n) return ''
@@ -1597,10 +1582,6 @@ async function loadNet(silent, refresh) {
     netErr.value = ''
     return
   }
-  if (!netSupported.value) {
-    netErr.value = 'agent 版本过旧，升级后可查看网络与 IPC'
-    return
-  }
   if (netBusy && silent) return
   netBusy = true
   netLoading.value = true
@@ -1623,8 +1604,7 @@ async function loadNet(silent, refresh) {
     netErr.value = r && r.error ? (r.error === 'busy' ? '设备正在采集，请稍后重试' : String(r.error)) : ''
     if (netPage.value > 1 && !netPageRows.value.length) netPage.value = 1
   } catch (e) {
-    if (e.status === 501) netErr.value = 'agent 版本过旧，升级后可查看网络与 IPC'
-    else if (e.status === 404) netErr.value = '设备离线，暂无网络快照'
+    if (e.status === 404) netErr.value = '设备离线，暂无网络快照'
     else if (e.status === 504) netErr.value = '采集超时，请稍后重试'
     else netErr.value = '网络信息加载失败：' + e.message
   } finally {
@@ -1658,15 +1638,16 @@ const netAgeText = computed(() => {
   return d < 60000 ? '刚刚采集' : ago(netTs.value) + ' 前采集'
 })
 
-function onNetTab() {
+async function onNetTab() {
   netPage.value = 1
   if (netScope.value === 'nic') {
     netErr.value = ''
     return
   }
   // 设备只有 POSIX 共享内存时，直接落到 POSIX 子页，避免先看到空的 SysV 页
-  if (netScope.value === 'ipc' && sysvIpcEmpty.value && ipcCount('posix') > 0) {
-    netIpcTab.value = 'posix'
+  if (netScope.value === 'ipc') {
+    await loadNetCounts()
+    if (sysvIpcEmpty.value && ipcCount('posix') > 0) netIpcTab.value = 'posix'
   }
   loadNet()
 }
@@ -1795,14 +1776,12 @@ const filteredUnconfigured = computed(() => unconfigured.value.filter((d) => {
 const ttyPageRows = computed(() => filteredTtys.value.slice((ttyPage.value - 1) * ttyPer.value, ttyPage.value * ttyPer.value))
 const ttyAddPageRows = computed(() => filteredUnconfigured.value.slice((ttyAddPage.value - 1) * ttyPer.value, ttyAddPage.value * ttyPer.value))
 const metricPageRows = computed(() => seriesCfg.value.slice((metricPage.value - 1) * metricPer.value, metricPage.value * metricPer.value))
-watch(() => [filteredTtys.value.length, filteredUnconfigured.value.length, seriesCfg.value.length, streams.value.length], () => {
+watch(() => [filteredTtys.value.length, filteredUnconfigured.value.length, seriesCfg.value.length], () => {
   const clamp = (page, total, per) => Math.max(1, Math.min(page, Math.ceil(total / per) || 1))
   ttyPage.value = clamp(ttyPage.value, filteredTtys.value.length, ttyPer.value)
   ttyAddPage.value = clamp(ttyAddPage.value, filteredUnconfigured.value.length, ttyPer.value)
   metricPage.value = clamp(metricPage.value, seriesCfg.value.length, metricPer.value)
-  sessionPage.value = clamp(sessionPage.value, streams.value.length, sessionPer.value)
 })
-const sessionPageRows = computed(() => streams.value.slice((sessionPage.value - 1) * sessionPer.value, sessionPage.value * sessionPer.value))
 const addCandidates = computed(() => {
   const existing = new Set(seriesCfg.value.map((c) => c.series))
   const out = ['cpu', 'mem', 'load']
@@ -1849,7 +1828,7 @@ const ovMemTotal = computed(() => Number(sys.value && sys.value.mem_total_kb) ||
 const ovMemUsed = computed(() => {
   const s = sys.value || {}
   const total = Number(s.mem_total_kb) || 0
-  const avail = Number(s.mem_available_kb != null ? s.mem_available_kb : s.mem_free_kb) || 0
+  const avail = Number(s.mem_available_kb) || 0
   return total ? Math.max(0, total - avail) : 0
 })
 const ovMemPct = computed(() => {
@@ -1876,7 +1855,7 @@ const ovProcText = computed(() => {
 })
 
 const ovNics = computed(() => nics.value.slice(0, 3))
-const ovNicText = computed(() => `${nics.value.length} 个 · ${nics.value.filter((n) => nicLinkUp(n)).length} 个已连接`)
+const ovNicText = computed(() => `${nics.value.length} 个 · ${nicUpCount.value} 个已连接`)
 const ovNetRx = computed(() => bytes(nics.value.reduce((a, n) => a + (Number(n.rx_bytes) || 0), 0)))
 const ovNetTx = computed(() => bytes(nics.value.reduce((a, n) => a + (Number(n.tx_bytes) || 0), 0)))
 
@@ -1917,22 +1896,32 @@ function scrollPageTop() {
 
 function switchMainTab(name) {
   if (mainTab.value === name) return
+  if (isFeatTab(name)) loadedTabs.feat = true
+  else if (name === 'net') loadedTabs.net = true
+  else if (name === 'monitor') loadedTabs.monitor = true
+  else if (name === 'tty') loadedTabs.tty = true
   mainTab.value = name
   scrollPageTop()
+  stopProcTimer()
+  if (name === 'overview') {
+    loadProcs(true, true)
+    pullSeries(false)
+    return
+  }
   if (isFeatTab(name)) {
     featTab.value = name
     onFeatTab(name)
     return
   }
-  stopProcTimer()
   if (name === 'net') {
     netErr.value = ''
+    loadNetCounts()
     if (!net.value) onNetTab()
     return
   }
   if (name === 'monitor') {
     obsTab.value = monitorView.value === 'metric' ? 'metric' : 'series'
-    if (obsTab.value === 'series') nextTick(renderCharts)
+    if (obsTab.value === 'series') refreshSeriesView()
     return
   }
   if (name === 'tty') {
@@ -1944,7 +1933,7 @@ function switchMainTab(name) {
 function setMonitorView(v) {
   monitorView.value = v
   obsTab.value = v === 'metric' ? 'metric' : 'series'
-  if (v === 'series') nextTick(renderCharts)
+  if (v === 'series') refreshSeriesView()
 }
 
 function onHeadCmd(cmd) {
@@ -1993,7 +1982,7 @@ function metricHint(row) {
 function mergeSysinfo(p) {
   if (!p || !sys.value) return
   if (p.swap_free_kb != null) sys.value.swap_free_kb = p.swap_free_kb
-  for (const k of ['cpu_usage', 'cpu_cores', 'loadavg', 'mem_free_kb', 'mem_available_kb']) {
+  for (const k of ['cpu_usage', 'cpu_cores', 'loadavg', 'mem_available_kb']) {
     if (p[k] != null) sys.value[k] = p[k]
   }
   ;(p.mounts || []).forEach((pm) => {
@@ -2025,9 +2014,6 @@ async function loadSysinfo(silent) {
     sysCached.value = !!r.cached
     sysTs.value = r.ts || 0
     sysErr.value = ''
-    if (sys.value && !sys.value.cpu_count && !sysRetry) {
-      sysRetry = setTimeout(() => { sysRetry = null; loadSysinfo(true) }, 1200)
-    }
   } catch (e) {
     if (!silent) sysErr.value = '系统信息获取失败：' + e.message
   }
@@ -2043,12 +2029,11 @@ async function loadAll(opts = {}) {
     if (!silent) ElMessage.error('设备详情加载失败：' + e.message)
   }
   await loadSysinfo(silent)
-  await loadNet(true)
-  loadNetCounts()
-  if (mainTab.value === 'proc') loadProcs(false, true)
+  if (mainTab.value === 'net') await loadNet(true)
+  else if (mainTab.value === 'proc') loadProcs(false, true)
   else if (mainTab.value === 'overview') loadProcs(true, true)
   nowTick.value = Date.now()
-  await pullSeries(!silent)
+  if (mainTab.value === 'overview' || mainTab.value === 'monitor') await pullSeries(!silent)
   if (!silent) loading.value = false
   if (notify) ElMessage.success('已刷新')
 }
@@ -2296,6 +2281,7 @@ function onFeatTab(name) {
   if (name !== 'caps') return
   if (sys.value) fillCapsFromSys()
   loadDicts()
+  loadTtys()
 }
 
 function kbText(kb) {
@@ -2306,7 +2292,6 @@ function kbText(kb) {
 }
 
 const procEntries = computed(() => (procs.value && procs.value.entries) || [])
-const procPageRows = computed(() => procEntries.value)
 const procTotal = computed(() => {
   const n = procs.value
   if (!n) return 0
@@ -2353,8 +2338,7 @@ async function loadProcs(refresh, silent) {
     const pages = Number(r && r.pages) || 1
     if (procPage.value > pages) procPage.value = pages
   } catch (e) {
-    if (e.status === 501) procErr.value = 'agent 版本过旧，升级后可查看进程'
-    else if (e.status === 404) procErr.value = '设备离线，无法读取进程'
+    if (e.status === 404) procErr.value = '设备离线，无法读取进程'
     else if (e.status === 504) procErr.value = '采集超时，请稍后重试'
     else procErr.value = '进程加载失败：' + e.message
   } finally {
@@ -2379,11 +2363,6 @@ function onTtySize(size) {
   ttyPer.value = Number(size) || 10
   ttyPage.value = 1
   ttyAddPage.value = 1
-}
-
-function onSessionSize(size) {
-  sessionPer.value = Number(size) || 10
-  sessionPage.value = 1
 }
 
 function onProcSize(size) {
@@ -2503,9 +2482,17 @@ watch(procShowKernel, () => {
   loadProcs(false, false)
 })
 
+function refreshSeriesView() {
+  nextTick(() => {
+    renderCharts()
+    if (seriesRO && seriesWrapEl.value) seriesRO.observe(seriesWrapEl.value)
+    measureSeries()
+  })
+}
+
 function onObsTab(name) {
   // 切回曲线时 canvas 可能刚从 display:none 恢复，尺寸为 0，需要重画
-  if (name === 'series') nextTick(renderCharts)
+  if (name === 'series') refreshSeriesView()
 }
 
 function addAllowTty() {
@@ -2538,12 +2525,10 @@ function fillCapsFromSys() {
   capsForm.allow_tty = Array.isArray(c.allow_tty) ? c.allow_tty.slice() : []
   allowTtyOpen.value = false
   allowTtyInput.value = ''
-  capsForm.fsSupported = Object.prototype.hasOwnProperty.call(c, 'fs')
   capsForm.fs = !!c.fs
   capsForm.fs_root = c.fs_root || c.file_dir || ''
   capsForm.fs_rw = !!c.fs_rw
   capsForm.fs_max_mb = Number(c.fs_max_mb) || 512
-  capsForm.svcSupported = Object.prototype.hasOwnProperty.call(c, 'svc')
   capsForm.svc = !!c.svc
   capsForm.svc_rw = !!c.svc_rw
 }
@@ -2589,9 +2574,8 @@ async function saveCaps() {
   }
   if (canOta.value) body.ota = !!capsForm.ota
   if (canTty.value) body.allow_tty = capsForm.allow_tty.slice()
-  if (!canCaps.value) {
-    // 只改 OTA / 串口白名单时不动其它能力
-  } else if (capsForm.fsSupported) {
+  if (canCaps.value) {
+    // 文件与服务能力只在有 device.caps.write 时提交
     if (capsForm.fs) {
       const root = capsForm.fs_root.trim()
       if (!root || root[0] !== '/' || root.includes('..')) {
@@ -2610,8 +2594,6 @@ async function saveCaps() {
     } else {
       body.fs = false
     }
-  }
-  if (canCaps.value && capsForm.svcSupported) {
     body.svc = !!capsForm.svc
     if (capsForm.svc) body.svc_rw = !!capsForm.svc_rw
   }
@@ -2622,18 +2604,16 @@ async function saveCaps() {
   capsSaving.value = true
   try {
     const r = await Api.put(agentBase.value + '/caps', body)
-    const fsMissed = body.fs !== undefined &&
-      !(typeof r.fs === 'boolean' && r.fs === body.fs && (!body.fs || r.fs_root === body.fs_root))
-    const svcMissed = body.svc !== undefined &&
-      !(typeof r.svc === 'boolean' && r.svc === body.svc && (!body.svc || r.svc_rw === body.svc_rw))
-    const otaMissed = body.ota !== undefined && (typeof r.ota !== 'boolean' || r.ota !== body.ota)
-    const ttyMissed = body.allow_tty !== undefined &&
-      !(Array.isArray(r.allow_tty) && JSON.stringify(r.allow_tty) === JSON.stringify(body.allow_tty))
-    if (otaMissed) ElMessage.warning('设备未应用 OTA 开关：请确认 agent 已升级到支持该配置的版本')
-    else if (ttyMissed) ElMessage.warning('设备未应用串口白名单：请确认 agent 已升级到支持该配置的版本')
-    else if (fsMissed) ElMessage.warning('设备未应用文件管理配置：请确认 agent 已升级')
-    else if (svcMissed) ElMessage.warning('设备未应用服务管理配置：请确认 agent 已升级')
-    else if (r && r.persisted === false) ElMessage.warning('已生效，但未能写入配置文件，重启后会丢失')
+    const missed = []
+    if (body.fs !== undefined &&
+        !(r.fs === body.fs && (!body.fs || r.fs_root === body.fs_root))) missed.push('文件管理')
+    if (body.svc !== undefined &&
+        !(r.svc === body.svc && (!body.svc || r.svc_rw === body.svc_rw))) missed.push('服务管理')
+    if (body.ota !== undefined && r.ota !== body.ota) missed.push('OTA 开关')
+    if (body.allow_tty !== undefined &&
+        JSON.stringify(r.allow_tty) !== JSON.stringify(body.allow_tty)) missed.push('串口白名单')
+    if (missed.length) ElMessage.warning('设备未应用：' + missed.join('、') + '，请重试')
+    else if (r.persisted === false) ElMessage.warning('已生效，但未能写入配置文件，重启后会丢失')
     else ElMessage.success('能力已更新')
     // 能力位不在增量 sysinfo 里，强制拉一次全量，卡片/入口立即跟着变
     sysFull = false
@@ -2740,33 +2720,39 @@ async function loadTtys(force) {
 }
 
 function fillTtyEditing(row) {
-  ttyEditing.isNew = false
-  ttyEditing.path = row.path || ''
-  ttyEditing.alias = row.alias || ''
-  ttyEditing.baud = Number(row.baud) || 115200
-  ttyEditing.data_bits = Number(row.data_bits) || 8
-  ttyEditing.parity = row.parity || 'N'
-  ttyEditing.stop_bits = Number(row.stop_bits) || 1
-  ttyEditing.enabled = !!row.enabled
-  ttyEditing.roles = row.roles || 'operator,manager,admin'
+  Object.assign(ttyEditing, ttyDefaults(), {
+    isNew: false,
+    path: row.path || '',
+    alias: row.alias || '',
+    baud: Number(row.baud) || 115200,
+    data_bits: Number(row.data_bits) || 8,
+    parity: row.parity || 'N',
+    stop_bits: Number(row.stop_bits) || 1,
+    enabled: !!row.enabled,
+    roles: row.roles || 'operator,manager,admin',
+  })
 }
 
 function onTtyRow(row) {
   if (ttyTable.value) ttyTable.value.toggleRowExpansion(row)
 }
 
-// 同时只展开一行，展开时把该行复制到 ttyEditing，取消不会改到列表数据
-function onTtyExpand(row, expanded) {
+// 同时只展开一行；取消时不清空正在编辑的副本，避免刚点开就丢数据
+function expandTtyRow(tableRef, openPathRef, row, expanded, onOpen) {
   const open = (expanded || []).some((r) => r.path === row.path)
   if (!open) {
-    if (ttyExpandedPath.value === row.path) ttyExpandedPath.value = ''
+    if (openPathRef.value === row.path) openPathRef.value = ''
     return
   }
   for (const r of expanded || []) {
-    if (r.path !== row.path && ttyTable.value) ttyTable.value.toggleRowExpansion(r, false)
+    if (r.path !== row.path && tableRef.value) tableRef.value.toggleRowExpansion(r, false)
   }
-  ttyExpandedPath.value = row.path
-  fillTtyEditing(row)
+  openPathRef.value = row.path
+  if (onOpen) onOpen()
+}
+
+function onTtyExpand(row, expanded) {
+  expandTtyRow(ttyTable, ttyExpandedPath, row, expanded, () => fillTtyEditing(row))
 }
 
 function collapseTtyRow() {
@@ -2776,12 +2762,7 @@ function collapseTtyRow() {
 }
 
 function resetTtyAdd() {
-  ttyAddForm.alias = ''
-  ttyAddForm.baud = 115200
-  ttyAddForm.data_bits = 8
-  ttyAddForm.parity = 'N'
-  ttyAddForm.stop_bits = 1
-  ttyAddForm.enabled = true
+  Object.assign(ttyAddForm, ttyDefaults())
 }
 
 function onTtyAddRow(row) {
@@ -2789,16 +2770,7 @@ function onTtyAddRow(row) {
 }
 
 function onTtyAddExpand(row, expanded) {
-  const open = (expanded || []).some((r) => r.path === row.path)
-  if (!open) {
-    if (ttyAddPath.value === row.path) ttyAddPath.value = ''
-    return
-  }
-  for (const r of expanded || []) {
-    if (r.path !== row.path && ttyAddTable.value) ttyAddTable.value.toggleRowExpansion(r, false)
-  }
-  ttyAddPath.value = row.path
-  resetTtyAdd()
+  expandTtyRow(ttyAddTable, ttyAddPath, row, expanded, resetTtyAdd)
 }
 
 function collapseTtyAddRow() {
@@ -2810,15 +2782,7 @@ function collapseTtyAddRow() {
 function manualAddTty() {
   collapseTtyRow()
   collapseTtyAddRow()
-  ttyEditing.isNew = true
-  ttyEditing.path = ''
-  ttyEditing.alias = ''
-  ttyEditing.baud = 115200
-  ttyEditing.data_bits = 8
-  ttyEditing.parity = 'N'
-  ttyEditing.stop_bits = 1
-  ttyEditing.enabled = true
-  ttyEditing.roles = 'operator,manager,admin'
+  Object.assign(ttyEditing, ttyDefaults(), { isNew: true, path: '', roles: 'operator,manager,admin' })
   ttyDialog.value = true
 }
 
@@ -2952,11 +2916,13 @@ async function init() {
   ttyPer.value = 10
   metricPage.value = 1
   metricPer.value = 10
-  sessionPage.value = 1
-  sessionPer.value = 10
   addMetricOpen.value = false
   mainTab.value = 'overview'
   monitorView.value = 'series'
+  loadedTabs.feat = false
+  loadedTabs.net = false
+  loadedTabs.monitor = false
+  loadedTabs.tty = false
   featTab.value = 'storage'
   obsTab.value = 'series'
   procs.value = null
@@ -2992,14 +2958,13 @@ async function init() {
   netCounts.ipc = null
   ipcCounts.value = {}
   netCountsLoaded = false
-  if (sysRetry) { clearTimeout(sysRetry); sysRetry = null }
+  netCountsPromise = null
   Object.keys(cache).forEach((k) => delete cache[k])
   Object.keys(lastTs).forEach((k) => delete lastTs[k])
   Object.keys(pullAt).forEach((k) => delete pullAt[k])
   await fetchSeriesCfg()
   pickSeries()
   await loadAll()
-  loadTtys()
 }
 
 watch(() => route.params.devid, (v) => { if (v) init() })
@@ -3016,10 +2981,7 @@ onMounted(() => {
   window.addEventListener('scroll', closeProcMenu, true)
   window.addEventListener('resize', closeProcMenu)
   window.addEventListener('keydown', onProcKeydown)
-  if (window.ResizeObserver) {
-    seriesRO = new ResizeObserver(() => measureSeries())
-    nextTick(() => { if (seriesWrapEl.value) seriesRO.observe(seriesWrapEl.value) })
-  }
+  if (window.ResizeObserver) seriesRO = new ResizeObserver(() => measureSeries())
 })
 onBeforeUnmount(() => {
   window.removeEventListener('click', closeProcMenu)
@@ -3032,7 +2994,6 @@ onBeforeUnmount(() => {
   stopTimer()
   stopSample()
   if (seriesRO) { seriesRO.disconnect(); seriesRO = null }
-  if (sysRetry) { clearTimeout(sysRetry); sysRetry = null }
   Object.values(charts).forEach((c) => { try { c.destroy() } catch (e) { /* 已销毁 */ } })
 })
 </script>
@@ -3092,10 +3053,6 @@ onBeforeUnmount(() => {
 }
 /* ---- 存储/文件/服务/能力 合并卡片 ---- */
 .feat-panel { padding-top: 12px; }
-.feat-tabs :deep(.el-tabs__header) { margin-bottom: 14px; }
-.feat-tabs :deep(.el-tabs__item) { padding: 0 18px; }
-.feat-tabs :deep(.el-tabs__item:first-child) { padding-left: 2px; }
-.feat-tabs :deep(.el-tabs__content) { padding-top: 2px; }
 
 /* ---- 设备摘要 + 主 tab + 概览 ---- */
 .dev-sticky {
@@ -3237,7 +3194,6 @@ onBeforeUnmount(() => {
 .period { width: 84px; }
 .back { margin-right: 2px; padding: 0 6px; }
 .back .el-icon { margin-right: 2px; }
-.cached-tag { color: #f5a623; }
 :deep(.el-table .cell) { white-space: nowrap; }
 .disk { padding: 8px 0; border-bottom: 1px solid var(--el-border-color-lighter); }
 .disk:last-child { border-bottom: 0; }
@@ -3313,14 +3269,9 @@ onBeforeUnmount(() => {
 .kv-row:last-child { border-bottom: 0; }
 .kv-row .caret { flex: none; display: flex; align-items: center; justify-content: center; width: 16px; height: 24px; color: var(--el-text-color-secondary); }
 .kv-row .caret .el-icon { font-size: 12px; transition: transform 0.15s ease; }
-.kv-row .caret .el-icon.open { transform: rotate(90deg); }
 .kv-row .k { flex: none; width: 92px; color: var(--el-text-color-secondary); font-size: 12px; line-height: 24px; }
 .kv-row .v { min-width: 0; font-size: 13px; word-break: break-all; }
 .kv-row .chips { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 1px; }
-.caps-toggle.clickable { cursor: pointer; }
-.caps-toggle.clickable:hover { background: var(--el-fill-color-light); }
-.caps-toggle.clickable:focus-visible { outline: 2px solid var(--el-color-primary-light-5); outline-offset: -2px; }
-.caps-hint { flex: none; margin-left: auto; font-size: 12px; line-height: 24px; color: var(--el-text-color-secondary); }
 .args { font-size: 12px; color: var(--el-text-color-regular); white-space: pre-wrap; word-break: break-all; }
 .caps-edit {
   margin-top: 12px;
@@ -3413,12 +3364,9 @@ onBeforeUnmount(() => {
 }
 @media (max-width: 599px) {
   .period { width: 76px; }
-  .panel-head { flex-wrap: wrap; }
-  .feat-tabs :deep(.el-tabs__item) { padding: 0 12px; }
   .tty-search { width: 100%; }
   .tty-form { grid-template-columns: 1fr; }
   .metric-edit, .tty-edit { padding-left: 12px; }
-  .caps-hint { display: none; }
   .kv-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 8px; row-gap: 2px; align-items: start; }
   .kv-row .caret { grid-column: 1; grid-row: 1; height: 20px; }
   .kv-row .k { grid-column: 2; grid-row: 1; width: auto; line-height: 20px; }
@@ -3477,7 +3425,6 @@ onBeforeUnmount(() => {
   background: var(--el-color-primary-light-9);
   color: var(--el-color-primary);
 }
-.traffic { font-variant-numeric: tabular-nums; }
 .net-search { width: 220px; }
 .net-table { width: 100%; }
 .net-table .strong, .net-card .strong { font-weight: 600; }

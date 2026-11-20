@@ -46,7 +46,7 @@ curl -fsS -X POST -H 'Content-Type: application/json' \
 curl -fsS -c "$T/c" -X POST -H 'Content-Type: application/json' \
     -d '{"username":"admin","password":"pass12345"}' "$A/api/v1/login" >/dev/null
 
-# 列表要带上 caps_net，前端据此判断是否需要升级 agent
+# 列表要带上 caps_net，供调用方确认 agent 能力
 curl -fsS -b "$T/c" "$A/api/v1/agents" >"$T/agents.json"
 python3 - "$T/agents.json" <<'PY'
 import json, sys

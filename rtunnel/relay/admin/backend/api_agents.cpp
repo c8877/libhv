@@ -50,6 +50,8 @@ void AdminServer::handleAgents(const HttpContextPtr& ctx) {
                 j["caps_arch"] = relay_->agentArch(c->devid);
                 j["caps_ports"] = relay_->agentPorts(c->devid);
                 j["caps_local_web"] = relay_->agentLocalWeb(c->devid);
+        j["caps_net"] = relay_->agentNetCap(c->devid);
+        j["caps_proc"] = relay_->agentProcCap(c->devid);
                 j["caps_net"] = relay_->agentNetCap(c->devid);
                 j["caps_proc"] = relay_->agentProcCap(c->devid);
                 auto vt = relay_->agent_versions.find(c->devid);
@@ -96,8 +98,6 @@ void AdminServer::handleAgentDetail(const HttpContextPtr& ctx) {
         j["boot_ms"] = relay_->agentBootMs(c->devid);
         j["caps_ports"] = relay_->agentPorts(c->devid);
         j["caps_local_web"] = relay_->agentLocalWeb(c->devid);
-        j["caps_net"] = relay_->agentNetCap(c->devid);
-        j["caps_proc"] = relay_->agentProcCap(c->devid);
         j["streams"] = json::array();
         for (RelayStream* s = c->streams; s; s = s->next_c) {
             json st;
@@ -503,7 +503,7 @@ int AdminServer::handleAgentNet(const HttpContextPtr& ctx) {
     });
     if (cap != 1) {
         ctx->response->status_code = HTTP_STATUS_NOT_IMPLEMENTED;
-        ctx->send("{\"error\":\"agent version too old, upgrade to 1.4.28+\",\"caps_net\":" +
+        ctx->send("{\"error\":\"agent does not support net snapshot\",\"caps_net\":" +
                   std::to_string(cap) + "}");
         return HTTP_STATUS_NOT_IMPLEMENTED;
     }
@@ -592,7 +592,7 @@ int AdminServer::proxyAgentProc(const HttpContextPtr& ctx, const std::string& de
     });
     if (cap != 1) {
         ctx->response->status_code = HTTP_STATUS_NOT_IMPLEMENTED;
-        ctx->send("{\"error\":\"agent version too old, upgrade to 1.4.31+\",\"caps_proc\":" +
+        ctx->send("{\"error\":\"agent does not support process snapshot\",\"caps_proc\":" +
                   std::to_string(cap) + "}");
         return HTTP_STATUS_NOT_IMPLEMENTED;
     }
