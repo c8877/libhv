@@ -1197,16 +1197,15 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import Chart from 'chart.js/auto'
 import { ArrowLeft, MoreFilled, Refresh } from '@element-plus/icons-vue'
 import { Api } from '@/shared/api.js'
 import { can, canManage } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import { ago, bytes, copyText, downloadJson, duration, kbPair, time } from '@/shared/utils.js'
-import FileManagerCard from '@/components/FileManagerCard.vue'
-import SvcManagerCard from '@/components/SvcManagerCard.vue'
+const FileManagerCard = defineAsyncComponent(() => import('@/components/FileManagerCard.vue'))
+const SvcManagerCard = defineAsyncComponent(() => import('@/components/SvcManagerCard.vue'))
 import DictChips from '@/components/DictChips.vue'
 
 const route = useRoute()
@@ -1275,6 +1274,20 @@ const percentEl = ref(null)
 const loadEl = ref(null)
 const rateEl = ref(null)
 const charts = {}
+// chart.js 只在真正要画曲线时加载，概览首屏不背这块代码
+let ChartCtor = null
+let chartLoading = null
+let chartSeq = 0
+
+function loadChart() {
+  if (ChartCtor) return Promise.resolve(ChartCtor)
+  if (!chartLoading) {
+    chartLoading = import('chart.js/auto')
+      .then((m) => (ChartCtor = m.default))
+      .catch(() => { chartLoading = null; return null })
+  }
+  return chartLoading
+}
 
 const MAIN_TABS = [
   { name: 'overview', label: '概览' },
@@ -2238,18 +2251,31 @@ function stopSample() {
 
 const palette = ['#4a9eff', '#f5a623', '#57ab5a', '#b083f0', '#e5534b']
 
-function renderCharts() {
+async function renderCharts() {
   const groups = { percent: [], load: [], rate: [] }
   selected.value.forEach((s) => groups[unitOf(s)].push(s))
   const els = { percent: percentEl.value, load: loadEl.value, rate: rateEl.value }
-  for (const unit of ['percent', 'load', 'rate']) {
+  const units = ['percent', 'load', 'rate'].filter((u) => els[u] && groups[u].length)
+  if (!units.length) {
+    chartSeq++
+    for (const unit of ['percent', 'load', 'rate']) {
+      if (charts[unit]) {
+        charts[unit].destroy()
+        delete charts[unit]
+      }
+    }
+    return
+  }
+  const seq = ++chartSeq
+  const Chart = await loadChart()
+  // 加载期间又触发了新的绘制，交给最后一次
+  if (!Chart || seq !== chartSeq) return
+  for (const unit of units) {
     const el = els[unit]
-    if (!el) continue
     if (charts[unit]) {
       charts[unit].destroy()
       delete charts[unit]
     }
-    if (!groups[unit].length) continue
     const tsSet = new Set()
     const data = {}
     groups[unit].forEach((name) => {
