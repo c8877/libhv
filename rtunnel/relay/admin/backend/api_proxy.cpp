@@ -61,6 +61,9 @@ void AdminServer::handleDeviceProxy(const HttpContextPtr& ctx) {
         return;
     }
     if (sub.empty() || sub[0] != '/') sub = "/" + sub;
+    // 转发查询串：本地页的 procs/net/metrics 依赖 page/q/series 等参数
+    std::string qs = hv::dump_query_params(ctx->request->query_params);
+    if (!qs.empty()) sub += "?" + qs;
 
     std::string err;
     int fd = openStream(cfg_, devid, port, err);
@@ -112,9 +115,10 @@ void AdminServer::handleDeviceProxy(const HttpContextPtr& ctx) {
     req += "Connection: close\r\n\r\n";
     if (!body.empty()) req += body;
 
-    // 发送请求并半关闭
+    // 只发请求，不做半关闭：上游的异步接口（procs/net/metrics）会延后写响应，
+    // 半关闭会让本地 Web 先看到 EOF 并断开，响应就丢了。
+    // 请求边界由 Content-Length / GET 无 body 确定，响应由 Connection: close 结束。
     sendData(fd, 1, req);
-    sendFrame(fd, 0x15, 1, std::string());
 
     // 先读到响应头
     std::string raw, p;
