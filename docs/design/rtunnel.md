@@ -355,7 +355,7 @@ sequenceDiagram
 | `0x3D` | `DIAG_END` | C→B | `str json {ok,size,sha256,error}`，sid 回显 |
 | `0x3E` | `STORAGE_REQ` | B→C | `str json {mount,path,depth}`，sid 为请求号；`path` 为子树根，`depth` 是相对该目录的回传层级 |
 | `0x3F` | `STORAGE_INFO` | C→B | `str json {ok,mount,total_kb,used_kb,free_kb,reserved_kb,dirs,files,scan_ms,truncated,skipped,error}` |
-| `0x40` | `STORAGE_DATA` | C→B | 原始字节：nodes 数组 JSON，按 32KiB 顺序分块 |
+| `0x40` | `STORAGE_DATA` | C→B | 原始字节：首字节 `\1` + gzip(整份响应 JSON)，按 32KiB 顺序分块；`\0` 表示未压缩明文 |
 | `0x41` | `STORAGE_END` | C→B | `str json {ok,size,error}`，sid 回显 |
 
 **会话级（stream_id > 0）**

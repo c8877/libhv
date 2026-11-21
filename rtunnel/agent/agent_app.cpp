@@ -3132,8 +3132,9 @@ void AgentApp::handleStorageReq(const rtnp::Frame* f) {
                                                     : info.value("error", std::string("scan failed"));
             }
             else {
-                meta = info;
-                meta.erase("nodes");
+                meta["ok"] = true;
+                meta["mount"] = info.value("mount", rj.value("mount", std::string("/")));
+                meta["path"] = info.value("path", rj.value("path", std::string()));
             }
             ChunkPost* p = new ChunkPost;
             memset(&p->ev, 0, sizeof p->ev);
@@ -3145,12 +3146,23 @@ void AgentApp::handleStorageReq(const rtnp::Frame* f) {
             p->data_type = rtnp::STORAGE_DATA;
             p->end_type = rtnp::STORAGE_END;
             p->ok = meta.value("ok", false);
-            p->meta = meta.dump();
             if (p->ok) {
-                // 只回传 nodes 数组，元信息已经在 INFO 里，省重复
-                json nodes = info["nodes"];
-                p->body = nodes.dump();
+                // 整份响应（元信息 + nodes）压成 gzip 上传，relay 直接原样透传给浏览器。
+                // 首字节标记：'\1' 压缩、'\0' 明文，和 metrics 帧保持一致。
+                std::string plain = info.dump();
+                std::string gz;
+                if (gzipCompress(plain, gz, 6)) {
+                    p->body.assign(1, '\1');
+                    p->body += gz;
+                    meta["gz"] = 1;
+                }
+                else {
+                    p->body.assign(1, '\0');
+                    p->body += plain;
+                    meta["gz"] = 0;
+                }
             }
+            p->meta = meta.dump();
             json end;
             end["ok"] = p->ok;
             end["size"] = (long long)p->body.size();

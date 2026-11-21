@@ -2,6 +2,7 @@
 #include "admin_server.hpp"
 #include "cpputil/hasync.h"
 #include "cpputil/json.hpp"
+#include "common/gzip_util.hpp"
 
 #include <atomic>
 #include <sys/stat.h>
@@ -838,6 +839,33 @@ int AdminServer::handleAgentStorage(const HttpContextPtr& ctx) {
                       "\"}");
             return;
         }
+        // 新 agent 把整份响应压成 gzip 上传（首字节标记），这里不再解析 JSON，
+        // 支持 gzip 的客户端直接原样转发压缩流，由浏览器解压。
+        if (!body.empty() && body[0] == '\1') {
+            std::string ae = ctx->header("Accept-Encoding");
+            if (ae.find("gzip") != std::string::npos) {
+                ctx->response->headers["Content-Encoding"] = "gzip";
+                ctx->response->headers["Vary"] = "Accept-Encoding";
+                ctx->response->content_type = APPLICATION_JSON;
+                ctx->send(body.substr(1));
+                return;
+            }
+            std::string plain;
+            if (!gzipDecompress(body.data() + 1, body.size() - 1, plain)) {
+                ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+                ctx->send("{\"error\":\"gunzip failed\"}");
+                return;
+            }
+            ctx->response->content_type = APPLICATION_JSON;
+            ctx->send(plain);
+            return;
+        }
+        if (!body.empty() && body[0] == '\0') {
+            ctx->response->content_type = APPLICATION_JSON;
+            ctx->send(body.substr(1));
+            return;
+        }
+        // 旧格式（无标记）：body 只有 nodes 数组，和 meta 合并后回明文
         json nodes = json::parse(body, nullptr, false);
         if (nodes.is_discarded() || !nodes.is_array()) nodes = json::array();
         m["nodes"] = std::move(nodes);
