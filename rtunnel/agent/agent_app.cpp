@@ -2827,7 +2827,8 @@ void AgentApp::warmTickCb(htimer_t* t) {
     ((AgentApp*)hevent_userdata(t))->onWarmTick();
 }
 
-// 页面打开期间每 30s 预采样一次，proc 结果进缓存，服务列表刷新 Service 内部缓存。
+// 页面打开期间每 30s 预采样一次进程列表，结果进缓存。
+// 服务列表和存储扫描只在页面实际请求时做，不做定时刷新。
 void AgentApp::onWarmTick() {
     uint64_t now = wallMs();
     uint64_t until = warm_until_ms_.load(std::memory_order_relaxed);
@@ -2837,12 +2838,7 @@ void AgentApp::onWarmTick() {
     if (!warm_inflight_.compare_exchange_strong(expect, 1)) return;
     warm_next_ms_.store(now + 30000);
 
-    // 服务列表排到 Service 自己的 worker；进程采样排到查询 worker，
-    // 和 relay/本地页的请求共用同一个串行队列。
-    if (svc_.ready()) {
-        // 结果丢弃，只为把 Service 的列表缓存刷新到最新
-        svc_.listAsync(rtvs::ListOptions(), [](const nlohmann::json&) {});
-    }
+    // 进程采样排到查询 worker，和 relay/本地页的请求共用同一个串行队列。
     if (!querySubmit([this]() {
             rtproc::Snapshot snap;
             std::string err;

@@ -14,7 +14,6 @@
 (function (global) {
     'use strict';
 
-    var STORE_TTL = 5 * 60 * 1000;
     var MAX_KIDS = 10;
     var FETCH_DEPTH_ALL = 32;
 
@@ -492,7 +491,7 @@
         this.open = mount;
         this.error = '';
         var c = this.cache[mount];
-        if (c && Date.now() - c.ts < STORE_TTL) {
+        if (c) {
             this.render();
             return;
         }
@@ -503,7 +502,7 @@
     Tree.prototype.loadRoot = function (mount, force) {
         var self = this;
         var c = this.cache[mount];
-        if (!force && c && Date.now() - c.ts < STORE_TTL) return;
+        if (!force && c) return;
         var seq = ++this.seq;
         this.loading = true;
         this.error = '';

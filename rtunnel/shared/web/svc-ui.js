@@ -234,7 +234,6 @@
         this.confirm = '';
         this.err = '';
         this.busy = false;
-        this.timer = null;
         this.filterTimer = null;
         this.logTimer = null;
         this.visible = false;
@@ -432,7 +431,6 @@
         this.win.hidden = false;
         if (!this.connected) this.connect();
         this.load();
-        this.startTimers();
     };
 
     Manager.prototype.close = function () {
@@ -465,16 +463,7 @@
         }
     };
 
-    Manager.prototype.startTimers = function () {
-        var self = this;
-        this.stopTimers();
-        this.timer = setInterval(function () {
-            if (self.visible && !document.hidden) self.load();
-        }, 5000);
-    };
-
     Manager.prototype.stopTimers = function () {
-        if (this.timer) { clearInterval(this.timer); this.timer = null; }
         if (this.logTimer) { clearInterval(this.logTimer); this.logTimer = null; }
     };
 
