@@ -50,6 +50,11 @@ namespace {
 
 uint64_t wallMs(); // 定义在文件后部的匿名命名空间
 
+struct WebKick {
+    hevent_t ev;
+    AgentApp* app = nullptr;
+};
+
 // 把 FsSession 的输出装进 RTNP DATA：u8 kind + WebSocket 原始消息
 class FsTunnelSink : public rtfs::Sink {
 public:
@@ -1979,40 +1984,74 @@ static void fillNicDetail(const std::string& name, nlohmann::json& n) {
     n["tx_dropped"] = readSysULL(base + "/statistics/tx_dropped");
 }
 
-nlohmann::json AgentApp::buildSysinfo() {
-    using nlohmann::json;
-    json j;
-    j["version"] = hv_version();
-    j["args"] = args_line;
+// 证书主体/签发者/序列号只解析一次；有效期每次快照按当前时间判断。
+void AgentApp::parseCert() {
+#if defined(WITH_OPENSSL)
+    if (!tls_cert[0]) return;
+    FILE* fp = fopen(tls_cert, "r");
+    if (!fp) return;
+    X509* x = PEM_read_X509(fp, NULL, NULL, NULL);
+    fclose(fp);
+    if (!x) return;
+    char subj[256] = {0}, iss[256] = {0};
+    X509_NAME_oneline(X509_get_subject_name(x), subj, sizeof(subj));
+    X509_NAME_oneline(X509_get_issuer_name(x), iss, sizeof(iss));
+    sys_static_.cert_subject = subj;
+    sys_static_.cert_issuer = iss;
+    sys_static_.cert_serial = std::to_string((long long)ASN1_INTEGER_get(X509_get_serialNumber(x)));
+    {
+        struct tm tm;
+        memset(&tm, 0, sizeof tm);
+        if (ASN1_TIME_to_tm(X509_get0_notAfter(x), &tm)) {
+            sys_static_.cert_not_after = (long long)timegm(&tm);
+        }
+    }
+    X509_free(x);
+#endif
+}
 
+// 内核、板卡、CPU 型号、证书这些不会随运行变化，只读一次。
+void AgentApp::fillSysinfoStatic() {
+    if (sys_static_.ready) return;
+    sys_static_.ready = true;
     struct utsname u;
     if (uname(&u) == 0) {
-        j["kernel"] = u.release;
-        j["machine"] = u.machine;
+        sys_static_.kernel = u.release;
+        sys_static_.machine = u.machine;
     }
     {
         std::ifstream f("/proc/device-tree/model");
-        if (f) {
-            std::string m;
-            std::getline(f, m);
-            j["board"] = m;
-        }
+        if (f) std::getline(f, sys_static_.board);
     }
     {
         std::ifstream f("/proc/cpuinfo");
-        std::string line, model;
-        int cores = 0;
+        std::string line;
         while (std::getline(f, line)) {
-            if (line.rfind("processor", 0) == 0) cores++;
-            if (model.empty() && (line.rfind("model name", 0) == 0 || line.rfind("Processor", 0) == 0)) {
+            if (line.rfind("processor", 0) == 0) sys_static_.cpu_count++;
+            if (sys_static_.cpu_model.empty() &&
+                (line.rfind("model name", 0) == 0 || line.rfind("Processor", 0) == 0)) {
                 size_t p = line.find(':');
-                if (p != std::string::npos) model = line.substr(p + 1);
+                if (p != std::string::npos) sys_static_.cpu_model = line.substr(p + 1);
             }
         }
-        while (!model.empty() && (model[0] == ' ' || model[0] == '\t')) model.erase(0, 1);
-        j["cpu_model"] = model;
-        j["cpu_count"] = cores;
+        while (!sys_static_.cpu_model.empty() &&
+               (sys_static_.cpu_model[0] == ' ' || sys_static_.cpu_model[0] == '\t'))
+            sys_static_.cpu_model.erase(0, 1);
     }
+    parseCert();
+}
+
+nlohmann::json AgentApp::buildSysinfo() {
+    using nlohmann::json;
+    fillSysinfoStatic();
+    json j;
+    j["version"] = hv_version();
+    j["args"] = args_line;
+    j["kernel"] = sys_static_.kernel;
+    j["machine"] = sys_static_.machine;
+    j["board"] = sys_static_.board;
+    j["cpu_model"] = sys_static_.cpu_model;
+    j["cpu_count"] = sys_static_.cpu_count;
     {
         std::ifstream f("/proc/meminfo");
         std::string line;
@@ -2134,18 +2173,27 @@ nlohmann::json AgentApp::buildSysinfo() {
         j["streams"] = arr;
     }
     {
-        std::set<std::string> paths;
-        for (auto& kv : tty_cfgs_) paths.insert(kv.first);
-        DIR* d = opendir("/dev");
-        if (d) {
-            struct dirent* e;
-            while ((e = readdir(d)) != NULL) {
-                std::string n = e->d_name;
-                if (n.rfind("ttyS", 0) != 0 && n.rfind("ttyUSB", 0) != 0 && n.rfind("ttyACM", 0) != 0 && n.rfind("ttySTM", 0) != 0) continue;
-                paths.insert("/dev/" + n);
+        // /dev 扫描用于发现新插入的串口，30s 一次即可；配置里的路径每次都并进来
+        uint64_t now_ms = wallMs();
+        if (tty_dev_paths_.empty() || now_ms - tty_dev_ms_ > 30000) {
+            std::vector<std::string> devs;
+            DIR* d = opendir("/dev");
+            if (d) {
+                struct dirent* e;
+                while ((e = readdir(d)) != NULL) {
+                    std::string n = e->d_name;
+                    if (n.rfind("ttyS", 0) != 0 && n.rfind("ttyUSB", 0) != 0 &&
+                        n.rfind("ttyACM", 0) != 0 && n.rfind("ttySTM", 0) != 0)
+                        continue;
+                    devs.push_back("/dev/" + n);
+                }
+                closedir(d);
             }
-            closedir(d);
+            tty_dev_paths_ = std::move(devs);
+            tty_dev_ms_ = now_ms;
         }
+        std::set<std::string> paths(tty_dev_paths_.begin(), tty_dev_paths_.end());
+        for (auto& kv : tty_cfgs_) paths.insert(kv.first);
         nlohmann::json serial = nlohmann::json::array();
         for (auto& path : paths) {
             unsigned long long rx = 0, tx = 0;
@@ -2241,25 +2289,12 @@ nlohmann::json AgentApp::buildSysinfo() {
         j["caps"] = caps;
     }
 
-#if defined(WITH_OPENSSL)
-    if (tls_cert[0]) {
-        FILE* fp = fopen(tls_cert, "r");
-        if (fp) {
-            X509* x = PEM_read_X509(fp, NULL, NULL, NULL);
-            fclose(fp);
-            if (x) {
-                char subj[256] = {0}, iss[256] = {0};
-                X509_NAME_oneline(X509_get_subject_name(x), subj, sizeof(subj));
-                X509_NAME_oneline(X509_get_issuer_name(x), iss, sizeof(iss));
-                j["cert_subject"] = subj;
-                j["cert_issuer"] = iss;
-                j["cert_serial"] = std::to_string((long long)ASN1_INTEGER_get(X509_get_serialNumber(x)));
-                j["cert_valid"] = (X509_cmp_current_time(X509_get0_notAfter(x)) < 0) ? 0 : 1;
-                X509_free(x);
-            }
-        }
+    if (!sys_static_.cert_subject.empty()) {
+        j["cert_subject"] = sys_static_.cert_subject;
+        j["cert_issuer"] = sys_static_.cert_issuer;
+        j["cert_serial"] = sys_static_.cert_serial;
+        j["cert_valid"] = (sys_static_.cert_not_after > (long long)time(NULL)) ? 1 : 0;
     }
-#endif
 
     j["devid"] = devid;
     j["online"] = ready();
@@ -2285,13 +2320,45 @@ nlohmann::json AgentApp::buildSysinfo() {
 }
 
 void AgentApp::refreshWebSnapshot() {
+    uint64_t now = wallMs();
+    // 无人看页面时降到 10s：mounts 的 statvfs 与 /proc 读取没必要每 2s 跑一遍；
+    // 页面请求会通过 noteWebRequest 立即补齐一次，再恢复 2s 节奏。
+    bool active = web_req_ms_.load(std::memory_order_relaxed) + 15000 > now;
+    if (!active && web_snapshot_ms_.load(std::memory_order_relaxed) + 10000 > now) return;
     nlohmann::json j = buildSysinfo();
     j["ok"] = true;
     j["ts"] = (long long)time(NULL) * 1000;
     j["web"] = {{"listen", web_listen}, {"interval_ms", 2000}};
     std::string body = j.dump();
-    std::lock_guard<std::mutex> lk(web_mu_);
-    web_body_.swap(body);
+    {
+        std::lock_guard<std::mutex> lk(web_mu_);
+        web_body_.swap(body);
+    }
+    web_snapshot_ms_.store(now, std::memory_order_relaxed);
+}
+
+// HTTP 线程调用：记录活跃时间，快照不新鲜时投递一次重建，首屏不用等定时器。
+void AgentApp::noteWebRequest() {
+    uint64_t now = wallMs();
+    web_req_ms_.store(now, std::memory_order_relaxed);
+    if (web_snapshot_ms_.load(std::memory_order_relaxed) + 1500 > now) return;
+    if (!loop) return;
+    if (web_kick_pending_.exchange(1) != 0) return;
+    WebKick* k = new WebKick;
+    memset(&k->ev, 0, sizeof k->ev);
+    k->ev.cb = webKickCb;
+    k->ev.userdata = k;
+    k->app = this;
+    hloop_post_event(loop, &k->ev);
+}
+
+void AgentApp::webKickCb(hevent_t* ev) {
+    WebKick* k = static_cast<WebKick*>(hevent_userdata(ev));
+    AgentApp* app = k->app;
+    delete k;
+    if (!app) return;
+    app->web_kick_pending_.store(0, std::memory_order_relaxed);
+    app->refreshWebSnapshot();
 }
 
 std::string AgentApp::webSnapshot() {
@@ -2464,9 +2531,19 @@ void AgentApp::handleNetReq(const rtnp::Frame* f) {
     json rj = json::parse(req, nullptr, false);
     if (rj.is_discarded() || !rj.is_object()) rj = json::object();
 
-    // 采集要扫 /proc 与 fork lsipc，最多允许 3 个并发，其余直接拒绝
-    if (net_inflight_.fetch_add(1) > 2) {
-        net_inflight_.fetch_sub(1);
+    // 采集要扫 /proc 与 fork lsipc，交给查询 worker 串行执行；队列满时直接拒绝
+    if (!querySubmit([this, sid, rj]() {
+            std::string body = netSnapshotJson(rj);
+            AsyncPost* t = new AsyncPost;
+            memset(&t->ev, 0, sizeof t->ev);
+            t->ev.cb = asyncPostCb;
+            t->ev.userdata = t;
+            t->app = this;
+            t->type = rtnp::NET_INFO;
+            t->sid = sid;
+            t->body = std::move(body);
+            hloop_post_event(loop, &t->ev);
+        })) {
         json e;
         e["error"] = "busy";
         e["scope"] = rj.value("scope", std::string("all"));
@@ -2475,23 +2552,7 @@ void AgentApp::handleNetReq(const rtnp::Frame* f) {
         rtnp::Writer w;
         w.str(body.c_str());
         rtnp::send(io, rtnp::NET_INFO, sid, w.data, (uint16_t)w.len);
-        return;
     }
-
-    hloop_t* lp = loop;
-    std::thread([this, sid, rj, lp]() {
-        std::string body = netSnapshotJson(rj);
-        AsyncPost* t = new AsyncPost;
-        memset(&t->ev, 0, sizeof t->ev);
-        t->ev.cb = asyncPostCb;
-        t->ev.userdata = t;
-        t->app = this;
-        t->type = rtnp::NET_INFO;
-        t->sid = sid;
-        t->body = std::move(body);
-        hloop_post_event(lp, &t->ev);
-        net_inflight_.fetch_sub(1);
-    }).detach();
 }
 
 // 同步取一页进程列表。relay 的 PROC_REQ 与本地页 /api/v1/procs 共用，
@@ -2603,8 +2664,18 @@ void AgentApp::handleProcReq(const rtnp::Frame* f) {
         return;
     }
 
-    if (proc_inflight_.fetch_add(1) > 2) {
-        proc_inflight_.fetch_sub(1);
+    if (!querySubmit([this, sid, rj]() {
+            std::string body = procsListJson(rj);
+            AsyncPost* t = new AsyncPost;
+            memset(&t->ev, 0, sizeof t->ev);
+            t->ev.cb = asyncPostCb;
+            t->ev.userdata = t;
+            t->app = this;
+            t->type = rtnp::PROC_INFO;
+            t->sid = sid;
+            t->body = std::move(body);
+            hloop_post_event(loop, &t->ev);
+        })) {
         json e;
         e["op"] = "list";
         e["error"] = "busy";
@@ -2612,23 +2683,7 @@ void AgentApp::handleProcReq(const rtnp::Frame* f) {
         rtnp::Writer w;
         w.str(body.c_str());
         rtnp::send(io, rtnp::PROC_INFO, sid, w.data, (uint16_t)w.len);
-        return;
     }
-
-    hloop_t* lp = loop;
-    std::thread([this, sid, rj, lp]() {
-        std::string body = procsListJson(rj);
-        AsyncPost* t = new AsyncPost;
-        memset(&t->ev, 0, sizeof t->ev);
-        t->ev.cb = asyncPostCb;
-        t->ev.userdata = t;
-        t->app = this;
-        t->type = rtnp::PROC_INFO;
-        t->sid = sid;
-        t->body = std::move(body);
-        hloop_post_event(lp, &t->ev);
-        proc_inflight_.fetch_sub(1);
-    }).detach();
 }
 
 void AgentApp::ensureWarmTimer() {
@@ -2652,21 +2707,23 @@ void AgentApp::onWarmTick() {
     if (!warm_inflight_.compare_exchange_strong(expect, 1)) return;
     warm_next_ms_.store(now + 30000);
 
-    std::thread([this]() {
-        // 服务列表首次要跑 systemctl show + list-unit-files（单核设备约 4s），
-        // 进程采样约 300ms；先启动服务刷新，打开服务 tab 时更快命中缓存
-        if (svc_.ready()) {
-            // 结果丢弃，只为把 Service 的列表缓存刷新到最新
-            svc_.listAsync(rtvs::ListOptions(), [](const nlohmann::json&) {});
-        }
-        rtproc::Snapshot snap;
-        std::string err;
-        if (rtproc::sample(snap, err)) {
-            std::lock_guard<std::mutex> lk(proc_cache_mu_);
-            proc_cache_ = std::move(snap);
-        }
+    // 服务列表排到 Service 自己的 worker；进程采样排到查询 worker，
+    // 和 relay/本地页的请求共用同一个串行队列。
+    if (svc_.ready()) {
+        // 结果丢弃，只为把 Service 的列表缓存刷新到最新
+        svc_.listAsync(rtvs::ListOptions(), [](const nlohmann::json&) {});
+    }
+    if (!querySubmit([this]() {
+            rtproc::Snapshot snap;
+            std::string err;
+            if (rtproc::sample(snap, err)) {
+                std::lock_guard<std::mutex> lk(proc_cache_mu_);
+                proc_cache_ = std::move(snap);
+            }
+            warm_inflight_.store(0);
+        })) {
         warm_inflight_.store(0);
-    }).detach();
+    }
 }
 
 namespace {
@@ -2701,6 +2758,72 @@ void AgentApp::warmKickCb(hevent_t* ev) {
     if (!app) return;
     app->ensureWarmTimer();
     app->onWarmTick();
+}
+
+// ---------------------------------------------------------------- 按需查询 worker
+// 进程扫描（两次读 /proc）与网络快照（fork lsipc）都会阻塞，放在单个线程串行执行：
+// 单核设备上不会出现多份扫描互相抢 CPU，线程数也固定为一个。
+void AgentApp::queryStart() {
+    if (query_thread_.joinable()) return;
+    query_stop_.store(false);
+    query_thread_ = std::thread([this]() { queryLoop(); });
+}
+
+void AgentApp::queryStop() {
+    query_stop_.store(true);
+    {
+        std::lock_guard<std::mutex> lk(query_mu_);
+        query_q_.clear();
+    }
+    query_cv_.notify_all();
+    if (query_thread_.joinable()) query_thread_.join();
+}
+
+void AgentApp::queryLoop() {
+    for (;;) {
+        std::function<void()> fn;
+        {
+            std::unique_lock<std::mutex> lk(query_mu_);
+            query_cv_.wait(lk, [this]() { return query_stop_.load() || !query_q_.empty(); });
+            if (query_stop_.load()) return;
+            fn = std::move(query_q_.front());
+            query_q_.pop_front();
+        }
+        fn();
+    }
+}
+
+bool AgentApp::querySubmit(std::function<void()> fn) {
+    {
+        std::lock_guard<std::mutex> lk(query_mu_);
+        if (query_stop_.load() || query_q_.size() >= kQueryMaxQueue) return false;
+        query_q_.push_back(std::move(fn));
+    }
+    query_cv_.notify_one();
+    return true;
+}
+
+// 同步入口给本地 HTTP 用：任务仍在查询线程执行，调用线程只等结果，
+// 这样 /api/v1/procs 与 relay 的 PROC_REQ 共用同一个并发上限。
+std::string AgentApp::querySync(const std::function<std::string()>& fn) {
+    std::mutex m;
+    std::condition_variable cv;
+    bool done = false;
+    std::string out;
+    if (!querySubmit([&]() {
+            std::string r = fn();
+            {
+                std::lock_guard<std::mutex> lk(m);
+                out.swap(r);
+                done = true;
+            }
+            cv.notify_one();
+        })) {
+        return std::string();
+    }
+    std::unique_lock<std::mutex> lk(m);
+    cv.wait(lk, [&]() { return done || query_stop_.load(); });
+    return out;
 }
 
 // B→C：设备详情页打开后按 ttl 续期预热（默认 120s，每 30s 采样一次）。
@@ -3295,7 +3418,9 @@ int AgentApp::run(int argc, char** argv) {
         },
         1000, INFINITE);
     hevent_set_userdata(series_timer, this);
+    queryStart();
     hloop_run(lp);
+    queryStop();
 #ifdef RTUNNEL_AGENT_WEB
     if (web_enabled) agentWebStop();
 #endif

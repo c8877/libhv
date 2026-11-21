@@ -14,6 +14,9 @@
 #include <set>
 #include <mutex>
 #include <atomic>
+#include <condition_variable>
+#include <functional>
+#include <thread>
 #include <cstdio>
 
 #include "cpputil/json.hpp"
@@ -116,6 +119,15 @@ public:
     // 可从 HTTP 工作线程调用，事件循环操作会投递回 loop。
     void requestWarm(uint64_t ttl_ms);
 
+    // 按需查询统一在单个 worker 上串行执行：进程扫描、网络快照都会阻塞
+    // （双采样、fork lsipc），串行可以把单核设备的 CPU 峰值压住。
+    // 队列满时返回 false / 空串，调用方回 busy。
+    bool querySubmit(std::function<void()> fn);
+    std::string querySync(const std::function<std::string()>& fn);
+
+    // HTTP 线程在页面请求时调用：记录活跃时间，空闲后首个请求触发一次快照重建。
+    void noteWebRequest();
+
 protected:
     uint8_t role() const override { return rtnp::ROLE_AGENT; }
     const char* identity() const override { return devid; }
@@ -126,11 +138,39 @@ protected:
 private:
     std::mutex web_mu_;
     std::string web_body_;    // refreshWebSnapshot 生成，webSnapshot 复制
+    std::atomic<uint64_t> web_req_ms_{0};      // 最近一次页面请求
+    std::atomic<uint64_t> web_snapshot_ms_{0}; // 最近一次快照生成
+    std::atomic<int> web_kick_pending_{0};
+    static void webKickCb(hevent_t* ev);
+
+    // 按需查询 worker：单线程 + 有限队列
+    void queryStart();
+    void queryStop();
+    void queryLoop();
+    std::thread query_thread_;
+    std::mutex query_mu_;
+    std::condition_variable query_cv_;
+    std::deque<std::function<void()>> query_q_;
+    std::atomic<bool> query_stop_{false};
+    static const size_t kQueryMaxQueue = 16;
+
+    // sysinfo 里不随运行变化的字段只取一次：uname/device-tree/cpuinfo/证书
+    struct SysinfoStatic {
+        bool ready = false;
+        std::string kernel, machine, board, cpu_model;
+        int cpu_count = 0;
+        std::string cert_subject, cert_issuer, cert_serial;
+        long long cert_not_after = 0; // unix 秒；0 表示没有证书
+    } sys_static_;
+    void fillSysinfoStatic();
+    void parseCert();
+    // /dev 下的串口设备名变化很慢（插拔 USB 串口），30s 扫一次即可
+    std::vector<std::string> tty_dev_paths_;
+    uint64_t tty_dev_ms_ = 0;
+
     std::mutex net_mu_;
     nlohmann::json net_ipc_cache_;   // 最近一次 IPC 采集结果
     uint64_t net_ipc_ts_ = 0;
-    std::atomic<int> net_inflight_{0};
-    std::atomic<int> proc_inflight_{0};
     // 设备详情页打开期间（WARM_REQ 续期）每 30s 预采样进程与服务，供后续请求直接命中
     std::mutex proc_cache_mu_;
     rtproc::Snapshot proc_cache_;

@@ -257,13 +257,16 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
     service->GET("/", [app](HttpRequest* req, HttpResponse* resp) {
         // 页面一打开就预热进程/服务缓存，切到对应 tab 时不用等 systemctl
         app->requestWarm(90000);
+        app->noteWebRequest();
         setNoCacheHeaders(resp);
         serveAsset(req, resp, g_html, TEXT_HTML);
         return 200;
     });
     service->GET("/api/v1/sysinfo", [app](HttpRequest* req, HttpResponse* resp) {
-        // 页面打开期间靠 2s 轮询续期，关闭后 90s 内自然停止
+        // 页面打开期间靠 2s 轮询续期，关闭后 90s 内自然停止；
+        // noteWebRequest 让暂停在 10s 的空闲快照立即补齐
         app->requestWarm(90000);
+        app->noteWebRequest();
         setNoCacheHeaders(resp);
         resp->content_type = APPLICATION_JSON;
         std::string body = app->webSnapshot();
@@ -286,7 +289,9 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
         q["page"] = atoi(req->GetParam("page", "1").c_str());
         q["page_size"] = atoi(req->GetParam("page_size", "10").c_str());
         q["refresh"] = req->GetParam("refresh", "0") == "1";
-        sendJson(req.get(), writer, app->procsListJson(q));
+        std::string body = app->querySync([app, q]() { return app->procsListJson(q); });
+        if (body.empty()) body = "{\"op\":\"list\",\"error\":\"busy\"}";
+        sendJson(req.get(), writer, body);
     });
     service->GET("/api/v1/net", [app](const HttpRequestPtr& req, const HttpResponseWriterPtr& writer) {
         nlohmann::json q;
@@ -299,7 +304,11 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
         q["utype"] = req->GetParam("utype", "all");
         q["ipc_kind"] = req->GetParam("ipc_kind", "shm");
         q["refresh"] = req->GetParam("refresh", "0") == "1";
-        sendJson(req.get(), writer, app->netSnapshotJson(q));
+        std::string body = app->querySync([app, q]() { return app->netSnapshotJson(q); });
+        if (body.empty())
+            body = "{\"error\":\"busy\",\"scope\":\"" + q["scope"].get<std::string>() +
+                   "\",\"summary\":{\"tcp\":-1,\"udp\":-1,\"unix\":-1,\"ipc\":-1}}";
+        sendJson(req.get(), writer, body);
     });
     service->GET("/api/v1/metrics", [app](const HttpRequestPtr& req, const HttpResponseWriterPtr& writer) {
         std::string series = req->GetParam("series");
