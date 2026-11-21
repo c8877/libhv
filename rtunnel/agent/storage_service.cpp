@@ -21,8 +21,17 @@ struct NodeAcc {
     uint64_t bytes = 0;
     uint64_t files = 0;
     uint64_t dirs = 0;
+    uint64_t small_bytes = 0; // 本层未单独成行的小文件
+    uint64_t small_files = 0;
     long long mtime = 0;
     int depth = 0;
+};
+
+// 单独回传的大文件；小文件按目录汇总进 NodeAcc::small_*
+struct FileNode {
+    std::string path;
+    uint64_t bytes = 0;
+    long long mtime = 0;
 };
 
 struct Walker {
@@ -30,6 +39,7 @@ struct Walker {
     const std::atomic<bool>& cancel;
     dev_t root_dev = 0;
     std::vector<NodeAcc> nodes; // nodes[0] 是挂载点
+    std::vector<FileNode> files;
     std::set<std::pair<uint64_t, uint64_t>> seen_inodes;
     uint64_t entries = 0;
     bool truncated = false;
@@ -91,8 +101,25 @@ struct Walker {
                     auto key = std::make_pair((uint64_t)st.st_dev, (uint64_t)st.st_ino);
                     if (!seen_inodes.insert(key).second) continue;
                 }
-                nodes[idx].bytes += (uint64_t)st.st_size;
+                uint64_t sz = (uint64_t)st.st_size;
+                nodes[idx].bytes += sz;
                 ++nodes[idx].files;
+                // 大文件单独成行；小文件按目录聚合，保证子项之和等于父项
+                if (sz >= opt.min_file_bytes && !nodes[idx].path.empty() &&
+                    files.size() < opt.max_file_nodes) {
+                    std::string child = nodes[idx].path;
+                    if (child.back() != '/') child += '/';
+                    child += name;
+                    FileNode fn;
+                    fn.path = std::move(child);
+                    fn.bytes = sz;
+                    fn.mtime = (long long)st.st_mtime;
+                    files.push_back(std::move(fn));
+                }
+                else {
+                    nodes[idx].small_bytes += sz;
+                    ++nodes[idx].small_files;
+                }
                 continue;
             }
             if (!S_ISDIR(st.st_mode)) continue;
@@ -213,18 +240,28 @@ bool scan(const Options& opt_in, const std::atomic<bool>& cancel, Result& out) {
     out.dirs = w.nodes[0].dirs;
 
     nlohmann::json arr = nlohmann::json::array();
-    arr.push_back({{"p", w.nodes[0].path},
-                   {"b", w.nodes[0].bytes},
-                   {"n", w.nodes[0].files},
-                   {"d", w.nodes[0].dirs},
-                   {"m", w.nodes[0].mtime}});
+    auto addDir = [&arr](const NodeAcc& n) {
+        arr.push_back({{"p", n.path}, {"b", n.bytes}, {"n", n.files},
+                       {"d", n.dirs}, {"m", n.mtime}, {"t", "d"}});
+    };
+    addDir(w.nodes[0]);
     for (size_t i = 1; i < w.nodes.size(); ++i) {
         if (w.nodes[i].path.empty()) continue; // sink 节点
-        arr.push_back({{"p", w.nodes[i].path},
-                       {"b", w.nodes[i].bytes},
-                       {"n", w.nodes[i].files},
-                       {"d", w.nodes[i].dirs},
-                       {"m", w.nodes[i].mtime}});
+        addDir(w.nodes[i]);
+    }
+    // 大文件作为叶子节点，前端按路径挂到所属目录下
+    for (const FileNode& f : w.files) {
+        arr.push_back({{"p", f.path}, {"b", f.bytes}, {"n", 1},
+                       {"d", 0}, {"m", f.mtime}, {"t", "f"}});
+    }
+    // 小于阈值的文件按目录聚合成一条，路径用一个不会与实际文件重名的后缀
+    for (const NodeAcc& n : w.nodes) {
+        if (n.path.empty() || n.small_files == 0) continue;
+        std::string ap = n.path;
+        if (ap.back() != '/') ap += '/';
+        ap += std::string("\x01") + "files";
+        arr.push_back({{"p", ap}, {"b", n.small_bytes}, {"n", n.small_files},
+                       {"d", 0}, {"m", n.mtime}, {"t", "o"}});
     }
     out.nodes = std::move(arr);
     out.ok = true;

@@ -114,6 +114,8 @@ h2{font-size:14px;margin:0;font-weight:650}
 .st-row .bar{flex:1 1 90px;min-width:40px;margin-top:0}
 .st-row .pc{flex:none;width:44px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
 .st-row.other .nm{font-style:italic}
+.st-row.file .nm{color:var(--text)}
+.st-row.small .nm{color:var(--muted)}
 .st-row.foot{height:25px}
 .st-row.foot .nm{color:var(--muted)}
 .st-row .bar i.free{background:var(--bar-bg)}
@@ -513,62 +515,92 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     return p.slice(p.lastIndexOf('/') + 1).charAt(0) === '.';
   }
 
-  // 每个父节点最多列 10 个子项，其余合并成「其他 N 项」，点开再展开全部
+  // 子项分「目录 / 文件」两组，各自最多列 10 项，其余合并成
+  // 「其他目录 N 项」「其他文件 N 项」；点合并行展开全部
   function storeKids(c, path) {
     var node = c.map[path];
     if (!node || !node.children.length) return [];
     var list = node.children;
     if (!state.store.showHidden) list = list.filter(function (k) { return !isHiddenPath(k.p); });
     if (!list.length) return [];
-    var all = list.slice().sort(function (a, b) { return b.b - a.b; });
-    if (state.store.showAll[path]) return all;
-    var threshold = Math.max(node.b * 0.01, 1), keep = [], rest = [];
-    all.forEach(function (k, i) {
-      if (i < 10 && (k.b >= threshold || i < 3)) keep.push(k);
-      else rest.push(k);
+    var groups = { dir: [], file: [] };
+    list.forEach(function (k) {
+      (k.t === 'f' || k.t === 'o' ? groups.file : groups.dir).push(k);
     });
-    if (rest.length) {
-      keep.push({ other: true, count: rest.length, b: rest.reduce(function (a, x) { return a + x.b; }, 0) });
-    }
-    return keep;
+    var out = [];
+    ['dir', 'file'].forEach(function (kind) {
+      var arr = groups[kind];
+      if (!arr.length) return;
+      arr.sort(function (a, b) { return b.b - a.b; });
+      if (state.store.showAll[path]) {
+        out = out.concat(arr);
+        return;
+      }
+      var threshold = Math.max(node.b * 0.01, 1), keep = [], rest = [];
+      arr.forEach(function (k, i) {
+        if (i < 10 && (k.b >= threshold || i < 3)) keep.push(k);
+        else rest.push(k);
+      });
+      out = out.concat(keep);
+      if (rest.length) {
+        out.push({ other: true, group: kind, count: rest.length,
+          b: rest.reduce(function (a, x) { return a + x.b; }, 0) });
+      }
+    });
+    return out;
   }
 
   function storeRows(c) {
     var total = Math.max(1, toNum(c.data.total_kb) * 1024), rows = [];
+    function base(node, depth) {
+      return { b: node.b, depth: depth,
+        pct: Math.max(node.b > 0 ? 0.4 : 0, storePct(node.b, total)),
+        pctText: storePctText(node.b, total) };
+    }
+    function leafRow(node, depth) {
+      var isSmall = node.t === 'o';
+      var r = { path: node.p, kind: isSmall ? 'small' : 'file',
+        name: isSmall ? '小文件 ' + toNum(node.n) + ' 项' : node.p.slice(node.p.lastIndexOf('/') + 1),
+        title: isSmall ? (node.p.slice(0, node.p.lastIndexOf('/')) || '/') : node.p,
+        toggle: false, open: false };
+      return Object.assign(r, base(node, depth));
+    }
+    function otherRow(parent, kid, depth) {
+      var r = { path: parent, kind: 'other', other: true,
+        name: (kid.group === 'file' ? '其他文件 ' : '其他目录 ') + kid.count + ' 项',
+        toggle: true, open: false };
+      return Object.assign(r, base(kid, depth));
+    }
+    function emitKids(kids, depth, parent) {
+      kids.forEach(function (kid) {
+        if (kid.other) rows.push(otherRow(parent, kid, depth));
+        else if (kid.t === 'f' || kid.t === 'o') rows.push(leafRow(kid, depth));
+        else walk(kid.p, depth);
+      });
+    }
     function walk(path, depth) {
       var node = c.map[path];
       if (!node) return;
       var kids = storeKids(c, path), open = !!state.store.expanded[path];
-      rows.push({ path: path, name: path.slice(path.lastIndexOf('/') + 1), b: node.b, depth: depth,
-        toggle: kids.length > 0, open: open, pct: Math.max(node.b > 0 ? 0.4 : 0, storePct(node.b, total)),
-        pctText: storePctText(node.b, total) });
-      if (!open) return;
-      kids.forEach(function (kid) {
-        if (kid.other) {
-          rows.push({ path: path, other: true, name: '其他 ' + kid.count + ' 项', b: kid.b, depth: depth + 1,
-            toggle: true, open: false, pct: Math.max(kid.b > 0 ? 0.4 : 0, storePct(kid.b, total)),
-            pctText: storePctText(kid.b, total) });
-        }
-        else walk(kid.p, depth + 1);
-      });
+      var r = { path: path, kind: 'dir', title: path,
+        name: path.slice(path.lastIndexOf('/') + 1),
+        toggle: kids.length > 0, open: open };
+      rows.push(Object.assign(r, base(node, depth)));
+      if (open) emitKids(kids, depth + 1, path);
     }
-    storeKids(c, c.data.mount).forEach(function (kid) {
-      if (kid.other) {
-        rows.push({ path: c.data.mount, other: true, name: '其他 ' + kid.count + ' 项', b: kid.b, depth: 0,
-          toggle: true, open: false, pct: Math.max(kid.b > 0 ? 0.4 : 0, storePct(kid.b, total)),
-          pctText: storePctText(kid.b, total) });
-      }
-      else walk(kid.p, 0);
-    });
+    // 分区本身已由头部展示，正文从一级子项开始
+    emitKids(storeKids(c, c.data.mount), 0, c.data.mount);
     return rows;
   }
 
   function storeRowHtml(r) {
-    return '<div class="st-row' + (r.other ? ' other' : '') + '" data-path="' + esc(r.path) + '"' +
+    return '<div class="st-row' + (r.other ? ' other' : '') +
+      (r.kind === 'file' ? ' file' : '') + (r.kind === 'small' ? ' small' : '') +
+      '" data-path="' + esc(r.path) + '" data-kind="' + r.kind + '"' +
       (r.other ? ' data-other="1"' : '') + (r.toggle && !r.other ? ' data-kids="1"' : '') +
       ' style="padding-left:' + (4 + r.depth * 12) + 'px">' +
       '<span class="caret">' + (r.toggle ? (r.open ? '▾' : '▸') : '') + '</span>' +
-      '<span class="nm mono" title="' + esc(r.path) + '">' + esc(r.name) + '</span>' +
+      '<span class="nm mono" title="' + esc(r.title || r.path) + '">' + esc(r.name) + '</span>' +
       '<span class="sz mono">' + fmtBytes(r.b) + '</span>' +
       '<span class="bar slim"><i class="' + (r.other ? 'muted-fill' : '') + '" style="width:' + r.pct + '%"></i></span>' +
       '<span class="pc mono">' + r.pctText + '</span></div>';
@@ -602,7 +634,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
         '<span class="pc mono">' + p + '%</span></div>';
     });
     html += '</div>';
-    html += '<div class="st-note">目录合计 ' + fmtBytes(d.bytes) + ' · df 已用 ' + fmtKB(d.used_kb) +
+    html += '<div class="st-note">统计合计 ' + fmtBytes(d.bytes) + ' · df 已用 ' + fmtKB(d.used_kb) +
       ' · 差额来自文件系统元数据、保留块、已删除未释放的文件和无权限目录</div>';
     if (d.truncated) html += '<div class="st-warn warn">结果可能偏低：' + esc(storeTruncText(d.truncated_reason)) + '</div>';
     if (d.skipped && d.skipped.length) {
@@ -671,7 +703,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
         if (seq !== st.seq) return;
         if (!d || !d.ok) throw new Error((d && d.error) || 'scan failed');
         var map = {};
-        (d.nodes || []).forEach(function (n) { map[n.p] = { p: n.p, b: n.b, n: n.n, d: n.d, m: n.m, children: [] }; });
+        (d.nodes || []).forEach(function (n) { map[n.p] = { p: n.p, b: n.b, n: n.n, d: n.d, m: n.m, t: n.t, children: [] }; });
         (d.nodes || []).forEach(function (n) {
           if (n.p === mount) return;
           var parent = n.p.slice(0, n.p.lastIndexOf('/')) || '/';
@@ -769,6 +801,8 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
   $('#storeList').addEventListener('contextmenu', function (e) {
     var row = e.target.closest('.st-row');
     if (!row) return;
+    var kind = row.getAttribute('data-kind');
+    if (kind === 'file' || kind === 'small') return;
     var path = row.getAttribute('data-path');
     if (!path) return;
     var c = state.store.cache[state.store.open];

@@ -236,12 +236,12 @@
                 <el-alert v-else-if="storageError" :title="storageError" type="error" :closable="false" show-icon />
                 <template v-else-if="storeCur">
                   <div v-for="row in storageRows" :key="row.key" class="st-row"
-                       :class="{ root: row.depth === 0, other: row.other }"
+                       :class="{ root: row.depth === 0, other: row.other, file: row.kind === 'file', small: row.kind === 'small' }"
                        :style="{ paddingLeft: 6 + row.depth * 14 + 'px' }"
                        @click="onStorageRow(row)"
                        @contextmenu.prevent="onStorageContextMenu($event, row)">
                     <span class="caret">{{ row.toggle ? (row.open ? '▾' : '▸') : '' }}</span>
-                    <span class="nm mono" :title="row.path">{{ row.name }}</span>
+                    <span class="nm mono" :title="row.title || row.path">{{ row.name }}</span>
                     <span class="sz mono">{{ bytes(row.b) }}</span>
                     <span class="st-bar"><i :style="{ width: row.pct + '%' }" :class="{ 'muted-fill': row.other }" /></span>
                     <span class="pc mono">{{ row.pctText }}</span>
@@ -268,7 +268,7 @@
                     </div>
                   </div>
                   <div class="st-note muted">
-                    目录合计 {{ bytes(storeCur.data.bytes) }} · df 已用 {{ bytes(storeCur.data.used_kb * 1024) }} ·
+                    统计合计 {{ bytes(storeCur.data.bytes) }} · df 已用 {{ bytes(storeCur.data.used_kb * 1024) }} ·
                     差额来自文件系统元数据、保留块、已删除未释放的文件和无权限目录
                   </div>
                   <el-alert v-if="storeCur.data.truncated" class="st-warn" type="warning" :closable="false" show-icon
@@ -1594,7 +1594,8 @@ function storagePctText(b, total) {
   return p >= 10 ? Math.round(p) + '%' : p.toFixed(1) + '%'
 }
 
-// 每个父节点最多列 10 个子项，其余合并成「其他 N 项」，点开再展开全部
+// 子项分「目录 / 文件」两组，各自最多列 10 项，其余合并成
+// 「其他目录 N 项」「其他文件 N 项」；点合并行展开全部
 function isHiddenPath(p) {
   return p.slice(p.lastIndexOf('/') + 1).startsWith('.')
 }
@@ -1605,19 +1606,36 @@ function storageKids(cur, path) {
   let list = node.children
   if (!storageShowHidden.value) list = list.filter((k) => !isHiddenPath(k.p))
   if (!list.length) return []
-  const all = list.slice().sort((a, b) => b.b - a.b)
-  if (storageShowAll[path]) return all
-  const threshold = Math.max(node.b * 0.01, 1)
-  const keep = []
-  const rest = []
-  all.forEach((k, i) => {
-    if (i < 10 && (k.b >= threshold || i < 3)) keep.push(k)
-    else rest.push(k)
-  })
-  if (rest.length) {
-    keep.push({ other: true, count: rest.length, b: rest.reduce((a, x) => a + x.b, 0) })
+  const groups = { dir: [], file: [] }
+  for (const k of list) (k.t === 'f' || k.t === 'o' ? groups.file : groups.dir).push(k)
+
+  const out = []
+  for (const kind of ['dir', 'file']) {
+    const arr = groups[kind]
+    if (!arr.length) continue
+    arr.sort((a, b) => b.b - a.b)
+    if (storageShowAll[path]) {
+      out.push(...arr)
+      continue
+    }
+    const threshold = Math.max(node.b * 0.01, 1)
+    const keep = []
+    const rest = []
+    arr.forEach((k, i) => {
+      if (i < 10 && (k.b >= threshold || i < 3)) keep.push(k)
+      else rest.push(k)
+    })
+    out.push(...keep)
+    if (rest.length) {
+      out.push({
+        other: true,
+        group: kind,
+        count: rest.length,
+        b: rest.reduce((a, x) => a + x.b, 0),
+      })
+    }
   }
-  return keep
+  return out
 }
 
 const storageRows = computed(() => {
@@ -1625,6 +1643,48 @@ const storageRows = computed(() => {
   if (!cur) return []
   const total = storeTotalBytes.value
   const rows = []
+
+  const base = (node, depth) => ({
+    b: node.b,
+    depth,
+    pct: Math.max(Number(node.b) > 0 ? 0.4 : 0, storagePct(node.b, total)),
+    pctText: storagePctText(node.b, total),
+  })
+
+  // 「小文件」是 agent 把一个目录下 <64 KB 的文件聚合成的行
+  const leafRow = (node, depth) => {
+    const kind = node.t === 'f' ? 'file' : 'small'
+    return {
+      key: node.p,
+      path: node.p,
+      kind,
+      title: kind === 'small' ? node.p.slice(0, node.p.lastIndexOf('/')) || '/' : node.p,
+      name: kind === 'small' ? '小文件 ' + node.n + ' 项' : node.p.slice(node.p.lastIndexOf('/') + 1),
+      toggle: false,
+      open: false,
+      ...base(node, depth),
+    }
+  }
+
+  const otherRow = (path, kid, depth) => ({
+    key: path + '::other-' + kid.group,
+    path,
+    kind: 'other',
+    name: (kid.group === 'file' ? '其他文件 ' : '其他目录 ') + kid.count + ' 项',
+    toggle: true,
+    open: false,
+    other: true,
+    ...base(kid, depth),
+  })
+
+  const emitKids = (kids, depth, parent) => {
+    for (const kid of kids) {
+      if (kid.other) rows.push(otherRow(parent, kid, depth))
+      else if (kid.t === 'f' || kid.t === 'o') rows.push(leafRow(kid, depth))
+      else walk(kid.p, depth)
+    }
+  }
+
   const walk = (path, depth) => {
     const node = cur.map[path]
     if (!node) return
@@ -1633,55 +1693,18 @@ const storageRows = computed(() => {
     rows.push({
       key: path,
       path,
+      kind: 'dir',
+      title: path,
       name: path === cur.data.mount ? path : path.slice(path.lastIndexOf('/') + 1),
-      b: node.b,
-      depth,
       toggle: kids.length > 0,
       open,
-      pct: Math.max(Number(node.b) > 0 ? 0.4 : 0, storagePct(node.b, total)),
-      pctText: storagePctText(node.b, total),
+      ...base(node, depth),
     })
-    if (!open) return
-    for (const kid of kids) {
-      if (kid.other) {
-        rows.push({
-          key: path + '::other',
-          path,
-          name: '其他 ' + kid.count + ' 项',
-          b: kid.b,
-          depth: depth + 1,
-          toggle: true,
-          open: false,
-          other: true,
-          pct: Math.max(kid.b > 0 ? 0.4 : 0, storagePct(kid.b, total)),
-          pctText: storagePctText(kid.b, total),
-        })
-      }
-      else {
-        walk(kid.p, depth + 1)
-      }
-    }
+    if (open) emitKids(kids, depth + 1, path)
   }
-  // 分区本身已由头部展示，正文从一级子目录开始
-  for (const kid of storageKids(cur, cur.data.mount)) {
-    if (kid.other) {
-      rows.push({
-        key: cur.data.mount + '::other',
-        path: cur.data.mount,
-        name: '其他 ' + kid.count + ' 项',
-        b: kid.b,
-        depth: 0,
-        toggle: true,
-        open: false,
-        other: true,
-        pct: Math.max(kid.b > 0 ? 0.4 : 0, storagePct(kid.b, total)),
-        pctText: storagePctText(kid.b, total),
-      })
-    }
-    else {
-      walk(kid.p, 0)
-    }
-  }
+
+  // 分区本身已由头部展示，正文从一级子项开始
+  emitKids(storageKids(cur, cur.data.mount), 0, cur.data.mount)
   return rows
 })
 
@@ -1746,6 +1769,8 @@ function onStorageRow(row) {
 
 // 右键菜单：只对目录行生效；「其他」行用它所属的父路径
 function onStorageContextMenu(e, row) {
+  // 只有目录行（含「其他目录/其他文件」合并行）能对子树操作
+  if (row.kind === 'file' || row.kind === 'small') return
   const path = row.path
   if (!path || !storeCur.value || !storeCur.value.map[path]) return
   const w = 132
@@ -3795,6 +3820,8 @@ onBeforeUnmount(() => {
 .st-row .sz { flex: none; width: 76px; text-align: right; color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums; }
 .st-row .pc { flex: none; width: 46px; text-align: right; color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums; }
 .st-row.other .nm { font-style: italic; }
+.st-row.file .nm { color: var(--el-text-color-regular); }
+.st-row.small .nm { color: var(--el-text-color-secondary); }
 .st-row.foot { height: 26px; }
 .st-row.foot .nm { color: var(--el-text-color-secondary); }
 .st-bar i.free { background: var(--el-fill-color-darker); }
