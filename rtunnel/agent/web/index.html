@@ -353,6 +353,11 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
           <canvas id="monRate"></canvas>
           <div class="legend mon" id="monRateLegend"></div>
         </div>
+        <div class="chartbox" id="monTempBox">
+          <h3>温度 (°C)</h3>
+          <canvas id="monTemp"></canvas>
+          <div class="legend mon" id="monTempLegend"></div>
+        </div>
         <div class="emptyp mon-empty" id="monEmpty" hidden>暂无采样数据，等待 agent 采集</div>
       </div>
     </section>
@@ -1216,6 +1221,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
   function monUnit(name) {
     if (name === 'cpu' || name === 'mem') return 'percent';
     if (name === 'load') return 'load';
+    if (name === 'temp') return 'temp';
     return 'rate';
   }
 
@@ -1223,6 +1229,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     if (name === 'cpu') return 'CPU';
     if (name === 'mem') return '内存';
     if (name === 'load') return '负载';
+    if (name === 'temp') return '温度';
     if (name.indexOf('net:') === 0) return name.slice(4) + ' 流量';
     if (name.indexOf('serial:') === 0) return name.slice(7) + ' 串口';
     return name;
@@ -1322,7 +1329,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
 
   function drawMon() {
     var mon = state.mon, now = Date.now(), xMin = now - mon.range;
-    var groups = { percent: [], load: [], rate: [] };
+    var groups = { percent: [], load: [], rate: [], temp: [] };
     mon.selected.forEach(function (name) {
       var arr = mon.data[name] || [];
       var pts = arr.filter(function (p) { return toNum(p.ts) >= xMin; });
@@ -1358,7 +1365,8 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     [
       ['percent', '#monPercent', '#monPercentLegend', function (v) { return v + '%'; }, 100],
       ['load', '#monLoad', '#monLoadLegend', function (v) { return v.toFixed(1); }, 0],
-      ['rate', '#monRate', '#monRateLegend', function (v) { return fmtBytes(v) + '/s'; }, 0]
+      ['rate', '#monRate', '#monRateLegend', function (v) { return fmtBytes(v) + '/s'; }, 0],
+      ['temp', '#monTemp', '#monTempLegend', function (v) { return v.toFixed(1) + '°'; }, 0]
     ].forEach(function (g) {
       var items = groups[g[0]], cv = $(g[1]), box = cv.parentNode;
       box.hidden = !items.length;
