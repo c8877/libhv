@@ -123,6 +123,12 @@ h2{font-size:14px;margin:0;font-weight:650}
 .st-warn{margin-top:8px;padding:7px 10px;border-radius:8px;font-size:12px;line-height:17px}
 .st-warn.warn{background:rgba(224,138,46,.12);color:var(--warn)}
 .st-warn.info{background:var(--hover);color:var(--muted);word-break:break-all}
+.store-eye{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer}
+.store-eye:hover{background:var(--hover);color:var(--text)}
+.store-eye svg{display:block}
+.ctx-menu{position:fixed;z-index:60;min-width:120px;padding:4px;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18)}
+.ctx-menu button{display:block;width:100%;padding:7px 12px;border:0;border-radius:6px;background:transparent;color:var(--text);font:inherit;font-size:13px;text-align:left;cursor:pointer}
+.ctx-menu button:hover{background:var(--hover)}
 .nic{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:4px 8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:12px}
 .nic:last-child{border-bottom:none}
 .nic .nm{font-family:ui-monospace,Menlo,monospace;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}
@@ -410,6 +416,11 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     </section>
   </main>
 
+  <div class="ctx-menu" id="storeMenu" role="menu" hidden>
+    <button type="button" role="menuitem" data-act="expand">全展开</button>
+    <button type="button" role="menuitem" data-act="collapse">全折叠</button>
+  </div>
+
   <footer id="foot">本地页面 · agent 采集</footer>
 </div>
 <script src="assets/fs-ui.js"></script>
@@ -427,7 +438,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     proc: { data: null, page: 1, per: 10, sort: 'cpu', q: '', kernel: false, auto: 0, timer: null },
     net: { scope: 'nic', page: 1, per: 10, q: '', listen: false, ipcKind: 'shm', data: null, counts: null },
     mon: { range: 900000, selected: [], data: {}, timer: null },
-    store: { open: '', loading: false, error: '', elapsed: 0, cache: {}, expanded: {}, showAll: {}, timer: null, seq: 0, sig: '' }
+    store: { open: '', loading: false, error: '', elapsed: 0, cache: {}, expanded: {}, showAll: {}, showHidden: true, menu: { show: false, x: 0, y: 0, path: '' }, timer: null, seq: 0, sig: '' }
   };
 
   // 相对路径：直接访问（/）和经 relay /device/<devid>/<port>/ 代理都能用
@@ -494,11 +505,21 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     return { entries: '达到目录项上限', time: '达到时间上限', depth: '超过统计深度', nodes: '目录节点过多' }[r] || '超出扫描上限';
   }
 
+  var ICON_EYE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/></svg>';
+  var ICON_EYE_OFF = ICON_EYE + '<path d="M3 3l18 18"/>';
+
+  function isHiddenPath(p) {
+    return p.slice(p.lastIndexOf('/') + 1).charAt(0) === '.';
+  }
+
   // 每个父节点最多列 10 个子项，其余合并成「其他 N 项」，点开再展开全部
   function storeKids(c, path) {
     var node = c.map[path];
     if (!node || !node.children.length) return [];
-    var all = node.children.slice().sort(function (a, b) { return b.b - a.b; });
+    var list = node.children;
+    if (!state.store.showHidden) list = list.filter(function (k) { return !isHiddenPath(k.p); });
+    if (!list.length) return [];
+    var all = list.slice().sort(function (a, b) { return b.b - a.b; });
     if (state.store.showAll[path]) return all;
     var threshold = Math.max(node.b * 0.01, 1), keep = [], rest = [];
     all.forEach(function (k, i) {
@@ -561,8 +582,12 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     if (st.error) return '<div class="st-warn warn">' + esc(st.error) + '</div>';
     if (!c) return '';
     var d = c.data, total = Math.max(1, toNum(d.total_kb) * 1024), html = '';
+    var showHidden = st.showHidden;
     html += '<div class="store-tools"><span>条长 = 占分区容量 · 缩进 = 层级</span>' +
       '<span style="margin-left:auto">' + toNum(d.files) + ' 个文件 · 扫描 ' + (toNum(d.scan_ms) / 1000).toFixed(1) + 's</span>' +
+      '<button class="store-eye" type="button" data-toggle-hidden="1" title="' +
+      (showHidden ? '隐藏隐藏项' : '显示隐藏项') + '" aria-label="' + (showHidden ? '隐藏隐藏项' : '显示隐藏项') + '">' +
+      (showHidden ? ICON_EYE : ICON_EYE_OFF) + '</button>' +
       '<button class="link" type="button" data-rescan="' + esc(mount) + '">重新扫描</button></div>';
     html += storeRows(c).map(storeRowHtml).join('');
     html += '<div class="st-foot">';
@@ -671,6 +696,11 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
       loadStore(rescan.getAttribute('data-rescan'), true);
       return;
     }
+    if (e.target.closest('[data-toggle-hidden]')) {
+      state.store.showHidden = !state.store.showHidden;
+      renderStore(sortedMounts(state.data || {}), true);
+      return;
+    }
     var head = e.target.closest('.store-head');
     if (head) {
       toggleStore(head.getAttribute('data-mount'));
@@ -689,6 +719,73 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
       return;
     }
     renderStore(sortedMounts(state.data || {}), true);
+  });
+
+  // ---------------------------------------------------------------- 存储右键菜单
+  function openStoreMenu(x, y, path) {
+    var m = state.store.menu;
+    m.path = path;
+    m.x = Math.max(8, Math.min(x, innerWidth - 128));
+    m.y = Math.max(8, Math.min(y, innerHeight - 92));
+    m.show = true;
+    var el = $('#storeMenu');
+    el.hidden = false;
+    el.style.left = m.x + 'px';
+    el.style.top = m.y + 'px';
+  }
+
+  function closeStoreMenu() {
+    var m = state.store.menu;
+    if (!m.show) return;
+    m.show = false;
+    m.path = '';
+    $('#storeMenu').hidden = true;
+  }
+
+  function applyStoreMenu(open) {
+    var path = state.store.menu.path;
+    closeStoreMenu();
+    var c = state.store.cache[state.store.open];
+    if (!path || !c) return;
+    (function walk(p) {
+      var node = c.map[p];
+      if (!node) return;
+      if (open) {
+        state.store.expanded[p] = true;
+        state.store.showAll[p] = true;
+      }
+      else {
+        delete state.store.expanded[p];
+        delete state.store.showAll[p];
+      }
+      node.children.forEach(function (k) { walk(k.p); });
+    })(path);
+    renderStore(sortedMounts(state.data || {}), true);
+  }
+
+  $('#storeList').addEventListener('contextmenu', function (e) {
+    var row = e.target.closest('.st-row');
+    if (!row) return;
+    var path = row.getAttribute('data-path');
+    if (!path) return;
+    var c = state.store.cache[state.store.open];
+    if (!c || !c.map[path]) return;
+    e.preventDefault();
+    openStoreMenu(e.clientX, e.clientY, path);
+  });
+
+  $('#storeMenu').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-act]');
+    if (!b) return;
+    e.stopPropagation();
+    applyStoreMenu(b.getAttribute('data-act') === 'expand');
+  });
+
+  document.addEventListener('click', closeStoreMenu);
+  window.addEventListener('scroll', closeStoreMenu, true);
+  window.addEventListener('resize', closeStoreMenu);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeStoreMenu();
   });
 
   // ---------------------------------------------------------------- tab

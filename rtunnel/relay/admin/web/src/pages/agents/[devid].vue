@@ -217,6 +217,13 @@
                   <span v-if="storeCur" class="muted">
                     {{ storeCur.data.files }} 个文件 · 扫描 {{ (storeCur.data.scan_ms / 1000).toFixed(1) }}s
                   </span>
+                  <el-tooltip :content="storageShowHidden ? '隐藏隐藏项' : '显示隐藏项'" placement="top">
+                    <el-button link size="small" class="store-eye"
+                               :aria-label="storageShowHidden ? '隐藏隐藏项' : '显示隐藏项'"
+                               @click.stop="storageShowHidden = !storageShowHidden">
+                      <el-icon><View v-if="storageShowHidden" /><Hide v-else /></el-icon>
+                    </el-button>
+                  </el-tooltip>
                   <el-button link type="primary" size="small" :loading="storageLoading"
                              @click.stop="loadStorageTree(d.mount, true)">重新扫描</el-button>
                 </div>
@@ -230,7 +237,8 @@
                   <div v-for="row in storageRows" :key="row.key" class="st-row"
                        :class="{ root: row.depth === 0, other: row.other }"
                        :style="{ paddingLeft: 6 + row.depth * 14 + 'px' }"
-                       @click="onStorageRow(row)">
+                       @click="onStorageRow(row)"
+                       @contextmenu.prevent="onStorageContextMenu($event, row)">
                     <span class="caret">{{ row.toggle ? (row.open ? '▾' : '▸') : '' }}</span>
                     <span class="nm mono" :title="row.path">{{ row.name }}</span>
                     <span class="sz mono">{{ bytes(row.b) }}</span>
@@ -272,6 +280,12 @@
                 </template>
               </div>
             </div>
+          </div>
+          <div v-if="storeMenu.show" class="store-menu" role="menu"
+               :style="{ left: storeMenu.x + 'px', top: storeMenu.y + 'px' }"
+               @click.stop>
+            <button type="button" role="menuitem" @click="applyStoreMenu(true)">全展开</button>
+            <button type="button" role="menuitem" @click="applyStoreMenu(false)">全折叠</button>
           </div>
           <el-empty v-if="sys && !disks.length" description="无挂载点" :image-size="60" />
           <el-skeleton v-else-if="!sys" :rows="3" animated />
@@ -1305,7 +1319,7 @@
 <script setup>
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, MoreFilled, Refresh } from '@element-plus/icons-vue'
+import { ArrowLeft, Hide, MoreFilled, Refresh, View } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import { Api } from '@/shared/api.js'
 import { can, canManage } from '@/shared/store.js'
@@ -1537,6 +1551,8 @@ const storageElapsed = ref(0)
 const storageCache = reactive({})    // mount -> { data, map, ts }
 const storageExpanded = reactive({}) // path -> bool
 const storageShowAll = reactive({})  // path -> bool（「其他」点开后展开全部）
+const storageShowHidden = ref(true)  // 是否显示 . 开头的目录
+const storeMenu = reactive({ show: false, x: 0, y: 0, path: '' })
 let storageTimer = null
 let storageSeq = 0
 
@@ -1578,10 +1594,17 @@ function storagePctText(b, total) {
 }
 
 // 每个父节点最多列 10 个子项，其余合并成「其他 N 项」，点开再展开全部
+function isHiddenPath(p) {
+  return p.slice(p.lastIndexOf('/') + 1).startsWith('.')
+}
+
 function storageKids(cur, path) {
   const node = cur.map[path]
   if (!node || !node.children.length) return []
-  const all = node.children.slice().sort((a, b) => b.b - a.b)
+  let list = node.children
+  if (!storageShowHidden.value) list = list.filter((k) => !isHiddenPath(k.p))
+  if (!list.length) return []
+  const all = list.slice().sort((a, b) => b.b - a.b)
   if (storageShowAll[path]) return all
   const threshold = Math.max(node.b * 0.01, 1)
   const keep = []
@@ -1718,6 +1741,46 @@ function onStorageRow(row) {
   }
   if (!row.toggle) return
   storageExpanded[row.path] = !storageExpanded[row.path]
+}
+
+// 右键菜单：只对目录行生效；「其他」行用它所属的父路径
+function onStorageContextMenu(e, row) {
+  const path = row.path
+  if (!path || !storeCur.value || !storeCur.value.map[path]) return
+  const w = 132
+  const h = 84
+  storeMenu.x = Math.max(8, Math.min(e.clientX, window.innerWidth - w - 8))
+  storeMenu.y = Math.max(8, Math.min(e.clientY, window.innerHeight - h - 8))
+  storeMenu.path = path
+  storeMenu.show = true
+}
+
+// 递归展开/折叠该节点整棵子树；展开时同时取消「其他」合并，避免看起来没展开完
+function applyStoreMenu(open) {
+  const path = storeMenu.path
+  storeMenu.show = false
+  const cur = storeCur.value
+  if (!path || !cur) return
+  const walk = (p) => {
+    const node = cur.map[p]
+    if (!node) return
+    if (open) {
+      storageExpanded[p] = true
+      storageShowAll[p] = true
+    } else {
+      delete storageExpanded[p]
+      delete storageShowAll[p]
+    }
+    for (const k of node.children) walk(k.p)
+  }
+  walk(path)
+}
+
+function closeStoreMenu() {
+  if (storeMenu.show) storeMenu.show = false
+}
+function onStoreKeydown(e) {
+  if (e.key === 'Escape') closeStoreMenu()
 }
 
 const nics = computed(() => (sys.value && sys.value.nics) || [])
@@ -3470,6 +3533,10 @@ onMounted(() => {
   window.addEventListener('scroll', closeProcMenu, true)
   window.addEventListener('resize', closeProcMenu)
   window.addEventListener('keydown', onProcKeydown)
+  window.addEventListener('click', closeStoreMenu)
+  window.addEventListener('scroll', closeStoreMenu, true)
+  window.addEventListener('resize', closeStoreMenu)
+  window.addEventListener('keydown', onStoreKeydown)
   if (window.ResizeObserver) seriesRO = new ResizeObserver(() => measureSeries())
 })
 onBeforeUnmount(() => {
@@ -3477,6 +3544,10 @@ onBeforeUnmount(() => {
   window.removeEventListener('scroll', closeProcMenu, true)
   window.removeEventListener('resize', closeProcMenu)
   window.removeEventListener('keydown', onProcKeydown)
+  window.removeEventListener('click', closeStoreMenu)
+  window.removeEventListener('scroll', closeStoreMenu, true)
+  window.removeEventListener('resize', closeStoreMenu)
+  window.removeEventListener('keydown', onStoreKeydown)
   if (procQueryTimer) { clearTimeout(procQueryTimer); procQueryTimer = null }
   if (netQueryTimer) { clearTimeout(netQueryTimer); netQueryTimer = null }
   if (storageTimer) { clearInterval(storageTimer); storageTimer = null }
@@ -3729,6 +3800,31 @@ onBeforeUnmount(() => {
 .st-bar i.muted-fill { background: var(--el-text-color-placeholder); }
 .st-foot { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--el-border-color-lighter); }
 .st-note { margin-top: 6px; font-size: 11px; line-height: 16px; }
+.store-eye { padding: 0 4px; }
+.store-menu {
+  position: fixed;
+  z-index: 3000;
+  min-width: 120px;
+  padding: 4px;
+  background: var(--el-bg-color-overlay);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+  box-shadow: var(--el-box-shadow-light);
+}
+.store-menu button {
+  display: block;
+  width: 100%;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--el-text-color-regular);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.store-menu button:hover { background: var(--el-fill-color-light); color: var(--el-text-color-primary); }
 .st-warn { margin-top: 8px; }
 .chart-box { margin-top: 12px; height: 200px; position: relative; display: flex; flex-direction: column; }
 .chart-title { flex: none; font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 4px; }
