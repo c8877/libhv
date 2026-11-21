@@ -260,7 +260,7 @@
                   </div>
                   <div class="st-note muted">
                     目录合计 {{ bytes(storeCur.data.bytes) }} · df 已用 {{ bytes(storeCur.data.used_kb * 1024) }} ·
-                    差额来自保留块、已删除未释放的文件和无权限目录
+                    差额来自文件系统元数据、保留块、已删除未释放的文件和无权限目录
                   </div>
                   <el-alert v-if="storeCur.data.truncated" class="st-warn" type="warning" :closable="false" show-icon
                             :title="'结果可能偏低：' + storageTruncText(storeCur.data.truncated_reason)" />

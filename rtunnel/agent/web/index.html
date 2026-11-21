@@ -575,7 +575,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     });
     html += '</div>';
     html += '<div class="st-note">目录合计 ' + fmtBytes(d.bytes) + ' · df 已用 ' + fmtKB(d.used_kb) +
-      ' · 差额来自保留块、已删除未释放的文件和无权限目录</div>';
+      ' · 差额来自文件系统元数据、保留块、已删除未释放的文件和无权限目录</div>';
     if (d.truncated) html += '<div class="st-warn warn">结果可能偏低：' + esc(storeTruncText(d.truncated_reason)) + '</div>';
     if (d.skipped && d.skipped.length) {
       html += '<div class="st-warn info">已跳过 ' + d.skipped.length + ' 个无权限目录：' +
