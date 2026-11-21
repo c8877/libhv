@@ -276,7 +276,7 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
 - 概览：CPU/内存/负载/网络累计流量四个 KPI、CPU/内存趋势、存储用量、网卡、
   会话、系统信息与 mTLS 证书状态
 - 顶部摘要条展示设备名、agent 版本、连接信息、流量与采集时间，和一级 tab 一起吸顶
-- 「能力」tab 展示 TCP 端口、Shell、SYSINFO、mTLS、OTA、电源操作、文件/服务能力与串口白名单；
+- 「能力」tab 展示 TCP 端口、Shell、SYSINFO、mTLS、OTA、可重启/可关机、文件/服务能力与串口白名单；
   manager/admin 可在线编辑
 - 表格默认 10 行/页，支持 5/10/20/50；进程/网络/服务列表的分页与排序在 agent 端完成，
   只回传当前页
@@ -313,9 +313,11 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
   `device.proc.read`，信号需要 `device.proc.signal`，两者都受账号设备范围限制。
   打开设备详情页时 relay 下发 `WARM_REQ`，agent 在页面打开期间每 30s 预采样进程与
   服务列表；随后的翻页/搜索直接命中缓存（`cached:true`），不再等 300ms 双采样）
-- 电源操作：`POST /api/v1/agents/{devid}/power {action:"reboot"|"poweroff",delay_ms}`
-  （agent 侧需要 `"power": true`，能力页可开关；ACK 先返回，延迟到点再执行，
-  权限资源 `device.power`。默认关闭，避免误操作）
+- 电源操作：`POST /api/v1/agents/{devid}/power
+  {action:"reboot"|"poweroff",delay_ms,password}`，必须带设备 root 密码；
+  agent 用 `/etc/shadow` 的哈希校验，连续 5 次失败冷却 5 分钟。
+  agent 侧分 `"reboot"` / `"poweroff"` 两个开关（能力页可分别开启），
+  ACK 先返回，延迟到点再执行，权限资源 `device.power`。默认关闭
 - 诊断包：`GET /api/v1/agents/{devid}/diag` 返回 `application/gzip` 附件
   （agent 汇总 sysinfo、dmesg、journal 500 行、`ip addr/route`、`ss -s`、服务列表、
   前 30 进程、网络快照与本机配置，打成 tar.gz；生成走查询 worker，上限 8MB，

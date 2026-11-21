@@ -718,7 +718,8 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     if (c.shell) chips.push('Shell');
     if (c.sysinfo) chips.push('SYSINFO');
     if (c.ota) chips.push('OTA');
-    if (c.power) chips.push('电源操作');
+    if (c.reboot) chips.push('可重启');
+    if (c.poweroff) chips.push('可关机');
     chips.push(c.mtls ? 'mTLS' : 'mTLS 未启用');
     if (c.fs) chips.push('文件管理' + (c.fs_rw ? '（读写）' : '（只读）'));
     if (c.svc) chips.push('服务管理' + (c.svc_rw ? '（可控）' : '（只读）'));

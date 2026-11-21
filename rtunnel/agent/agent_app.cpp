@@ -19,6 +19,8 @@
 #include <ctype.h>
 #include <sys/sysinfo.h>
 #include <sys/reboot.h>
+#include <shadow.h>
+#include <crypt.h>
 #include <ifaddrs.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -702,7 +704,8 @@ void AgentApp::loadConfig() {
     }
     if (j.contains("shell") && j["shell"].is_boolean()) allow_shell = j["shell"].get<bool>() ? 1 : 0;
     if (j.contains("ota") && j["ota"].is_boolean()) allow_ota = j["ota"].get<bool>() ? 1 : 0;
-    if (j.contains("power") && j["power"].is_boolean()) allow_power = j["power"].get<bool>() ? 1 : 0;
+    if (j.contains("reboot") && j["reboot"].is_boolean()) allow_reboot = j["reboot"].get<bool>() ? 1 : 0;
+    if (j.contains("poweroff") && j["poweroff"].is_boolean()) allow_poweroff = j["poweroff"].get<bool>() ? 1 : 0;
     if (j.contains("allow_tty") && j["allow_tty"].is_array()) {
         std::string joined;
         for (auto& v : j["allow_tty"]) {
@@ -801,7 +804,8 @@ bool AgentApp::saveConfig() {
     j["svc_enabled"] = svc_enabled != 0;
     j["svc_rw"] = svc_rw != 0;
     j["ota"] = allow_ota != 0;
-    j["power"] = allow_power != 0;
+    j["reboot"] = allow_reboot != 0;
+    j["poweroff"] = allow_poweroff != 0;
     // local_web 不在这里写：它来自部署配置或命令行，运行期端口占用导致的失败
     // 不能固化成 "local_web": false，否则下次启动本地页会被永久关掉。
     j["metrics"] = nlohmann::json::object();
@@ -1049,18 +1053,31 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
         new_ota = r["ota"].get<bool>() ? 1 : 0;
         ota_set = true;
     }
-    bool power_set = false;
-    int new_power = allow_power;
-    if (r.contains("power")) {
-        if (!r["power"].is_boolean()) {
-            std::string e = "{\"ok\":false,\"error\":\"power must be bool\"}";
+    bool reboot_set = false;
+    int new_reboot = allow_reboot;
+    if (r.contains("reboot")) {
+        if (!r["reboot"].is_boolean()) {
+            std::string e = "{\"ok\":false,\"error\":\"reboot must be bool\"}";
             rtnp::Writer w;
             w.str(e.c_str());
             rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
             return;
         }
-        new_power = r["power"].get<bool>() ? 1 : 0;
-        power_set = true;
+        new_reboot = r["reboot"].get<bool>() ? 1 : 0;
+        reboot_set = true;
+    }
+    bool poweroff_set = false;
+    int new_poweroff = allow_poweroff;
+    if (r.contains("poweroff")) {
+        if (!r["poweroff"].is_boolean()) {
+            std::string e = "{\"ok\":false,\"error\":\"poweroff must be bool\"}";
+            rtnp::Writer w;
+            w.str(e.c_str());
+            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
+        new_poweroff = r["poweroff"].get<bool>() ? 1 : 0;
+        poweroff_set = true;
     }
     bool tty_set = false;
     std::string new_allow_tty = allow_tty;
@@ -1122,7 +1139,8 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     }
     if (shell_set) allow_shell = new_shell;
     if (ota_set) allow_ota = new_ota;
-    if (power_set) allow_power = new_power;
+    if (reboot_set) allow_reboot = new_reboot;
+    if (poweroff_set) allow_poweroff = new_poweroff;
     if (tty_set) snprintf(allow_tty, sizeof(allow_tty), "%s", new_allow_tty.c_str());
     if (svc_set) {
         svc_enabled = new_svc_enabled;
@@ -1146,7 +1164,8 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     ack["svc"] = svc_.ready();
     ack["svc_rw"] = svc_.ready() && svc_rw != 0;
     ack["ota"] = allow_ota != 0;
-    ack["power"] = allow_power != 0;
+    ack["reboot"] = allow_reboot != 0;
+    ack["poweroff"] = allow_poweroff != 0;
     ack["allow_tty"] = nlohmann::json::array();
     {
         std::string list = allow_tty;
@@ -1160,8 +1179,8 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
         }
     }
     std::string body = ack.dump();
-    logf_("[agent] config set: ports=%d shell=%d fs=%d svc=%d power=%d persisted=%d", allow_ports[0], allow_shell,
-          file_enabled && fs_.ready(), svc_.ready(), allow_power, (int)persisted);
+    logf_("[agent] config set: ports=%d shell=%d fs=%d svc=%d reboot=%d poweroff=%d persisted=%d", allow_ports[0],
+          allow_shell, file_enabled && fs_.ready(), svc_.ready(), allow_reboot, allow_poweroff, (int)persisted);
     rtnp::Writer w;
     w.str(body.c_str());
     rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
@@ -2366,7 +2385,8 @@ nlohmann::json AgentApp::buildSysinfo() {
         caps["svc_token"] = svc_.tokenRequired();
         caps["ota"] = allow_ota != 0;
         caps["ota_pkg"] = "tar.gz"; // 支持 install.sh 部署包
-        caps["power"] = allow_power != 0;
+        caps["reboot"] = allow_reboot != 0;
+        caps["poweroff"] = allow_poweroff != 0;
         caps["diag"] = true;        // 支持 DIAG_REQ 诊断包
         caps["net"] = true;         // 支持 NET_REQ 网络/IPC 快照
         caps["proc"] = true;        // 支持 PROC_REQ 进程列表与信号
@@ -3053,6 +3073,39 @@ void AgentApp::powerTimerCb(htimer_t* t) {
     }
 }
 
+// 校验本机 root 密码。用 /etc/shadow 的哈希 + crypt_r，不依赖 PAM，
+// 这样静态/裁剪镜像也能用；密码只在内存里存在，不写日志。
+bool AgentApp::verifyRootPassword(const std::string& password, std::string& err) {
+    struct spwd spbuf;
+    struct spwd* sp = nullptr;
+    char buf[4096];
+    if (getspnam_r("root", &spbuf, buf, sizeof buf, &sp) != 0 || !sp) {
+        err = "无法读取 root 账户";
+        return false;
+    }
+    std::string hash = sp->sp_pwdp ? sp->sp_pwdp : "";
+    if (hash.empty()) {
+        err = "设备未设置 root 密码，无法远程重启/关机";
+        return false;
+    }
+    if (hash[0] == '!' || hash[0] == '*') {
+        err = "root 账户已锁定";
+        return false;
+    }
+    struct crypt_data data;
+    memset(&data, 0, sizeof data);
+    char* enc = crypt_r(password.c_str(), hash.c_str(), &data);
+    if (!enc) {
+        err = "密码校验失败";
+        return false;
+    }
+    if (hash != enc) {
+        err = "root 密码错误";
+        return false;
+    }
+    return true;
+}
+
 void AgentApp::handlePowerReq(const rtnp::Frame* f) {
     using nlohmann::json;
     json rj = json::object();
@@ -3065,6 +3118,7 @@ void AgentApp::handlePowerReq(const rtnp::Frame* f) {
         }
     }
     std::string action = rj.value("action", std::string());
+    std::string password = rj.value("password", std::string());
     long long delay = rj.value("delay_ms", 1000LL);
     if (delay < 0) delay = 0;
     if (delay > 600000) delay = 600000;
@@ -3072,23 +3126,46 @@ void AgentApp::handlePowerReq(const rtnp::Frame* f) {
     json ack;
     ack["action"] = action;
     ack["delay_ms"] = delay;
-    if (!allow_power) {
-        ack["ok"] = false;
-        ack["error"] = "power disabled";
-    }
-    else if (action != "reboot" && action != "poweroff") {
+    uint64_t now = wallMs();
+    if (action != "reboot" && action != "poweroff") {
         ack["ok"] = false;
         ack["error"] = "action must be reboot or poweroff";
     }
+    else if (action == "reboot" ? !allow_reboot : !allow_poweroff) {
+        ack["ok"] = false;
+        ack["error"] = action == "reboot" ? "reboot disabled" : "poweroff disabled";
+    }
+    else if (now < power_lock_until_ms_) {
+        ack["ok"] = false;
+        ack["error"] = "too many password failures, retry later";
+        ack["retry_ms"] = (long long)(power_lock_until_ms_ - now);
+    }
+    else if (password.empty() || password.size() > 256) {
+        ack["ok"] = false;
+        ack["error"] = "root password required";
+    }
     else {
-        ack["ok"] = true;
-        PowerAction* p = new PowerAction;
-        memset(&p->ev, 0, sizeof p->ev);
-        p->app = this;
-        p->action = action;
-        htimer_t* t = htimer_add(loop, powerTimerCb, (uint32_t)delay, 1);
-        hevent_set_userdata(t, p);
-        logf_("[agent] power %s scheduled in %lldms", action.c_str(), delay);
+        std::string verr;
+        if (!verifyRootPassword(password, verr)) {
+            // 连续 5 次失败冷却 5 分钟，避免把接口当成在线爆破入口
+            if (++power_fail_ >= 5) {
+                power_fail_ = 0;
+                power_lock_until_ms_ = now + 300000;
+            }
+            ack["ok"] = false;
+            ack["error"] = verr;
+        }
+        else {
+            power_fail_ = 0;
+            ack["ok"] = true;
+            PowerAction* p = new PowerAction;
+            memset(&p->ev, 0, sizeof p->ev);
+            p->app = this;
+            p->action = action;
+            htimer_t* t = htimer_add(loop, powerTimerCb, (uint32_t)delay, 1);
+            hevent_set_userdata(t, p);
+            logf_("[agent] power %s scheduled in %lldms", action.c_str(), delay);
+        }
     }
     std::string body = ack.dump();
     rtnp::Writer w;

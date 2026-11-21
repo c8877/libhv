@@ -22,8 +22,8 @@
                 <el-dropdown-menu>
                   <el-dropdown-item command="export">导出 JSON</el-dropdown-item>
                   <el-dropdown-item command="diag" :disabled="!can('device.diag')">下载诊断包</el-dropdown-item>
-                  <el-dropdown-item divided command="reboot" :disabled="!can('device.power')">重启设备</el-dropdown-item>
-                  <el-dropdown-item command="poweroff" :disabled="!can('device.power')">关机</el-dropdown-item>
+                  <el-dropdown-item divided command="reboot" :disabled="!canPower('reboot')">重启设备</el-dropdown-item>
+                  <el-dropdown-item command="poweroff" :disabled="!canPower('poweroff')">关机</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -45,8 +45,8 @@
                   </el-dropdown-item>
                   <el-dropdown-item command="diag" :disabled="!can('device.diag')">下载诊断包</el-dropdown-item>
                   <el-dropdown-item divided command="export">导出 JSON</el-dropdown-item>
-                  <el-dropdown-item divided command="reboot" :disabled="!can('device.power')">重启设备</el-dropdown-item>
-                  <el-dropdown-item command="poweroff" :disabled="!can('device.power')">关机</el-dropdown-item>
+                  <el-dropdown-item divided command="reboot" :disabled="!canPower('reboot')">重启设备</el-dropdown-item>
+                  <el-dropdown-item command="poweroff" :disabled="!canPower('poweroff')">关机</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -328,8 +328,10 @@
                   <span class="muted">agent {{ sys.caps.version || '—' }}</span>
                   <span class="spacer" />
                   <el-button link size="small" :loading="capsRefreshing" @click="refreshCaps">刷新运行时</el-button>
+                  <el-button size="small" @click="capsOpen = !capsOpen">{{ capsOpen ? '收起配置' : '编辑配置' }}</el-button>
                 </div>
-                <div class="caps-form">
+                <el-collapse-transition>
+                  <div v-if="capsOpen" class="caps-form">
                   <div class="caps-grid">
                     <div class="vform-section span2">访问控制</div>
                     <div class="vform-row span2">
@@ -358,11 +360,20 @@
                         <span class="muted">接收升级包</span>
                       </div>
                     </div>
+
+                    <div class="vform-section span2">电源操作</div>
                     <div class="vform-row">
-                      <span class="vlabel">电源操作</span>
+                      <span class="vlabel">允许重启</span>
                       <div class="vcontrol">
-                        <el-switch v-model="capsForm.power" :disabled="!canCaps" />
-                        <span class="muted">允许远程重启/关机</span>
+                        <el-switch v-model="capsForm.reboot" :disabled="!canCaps" />
+                        <span class="muted">执行时校验 root 密码</span>
+                      </div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">允许关机</span>
+                      <div class="vcontrol">
+                        <el-switch v-model="capsForm.poweroff" :disabled="!canCaps" />
+                        <span class="muted">执行时校验 root 密码</span>
                       </div>
                     </div>
 
@@ -447,7 +458,8 @@
                     <el-button size="small" type="primary" :loading="capsSaving"
                                :disabled="!canCaps && !canOta && !canTty" @click="saveCaps">保存并下发</el-button>
                   </div>
-                </div>
+                  </div>
+                </el-collapse-transition>
             </div>
           </div>
           <el-skeleton v-else :rows="3" animated />
@@ -1378,8 +1390,9 @@ const PROC_SIGNALS = [
 ]
 const obsTab = ref('series')
 const capsSaving = ref(false)
+const capsOpen = ref(false)
 const capsForm = reactive({
-  ports: [], file_dir: '', shell: false, ota: false, power: false, allow_tty: [],
+  ports: [], file_dir: '', shell: false, ota: false, reboot: false, poweroff: false, allow_tty: [],
   fs: false, fs_root: '', fs_rw: false, fs_max_mb: 512,
   svc: false, svc_rw: false,
 })
@@ -1727,6 +1740,8 @@ const capsChips = computed(() => {
   if (c.shell) out.push('Shell')
   if (c.sysinfo) out.push('SYSINFO')
   if (c.ota) out.push('OTA 升级')
+  if (c.reboot) out.push('可重启')
+  if (c.poweroff) out.push('可关机')
   if ((c.allow_tty || []).length) out.push('串口 ' + c.allow_tty.join(' '))
   if (c.fs) out.push('文件管理 ' + (c.fs_root || '') + (c.fs_rw ? ' (读写)' : ' (只读)'))
   if (c.svc) out.push('服务管理' + (c.svc_rw ? ' (可控制)' : ' (只读)'))
@@ -2091,6 +2106,12 @@ async function downloadDiag() {
   }
 }
 
+function canPower(action) {
+  if (!can('device.power')) return false
+  const c = caps.value || {}
+  return action === 'reboot' ? !!c.reboot : !!c.poweroff
+}
+
 async function powerAction(action) {
   if (!can('device.power')) {
     ElMessage.warning('没有电源操作权限')
@@ -2100,17 +2121,26 @@ async function powerAction(action) {
   const tip = action === 'reboot'
     ? '设备会在约 1 秒后断开，随后自动重连。'
     : '关机后需要现场或远程上电才能恢复。'
+  let password = ''
   try {
-    await ElMessageBox.confirm(`确定要${label}设备 ${devid.value} 吗？${tip}`, `${label}设备`, {
-      type: 'warning',
-      confirmButtonText: label,
-      cancelButtonText: '取消',
-    })
+    const r = await ElMessageBox.prompt(
+      `确定要${label}设备 ${devid.value} 吗？${tip}请输入设备 root 密码确认。`,
+      `${label}设备`,
+      {
+        type: 'warning',
+        confirmButtonText: label,
+        cancelButtonText: '取消',
+        inputType: 'password',
+        inputPlaceholder: 'root 密码',
+        inputValidator: (v) => (v && v.length ? true : '请输入 root 密码'),
+      },
+    )
+    password = r.value
   } catch {
     return
   }
   try {
-    const r = await Api.post(agentBase.value + '/power', { action, delay_ms: 1000 })
+    const r = await Api.post(agentBase.value + '/power', { action, delay_ms: 1000, password })
     if (r && r.ok) ElMessage.success(`${label}指令已下发`)
     else ElMessage.error(`${label}失败：` + ((r && r.error) || '未知错误'))
   } catch (e) {
@@ -2697,7 +2727,8 @@ function fillCapsFromSys() {
   capsForm.file_dir = c.file_dir || ''
   capsForm.shell = !!c.shell
   capsForm.ota = !!c.ota
-  capsForm.power = !!c.power
+  capsForm.reboot = !!c.reboot
+  capsForm.poweroff = !!c.poweroff
   capsForm.allow_tty = Array.isArray(c.allow_tty) ? c.allow_tty.slice() : []
   allowTtyOpen.value = false
   allowTtyInput.value = ''
@@ -2749,7 +2780,10 @@ async function saveCaps() {
     body.shell = capsForm.shell
   }
   if (canOta.value) body.ota = !!capsForm.ota
-  if (canCaps.value) body.power = !!capsForm.power
+  if (canCaps.value) {
+    body.reboot = !!capsForm.reboot
+    body.poweroff = !!capsForm.poweroff
+  }
   if (canTty.value) body.allow_tty = capsForm.allow_tty.slice()
   if (canCaps.value) {
     // 文件与服务能力只在有 device.caps.write 时提交
@@ -2787,6 +2821,8 @@ async function saveCaps() {
     if (body.svc !== undefined &&
         !(r.svc === body.svc && (!body.svc || r.svc_rw === body.svc_rw))) missed.push('服务管理')
     if (body.ota !== undefined && r.ota !== body.ota) missed.push('OTA 开关')
+    if (body.reboot !== undefined && r.reboot !== body.reboot) missed.push('重启能力')
+    if (body.poweroff !== undefined && r.poweroff !== body.poweroff) missed.push('关机能力')
     if (body.allow_tty !== undefined &&
         JSON.stringify(r.allow_tty) !== JSON.stringify(body.allow_tty)) missed.push('串口白名单')
     if (missed.length) ElMessage.warning('设备未应用：' + missed.join('、') + '，请重试')
@@ -2797,6 +2833,7 @@ async function saveCaps() {
     sysCached.value = false
     await loadAll({ silent: true })
     if (sys.value) fillCapsFromSys()
+    capsOpen.value = false
   } catch (e) {
     ElMessage.error('失败：' + e.message)
   } finally {

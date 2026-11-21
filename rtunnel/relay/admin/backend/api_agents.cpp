@@ -146,17 +146,18 @@ void AdminServer::handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& a
     bool has_svc = req.contains("svc");
     bool has_svc_rw = req.contains("svc_rw");
     bool has_ota = req.contains("ota");
-    bool has_power = req.contains("power");
+    bool has_reboot = req.contains("reboot");
+    bool has_poweroff = req.contains("poweroff");
     bool has_tty = req.contains("allow_tty");
     if (!has_ports && !has_shell && !has_dir && !has_fs && !has_fs_root && !has_fs_rw && !has_fs_max &&
-        !has_svc && !has_svc_rw && !has_ota && !has_power && !has_tty) {
+        !has_svc && !has_svc_rw && !has_ota && !has_reboot && !has_poweroff && !has_tty) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"nothing to update\"}");
         return;
     }
     // 每个字段组独立资源：能力配置 / OTA 开关 / 串口白名单
     if ((has_ports || has_shell || has_dir || has_fs || has_fs_root || has_fs_rw || has_fs_max ||
-         has_svc || has_svc_rw || has_power) &&
+         has_svc || has_svc_rw || has_reboot || has_poweroff) &&
         !hasPerm("device.caps.write")) {
         ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
         ctx->send("{\"error\":\"forbidden\",\"need\":\"device.caps.write\"}");
@@ -278,13 +279,21 @@ void AdminServer::handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& a
         }
         out["ota"] = req["ota"].get<bool>();
     }
-    if (has_power) {
-        if (!req["power"].is_boolean()) {
+    if (has_reboot) {
+        if (!req["reboot"].is_boolean()) {
             ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
-            ctx->send("{\"error\":\"power must be bool\"}");
+            ctx->send("{\"error\":\"reboot must be bool\"}");
             return;
         }
-        out["power"] = req["power"].get<bool>();
+        out["reboot"] = req["reboot"].get<bool>();
+    }
+    if (has_poweroff) {
+        if (!req["poweroff"].is_boolean()) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"poweroff must be bool\"}");
+            return;
+        }
+        out["poweroff"] = req["poweroff"].get<bool>();
     }
     if (has_tty) {
         if (!req["allow_tty"].is_array() || req["allow_tty"].size() > 16) {
@@ -654,6 +663,12 @@ int AdminServer::handleAgentPower(const HttpContextPtr& ctx) {
         ctx->send("{\"error\":\"action must be reboot or poweroff\"}");
         return HTTP_STATUS_BAD_REQUEST;
     }
+    std::string password = body.value("password", std::string());
+    if (password.empty() || password.size() > 256) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"root password required\"}");
+        return HTTP_STATUS_BAD_REQUEST;
+    }
     int delay = body.value("delay_ms", 1000);
     if (delay < 0) delay = 0;
     if (delay > 60000) delay = 60000;
@@ -666,6 +681,7 @@ int AdminServer::handleAgentPower(const HttpContextPtr& ctx) {
     json req;
     req["action"] = action;
     req["delay_ms"] = delay;
+    req["password"] = password; // 只透传给 agent 校验，不落审计/日志
     std::string payload = req.dump();
     uint32_t rid = 0;
     std::string err;
