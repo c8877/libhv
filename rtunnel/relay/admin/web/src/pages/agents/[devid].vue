@@ -3403,8 +3403,9 @@ onBeforeUnmount(() => {
 .disk-top .pct.warn { color: #c98a12; }
 .disk-top .pct.bad { color: #d9534f; }
 .size { margin-top: 3px; font-size: 11px; color: var(--el-text-color-secondary); }
-.chart-box { margin-top: 8px; height: 190px; position: relative; }
-.chart-title { font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 4px; }
+.chart-box { margin-top: 12px; height: 200px; position: relative; display: flex; flex-direction: column; }
+.chart-title { flex: none; font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 4px; }
+.chart-box canvas { flex: 1 1 auto; min-height: 0; }
 .series-bar { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 12px; }
 .series-label { flex: none; font-size: 12px; line-height: 30px; color: var(--el-text-color-secondary); }
 .series-select {
