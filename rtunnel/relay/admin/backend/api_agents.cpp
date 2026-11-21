@@ -787,7 +787,8 @@ int AdminServer::handleAgentStorage(const HttpContextPtr& ctx) {
     // path 为空表示列分区根；depth 是相对 path 的回传层级
     std::string path = ctx->param("path");
     if (!path.empty()) {
-        if (path[0] != '/' || path.size() > 1024 ||
+        bool outside = mount != "/" && path != mount && path.rfind(mount + "/", 0) != 0;
+        if (path[0] != '/' || path.size() > 1024 || outside ||
             path.find("/../") != std::string::npos ||
             (path.size() >= 3 && path.compare(path.size() - 3, 3, "/..") == 0)) {
             ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;

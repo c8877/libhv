@@ -10,6 +10,10 @@
   --bg:#f4f6fa;--panel:#fff;--text:#1f2633;--muted:#7b8494;--line:#e4e8f0;
   --brand:#3b6ef5;--ok:#2e9e63;--warn:#c98a18;--bad:#d9534f;
   --bar-bg:#eef1f7;--shadow:0 1px 2px rgba(16,24,40,.04),0 4px 14px rgba(16,24,40,.05);
+  /* shared/web/storage-ui.js 用到的主题变量，跟随页面深浅色 */
+  --rt-fg:var(--text);--rt-bg:var(--panel);--rt-line:var(--line);--rt-muted:var(--muted);
+  --rt-hover:rgba(127,127,127,.12);--rt-fill:var(--bar-bg);--rt-fill-dark:var(--line);
+  --rt-accent:var(--brand);
 }
 @media (prefers-color-scheme:dark){
   :root{--bg:#0f131a;--panel:#171c26;--text:#e6ebf5;--muted:#8f99ab;--line:#252c3a;
@@ -90,48 +94,7 @@ h2{font-size:14px;margin:0;font-weight:650}
 .kv .v{min-width:0;overflow-wrap:anywhere}
 .cert{margin-top:10px;padding-top:9px;border-top:1px solid var(--line);font-size:12px;overflow-wrap:anywhere}
 .cert .ch{color:var(--muted);margin-bottom:3px}
-/* 存储：可折叠分区 + 目录瀑布 */
-.store{border-bottom:1px solid var(--line)}
-.store:last-child{border-bottom:none}
-.store-head{display:flex;align-items:center;gap:9px;padding:9px 4px;border-radius:6px;cursor:pointer;font-size:12px}
-.store-head:hover{background:var(--hover)}
-.store-head .caret{flex:none;width:11px;font-size:11px;color:var(--muted)}
-.store-head b{flex:none;min-width:76px;font-family:ui-monospace,Menlo,monospace;font-size:13px}
-.store-head .muted{flex:none;font-size:11px}
-.store-head .sizes{flex:none;min-width:112px;color:var(--muted);font-variant-numeric:tabular-nums;text-align:right}
-.store-head .bar{flex:1 1 120px;min-width:50px;margin-top:0}
-.store-head .pct{flex:none;width:42px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
-.store-head .pct.warn{color:var(--warn)}.store-head .pct.bad{color:var(--bad)}
-.store-body{padding:0 2px 12px}
-.store-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:6px}
-.store-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}
-.store-loading{display:flex;flex-direction:column;gap:6px;padding:8px 0;font-size:12px;color:var(--muted)}
-.st-row{display:flex;align-items:center;gap:8px;height:29px;padding-right:4px;border-radius:6px;font-size:12px}
-.st-row:hover{background:var(--hover)}
-.st-row .caret{flex:none;width:11px;font-size:11px;color:var(--muted)}
-.st-row .nm{flex:0 1 210px;min-width:50px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.st-row .sz{flex:none;width:70px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
-.st-row .bar{flex:1 1 90px;min-width:40px;margin-top:0}
-.st-row .pc{flex:none;width:44px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
-.st-row.other .nm{font-style:italic}
-.st-row.file .nm{color:var(--text)}
-.st-row.small .nm{color:var(--muted)}
-.st-row.foot{height:25px}
-.st-row.foot .nm{color:var(--muted)}
-.st-row .bar i.free{background:var(--bar-bg)}
-.st-row .bar i.reserved{background:var(--line)}
-.st-row .bar i.muted-fill{background:var(--muted);opacity:.45}
-.st-foot{margin-top:8px;padding-top:6px;border-top:1px dashed var(--line)}
-.st-note{margin-top:6px;font-size:11px;line-height:16px;color:var(--muted)}
-.st-warn{margin-top:8px;padding:7px 10px;border-radius:8px;font-size:12px;line-height:17px}
-.st-warn.warn{background:rgba(224,138,46,.12);color:var(--warn)}
-.st-warn.info{background:var(--hover);color:var(--muted);word-break:break-all}
-.store-eye{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer}
-.store-eye:hover{background:var(--hover);color:var(--text)}
-.store-eye svg{display:block}
-.ctx-menu{position:fixed;z-index:60;min-width:120px;padding:4px;background:var(--panel);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18)}
-.ctx-menu button{display:block;width:100%;padding:7px 12px;border:0;border-radius:6px;background:transparent;color:var(--text);font:inherit;font-size:13px;text-align:left;cursor:pointer}
-.ctx-menu button:hover{background:var(--hover)}
+
 .nic{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:4px 8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:12px}
 .nic:last-child{border-bottom:none}
 .nic .nm{font-family:ui-monospace,Menlo,monospace;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}
@@ -204,13 +167,6 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
   #chart{height:130px}
   .toolbar .search{flex-basis:100%}
   .toolbar .spacer{display:none}
-  .store-head{flex-wrap:wrap;row-gap:5px;padding:9px 2px}
-  .store-head b{flex:1 1 auto;min-width:0}
-  .store-head .sizes{min-width:0}
-  .store-head .bar{order:5;flex-basis:100%}
-  .st-row .nm{flex-basis:118px}
-  .st-row .sz{width:60px}
-  .st-row .pc{width:38px}
   .hide-sm{display:none!important}
   .panel-head{flex-wrap:wrap}
   .panel-head .hint{flex-basis:100%;order:3;margin-left:0;white-space:normal;font-size:11px;line-height:16px}
@@ -294,7 +250,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     <section data-page="storage" hidden>
       <div class="panel">
         <div class="panel-head"><h2>存储</h2><span class="hint" id="diskHint"></span></div>
-        <div id="storeList"></div>
+        <div id="storeHost"></div>
       </div>
     </section>
 
@@ -419,16 +375,12 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     </section>
   </main>
 
-  <div class="ctx-menu" id="storeMenu" role="menu" hidden>
-    <button type="button" role="menuitem" data-act="expand">全展开</button>
-    <button type="button" role="menuitem" data-act="collapse">全折叠</button>
-  </div>
-
   <footer id="foot">本地页面 · agent 采集</footer>
 </div>
 <script src="assets/fs-ui.js"></script>
 <script src="assets/svc-ui.js"></script>
 <script src="assets/file-view.js"></script>
+<script src="assets/storage-ui.js"></script>
 <script>
 (function () {
   'use strict';
@@ -440,8 +392,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     ovProc: null, ovProcTs: 0, ovProcLoading: false,
     proc: { data: null, page: 1, per: 10, sort: 'cpu', q: '', kernel: false, auto: 0, timer: null },
     net: { scope: 'nic', page: 1, per: 10, q: '', listen: false, ipcKind: 'shm', data: null, counts: null },
-    mon: { range: 900000, selected: [], data: {}, timer: null },
-    store: { open: '', loading: false, error: '', elapsed: 0, cache: {}, expanded: {}, showAll: {}, showHidden: true, menu: { show: false, x: 0, y: 0, path: '' }, timer: null, seq: 0, sig: '' }
+    mon: { range: 900000, selected: [], data: {}, timer: null }
   };
 
   // 相对路径：直接访问（/）和经 relay /device/<devid>/<port>/ 代理都能用
@@ -492,437 +443,23 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
   }
 
   // ---------------------------------------------------------------- 存储目录树
-  var STORE_TTL = 5 * 60 * 1000;
-
-  function storePct(b, total) {
-    var p = toNum(b) * 100 / Math.max(1, total);
-    return p >= 10 ? Math.round(p) : p >= 1 ? Number(p.toFixed(1)) : p > 0 ? 0.1 : 0;
-  }
-  function storePctText(b, total) {
-    var p = toNum(b) * 100 / Math.max(1, total);
-    if (p <= 0) return '0%';
-    if (p < 1) return '<1%';
-    return p >= 10 ? Math.round(p) + '%' : p.toFixed(1) + '%';
-  }
-  function storeTruncText(r) {
-    return { entries: '达到目录项上限', time: '达到时间上限', depth: '超过统计深度', nodes: '目录节点过多' }[r] || '超出扫描上限';
-  }
-
-  var ICON_EYE = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/></svg>';
-  var ICON_EYE_OFF = ICON_EYE + '<path d="M3 3l18 18"/>';
-
-  function isHiddenPath(p) {
-    return p.slice(p.lastIndexOf('/') + 1).charAt(0) === '.';
-  }
-
-  // 子项分「目录 / 文件」两组，各自最多列 10 项，其余合并成
-  // 「其他目录 N 项」「其他文件 N 项」；点合并行展开全部。
-  // 返回 null 表示该目录的子项还没取过，需要按需请求。
-  function storeKids(c, path) {
-    var node = c.map[path];
-    if (!node) return [];
-    if (!node.kidsLoaded) return null;
-    var list = node.children;
-    if (!state.store.showHidden) list = list.filter(function (k) { return !isHiddenPath(k.p); });
-    var groups = { dir: [], file: [] };
-    list.forEach(function (k) {
-      (k.t === 'f' || k.t === 'o' ? groups.file : groups.dir).push(k);
-    });
-    var out = [];
-    ['dir', 'file'].forEach(function (kind) {
-      var arr = groups[kind];
-      if (!arr.length) return;
-      arr.sort(function (a, b) { return b.b - a.b; });
-      if (state.store.showAll[path]) {
-        out = out.concat(arr);
-        return;
-      }
-      var threshold = Math.max(node.b * 0.01, 1), keep = [], rest = [];
-      arr.forEach(function (k, i) {
-        if (i < 10 && (k.b >= threshold || i < 3)) keep.push(k);
-        else rest.push(k);
-      });
-      out = out.concat(keep);
-      if (rest.length) {
-        out.push({ other: true, group: kind, count: rest.length,
-          b: rest.reduce(function (a, x) { return a + x.b; }, 0) });
-      }
-    });
-    return out;
-  }
-
-  function storeRows(c) {
-    var total = Math.max(1, toNum(c.info.total_kb) * 1024), rows = [];
-    function base(node, depth) {
-      return { b: node.b, depth: depth,
-        pct: Math.max(node.b > 0 ? 0.4 : 0, storePct(node.b, total)),
-        pctText: storePctText(node.b, total) };
-    }
-    function leafRow(node, depth) {
-      var isSmall = node.t === 'o';
-      var r = { path: node.p, kind: isSmall ? 'small' : 'file',
-        name: isSmall ? '小文件 ' + toNum(node.n) + ' 项' : node.p.slice(node.p.lastIndexOf('/') + 1),
-        title: isSmall ? (node.p.slice(0, node.p.lastIndexOf('/')) || '/') : node.p,
-        toggle: false, open: false };
-      return Object.assign(r, base(node, depth));
-    }
-    function otherRow(parent, kid, depth) {
-      var r = { path: parent, kind: 'other', other: true,
-        name: (kid.group === 'file' ? '其他文件 ' : '其他目录 ') + kid.count + ' 项',
-        toggle: true, open: false };
-      return Object.assign(r, base(kid, depth));
-    }
-    function emitKids(kids, depth, parent) {
-      kids.forEach(function (kid) {
-        if (kid.other) rows.push(otherRow(parent, kid, depth));
-        else if (kid.t === 'f' || kid.t === 'o') rows.push(leafRow(kid, depth));
-        else walk(kid.p, depth);
+  // 实现在 shared/web/storage-ui.js，与管理台共用同一份
+  var storeTree = null;
+  function ensureStoreTree(mounts) {
+    if (!storeTree) {
+      storeTree = RtunnelStorage.createTree({
+        container: $('#storeHost'),
+        emptyText: '无挂载点信息',
+        fetchNodes: function (mount, path, depth) {
+          return fetch('api/v1/storage/tree?mount=' + encodeURIComponent(mount) +
+            (path ? '&path=' + encodeURIComponent(path) : '') + '&depth=' + depth,
+            { cache: 'no-store' }).then(function (r) { return r.json(); });
+        }
       });
     }
-    function walk(path, depth) {
-      var node = c.map[path];
-      if (!node) return;
-      var kids = storeKids(c, path), open = !!state.store.expanded[path];
-      var hasKids = kids === null ? !!node.c : kids.length > 0;
-      var r = { path: path, kind: 'dir', title: path,
-        name: path.slice(path.lastIndexOf('/') + 1),
-        toggle: hasKids, open: open };
-      rows.push(Object.assign(r, base(node, depth)));
-      if (!open) return;
-      if (kids === null) {
-        rows.push({ path: '', kind: 'loading', name: '加载中…', depth: depth + 1,
-          toggle: false, open: false, b: 0, pct: 0, pctText: '' });
-        return;
-      }
-      emitKids(kids, depth + 1, path);
-    }
-    // 分区本身已由头部展示，正文从一级子项开始
-    var rootKids = storeKids(c, c.info.mount);
-    if (rootKids) emitKids(rootKids, 0, c.info.mount);
-    return rows;
-  }
-
-  function storeRowHtml(r) {
-    if (r.kind === 'loading') {
-      return '<div class="st-row loading" data-kind="loading" style="padding-left:' +
-        (4 + r.depth * 12) + 'px"><span class="caret"></span>' +
-        '<span class="nm mono">' + esc(r.name) + '</span></div>';
-    }
-    return '<div class="st-row' + (r.other ? ' other' : '') +
-      (r.kind === 'file' ? ' file' : '') + (r.kind === 'small' ? ' small' : '') +
-      '" data-path="' + esc(r.path) + '" data-kind="' + r.kind + '"' +
-      (r.other ? ' data-other="1"' : '') + (r.toggle && !r.other ? ' data-kids="1"' : '') +
-      ' style="padding-left:' + (4 + r.depth * 12) + 'px">' +
-      '<span class="caret">' + (r.toggle ? (r.open ? '▾' : '▸') : '') + '</span>' +
-      '<span class="nm mono" title="' + esc(r.title || r.path) + '">' + esc(r.name) + '</span>' +
-      '<span class="sz mono">' + fmtBytes(r.b) + '</span>' +
-      '<span class="bar slim"><i class="' + (r.other ? 'muted-fill' : '') + '" style="width:' + r.pct + '%"></i></span>' +
-      '<span class="pc mono">' + r.pctText + '</span></div>';
-  }
-
-  function storeBodyHtml(mount) {
-    var st = state.store, c = st.cache[mount];
-    if (st.loading && !c) {
-      return '<div class="store-loading"><span>正在扫描 ' + esc(mount) + ' … ' + st.elapsed + 's</span>' +
-        '<div class="bar slim"><i style="width:100%;opacity:.35"></i></div></div>';
-    }
-    if (!c) return st.error ? '<div class="st-warn warn">' + esc(st.error) + '</div>' : '';
-    var d = c.info, total = Math.max(1, toNum(d.total_kb) * 1024), html = '';
-    var showHidden = st.showHidden;
-    html += '<div class="store-tools"><span>条长 = 占分区容量 · 缩进 = 层级</span>' +
-      '<span class="store-actions">' +
-      '<span>' + toNum(d.files) + ' 个文件 · 扫描 ' + (toNum(d.scan_ms) / 1000).toFixed(1) + 's</span>' +
-      '<button class="store-eye" type="button" data-toggle-hidden="1" title="' +
-      (showHidden ? '隐藏隐藏项' : '显示隐藏项') + '" aria-label="' + (showHidden ? '隐藏隐藏项' : '显示隐藏项') + '">' +
-      (showHidden ? ICON_EYE : ICON_EYE_OFF) + '</button>' +
-      '<button class="link" type="button" data-rescan="' + esc(mount) + '">重新扫描</button>' +
-      '</span></div>';
-    if (c.error) html += '<div class="st-warn warn">' + esc(c.error) + '</div>';
-    html += storeRows(c).map(storeRowHtml).join('');
-    html += '<div class="st-foot">';
-    [['已用', d.used_kb, 'used'], ['可用', d.free_kb, 'free'], ['保留', d.reserved_kb, 'reserved']].forEach(function (r) {
-      var p = Math.round(toNum(r[1]) * 1024 * 100 / total);
-      html += '<div class="st-row foot"><span class="nm">' + r[0] + '</span>' +
-        '<span class="sz mono">' + fmtKB(r[1]) + '</span>' +
-        '<span class="bar slim"><i class="' + r[2] + '" style="width:' + Math.min(100, p) + '%"></i></span>' +
-        '<span class="pc mono">' + p + '%</span></div>';
-    });
-    html += '</div>';
-    html += '<div class="st-note">统计合计 ' + fmtBytes(d.bytes) + ' · df 已用 ' + fmtKB(d.used_kb) +
-      ' · 差额来自文件系统元数据、保留块、已删除未释放的文件和无权限目录</div>';
-    if (d.truncated) html += '<div class="st-warn warn">结果可能偏低：' + esc(storeTruncText(d.truncated_reason)) + '</div>';
-    if (d.skipped && d.skipped.length) {
-      html += '<div class="st-warn info">已跳过 ' + d.skipped.length + ' 个无权限目录：' +
-        esc(d.skipped.slice(0, 3).join('  ')) +
-        (d.skipped.length > 3 ? '  等 ' + d.skipped.length + ' 个' : '') + '</div>';
-    }
-    return html;
-  }
-
-  function renderStore(mounts, force) {
-    var sig = mounts.map(function (m) { return m.mount + ':' + toNum(m.used_kb) + ':' + toNum(m.total_kb); }).join('|');
-    if (!force && sig === state.store.sig) return;
-    state.store.sig = sig;
-    var el = $('#storeList');
-    if (!el) return;
-    el.innerHTML = mounts.length ? mounts.map(function (m) {
-      var p = diskPct(m), cls = tone(p), open = state.store.open === m.mount;
-      return '<div class="store"><div class="store-head" data-mount="' + esc(m.mount) + '">' +
-        '<span class="caret">' + (open ? '▾' : '▸') + '</span>' +
-        '<b>' + esc(m.mount) + '</b>' +
-        '<span class="muted">' + esc(m.fstype || '') + '</span>' +
-        '<span class="sizes mono">' + fmtKB(m.used_kb) + ' / ' + fmtKB(m.total_kb) + '</span>' +
-        '<span class="bar slim"><i class="' + cls + '" style="width:' + p + '%"></i></span>' +
-        '<span class="pct ' + cls + '">' + p + '%</span></div>' +
-        (open ? '<div class="store-body">' + storeBodyHtml(m.mount) + '</div>' : '') +
-        '</div>';
-    }).join('') : '<div class="emptyp">无挂载点信息</div>';
+    storeTree.setMounts(mounts);
     $('#diskHint').textContent = mounts.length ? mounts.length + ' 个挂载点' : '';
   }
-
-  function toggleStore(mount) {
-    var st = state.store;
-    if (st.open === mount) {
-      st.open = '';
-      renderStore(sortedMounts(state.data || {}), true);
-      return;
-    }
-    st.open = mount;
-    st.error = '';
-    var c = st.cache[mount];
-    if (c && Date.now() - c.ts < STORE_TTL) {
-      renderStore(sortedMounts(state.data || {}), true);
-      return;
-    }
-    loadStoreRoot(mount, false);
-  }
-
-  function storeUrl(mount, path, depth) {
-    return 'api/v1/storage/tree?mount=' + encodeURIComponent(mount) +
-      (path ? '&path=' + encodeURIComponent(path) : '') + '&depth=' + depth;
-  }
-
-  // 把一次响应合并进缓存；rootPath 的子项以本次结果为准
-  function mergeStore(c, d, rootPath, depth) {
-    var nodes = d.nodes || [];
-    nodes.forEach(function (n) {
-      if (!c.map[n.p]) c.map[n.p] = { p: n.p, b: n.b, n: n.n, d: n.d, m: n.m, t: n.t, c: n.c, children: [], kidsLoaded: false };
-      else {
-        var cur = c.map[n.p];
-        cur.b = n.b; cur.n = n.n; cur.d = n.d; cur.m = n.m; cur.t = n.t; cur.c = n.c;
-        if (!cur.children) cur.children = [];
-      }
-    });
-    if (c.map[rootPath]) {
-      c.map[rootPath].children = [];
-      c.map[rootPath].kidsLoaded = true;
-    }
-    var touched = {};
-    nodes.forEach(function (n) {
-      if (n.p === rootPath) return;
-      var i = n.p.lastIndexOf('/');
-      var parent = i <= 0 ? '/' : n.p.slice(0, i);
-      if (!c.map[parent]) return;
-      if (depth > 1 && !touched[parent]) {
-        touched[parent] = true;
-        c.map[parent].children = [];
-      }
-      c.map[parent].children.push(c.map[n.p]);
-    });
-    if (depth > 1 && !d.truncated) {
-      nodes.forEach(function (n) {
-        if (n.t === 'd' && n.p !== rootPath && c.map[n.p]) c.map[n.p].kidsLoaded = true;
-      });
-    }
-  }
-
-  function loadStoreRoot(mount, force) {
-    var st = state.store, c = st.cache[mount];
-    if (!force && c && Date.now() - c.ts < STORE_TTL) return;
-    var seq = ++st.seq;
-    st.loading = true;
-    st.error = '';
-    st.elapsed = 0;
-    var t0 = Date.now();
-    clearInterval(st.timer);
-    st.timer = setInterval(function () {
-      st.elapsed = Math.round((Date.now() - t0) / 1000);
-      renderStore(sortedMounts(state.data || {}), true);
-    }, 250);
-    fetch(storeUrl(mount, '', 1), { cache: 'no-store' })
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (seq !== st.seq) return;
-        if (!d || !d.ok) throw new Error((d && d.error) || 'scan failed');
-        var cur = { info: d, map: {}, ts: Date.now(), loading: {} };
-        mergeStore(cur, d, mount, 1);
-        st.cache[mount] = cur;
-      })
-      .catch(function (e) {
-        if (seq === st.seq) st.error = '扫描失败：' + (e.message || e);
-      })
-      .then(function () {
-        if (seq !== st.seq) return;
-        clearInterval(st.timer);
-        st.timer = null;
-        st.loading = false;
-        renderStore(sortedMounts(state.data || {}), true);
-      });
-  }
-
-  // 取某个目录的直接子项（depth=1）或整棵子树（depth>1）
-  function loadStoreKids(mount, path, depth, done) {
-    var c = state.store.cache[mount];
-    if (!c || c.loading[path]) {
-      if (done) done(false);
-      return;
-    }
-    c.loading[path] = true;
-    fetch(storeUrl(mount, path, depth), { cache: 'no-store' })
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (!d || !d.ok) throw new Error((d && d.error) || 'scan failed');
-        mergeStore(c, d, path, depth);
-        c.error = '';
-        renderStore(sortedMounts(state.data || {}), true);
-        if (done) done(true);
-      })
-      .catch(function (e) {
-        delete state.store.expanded[path];
-        c.error = '加载 ' + path + ' 失败：' + (e.message || e);
-        renderStore(sortedMounts(state.data || {}), true);
-        if (done) done(false);
-      })
-      .then(function () { c.loading[path] = false; });
-  }
-
-  $('#storeList').addEventListener('click', function (e) {
-    var rescan = e.target.closest('[data-rescan]');
-    if (rescan) {
-      loadStoreRoot(rescan.getAttribute('data-rescan'), true);
-      return;
-    }
-    if (e.target.closest('[data-toggle-hidden]')) {
-      state.store.showHidden = !state.store.showHidden;
-      renderStore(sortedMounts(state.data || {}), true);
-      return;
-    }
-    var head = e.target.closest('.store-head');
-    if (head) {
-      toggleStore(head.getAttribute('data-mount'));
-      return;
-    }
-    var row = e.target.closest('.st-row');
-    if (!row || row.getAttribute('data-kind') === 'loading') return;
-    var path = row.getAttribute('data-path');
-    if (row.getAttribute('data-other')) {
-      state.store.showAll[path] = true;
-    }
-    else if (row.getAttribute('data-kids')) {
-      if (state.store.expanded[path]) {
-        delete state.store.expanded[path];
-      }
-      else {
-        state.store.expanded[path] = true;
-        var c = state.store.cache[state.store.open];
-        var node = c && c.map[path];
-        if (node && !node.kidsLoaded) {
-          renderStore(sortedMounts(state.data || {}), true);
-          loadStoreKids(state.store.open, path, 1);
-          return;
-        }
-      }
-    }
-    else {
-      return;
-    }
-    renderStore(sortedMounts(state.data || {}), true);
-  });
-
-  // ---------------------------------------------------------------- 存储右键菜单
-  function openStoreMenu(x, y, path) {
-    var m = state.store.menu;
-    m.path = path;
-    m.x = Math.max(8, Math.min(x, innerWidth - 128));
-    m.y = Math.max(8, Math.min(y, innerHeight - 92));
-    m.show = true;
-    var el = $('#storeMenu');
-    el.hidden = false;
-    el.style.left = m.x + 'px';
-    el.style.top = m.y + 'px';
-  }
-
-  function closeStoreMenu() {
-    var m = state.store.menu;
-    if (!m.show) return;
-    m.show = false;
-    m.path = '';
-    $('#storeMenu').hidden = true;
-  }
-
-  // 递归展开整棵子树：先按需把子树取回来，再逐层标记
-  function applyStoreMenu(open) {
-    var path = state.store.menu.path;
-    closeStoreMenu();
-    var mount = state.store.open;
-    var c = state.store.cache[mount];
-    if (!path || !c) return;
-    var mark = function () {
-      (function walk(p) {
-        var node = c.map[p];
-        if (!node) return;
-        if (open) {
-          // 子树被截断时有些后代还没取过，不要把它们标成展开（否则一直显示加载中）
-          if (node.kidsLoaded) {
-            state.store.expanded[p] = true;
-            state.store.showAll[p] = true;
-          }
-        }
-        else {
-          delete state.store.expanded[p];
-          delete state.store.showAll[p];
-        }
-        node.children.forEach(function (k) { walk(k.p); });
-      })(path);
-      renderStore(sortedMounts(state.data || {}), true);
-    };
-    if (open) {
-      // 全展开需要整棵子树：即使当前层已加载，后代也可能没取过，
-      // 统一按 depth=32 拉一次，再逐层标记，避免留下「加载中」
-      state.store.expanded[path] = true;
-      renderStore(sortedMounts(state.data || {}), true);
-      loadStoreKids(mount, path, 32, function (ok) { if (ok) mark(); });
-      return;
-    }
-    mark();
-  }
-
-  $('#storeList').addEventListener('contextmenu', function (e) {
-    var row = e.target.closest('.st-row');
-    if (!row) return;
-    var kind = row.getAttribute('data-kind');
-    if (kind === 'file' || kind === 'small' || kind === 'loading') return;
-    var path = row.getAttribute('data-path');
-    if (!path) return;
-    var c = state.store.cache[state.store.open];
-    if (!c || !c.map[path]) return;
-    e.preventDefault();
-    openStoreMenu(e.clientX, e.clientY, path);
-  });
-
-  $('#storeMenu').addEventListener('click', function (e) {
-    var b = e.target.closest('button[data-act]');
-    if (!b) return;
-    e.stopPropagation();
-    applyStoreMenu(b.getAttribute('data-act') === 'expand');
-  });
-
-  document.addEventListener('click', closeStoreMenu);
-  window.addEventListener('scroll', closeStoreMenu, true);
-  window.addEventListener('resize', closeStoreMenu);
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') closeStoreMenu();
-  });
 
   // ---------------------------------------------------------------- tab
   function tabFromHash() {
@@ -1115,7 +652,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
       ? mounts.slice(0, 3).map(diskCompact).join('')
       : '<div class="emptyp">无挂载点</div>';
     $('#ovDiskHint').textContent = mounts.length ? mounts.length + ' 个挂载点' : '';
-    renderStore(mounts, false);
+    ensureStoreTree(mounts);
 
     var nics = d.nics || [];
     var ovNics = nics.slice(0, 4);

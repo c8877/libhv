@@ -347,7 +347,7 @@ sequenceDiagram
 | `0x35` | `PROC_REQ` | B→C | `str json {op:list|detail|signal,...}`，sid 为请求号 |
 | `0x36` | `PROC_INFO` | C→B | `str json`：进程列表/详情/信号结果，sid 回显 |
 | `0x37` | `WARM_REQ` | B→C | `str json {ttl_ms}`：详情页打开期间续期，agent 每 30s 预热进程/服务缓存 |
-| `0x38` | `POWER_REQ` | B→C | `str json {action:reboot\|poweroff,delay_ms}`，sid 为请求号 |
+| `0x38` | `POWER_REQ` | B→C | `str json {action:reboot\|poweroff,delay_ms,password}`，sid 为请求号；`password` 为设备 root 密码，仅透传不落日志 |
 | `0x39` | `POWER_ACK` | C→B | `str json {ok,action,delay_ms,error}`，sid 回显 |
 | `0x3A` | `DIAG_REQ` | B→C | `str json {max_mb}`，sid 为请求号 |
 | `0x3B` | `DIAG_INFO` | C→B | `str json {ok,name,size,sha256,error}`，sid 回显 |
@@ -540,7 +540,7 @@ operator（Shell、Web、文件上传下载）/ viewer（概览、设备列表�
   relay 仅内存缓存，详情页打开时刷新一次，不周期上报
 - 快照字段：version/args/caps、uname/CPU/内存/分区/负载/网卡、证书（mTLS 未配置则 `mtls=false`）
 - `CONFIG_SET(0x1B)` / `CONFIG_ACK(0x1C, sid 回显)`：在线修改 `ports` 与 `shell`；
-  agent 校验→原子替换→写 `--config-file`（默认 `/opt/data/etc/agent.json`）→ ACK
+  agent 校验→原子替换→写 `--config-file`（默认 `/opt/data/etc/rtunnel-agent.json`）→ ACK
 - `PUT /api/v1/agents/{devid}/caps`：manager/admin 改端口，Shell 仅 admin；离线返回 404
 
 ### 13.3 接口

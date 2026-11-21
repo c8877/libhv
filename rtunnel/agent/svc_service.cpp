@@ -111,13 +111,6 @@ std::string firstLine(const std::string& s) {
     return line;
 }
 
-std::string trimStr(const std::string& s) {
-    size_t b = s.find_first_not_of(" \t\r\n");
-    if (b == std::string::npos) return "";
-    size_t e = s.find_last_not_of(" \t\r\n");
-    return s.substr(b, e - b + 1);
-}
-
 double readUptimeSec() {
     FILE* fp = fopen("/proc/uptime", "r");
     if (!fp) return 0;

@@ -59,6 +59,22 @@ struct WebKick {
     AgentApp* app = nullptr;
 };
 
+// loop 线程直接回一帧 JSON（参数错误、busy 等小响应）。
+void sendJsonFrame(hio_t* io, uint8_t type, uint32_t sid, const nlohmann::json& j) {
+    std::string body = j.dump();
+    rtnp::Writer w;
+    w.str(body.c_str());
+    rtnp::send(io, type, sid, w.data, (uint16_t)w.len);
+}
+
+// CONFIG_SET 的参数校验失败统一回 CONFIG_ACK
+void ackConfigError(hio_t* io, uint32_t sid, const char* msg) {
+    nlohmann::json e;
+    e["ok"] = false;
+    e["error"] = msg;
+    sendJsonFrame(io, rtnp::CONFIG_ACK, sid, e);
+}
+
 // 把 FsSession 的输出装进 RTNP DATA：u8 kind + WebSocket 原始消息
 class FsTunnelSink : public rtfs::Sink {
 public:
@@ -879,10 +895,7 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     rr.str(cfg, sizeof(cfg));
     auto r = nlohmann::json::parse(rr.err ? std::string() : std::string(cfg), nullptr, false);
     if (r.is_discarded() || !r.is_object()) {
-        std::string e = "{\"ok\":false,\"error\":\"bad json\"}";
-        rtnp::Writer w;
-        w.str(e.c_str());
-        rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+        ackConfigError(io, f->sid, "bad json");
         return;
     }
     int new_ports[32] = {0};
@@ -890,27 +903,18 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     int new_shell = allow_shell;
     if (r.contains("ports")) {
         if (!r["ports"].is_array()) {
-            std::string e = "{\"ok\":false,\"error\":\"ports must be array\"}";
-            rtnp::Writer w;
-            w.str(e.c_str());
-            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            ackConfigError(io, f->sid, "ports must be array");
             return;
         }
         int idx = 0;
         for (auto& v : r["ports"]) {
             if (!v.is_number_integer()) {
-                std::string e = "{\"ok\":false,\"error\":\"bad port\"}";
-                rtnp::Writer w;
-                w.str(e.c_str());
-                rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+                ackConfigError(io, f->sid, "bad port");
                 return;
             }
             int p = v.get<int>();
             if (p <= 0 || p > 65535 || idx >= 32) {
-                std::string e = "{\"ok\":false,\"error\":\"port out of range or too many\"}";
-                rtnp::Writer w;
-                w.str(e.c_str());
-                rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+                ackConfigError(io, f->sid, "port out of range or too many");
                 return;
             }
             bool dup = false;
@@ -923,10 +927,7 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     }
     if (r.contains("shell")) {
         if (!r["shell"].is_boolean()) {
-            std::string e = "{\"ok\":false,\"error\":\"shell must be bool\"}";
-            rtnp::Writer w;
-            w.str(e.c_str());
-            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            ackConfigError(io, f->sid, "shell must be bool");
             return;
         }
         new_shell = r["shell"].get<bool>() ? 1 : 0;
@@ -935,18 +936,12 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     std::string new_file_dir = file_dir;
     if (r.contains("file_dir")) {
         if (!r["file_dir"].is_string()) {
-            std::string e = "{\"ok\":false,\"error\":\"file_dir must be string\"}";
-            rtnp::Writer w;
-            w.str(e.c_str());
-            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            ackConfigError(io, f->sid, "file_dir must be string");
             return;
         }
         std::string v = r["file_dir"].get<std::string>();
         if (v.empty() || v[0] != '/' || v.find("..") != std::string::npos || v.size() > 200) {
-            std::string e = "{\"ok\":false,\"error\":\"bad file_dir\"}";
-            rtnp::Writer w;
-            w.str(e.c_str());
-            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            ackConfigError(io, f->sid, "bad file_dir");
             return;
         }
         new_file_dir = v;
@@ -958,10 +953,7 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     int new_fs_max = file_max_mb;
     if (r.contains("fs")) {
         if (!r["fs"].is_boolean()) {
-            std::string e = "{\"ok\":false,\"error\":\"fs must be bool\"}";
-            rtnp::Writer w;
-            w.str(e.c_str());
-            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            ackConfigError(io, f->sid, "fs must be bool");
             return;
         }
         new_fs_enabled = r["fs"].get<bool>() ? 1 : 0;
@@ -969,18 +961,12 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     }
     if (r.contains("fs_root")) {
         if (!r["fs_root"].is_string()) {
-            std::string e = "{\"ok\":false,\"error\":\"fs_root must be string\"}";
-            rtnp::Writer w;
-            w.str(e.c_str());
-            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            ackConfigError(io, f->sid, "fs_root must be string");
             return;
         }
         std::string v = r["fs_root"].get<std::string>();
         if (v.empty() || v[0] != '/' || v.find("..") != std::string::npos || v.size() > 512) {
-            std::string e = "{\"ok\":false,\"error\":\"bad fs_root\"}";
-            rtnp::Writer w;
-            w.str(e.c_str());
-            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            ackConfigError(io, f->sid, "bad fs_root");
             return;
         }
         new_fs_root = v;
@@ -988,10 +974,7 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     }
     if (r.contains("fs_rw")) {
         if (!r["fs_rw"].is_boolean()) {
-            std::string e = "{\"ok\":false,\"error\":\"fs_rw must be bool\"}";
-            rtnp::Writer w;
-            w.str(e.c_str());
-            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            ackConfigError(io, f->sid, "fs_rw must be bool");
             return;
         }
         new_fs_rw = r["fs_rw"].get<bool>() ? 1 : 0;
@@ -999,18 +982,12 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     }
     if (r.contains("fs_max_mb")) {
         if (!r["fs_max_mb"].is_number_integer()) {
-            std::string e = "{\"ok\":false,\"error\":\"fs_max_mb must be integer\"}";
-            rtnp::Writer w;
-            w.str(e.c_str());
-            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            ackConfigError(io, f->sid, "fs_max_mb must be integer");
             return;
         }
         int v = r["fs_max_mb"].get<int>();
         if (v <= 0 || v > 10240) {
-            std::string e = "{\"ok\":false,\"error\":\"fs_max_mb out of range\"}";
-            rtnp::Writer w;
-            w.str(e.c_str());
-            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            ackConfigError(io, f->sid, "fs_max_mb out of range");
             return;
         }
         new_fs_max = v;
@@ -1021,10 +998,7 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     int new_svc_rw = svc_rw;
     if (r.contains("svc")) {
         if (!r["svc"].is_boolean()) {
-            std::string e = "{\"ok\":false,\"error\":\"svc must be bool\"}";
-            rtnp::Writer w;
-            w.str(e.c_str());
-            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            ackConfigError(io, f->sid, "svc must be bool");
             return;
         }
         new_svc_enabled = r["svc"].get<bool>() ? 1 : 0;
@@ -1032,10 +1006,7 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     }
     if (r.contains("svc_rw")) {
         if (!r["svc_rw"].is_boolean()) {
-            std::string e = "{\"ok\":false,\"error\":\"svc_rw must be bool\"}";
-            rtnp::Writer w;
-            w.str(e.c_str());
-            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            ackConfigError(io, f->sid, "svc_rw must be bool");
             return;
         }
         new_svc_rw = r["svc_rw"].get<bool>() ? 1 : 0;
@@ -1045,10 +1016,7 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     int new_ota = allow_ota;
     if (r.contains("ota")) {
         if (!r["ota"].is_boolean()) {
-            std::string e = "{\"ok\":false,\"error\":\"ota must be bool\"}";
-            rtnp::Writer w;
-            w.str(e.c_str());
-            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            ackConfigError(io, f->sid, "ota must be bool");
             return;
         }
         new_ota = r["ota"].get<bool>() ? 1 : 0;
@@ -1058,10 +1026,7 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     int new_reboot = allow_reboot;
     if (r.contains("reboot")) {
         if (!r["reboot"].is_boolean()) {
-            std::string e = "{\"ok\":false,\"error\":\"reboot must be bool\"}";
-            rtnp::Writer w;
-            w.str(e.c_str());
-            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            ackConfigError(io, f->sid, "reboot must be bool");
             return;
         }
         new_reboot = r["reboot"].get<bool>() ? 1 : 0;
@@ -1071,10 +1036,7 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     int new_poweroff = allow_poweroff;
     if (r.contains("poweroff")) {
         if (!r["poweroff"].is_boolean()) {
-            std::string e = "{\"ok\":false,\"error\":\"poweroff must be bool\"}";
-            rtnp::Writer w;
-            w.str(e.c_str());
-            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            ackConfigError(io, f->sid, "poweroff must be bool");
             return;
         }
         new_poweroff = r["poweroff"].get<bool>() ? 1 : 0;
@@ -1084,36 +1046,24 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     std::string new_allow_tty = allow_tty;
     if (r.contains("allow_tty")) {
         if (!r["allow_tty"].is_array()) {
-            std::string e = "{\"ok\":false,\"error\":\"allow_tty must be array\"}";
-            rtnp::Writer w;
-            w.str(e.c_str());
-            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            ackConfigError(io, f->sid, "allow_tty must be array");
             return;
         }
         std::string joined;
         for (auto& v : r["allow_tty"]) {
             if (!v.is_string()) {
-                std::string e = "{\"ok\":false,\"error\":\"bad tty path\"}";
-                rtnp::Writer w;
-                w.str(e.c_str());
-                rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+                ackConfigError(io, f->sid, "bad tty path");
                 return;
             }
             std::string one = v.get<std::string>();
             if (one.empty() || one[0] != '/' || one.size() > 200 || one.find("..") != std::string::npos) {
-                std::string e = "{\"ok\":false,\"error\":\"bad tty path\"}";
-                rtnp::Writer w;
-                w.str(e.c_str());
-                rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+                ackConfigError(io, f->sid, "bad tty path");
                 return;
             }
             if (!joined.empty()) joined += ",";
             joined += one;
             if (joined.size() > sizeof(allow_tty) - 2) {
-                std::string e = "{\"ok\":false,\"error\":\"too many tty\"}";
-                rtnp::Writer w;
-                w.str(e.c_str());
-                rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+                ackConfigError(io, f->sid, "too many tty");
                 return;
             }
         }
@@ -1126,10 +1076,7 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
             nlohmann::json e;
             e["ok"] = false;
             e["error"] = ferr.empty() ? std::string("file service unavailable") : ferr;
-            std::string es = e.dump();
-            rtnp::Writer w;
-            w.str(es.c_str());
-            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            sendJsonFrame(io, rtnp::CONFIG_ACK, f->sid, e);
             return;
         }
     }
@@ -1179,12 +1126,9 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
             pos = comma + 1;
         }
     }
-    std::string body = ack.dump();
     logf_("[agent] config set: ports=%d shell=%d fs=%d svc=%d reboot=%d poweroff=%d persisted=%d", allow_ports[0],
           allow_shell, file_enabled && fs_.ready(), svc_.ready(), allow_reboot, allow_poweroff, (int)persisted);
-    rtnp::Writer w;
-    w.str(body.c_str());
-    rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+    sendJsonFrame(io, rtnp::CONFIG_ACK, f->sid, ack);
 }
 
 struct FileRx {
@@ -2578,6 +2522,19 @@ void asyncPostCb(hevent_t* ev) {
     delete p;
 }
 
+// 工作线程把结果投递回 loop 线程发送：重连后 io 已换，不能直接写。
+void postFrame(AgentApp* app, hloop_t* lp, uint8_t type, uint32_t sid, std::string body) {
+    AsyncPost* t = new AsyncPost;
+    memset(&t->ev, 0, sizeof t->ev);
+    t->ev.cb = asyncPostCb;
+    t->ev.userdata = t;
+    t->app = app;
+    t->type = type;
+    t->sid = sid;
+    t->body = std::move(body);
+    hloop_post_event(lp, &t->ev);
+}
+
 // 大块结果（诊断包、目录树）：INFO 带元信息，DATA 按 32KB 顺序分块，END 收尾。
 // 在工作线程里生成，回到 loop 线程发送，避免连接重连后写到旧 io。
 struct ChunkPost {
@@ -2736,25 +2693,13 @@ void AgentApp::handleNetReq(const rtnp::Frame* f) {
 
     // 采集要扫 /proc 与 fork lsipc，交给查询 worker 串行执行；队列满时直接拒绝
     if (!querySubmit([this, sid, rj]() {
-            std::string body = netSnapshotJson(rj);
-            AsyncPost* t = new AsyncPost;
-            memset(&t->ev, 0, sizeof t->ev);
-            t->ev.cb = asyncPostCb;
-            t->ev.userdata = t;
-            t->app = this;
-            t->type = rtnp::NET_INFO;
-            t->sid = sid;
-            t->body = std::move(body);
-            hloop_post_event(loop, &t->ev);
+            postFrame(this, loop, rtnp::NET_INFO, sid, netSnapshotJson(rj));
         })) {
         json e;
         e["error"] = "busy";
         e["scope"] = rj.value("scope", std::string("all"));
         e["summary"] = {{"tcp", -1}, {"udp", -1}, {"unix", -1}, {"ipc", -1}};
-        std::string body = e.dump();
-        rtnp::Writer w;
-        w.str(body.c_str());
-        rtnp::send(io, rtnp::NET_INFO, sid, w.data, (uint16_t)w.len);
+        sendJsonFrame(io, rtnp::NET_INFO, sid, e);
     }
 }
 
@@ -2847,10 +2792,7 @@ void AgentApp::handleProcReq(const rtnp::Frame* f) {
         out["pid"] = pid;
         out["signal"] = sig;
         if (!ok) out["error"] = err;
-        std::string body = out.dump();
-        rtnp::Writer w;
-        w.str(body.c_str());
-        rtnp::send(io, rtnp::PROC_INFO, sid, w.data, (uint16_t)w.len);
+        sendJsonFrame(io, rtnp::PROC_INFO, sid, out);
         return;
     }
 
@@ -2860,32 +2802,17 @@ void AgentApp::handleProcReq(const rtnp::Frame* f) {
         json out = rtproc::detail(pid, err);
         out["op"] = "detail";
         if (!err.empty()) out["error"] = err;
-        std::string body = out.dump();
-        rtnp::Writer w;
-        w.str(body.c_str());
-        rtnp::send(io, rtnp::PROC_INFO, sid, w.data, (uint16_t)w.len);
+        sendJsonFrame(io, rtnp::PROC_INFO, sid, out);
         return;
     }
 
     if (!querySubmit([this, sid, rj]() {
-            std::string body = procsListJson(rj);
-            AsyncPost* t = new AsyncPost;
-            memset(&t->ev, 0, sizeof t->ev);
-            t->ev.cb = asyncPostCb;
-            t->ev.userdata = t;
-            t->app = this;
-            t->type = rtnp::PROC_INFO;
-            t->sid = sid;
-            t->body = std::move(body);
-            hloop_post_event(loop, &t->ev);
+            postFrame(this, loop, rtnp::PROC_INFO, sid, procsListJson(rj));
         })) {
         json e;
         e["op"] = "list";
         e["error"] = "busy";
-        std::string body = e.dump();
-        rtnp::Writer w;
-        w.str(body.c_str());
-        rtnp::send(io, rtnp::PROC_INFO, sid, w.data, (uint16_t)w.len);
+        sendJsonFrame(io, rtnp::PROC_INFO, sid, e);
     }
 }
 
@@ -3175,11 +3102,8 @@ void AgentApp::handleStorageReq(const rtnp::Frame* f) {
         e["error"] = "busy";
         e["mount"] = rj.value("mount", std::string("/"));
         e["path"] = rj.value("path", std::string());
-        std::string body = e.dump();
-        rtnp::Writer w;
-        w.str(body.c_str());
-        rtnp::send(io, rtnp::STORAGE_INFO, sid, w.data, (uint16_t)w.len);
-        rtnp::send(io, rtnp::STORAGE_END, sid, w.data, (uint16_t)w.len);
+        sendJsonFrame(io, rtnp::STORAGE_INFO, sid, e);
+        sendJsonFrame(io, rtnp::STORAGE_END, sid, e);
     }
 }
 
@@ -3325,10 +3249,7 @@ void AgentApp::handlePowerReq(const rtnp::Frame* f) {
             logf_("[agent] power %s scheduled in %lldms", action.c_str(), delay);
         }
     }
-    std::string body = ack.dump();
-    rtnp::Writer w;
-    w.str(body.c_str());
-    rtnp::send(io, rtnp::POWER_ACK, f->sid, w.data, (uint16_t)w.len);
+    sendJsonFrame(io, rtnp::POWER_ACK, f->sid, ack);
 }
 
 // 诊断包：系统信息 + 内核日志 + journal + 网络 + 服务 + 进程 + 配置。
@@ -3475,11 +3396,8 @@ void AgentApp::handleDiagReq(const rtnp::Frame* f) {
         json e;
         e["ok"] = false;
         e["error"] = "busy";
-        std::string body = e.dump();
-        rtnp::Writer w;
-        w.str(body.c_str());
-        rtnp::send(io, rtnp::DIAG_INFO, sid, w.data, (uint16_t)w.len);
-        rtnp::send(io, rtnp::DIAG_END, sid, w.data, (uint16_t)w.len);
+        sendJsonFrame(io, rtnp::DIAG_INFO, sid, e);
+        sendJsonFrame(io, rtnp::DIAG_END, sid, e);
     }
 }
 

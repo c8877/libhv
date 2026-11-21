@@ -106,7 +106,7 @@ flowchart TB
         AG[rtunnel-agent]
         PTY[pty shell]
         TCP[TCP 连接]
-        CFG[(agent.json<br/>allow/shell)]
+        CFG[(rtunnel-agent.json<br/>allow/shell)]
         AG --> PTY
         AG --> TCP
         AG --> CFG
@@ -236,7 +236,7 @@ sequenceDiagram
     U->>A: PUT /agents/board01/caps {ports,shell}
     A->>R: CONFIG_SET(sid=1)
     R->>C: CONFIG_SET
-    C->>C: 原子更新 + 写 agent.json
+    C->>C: 原子更新 + 写 rtunnel-agent.json
     C-->>R: CONFIG_ACK(sid=1)
     R-->>A: ACK
     A-->>U: 生效列表
@@ -425,7 +425,7 @@ stateDiagram-v2
 | `--devid` | — | 设备标识（证书 SAN） |
 | `--allow` | — | 允许访问的本地端口列表 |
 | `--allow-shell` | 关 | 允许 `OPEN_SHELL` |
-| `--config-file` | `/opt/data/etc/agent.json` | 能力持久化文件（运行期修改） |
+| `--config-file` | `/opt/data/etc/rtunnel-agent.json` | 能力持久化文件（运行期修改） |
 | `--tls-ca/--tls-cert/--tls-key` | — | mTLS |
 | `--max-idle` | 0 | 按需 agent 未使用自退秒数 |
 | `--local-web` | 关 | 本地设备详情页，默认 `127.0.0.1:8080`（带 Web 构建） |
@@ -507,8 +507,8 @@ stateDiagram-v2
 |---|---|---|
 | RTNP 版本 | 1 | 协议 |
 | 帧头 | 16 字节 | 协议 |
-| 单帧上限 | 64 KiB | `MAX_PAYLOAD` |
-| 初始 credit | 256 KiB | 流控 |
+| 单帧上限 | 32 KiB | `MAX_PAYLOAD` |
+| 初始 credit | 128 KiB | 流控 |
 | 心跳间隔 | 15s | relay |
 | 心跳超时 | 45s | relay |
 | HELLO 超时 | 5s | 握手 |

@@ -42,9 +42,6 @@ public:
     void addCredit(uint32_t n);
     void pump();
 
-    bool authed() const { return authed_; }
-    bool writable() const { return rw_; }
-
     static const size_t MAX_MESSAGE = 30000;
     static const size_t BIN_HEADER = 16;
 

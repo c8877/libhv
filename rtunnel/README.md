@@ -107,9 +107,10 @@ python3 rtunnel/tests/e2e_failover.py    # 双 relay 故障切换
 python3 rtunnel/tests/e2e_alerts.py      # 告警（本地 webhook sink）
 bash rtunnel/tests/ota_e2e.sh            # OTA 安装/重启/版本确认 + 错误架构拒绝
 bash rtunnel/tests/dist_scope_e2e.sh     # 分发/OTA 的设备范围授权
-bash rtunnel/tests/sysinfo_e2e.sh        # 存储统计全量/增量 + 离线缓存 + 管理台不阻塞
+bash rtunnel/tests/sysinfo_e2e.sh        # 挂载字段全量/增量 + 离线缓存 + 管理台不阻塞
 bash rtunnel/tests/net_e2e.sh            # 网络/IPC 快照、进程归属、缓存与离线回退
 bash rtunnel/tests/proc_e2e.sh           # 进程列表/详情/信号与 device.proc 权限
+bash rtunnel/tests/storage_e2e.sh        # 目录树按路径/层级、子项求和、越界校验与 gzip 透传
 python3 rtunnel/tests/stream_idle_e2e.py # 流空闲回收：闲置 RESET、活跃流保留
 build/bin/rtunnel-endpoint-test          # --server 地址解析单测
 ```
@@ -280,7 +281,8 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
   之和等于父项；工具栏眼睛按钮切换是否显示以 `.` 开头的项；已取回的节点
   缓存 5 分钟，收起再展开不重复扫描。agent 把整份响应压成 gzip 后上传，
   relay 对支持 gzip 的浏览器原样透传压缩流（由浏览器解压），
-  不支持时由 relay 解压后回明文
+  不支持时由 relay 解压后回明文。这份树的管理台与设备本地页共用
+  `shared/web/storage-ui.js`，只有数据来源不同
 - 概览：CPU/内存/负载/网络累计流量四个 KPI、CPU/内存趋势、存储用量、网卡、
   会话、系统信息与 mTLS 证书状态
 - 顶部摘要条展示设备名、agent 版本、连接信息、流量与采集时间，和一级 tab 一起吸顶
@@ -558,11 +560,16 @@ http://B:9443/device/<devid>/<port>/<path>
   文件与服务管理走 `GET /ws/fs`、`GET /ws/svc`（WebSocket，见下节）
 - `procs` / `net` / `metrics` 与 relay 的 `PROC_REQ`、`NET_REQ`、`METRICS_QUERY`
   共用同一份查询实现：进程双采样、IPC 采集、指标 ring 读取都带缓存与并发上限；
-  HTTP 处理函数在 `hv::async` 线程池执行，不阻塞 IO 线程和 WebSocket
-- 页面、`fs-ui.js`、`svc-ui.js`、`file-view.js`、`cm-editor.js` 在构建时压成 gzip 后以字节数组
-  嵌入二进制，运行时直接发压缩体（非 gzip 客户端按需解压一次），不再在堆里保留副本
+  `storage/tree` 也复用同一份 `rtstorage`，但走独立扫描线程（整盘遍历较慢），
+  不占用进程/网络查询队列
+- HTTP 处理函数在 `hv::async` 线程池执行，不阻塞 IO 线程和 WebSocket
+- 页面、`fs-ui.js`、`svc-ui.js`、`storage-ui.js`、`file-view.js`、`cm-editor.js` 在构建时
+  压成 gzip 后以字节数组嵌入二进制，运行时直接发压缩体（非 gzip 客户端按需解压一次），
+  不再在堆里保留副本
 - 响应支持 gzip 协商（`Accept-Encoding: gzip`），HTML、sysinfo 与较大的 JSON 都会压缩，
   并带 `Vary: Accept-Encoding`
+- sysinfo 快照在 loop 线程生成：页面打开（15s 内有请求）时 2s 一次，
+  无人访问降到 10s 一次；页面发起请求时会立即补一次重建，首屏不等定时器
 - 数据由 agent 主循环采集并缓存，HTTP 线程只读快照或调用带锁的共享查询，不直接访问隧道状态
 - 两个构建变体：`rtunnel-agent`（带 Web）与 `rtunnel-agent-noweb`（纯隧道，体积更小）。
   两者共用一个 `rtunnel-agent.service`，变体只由 `bin/rtunnel-agent` 软链指向哪个版本决定；
@@ -572,9 +579,25 @@ http://B:9443/device/<devid>/<port>/<path>
   `deploy/package_agent.sh` 生成带 `install.sh` 的 `.tar.gz` 部署包（OTA 和手工安装共用），
   `deploy/upload_agent.sh` 上传到文件仓库 `agent/` 目录
 
+### 共享前端组件
+
+管理台与设备本地页是两套页面，但文件、服务、存储三块交互只有一份实现，
+放在 `shared/web/`，由两边各自挂载：
+
+| 组件 | 作用 | 本地页 | 管理台 |
+|---|---|---|---|
+| `fs-ui.js` | 文件管理（WebSocket 会话、上传下载、编辑器） | 内嵌资源 `/assets/fs-ui.js` | `FileManagerCard.vue` 异步引入 |
+| `svc-ui.js` | 服务管理（systemd 列表/日志/启停） | 内嵌资源 `/assets/svc-ui.js` | `SvcManagerCard.vue` 异步引入 |
+| `storage-ui.js` | 存储分区折叠、目录瀑布、右键递归展开 | 内嵌资源 `/assets/storage-ui.js` | `StorageTreeCard.vue` 异步引入 |
+| `file-view.js` | Hex / 文本 / 图片查看器 | 内嵌资源 `/assets/file-view.js` | 与 `fs-ui` 共用 |
+
+组件都用 `createXxx(opts)` 挂到传入的容器上，样式自带作用域
+（`fs-ui` 用 Shadow DOM，`storage-ui` 的规则全部挂在 `.rtstore` 下），
+不依赖页面框架，也不污染宿主页面样式。改交互只改这一份。
+
 ### 文件管理（WebSocket）
 
-设备详情页的「文件管理」卡片提供浏览、上传、下载、新建/重命名/移动/删除、
+设备详情页的「文件」tab 提供浏览、上传、下载、新建/重命名/移动/删除、
 文本编辑和图片预览。本地页面与管理台共用同一个 WebSocket 协议和同一份前端
 （`shared/web/fs-ui.js`），relay 只转发数据流，不解析文件协议：
 
@@ -627,7 +650,7 @@ http://B:9443/device/<devid>/<port>/<path>
 ### 文件页：文件仓库
 
 导航「文件」页只有文件仓库（relay 本机的 `--admin-file-dir`）；设备文件仍然只在
-设备详情页的「文件管理」卡片里。两个页面挂载的是**同一个** `shared/web/fs-ui.js`：
+设备详情页的「文件」tab 里。两个页面挂载的是**同一个** `shared/web/fs-ui.js`：
 设备侧走 WebSocket，仓库侧给组件传一个 HTTP 后端（`relay/admin/web/src/shared/repo-backend.js`），
 表格、工具栏、行内表单、右键菜单、编辑器、Hex/尾部查看器全部复用，只是仓库是扁平目录，
 所以隐藏了路径栏、新建目录/文件和重命名/移动。
@@ -654,7 +677,7 @@ http://B:9443/device/<devid>/<port>/<path>
 
 ### 服务管理（WebSocket）
 
-设备详情页的「服务管理」卡片读取 systemd 服务列表，支持启动、停止、重启、
+设备详情页的「服务」tab 读取 systemd 服务列表，支持启动、停止、重启、
 启用/禁用开机自启、屏蔽/解除屏蔽，并查看最近 200 行 journal 日志。
 本地页面与管理台共用同一份前端（`shared/web/svc-ui.js`），relay 只转发，不解析协议：
 

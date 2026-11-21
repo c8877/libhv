@@ -189,15 +189,16 @@ public:
     uint32_t proc_seq = 0;
     std::unordered_map<uint32_t, std::string> power_results;
     uint32_t power_seq = 0;
-    struct DiagAcc {
+    // 分块结果（诊断包 / 目录树）：meta 是 INFO 帧的 json，body 是原始字节
+    struct ChunkAcc {
         std::string meta;
         std::string body;
     };
-    std::unordered_map<uint32_t, DiagAcc> diag_acc;      // 分块接收中
-    std::unordered_map<uint32_t, DiagAcc> diag_results;  // 已收完，等管理台取走
+    std::unordered_map<uint32_t, ChunkAcc> diag_acc;      // 分块接收中
+    std::unordered_map<uint32_t, ChunkAcc> diag_results;  // 已收完，等管理台取走
     uint32_t diag_seq = 0;
-    std::unordered_map<uint32_t, DiagAcc> storage_acc;
-    std::unordered_map<uint32_t, DiagAcc> storage_results;
+    std::unordered_map<uint32_t, ChunkAcc> storage_acc;
+    std::unordered_map<uint32_t, ChunkAcc> storage_results;
     uint32_t storage_seq = 0;
     std::unordered_map<std::string, uint64_t> warm_sent_ms; // devid -> 上次下发预热的时间
     struct NetCache { std::string json; uint64_t ts = 0; };

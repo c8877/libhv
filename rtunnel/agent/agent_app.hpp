@@ -8,24 +8,20 @@
 #include "fs_service.hpp"
 #include "svc_session.hpp"
 #include "proc_service.hpp"
-#include <string>
-#include <vector>
-#include <map>
-#include <set>
-#include <mutex>
+#include "cpputil/json.hpp"
+
 #include <atomic>
 #include <condition_variable>
-#include <functional>
-#include <thread>
 #include <cstdio>
-
-#include "cpputil/json.hpp"
 #include <ctime>
 #include <deque>
+#include <functional>
 #include <map>
+#include <mutex>
 #include <set>
-
-#include "cpputil/json.hpp"
+#include <string>
+#include <thread>
+#include <vector>
 
 class AgentApp;
 
@@ -71,8 +67,8 @@ public:
     int allow_ports[32] = {0};
     int nallow = 0;
     int allow_all = 0;
-    int allow_shell = 0;
-    char allow_tty[512] = {0}; // 逗号分隔的串口白名单   // 允许 OPEN_SHELL（forkpty 起 shell，默认禁用）
+    int allow_shell = 0;                  // 允许 OPEN_SHELL（forkpty 起 shell，默认禁用）
+    char allow_tty[512] = {0};            // 逗号分隔的串口白名单
     std::string config_file = "/opt/data/etc/rtunnel-agent.json"; // --config-file 可覆盖
     bool config_loaded = false;                          // 本次启动是否成功读取配置文件
     std::string file_dir = "/opt/data/files";

@@ -59,20 +59,20 @@ enum Type : uint8_t {
     OTA_APPLY      = 0x30,   // B→C：str json {path,version,size,sha256}；sid=安装号
     OTA_APPLY_ACK  = 0x31,   // C→B：str json {ok,phase,error}（phase=verified|installed）
     OTA_CANCEL     = 0x32,   // B→C：无载荷（安装开始前有效）
-    NET_REQ        = 0x33,   // B→C：str json {scope,proc,limit}；sid=请求号
+    NET_REQ        = 0x33,   // B→C：str json {scope,proc,page,page_size,q,listen,utype,ipc_kind,refresh}；sid=请求号
     NET_INFO       = 0x34,   // C→B：str json 网络/IPC 快照；sid 回显请求号
-    PROC_REQ       = 0x35,   // B→C：str json {op,sort,q,limit,pid,signal}；sid=请求号
+    PROC_REQ       = 0x35,   // B→C：str json {op,sort,q,kernel,page,page_size,refresh,pid,signal}；sid=请求号
     PROC_INFO      = 0x36,   // C→B：str json 进程列表/详情/信号结果；sid 回显请求号
     WARM_REQ       = 0x37,   // B→C：str json {ttl_ms}；详情页打开期间续期，agent 后台预热缓存
-    POWER_REQ      = 0x38,   // B→C：str json {action:"reboot"|"poweroff",delay_ms}；sid=请求号
+    POWER_REQ      = 0x38,   // B→C：str json {action:"reboot"|"poweroff",delay_ms,password}；sid=请求号
     POWER_ACK      = 0x39,   // C→B：str json {ok,action,delay_ms,error}；sid 回显
     DIAG_REQ       = 0x3A,   // B→C：str json {max_mb}；sid=请求号
     DIAG_INFO      = 0x3B,   // C→B：str json {ok,name,size,sha256,error}；sid 回显
     DIAG_DATA      = 0x3C,   // C→B：原始字节（顺序拼接）；sid 回显
     DIAG_END       = 0x3D,   // C→B：str json {ok,size,sha256,error}；sid 回显
-    STORAGE_REQ    = 0x3E,   // B→C：str json {mount,depth}；sid=请求号
+    STORAGE_REQ    = 0x3E,   // B→C：str json {mount,path,depth}；sid=请求号
     STORAGE_INFO   = 0x3F,   // C→B：str json {ok,mount,total_kb,used_kb,...,error}；sid 回显
-    STORAGE_DATA   = 0x40,   // C→B：原始字节（JSON 顺序拼接）；sid 回显
+    STORAGE_DATA   = 0x40,   // C→B：原始字节，首字节 \\1=gzip / \\0=明文，顺序拼接；sid 回显
     STORAGE_END    = 0x41,   // C→B：str json {ok,size,error}；sid 回显
 };
 

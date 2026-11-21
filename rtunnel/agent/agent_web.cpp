@@ -7,6 +7,7 @@
 #include "fs_ui_js.hpp"
 #include "file_view_js.hpp"
 #include "svc_session.hpp"
+#include "storage_ui_js.hpp"
 #include "svc_ui_js.hpp"
 
 #include "HttpServer.h"
@@ -213,6 +214,7 @@ WebAsset g_html(kAgentWebBlob, kAgentWebBlobLen, kAgentWebBlobGzip);
 WebAsset g_fs(kFsUiBlob, kFsUiBlobLen, kFsUiBlobGzip);
 WebAsset g_svc(kSvcUiBlob, kSvcUiBlobLen, kSvcUiBlobGzip);
 WebAsset g_fileView(kFileViewBlob, kFileViewBlobLen, kFileViewBlobGzip);
+WebAsset g_storage(kStorageUiBlob, kStorageUiBlobLen, kStorageUiBlobGzip);
 WebAsset g_editor(kCmEditorBlob, kCmEditorBlobLen, kCmEditorBlobGzip);
 
 void serveAsset(HttpRequest* req, HttpResponse* resp, WebAsset& a, http_content_type type) {
@@ -254,6 +256,7 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
     service->GET("/assets/fs-ui.js", serveJsAsset(g_fs));
     service->GET("/assets/svc-ui.js", serveJsAsset(g_svc));
     service->GET("/assets/file-view.js", serveJsAsset(g_fileView));
+    service->GET("/assets/storage-ui.js", serveJsAsset(g_storage));
     service->GET("/", [app](HttpRequest* req, HttpResponse* resp) {
         // 页面一打开就预热进程/服务缓存，切到对应 tab 时不用等 systemctl
         app->requestWarm(90000);

@@ -1410,7 +1410,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         return;
     }
     case rtnp::DIAG_DATA: {
-        DiagAcc& acc = diag_acc[f->sid];
+        ChunkAcc& acc = diag_acc[f->sid];
         if (acc.body.size() + f->len > 16 * 1024 * 1024) {
             acc.body.clear();
             acc.meta = "{\"ok\":false,\"error\":\"bundle too large\"}";
@@ -1439,7 +1439,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         return;
     }
     case rtnp::STORAGE_DATA: {
-        DiagAcc& acc = storage_acc[f->sid];
+        ChunkAcc& acc = storage_acc[f->sid];
         // 目录树回传上限 8MB；超过说明 agent 端节点上限失效
         if (acc.body.size() + f->len > 8 * 1024 * 1024) {
             acc.body.clear();
