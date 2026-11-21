@@ -405,6 +405,7 @@ void Service::unitFilesRefresh(std::shared_ptr<UnitFiles> uf, uint64_t gen) {
     if (!m.empty() && uf->gen == gen) {
         uf->files = std::move(m);
         uf->ms = nowMs();
+        uf->ver++;
     }
     uf->refreshing = false;
 }
@@ -431,8 +432,15 @@ void Service::listAsync(const ListOptions& opt, Callback cb) {
             return;
         }
         long long now = nowMs();
-        // 详情页预热每 30s 刷新一次，缓存留 40s 保证期间的请求都能直接命中
-        if (!list_cache_.is_null() && now - list_cache_ms_ < 40000) {
+        uint64_t uf_ver = 0;
+        {
+            std::lock_guard<std::mutex> lk(unit_files_->mu);
+            uf_ver = unit_files_->ver;
+        }
+        // 详情页预热每 30s 刷新一次，缓存留 40s 保证期间的请求都能直接命中；
+        // unit-file 清单在后台更新后版本会变，缓存随之失效，下一次请求带上新单元
+        if (!list_cache_.is_null() && now - list_cache_ms_ < 40000 &&
+            list_files_ver_ == uf_ver) {
             cb(applyListPage(list_cache_, opt));
             return;
         }
@@ -463,6 +471,7 @@ void Service::listAsync(const ListOptions& opt, Callback cb) {
         {
             std::lock_guard<std::mutex> lk(unit_files_->mu);
             files = unit_files_->files;
+            uf_ver = unit_files_->ver;
             if (!unit_files_->refreshing &&
                 (unit_files_->ms == 0 || now - unit_files_->ms > 300000)) {
                 unit_files_->refreshing = true;
@@ -507,6 +516,7 @@ void Service::listAsync(const ListOptions& opt, Callback cb) {
         r["failed"] = stat.failed;
         list_cache_ = r;
         list_cache_ms_ = now;
+        list_files_ver_ = uf_ver;
         cb(applyListPage(r, opt));
     });
 }

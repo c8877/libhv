@@ -69,6 +69,7 @@ private:
     // 列表缓存：systemctl show 在单核设备上约 1s，5s 轮询不能每次都跑
     nlohmann::json list_cache_;
     long long list_cache_ms_ = 0;
+    uint64_t list_files_ver_ = 0;   // 建缓存时用的 unit-file 版本
 
     // unit-file 清单（disabled/masked 等未加载单元）约 2.8s，放后台线程刷新。
     // 线程只持有 shared_ptr，不引用 Service，进程退出时也不会悬空。
@@ -77,6 +78,7 @@ private:
         std::map<std::string, std::string> files;
         long long ms = 0;
         uint64_t gen = 0;      // 启停/启禁用后递增，丢弃旧代刷新结果
+        uint64_t ver = 0;      // 数据版本，每次写入清单递增
         bool refreshing = false;
     };
     std::shared_ptr<UnitFiles> unit_files_ = std::make_shared<UnitFiles>();
