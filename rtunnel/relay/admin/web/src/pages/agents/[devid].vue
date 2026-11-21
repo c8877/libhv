@@ -350,7 +350,8 @@
                     <div class="vform-row">
                       <span class="vlabel">允许 Shell</span>
                       <div class="vcontrol">
-                        <el-checkbox v-model="capsForm.shell" :disabled="!canCaps">允许</el-checkbox>
+                        <el-switch v-model="capsForm.shell" :disabled="!canCaps" />
+                        <span class="muted">通过 relay 打开交互终端</span>
                       </div>
                     </div>
                     <div class="vform-row">
@@ -386,9 +387,10 @@
                       </div>
                     </div>
                     <div class="vform-row">
-                      <span class="vlabel">启用文件管理</span>
+                      <span class="vlabel">文件管理</span>
                       <div class="vcontrol">
-                        <el-checkbox v-model="capsForm.fs" :disabled="!canCaps">启用</el-checkbox>
+                        <el-switch v-model="capsForm.fs" :disabled="!canCaps" />
+                        <span class="muted">浏览、上传与下载文件</span>
                       </div>
                     </div>
                     <div class="vform-row">
@@ -416,9 +418,9 @@
 
                     <div class="vform-section span2">服务管理</div>
                     <div class="vform-row">
-                      <span class="vlabel">启用服务管理</span>
+                      <span class="vlabel">服务管理</span>
                       <div class="vcontrol">
-                        <el-checkbox v-model="capsForm.svc" :disabled="!canCaps">启用</el-checkbox>
+                        <el-switch v-model="capsForm.svc" :disabled="!canCaps" />
                         <span class="muted">systemd 状态与日志</span>
                       </div>
                     </div>
