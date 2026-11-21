@@ -379,6 +379,42 @@ void Service::workerLoop() {
     }
 }
 
+// 后台刷新 unit-file 清单。只持有 shared_ptr，不引用 Service。
+void Service::unitFilesRefresh(std::shared_ptr<UnitFiles> uf, uint64_t gen) {
+    CmdResult f = runCmd({"systemctl", "list-unit-files", "--type=service", "--no-legend",
+                          "--no-pager"},
+                         15000, 1024 * 1024);
+    std::map<std::string, std::string> m;
+    if (f.code == 0 && !f.timeout) {
+        std::istringstream is(f.out);
+        std::string line;
+        while (std::getline(is, line)) {
+            std::istringstream ls(line);
+            std::string name, state;
+            ls >> name >> state;
+            if (name.size() < 9 || name.compare(name.size() - 8, 8, ".service") != 0) continue;
+            if (name.find('@') != std::string::npos) continue;   // 模板单元
+            if (state == "static" || state == "alias" || state == "generated" ||
+                state == "transient" || state == "bad")
+                continue;
+            m[name] = state;
+        }
+    }
+    std::lock_guard<std::mutex> lk(uf->mu);
+    // 期间发生过 enable/disable/mask，结果可能已过期，丢弃等下一次刷新
+    if (!m.empty() && uf->gen == gen) {
+        uf->files = std::move(m);
+        uf->ms = nowMs();
+    }
+    uf->refreshing = false;
+}
+
+void Service::invalidateUnitFiles() {
+    std::lock_guard<std::mutex> lk(unit_files_->mu);
+    unit_files_->gen++;
+    unit_files_->ms = 0;
+}
+
 void Service::listAsync(const ListOptions& opt, Callback cb) {
     post([this, opt, cb]() {
         nlohmann::json r;
@@ -418,33 +454,26 @@ void Service::listAsync(const ListOptions& opt, Callback cb) {
         for (size_t i = 0; i < units.size(); ++i) index[units[i].value("name", "")] = i;
 
         // 停止后的 disabled/masked 单元会被 systemd 卸载，show '*.service' 不再列出，
-        // 补一份 unit-file 清单，保证还能从界面启用/禁用/屏蔽
-        // unit-file 清单只在安装/卸载/外部 enable 时变化，5 分钟刷新一次即可；
-        // 这条命令在单核设备上要 2.8s，太频繁会拖慢服务启停
-        if (file_states_.empty() || now - file_states_ms_ > 300000) {
-            CmdResult f = runCmd({"systemctl", "list-unit-files", "--type=service", "--no-legend",
-                                  "--no-pager"},
-                                 15000, 1024 * 1024);
-            if (f.code == 0 && !f.timeout) {
-                std::map<std::string, std::string> m;
-                std::istringstream is(f.out);
-                std::string line;
-                while (std::getline(is, line)) {
-                    std::istringstream ls(line);
-                    std::string name, state;
-                    ls >> name >> state;
-                    if (name.size() < 9 || name.compare(name.size() - 8, 8, ".service") != 0) continue;
-                    if (name.find('@') != std::string::npos) continue;   // 模板单元
-                    if (state == "static" || state == "alias" || state == "generated" ||
-                        state == "transient" || state == "bad")
-                        continue;
-                    m[name] = state;
-                }
-                file_states_ = std::move(m);
-                file_states_ms_ = now;
+        // 补一份 unit-file 清单，保证还能从界面启用/禁用/屏蔽。
+        // 该命令在单核设备上约 2.8s，放后台刷新：本次先用已有清单，
+        // 完成后下一次请求自然带上新装的单元或新的启禁用状态。
+        std::map<std::string, std::string> files;
+        bool kick_files = false;
+        uint64_t files_gen = 0;
+        {
+            std::lock_guard<std::mutex> lk(unit_files_->mu);
+            files = unit_files_->files;
+            if (!unit_files_->refreshing &&
+                (unit_files_->ms == 0 || now - unit_files_->ms > 300000)) {
+                unit_files_->refreshing = true;
+                files_gen = unit_files_->gen;
+                kick_files = true;
             }
         }
-        for (const auto& kv : file_states_) {
+        if (kick_files) {
+            std::thread(Service::unitFilesRefresh, unit_files_, files_gen).detach();
+        }
+        for (const auto& kv : files) {
             auto it = index.find(kv.first);
             if (it != index.end()) {
                 units[it->second]["file_state"] = kv.second;   // unit-file 状态更完整
@@ -556,7 +585,7 @@ void Service::actionAsync(const std::string& unit, const std::string& verb, Call
         else {
             r["ok"] = true;
             list_cache_ms_ = 0;
-            if (verb == "enable" || verb == "disable" || verb == "mask" || verb == "unmask") file_states_ms_ = 0;
+            if (verb == "enable" || verb == "disable" || verb == "mask" || verb == "unmask") invalidateUnitFiles();
         }
         cb(r);
     });
