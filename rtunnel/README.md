@@ -18,6 +18,7 @@
 - 全部拓扑/流程/时序/状态图（Mermaid + ASCII）与协议/配置/状态/参数表：
   `docs/design/rtunnel-diagrams.md`
 - 接入账号与 Token：`docs/design/account-token.md`；账号详情页：`docs/design/account-detail.md`
+- 部署（测试环境直推、验证、回滚）：`deploy/DEPLOY.md`
 
 ## 构建
 
