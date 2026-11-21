@@ -521,6 +521,9 @@ http://B:9443/device/<devid>/<port>/<path>
 - 页面内容与管理台设备详情同源：单层 tab（概览 / 存储 / 文件 / 服务 / 进程 /
   网络 / 监控 / 串口 / 能力），概览含 CPU/内存/负载/网络 KPI、趋势、存储、
   网卡、系统信息与 mTLS 证书；非活动 tab 不请求数据，首次进入才加载
+- 本地页与 relay 详情共用同一套预热：agent 启动和页面打开时刷新进程/服务缓存，
+  页面打开期间由 2s 的 sysinfo 轮询续期（关闭后 90s 停止），
+  服务列表不用再等 `systemctl` 首次全量扫描（单核设备约 4s）
 - HTTP 接口：`GET /`、`GET /api/v1/sysinfo`、`GET /api/v1/procs`、
   `GET /api/v1/net`、`GET /api/v1/metrics`、`GET /api/v1/health`；
   文件与服务管理走 `GET /ws/fs`、`GET /ws/svc`（WebSocket，见下节）

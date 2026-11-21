@@ -419,7 +419,9 @@ void Service::listAsync(const ListOptions& opt, Callback cb) {
 
         // 停止后的 disabled/masked 单元会被 systemd 卸载，show '*.service' 不再列出，
         // 补一份 unit-file 清单，保证还能从界面启用/禁用/屏蔽
-        if (file_states_.empty() || now - file_states_ms_ > 120000) {
+        // unit-file 清单只在安装/卸载/外部 enable 时变化，5 分钟刷新一次即可；
+        // 这条命令在单核设备上要 2.8s，太频繁会拖慢服务启停
+        if (file_states_.empty() || now - file_states_ms_ > 300000) {
             CmdResult f = runCmd({"systemctl", "list-unit-files", "--type=service", "--no-legend",
                                   "--no-pager"},
                                  15000, 1024 * 1024);

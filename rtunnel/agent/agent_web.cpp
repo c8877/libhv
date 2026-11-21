@@ -254,12 +254,16 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
     service->GET("/assets/fs-ui.js", serveJsAsset(g_fs));
     service->GET("/assets/svc-ui.js", serveJsAsset(g_svc));
     service->GET("/assets/file-view.js", serveJsAsset(g_fileView));
-    service->GET("/", [](HttpRequest* req, HttpResponse* resp) {
+    service->GET("/", [app](HttpRequest* req, HttpResponse* resp) {
+        // 页面一打开就预热进程/服务缓存，切到对应 tab 时不用等 systemctl
+        app->requestWarm(90000);
         setNoCacheHeaders(resp);
         serveAsset(req, resp, g_html, TEXT_HTML);
         return 200;
     });
     service->GET("/api/v1/sysinfo", [app](HttpRequest* req, HttpResponse* resp) {
+        // 页面打开期间靠 2s 轮询续期，关闭后 90s 内自然停止
+        app->requestWarm(90000);
         setNoCacheHeaders(resp);
         resp->content_type = APPLICATION_JSON;
         std::string body = app->webSnapshot();
@@ -341,6 +345,8 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
                 ch->close();
                 return;
             }
+            // 直连 WS（例如深链直接打开服务页）时也保证缓存已在刷新
+            app->requestWarm(90000);
             auto conn = std::make_shared<LocalSvcConn>();
             conn->ws = ch;
             conn->sink.reset(new LocalSvcSink(conn.get()));

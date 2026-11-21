@@ -112,6 +112,10 @@ public:
     std::string netSnapshotJson(const nlohmann::json& req);
     std::string metricPointsJson(const nlohmann::json& q);
 
+    // 本地页打开期间续期进程/服务预热（与 relay 详情的 WARM_REQ 共用缓存）。
+    // 可从 HTTP 工作线程调用，事件循环操作会投递回 loop。
+    void requestWarm(uint64_t ttl_ms);
+
 protected:
     uint8_t role() const override { return rtnp::ROLE_AGENT; }
     const char* identity() const override { return devid; }
@@ -169,6 +173,7 @@ private:
     void onWarmTick();
     void ensureWarmTimer();
     static void warmTickCb(htimer_t* t);
+    static void warmKickCb(hevent_t* ev);
     static bool otaProbe(const std::string& path, const std::string& expect, std::string& out);
     bool hasOtaPending();
     void clearOtaPending();

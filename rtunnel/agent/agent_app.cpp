@@ -2653,18 +2653,54 @@ void AgentApp::onWarmTick() {
     warm_next_ms_.store(now + 30000);
 
     std::thread([this]() {
+        // 服务列表首次要跑 systemctl show + list-unit-files（单核设备约 4s），
+        // 进程采样约 300ms；先启动服务刷新，打开服务 tab 时更快命中缓存
+        if (svc_.ready()) {
+            // 结果丢弃，只为把 Service 的列表缓存刷新到最新
+            svc_.listAsync(rtvs::ListOptions(), [](const nlohmann::json&) {});
+        }
         rtproc::Snapshot snap;
         std::string err;
         if (rtproc::sample(snap, err)) {
             std::lock_guard<std::mutex> lk(proc_cache_mu_);
             proc_cache_ = std::move(snap);
         }
-        if (svc_.ready()) {
-            // 结果丢弃，只为把 Service 的列表缓存刷新到最新
-            svc_.listAsync(rtvs::ListOptions(), [](const nlohmann::json&) {});
-        }
         warm_inflight_.store(0);
     }).detach();
+}
+
+namespace {
+struct WarmKick {
+    hevent_t ev;
+    AgentApp* app = nullptr;
+};
+} // namespace
+
+// 本地页打开/轮询时续期预热。可从 HTTP 工作线程调用：
+// 续期是原子写，预热与 timer 初始化投递回 loop 线程。
+void AgentApp::requestWarm(uint64_t ttl_ms) {
+    uint64_t now = wallMs();
+    uint64_t until = now + ttl_ms;
+    uint64_t old = warm_until_ms_.load(std::memory_order_relaxed);
+    while (old < until &&
+           !warm_until_ms_.compare_exchange_weak(old, until, std::memory_order_relaxed)) {
+    }
+    if (!loop || now < warm_next_ms_.load(std::memory_order_relaxed)) return;
+    WarmKick* k = new WarmKick;
+    memset(&k->ev, 0, sizeof k->ev);
+    k->ev.cb = warmKickCb;
+    k->ev.userdata = k;
+    k->app = this;
+    hloop_post_event(loop, &k->ev);
+}
+
+void AgentApp::warmKickCb(hevent_t* ev) {
+    WarmKick* k = static_cast<WarmKick*>(hevent_userdata(ev));
+    AgentApp* app = k->app;
+    delete k;
+    if (!app) return;
+    app->ensureWarmTimer();
+    app->onWarmTick();
 }
 
 // B→C：设备详情页打开后按 ttl 续期预热（默认 120s，每 30s 采样一次）。
@@ -3222,6 +3258,9 @@ int AgentApp::run(int argc, char** argv) {
     init(lp);
 #ifdef RTUNNEL_AGENT_WEB
     if (web_enabled) {
+        // 本地页常驻设备：启动后先预热进程/服务缓存，
+        // 首个打开页面的人不必等 systemctl 首次全量扫描
+        requestWarm(60000);
         // 先产出一份快照再起 HTTP，避免首屏拿到 "not ready"
         refreshWebSnapshot();
         std::string werr;
