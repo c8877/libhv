@@ -104,6 +104,7 @@ h2{font-size:14px;margin:0;font-weight:650}
 .store-head .pct.warn{color:var(--warn)}.store-head .pct.bad{color:var(--bad)}
 .store-body{padding:0 2px 12px}
 .store-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:6px}
+.store-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto}
 .store-loading{display:flex;flex-direction:column;gap:6px;padding:8px 0;font-size:12px;color:var(--muted)}
 .st-row{display:flex;align-items:center;gap:8px;height:29px;padding-right:4px;border-radius:6px;font-size:12px}
 .st-row:hover{background:var(--hover)}
@@ -584,11 +585,13 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     var d = c.data, total = Math.max(1, toNum(d.total_kb) * 1024), html = '';
     var showHidden = st.showHidden;
     html += '<div class="store-tools"><span>条长 = 占分区容量 · 缩进 = 层级</span>' +
-      '<span style="margin-left:auto">' + toNum(d.files) + ' 个文件 · 扫描 ' + (toNum(d.scan_ms) / 1000).toFixed(1) + 's</span>' +
+      '<span class="store-actions">' +
+      '<span>' + toNum(d.files) + ' 个文件 · 扫描 ' + (toNum(d.scan_ms) / 1000).toFixed(1) + 's</span>' +
       '<button class="store-eye" type="button" data-toggle-hidden="1" title="' +
       (showHidden ? '隐藏隐藏项' : '显示隐藏项') + '" aria-label="' + (showHidden ? '隐藏隐藏项' : '显示隐藏项') + '">' +
       (showHidden ? ICON_EYE : ICON_EYE_OFF) + '</button>' +
-      '<button class="link" type="button" data-rescan="' + esc(mount) + '">重新扫描</button></div>';
+      '<button class="link" type="button" data-rescan="' + esc(mount) + '">重新扫描</button>' +
+      '</span></div>';
     html += storeRows(c).map(storeRowHtml).join('');
     html += '<div class="st-foot">';
     [['已用', d.used_kb, 'used'], ['可用', d.free_kb, 'free'], ['保留', d.reserved_kb, 'reserved']].forEach(function (r) {

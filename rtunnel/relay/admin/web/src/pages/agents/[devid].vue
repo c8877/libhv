@@ -213,19 +213,20 @@
               <div v-if="storageOpen === d.mount" class="store-body">
                 <div class="store-tools">
                   <span class="muted">条长 = 占分区容量 · 缩进 = 层级</span>
-                  <span class="spacer" />
-                  <span v-if="storeCur" class="muted">
-                    {{ storeCur.data.files }} 个文件 · 扫描 {{ (storeCur.data.scan_ms / 1000).toFixed(1) }}s
-                  </span>
-                  <el-tooltip :content="storageShowHidden ? '隐藏隐藏项' : '显示隐藏项'" placement="top">
-                    <el-button link size="small" class="store-eye"
-                               :aria-label="storageShowHidden ? '隐藏隐藏项' : '显示隐藏项'"
-                               @click.stop="storageShowHidden = !storageShowHidden">
-                      <el-icon><View v-if="storageShowHidden" /><Hide v-else /></el-icon>
-                    </el-button>
-                  </el-tooltip>
-                  <el-button link type="primary" size="small" :loading="storageLoading"
-                             @click.stop="loadStorageTree(d.mount, true)">重新扫描</el-button>
+                  <div class="store-actions">
+                    <span v-if="storeCur" class="muted">
+                      {{ storeCur.data.files }} 个文件 · 扫描 {{ (storeCur.data.scan_ms / 1000).toFixed(1) }}s
+                    </span>
+                    <el-tooltip :content="storageShowHidden ? '隐藏隐藏项' : '显示隐藏项'" placement="top">
+                      <el-button link size="small" class="store-eye"
+                                 :aria-label="storageShowHidden ? '隐藏隐藏项' : '显示隐藏项'"
+                                 @click.stop="storageShowHidden = !storageShowHidden">
+                        <el-icon><View v-if="storageShowHidden" /><Hide v-else /></el-icon>
+                      </el-button>
+                    </el-tooltip>
+                    <el-button link type="primary" size="small" :loading="storageLoading"
+                               @click.stop="loadStorageTree(d.mount, true)">重新扫描</el-button>
+                  </div>
                 </div>
 
                 <div v-if="storageLoading && !storeCur" class="store-loading">
@@ -3785,6 +3786,7 @@ onBeforeUnmount(() => {
 .store-bar i.bad { background: #e5534b; }
 .store-body { padding: 0 6px 14px; }
 .store-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; margin-bottom: 6px; }
+.store-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-left: auto; }
 .store-loading { display: flex; flex-direction: column; gap: 6px; padding: 10px 0 6px; font-size: 12px; color: var(--el-text-color-secondary); }
 .st-row { display: flex; align-items: center; gap: 8px; height: 30px; padding-right: 4px; border-radius: 6px; font-size: 12px; }
 .st-row:hover { background: var(--el-fill-color-light); }
