@@ -82,6 +82,7 @@ public:
     std::string args_line;               // 启动参数（展示/排障）
     std::vector<std::string> saved_argv; // 原样 argv，OTA 重启时 execv 使用
     int allow_ota = 0;                   // 允许 relay 通知安装 file_dir 里的新版本（默认关）
+    int allow_power = 0;                 // 允许 relay 触发重启/关机（默认关）
     std::string self_path;               // /proc/self/exe
     int max_idle = 0;                    // 无会话空闲多少秒后退出（0=常驻，按需 agent 用）
     uint64_t last_active_ms = 0;
@@ -210,6 +211,13 @@ private:
     void handleNetReq(const rtnp::Frame* f);
     void handleProcReq(const rtnp::Frame* f);
     void handleWarmReq(const rtnp::Frame* f);
+    void handlePowerReq(const rtnp::Frame* f);
+    void handleDiagReq(const rtnp::Frame* f);
+    static void powerTimerCb(htimer_t* t);
+
+    // 生成诊断包（tar.gz）并读入内存；在工作线程调用，err 非空表示失败。
+    std::string buildDiagBundle(const nlohmann::json& req, std::string& name, std::string& sha,
+                                std::string& err);
     void onWarmTick();
     void ensureWarmTimer();
     static void warmTickCb(htimer_t* t);

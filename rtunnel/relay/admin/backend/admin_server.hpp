@@ -117,6 +117,8 @@ private:
     void handleAgentDetail(const HttpContextPtr& ctx);
     int  handleAgentSysinfo(const HttpContextPtr& ctx); // 返回 HTTP_STATUS_NEXT 表示异步回包
     int  handleAgentNet(const HttpContextPtr& ctx);     // 网络/IPC 快照，返回 HTTP_STATUS_NEXT
+    int  handleAgentPower(const HttpContextPtr& ctx);   // 重启/关机，返回 HTTP_STATUS_NEXT
+    int  handleAgentDiag(const HttpContextPtr& ctx);    // 诊断包下载，返回 HTTP_STATUS_NEXT
     int  handleAgentProcs(const HttpContextPtr& ctx);   // 进程列表，返回 HTTP_STATUS_NEXT
     int  handleAgentProcDetail(const HttpContextPtr& ctx);
     int  handleAgentProcSignal(const HttpContextPtr& ctx);

@@ -16,7 +16,17 @@
               <el-option v-for="p in [5, 10, 30]" :key="p" :label="p + 's'" :value="p" />
             </el-select>
             <el-button :loading="loading" @click="loadAll({ notify: true })">刷新</el-button>
-            <el-button @click="exportJson">导出 JSON</el-button>
+            <el-dropdown trigger="click" @command="onHeadCmd">
+              <el-button>更多<el-icon class="el-icon--right"><MoreFilled /></el-icon></el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="export">导出 JSON</el-dropdown-item>
+                  <el-dropdown-item command="diag" :disabled="!can('device.diag')">下载诊断包</el-dropdown-item>
+                  <el-dropdown-item divided command="reboot" :disabled="!can('device.power')">重启设备</el-dropdown-item>
+                  <el-dropdown-item command="poweroff" :disabled="!can('device.power')">关机</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </template>
           <template v-else>
             <el-button text circle :loading="loading" aria-label="刷新" @click="loadAll({ notify: true })">
@@ -33,7 +43,10 @@
                   <el-dropdown-item v-for="p in [5, 10, 30]" :key="'p' + p" :command="'period-' + p">
                     {{ p }} 秒自动刷新
                   </el-dropdown-item>
+                  <el-dropdown-item command="diag" :disabled="!can('device.diag')">下载诊断包</el-dropdown-item>
                   <el-dropdown-item divided command="export">导出 JSON</el-dropdown-item>
+                  <el-dropdown-item divided command="reboot" :disabled="!can('device.power')">重启设备</el-dropdown-item>
+                  <el-dropdown-item command="poweroff" :disabled="!can('device.power')">关机</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -165,6 +178,8 @@
             <span>CPU</span><b>{{ sys.cpu_model || '—' }}</b>
             <span>板卡</span><b>{{ sys.board || '—' }}</b>
             <span>开机</span><b>{{ upFor }}</b>
+            <span>温度</span><b :class="{ 'temp-hot': ovTempHot }">{{ ovTempText }}</b>
+            <span>存储</span><b>{{ ovDiskHealthText }}</b>
             <span>mTLS</span><b>{{ sys.mtls ? '已启用' : '未启用' }}</b>
             <span>采集</span><b>{{ time(sysTs) }}</b>
           </div>
@@ -341,6 +356,13 @@
                       <div class="vcontrol">
                         <el-switch v-model="capsForm.ota" :disabled="!canOta" />
                         <span class="muted">接收升级包</span>
+                      </div>
+                    </div>
+                    <div class="vform-row">
+                      <span class="vlabel">电源操作</span>
+                      <div class="vcontrol">
+                        <el-switch v-model="capsForm.power" :disabled="!canCaps" />
+                        <span class="muted">允许远程重启/关机</span>
                       </div>
                     </div>
 
@@ -748,6 +770,10 @@
             <div v-show="hasUnit('rate')" class="chart-box">
               <div class="chart-title">速率</div>
               <canvas ref="rateEl" />
+            </div>
+            <div v-show="hasUnit('temp')" class="chart-box">
+              <div class="chart-title">温度 (°C)</div>
+              <canvas ref="tempEl" />
             </div>
           </template>
         </el-tab-pane>
@@ -1200,6 +1226,7 @@
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, MoreFilled, Refresh } from '@element-plus/icons-vue'
+import { ElMessageBox } from 'element-plus'
 import { Api } from '@/shared/api.js'
 import { can, canManage } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
@@ -1273,6 +1300,7 @@ const metricTable = ref(null)
 const percentEl = ref(null)
 const loadEl = ref(null)
 const rateEl = ref(null)
+const tempEl = ref(null)
 const charts = {}
 // chart.js 只在真正要画曲线时加载，概览首屏不背这块代码
 let ChartCtor = null
@@ -1351,7 +1379,7 @@ const PROC_SIGNALS = [
 const obsTab = ref('series')
 const capsSaving = ref(false)
 const capsForm = reactive({
-  ports: [], file_dir: '', shell: false, ota: false, allow_tty: [],
+  ports: [], file_dir: '', shell: false, ota: false, power: false, allow_tty: [],
   fs: false, fs_root: '', fs_rw: false, fs_max_mb: 512,
   svc: false, svc_rw: false,
 })
@@ -1802,7 +1830,7 @@ watch(() => [filteredTtys.value.length, filteredUnconfigured.value.length, serie
 })
 const addCandidates = computed(() => {
   const existing = new Set(seriesCfg.value.map((c) => c.series))
-  const out = ['cpu', 'mem', 'load']
+  const out = ['cpu', 'mem', 'load', 'temp']
   ;((sys.value && sys.value.nics) || []).forEach((n) => { if (n.name) out.push('net:' + n.name) })
   const paths = new Set()
   ;((sys.value && sys.value.serial) || []).forEach((s) => paths.add(s.path))
@@ -1874,6 +1902,27 @@ const ovProcText = computed(() => {
 
 const ovNics = computed(() => nics.value.slice(0, 3))
 const ovNicText = computed(() => `${nics.value.length} 个 · ${nicUpCount.value} 个已连接`)
+
+const ovTempC = computed(() => {
+  const list = (sys.value && sys.value.temps) || []
+  let max = null
+  for (const t of list) {
+    const v = Number(t.temp_c)
+    if (Number.isFinite(v) && (max == null || v > max)) max = v
+  }
+  return max
+})
+const ovTempHot = computed(() => ovTempC.value != null && ovTempC.value >= 70)
+const ovTempText = computed(() => (ovTempC.value == null ? '—' : ovTempC.value.toFixed(1) + ' °C'))
+const ovDiskHealthText = computed(() => {
+  const list = (sys.value && sys.value.disk_health) || []
+  if (!list.length) return '—'
+  const d = list[0]
+  const life = d.life_mlc != null ? d.life_mlc : d.life_slc
+  if (life != null) return `${d.device} 寿命已用 ${life}%`
+  if (d.pre_eol_text) return `${d.device} ${d.pre_eol_text}`
+  return d.device
+})
 const ovNetRx = computed(() => bytes(nics.value.reduce((a, n) => a + (Number(n.rx_bytes) || 0), 0)))
 const ovNetTx = computed(() => bytes(nics.value.reduce((a, n) => a + (Number(n.tx_bytes) || 0), 0)))
 
@@ -1993,6 +2042,14 @@ function onHeadCmd(cmd) {
     exportJson()
     return
   }
+  if (cmd === 'diag') {
+    downloadDiag()
+    return
+  }
+  if (cmd === 'reboot' || cmd === 'poweroff') {
+    powerAction(cmd)
+    return
+  }
   if (cmd === 'auto') {
     auto.value = !auto.value
     onAutoChange()
@@ -2005,13 +2062,70 @@ function onHeadCmd(cmd) {
   }
 }
 
+async function downloadDiag() {
+  if (!can('device.diag')) {
+    ElMessage.warning('没有下载诊断包的权限')
+    return
+  }
+  try {
+    const resp = await fetch('/api/v1/agents/' + encodeURIComponent(devid.value) + '/diag', {
+      credentials: 'same-origin',
+    })
+    if (!resp.ok) {
+      const j = await resp.json().catch(() => ({}))
+      throw new Error(j.error || 'HTTP ' + resp.status)
+    }
+    const blob = await resp.blob()
+    const cd = resp.headers.get('Content-Disposition') || ''
+    const m = /filename="([^"]+)"/.exec(cd)
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = m ? m[1] : 'diag-' + devid.value + '.tar.gz'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000)
+    ElMessage.success('诊断包已下载')
+  } catch (e) {
+    ElMessage.error('下载失败：' + (e.message || e))
+  }
+}
+
+async function powerAction(action) {
+  if (!can('device.power')) {
+    ElMessage.warning('没有电源操作权限')
+    return
+  }
+  const label = action === 'reboot' ? '重启' : '关机'
+  const tip = action === 'reboot'
+    ? '设备会在约 1 秒后断开，随后自动重连。'
+    : '关机后需要现场或远程上电才能恢复。'
+  try {
+    await ElMessageBox.confirm(`确定要${label}设备 ${devid.value} 吗？${tip}`, `${label}设备`, {
+      type: 'warning',
+      confirmButtonText: label,
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  try {
+    const r = await Api.post(agentBase.value + '/power', { action, delay_ms: 1000 })
+    if (r && r.ok) ElMessage.success(`${label}指令已下发`)
+    else ElMessage.error(`${label}失败：` + ((r && r.error) || '未知错误'))
+  } catch (e) {
+    ElMessage.error(`${label}失败：` + (e.message || e))
+  }
+}
+
 function unitOf(name) {
   if (name === 'cpu' || name === 'mem') return 'percent'
   if (name === 'load') return 'load'
+  if (name === 'temp') return 'temp'
   return 'rate'
 }
 function unitLabel(name) {
-  return { percent: '百分比', load: '负载', rate: '速率' }[unitOf(name)]
+  return { percent: '百分比', load: '负载', rate: '速率', temp: '温度' }[unitOf(name)]
 }
 function hasUnit(u) {
   return selected.value.some((s) => unitOf(s) === u)
@@ -2252,13 +2366,13 @@ function stopSample() {
 const palette = ['#4a9eff', '#f5a623', '#57ab5a', '#b083f0', '#e5534b']
 
 async function renderCharts() {
-  const groups = { percent: [], load: [], rate: [] }
+  const groups = { percent: [], load: [], rate: [], temp: [] }
   selected.value.forEach((s) => groups[unitOf(s)].push(s))
-  const els = { percent: percentEl.value, load: loadEl.value, rate: rateEl.value }
-  const units = ['percent', 'load', 'rate'].filter((u) => els[u] && groups[u].length)
+  const els = { percent: percentEl.value, load: loadEl.value, rate: rateEl.value, temp: tempEl.value }
+  const units = ['percent', 'load', 'rate', 'temp'].filter((u) => els[u] && groups[u].length)
   if (!units.length) {
     chartSeq++
-    for (const unit of ['percent', 'load', 'rate']) {
+    for (const unit of ['percent', 'load', 'rate', 'temp']) {
       if (charts[unit]) {
         charts[unit].destroy()
         delete charts[unit]
@@ -2583,6 +2697,7 @@ function fillCapsFromSys() {
   capsForm.file_dir = c.file_dir || ''
   capsForm.shell = !!c.shell
   capsForm.ota = !!c.ota
+  capsForm.power = !!c.power
   capsForm.allow_tty = Array.isArray(c.allow_tty) ? c.allow_tty.slice() : []
   allowTtyOpen.value = false
   allowTtyInput.value = ''
@@ -2634,6 +2749,7 @@ async function saveCaps() {
     body.shell = capsForm.shell
   }
   if (canOta.value) body.ota = !!capsForm.ota
+  if (canCaps.value) body.power = !!capsForm.power
   if (canTty.value) body.allow_tty = capsForm.allow_tty.slice()
   if (canCaps.value) {
     // 文件与服务能力只在有 device.caps.write 时提交
@@ -3240,6 +3356,7 @@ onBeforeUnmount(() => {
 .ov-kv { display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 4px 10px; font-size: 12px; line-height: 18px; }
 .ov-kv span { color: var(--el-text-color-secondary); }
 .ov-kv b { font-weight: 500; word-break: break-word; }
+.ov-kv b.temp-hot { color: #e5534b; }
 .ov-cert {
   display: flex; flex-direction: column; gap: 3px; margin-top: 10px; padding-top: 9px;
   border-top: 1px solid var(--el-border-color-lighter); font-size: 12px; word-break: break-all;

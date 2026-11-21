@@ -1130,6 +1130,49 @@ std::string RelayServer::takeProcResult(uint32_t rid) {
     return s;
 }
 
+bool RelayServer::startPowerAction(const char* devid, const std::string& json, uint32_t& rid, std::string& err) {
+    RelayConn* a = findAgent(devid);
+    if (!a || !a->io) {
+        err = "device offline";
+        return false;
+    }
+    rid = ++power_seq;
+    rtnp::Writer w;
+    w.str(json.c_str());
+    rtnp::send(a->io, rtnp::POWER_REQ, rid, w.data, (uint16_t)w.len);
+    return true;
+}
+
+std::string RelayServer::takePowerResult(uint32_t rid) {
+    auto it = power_results.find(rid);
+    if (it == power_results.end()) return std::string();
+    std::string s = it->second;
+    power_results.erase(it);
+    return s;
+}
+
+bool RelayServer::startDiag(const char* devid, const std::string& json, uint32_t& rid, std::string& err) {
+    RelayConn* a = findAgent(devid);
+    if (!a || !a->io) {
+        err = "device offline";
+        return false;
+    }
+    rid = ++diag_seq;
+    rtnp::Writer w;
+    w.str(json.c_str());
+    rtnp::send(a->io, rtnp::DIAG_REQ, rid, w.data, (uint16_t)w.len);
+    return true;
+}
+
+bool RelayServer::takeDiag(uint32_t rid, std::string& meta, std::string& body) {
+    auto it = diag_results.find(rid);
+    if (it == diag_results.end()) return false;
+    meta = it->second.meta;
+    body = std::move(it->second.body);
+    diag_results.erase(it);
+    return true;
+}
+
 bool RelayServer::startNetQuery(const char* devid, const std::string& json, uint32_t& rid, std::string& err) {
     RelayConn* a = findAgent(devid);
     if (!a || !a->io) {
@@ -1327,6 +1370,42 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         static char pb[64 * 1024];
         rr.str(pb, sizeof pb);
         if (!rr.err) proc_results[f->sid] = std::string(pb);
+        return;
+    }
+    case rtnp::POWER_ACK: {
+        rtnp::Reader rr(f->payload, f->len);
+        static char pw[1024];
+        rr.str(pw, sizeof pw);
+        if (!rr.err) power_results[f->sid] = std::string(pw);
+        return;
+    }
+    case rtnp::DIAG_INFO: {
+        rtnp::Reader rr(f->payload, f->len);
+        static char dm[4096];
+        rr.str(dm, sizeof dm);
+        if (!rr.err) diag_acc[f->sid].meta = std::string(dm);
+        return;
+    }
+    case rtnp::DIAG_DATA: {
+        DiagAcc& acc = diag_acc[f->sid];
+        if (acc.body.size() + f->len > 16 * 1024 * 1024) {
+            acc.body.clear();
+            acc.meta = "{\"ok\":false,\"error\":\"bundle too large\"}";
+            return;
+        }
+        acc.body.append((const char*)f->payload, f->len);
+        return;
+    }
+    case rtnp::DIAG_END: {
+        rtnp::Reader rr(f->payload, f->len);
+        static char de[1024];
+        rr.str(de, sizeof de);
+        auto it = diag_acc.find(f->sid);
+        if (it != diag_acc.end()) {
+            diag_results[f->sid] = std::move(it->second);
+            diag_acc.erase(it);
+        }
+        if (diag_results.size() > 8) diag_results.erase(diag_results.begin());
         return;
     }
     case rtnp::FILE_CHECK_ACK: {

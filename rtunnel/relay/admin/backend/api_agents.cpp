@@ -146,16 +146,17 @@ void AdminServer::handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& a
     bool has_svc = req.contains("svc");
     bool has_svc_rw = req.contains("svc_rw");
     bool has_ota = req.contains("ota");
+    bool has_power = req.contains("power");
     bool has_tty = req.contains("allow_tty");
     if (!has_ports && !has_shell && !has_dir && !has_fs && !has_fs_root && !has_fs_rw && !has_fs_max &&
-        !has_svc && !has_svc_rw && !has_ota && !has_tty) {
+        !has_svc && !has_svc_rw && !has_ota && !has_power && !has_tty) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"nothing to update\"}");
         return;
     }
     // 每个字段组独立资源：能力配置 / OTA 开关 / 串口白名单
     if ((has_ports || has_shell || has_dir || has_fs || has_fs_root || has_fs_rw || has_fs_max ||
-         has_svc || has_svc_rw) &&
+         has_svc || has_svc_rw || has_power) &&
         !hasPerm("device.caps.write")) {
         ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
         ctx->send("{\"error\":\"forbidden\",\"need\":\"device.caps.write\"}");
@@ -276,6 +277,14 @@ void AdminServer::handleAgentCaps(const HttpContextPtr& ctx, const AdminActor& a
             return;
         }
         out["ota"] = req["ota"].get<bool>();
+    }
+    if (has_power) {
+        if (!req["power"].is_boolean()) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"power must be bool\"}");
+            return;
+        }
+        out["power"] = req["power"].get<bool>();
     }
     if (has_tty) {
         if (!req["allow_tty"].is_array() || req["allow_tty"].size() > 16) {
@@ -627,6 +636,120 @@ int AdminServer::proxyAgentProc(const HttpContextPtr& ctx, const std::string& de
             return;
         }
         ctx->send(js);
+    });
+    return HTTP_STATUS_NEXT;
+}
+
+int AdminServer::handleAgentPower(const HttpContextPtr& ctx) {
+    std::string devid = ctx->param("devid");
+    json body = json::parse(ctx->body(), nullptr, false);
+    if (body.is_discarded() || !body.is_object()) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"bad json\"}");
+        return HTTP_STATUS_BAD_REQUEST;
+    }
+    std::string action = body.value("action", std::string());
+    if (action != "reboot" && action != "poweroff") {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"action must be reboot or poweroff\"}");
+        return HTTP_STATUS_BAD_REQUEST;
+    }
+    int delay = body.value("delay_ms", 1000);
+    if (delay < 0) delay = 0;
+    if (delay > 60000) delay = 60000;
+    if (!ownsDevid(devid)) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return HTTP_STATUS_FORBIDDEN;
+    }
+    audit(currentActor().username, "agent.power", devid + " " + action);
+    json req;
+    req["action"] = action;
+    req["delay_ms"] = delay;
+    std::string payload = req.dump();
+    uint32_t rid = 0;
+    std::string err;
+    bool sent = callRelay([this, &devid, &payload, &rid, &err]() {
+                    return relay_->startPowerAction(devid.c_str(), payload, rid, err) ? std::string("1")
+                                                                                        : std::string("0");
+                }) == "1";
+    if (!sent) {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"" + (err.empty() ? std::string("device offline") : err) + "\"}");
+        return HTTP_STATUS_NOT_FOUND;
+    }
+    hv::async([this, ctx, rid]() {
+        std::string js;
+        for (int i = 0; i < 40; ++i) { // 最多 2s，agent 收到即回，实际远小于此
+            usleep(50000);
+            js = callRelay([this, rid]() { return relay_->takePowerResult(rid); });
+            if (!js.empty()) break;
+        }
+        if (js.empty()) {
+            ctx->response->status_code = HTTP_STATUS_GATEWAY_TIMEOUT;
+            ctx->send("{\"error\":\"timeout\"}");
+            return;
+        }
+        ctx->send(js);
+    });
+    return HTTP_STATUS_NEXT;
+}
+
+int AdminServer::handleAgentDiag(const HttpContextPtr& ctx) {
+    std::string devid = ctx->param("devid");
+    if (!ownsDevid(devid)) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return HTTP_STATUS_FORBIDDEN;
+    }
+    audit(currentActor().username, "agent.diag", devid);
+    json req;
+    req["max_mb"] = 8;
+    std::string payload = req.dump();
+    uint32_t rid = 0;
+    std::string err;
+    bool sent = callRelay([this, &devid, &payload, &rid, &err]() {
+                    return relay_->startDiag(devid.c_str(), payload, rid, err) ? std::string("1")
+                                                                               : std::string("0");
+                }) == "1";
+    if (!sent) {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"" + (err.empty() ? std::string("device offline") : err) + "\"}");
+        return HTTP_STATUS_NOT_FOUND;
+    }
+    hv::async([this, ctx, rid]() {
+        std::string meta, body;
+        bool got = false;
+        for (int i = 0; i < 600; ++i) { // 最多 30s：journal/tar 在单核设备上要几秒
+            usleep(50000);
+            got = callRelay([this, rid, &meta, &body]() { return relay_->takeDiag(rid, meta, body) ? std::string("1") : std::string("0"); }) == "1";
+            if (got) break;
+        }
+        if (!got) {
+            ctx->response->status_code = HTTP_STATUS_GATEWAY_TIMEOUT;
+            ctx->send("{\"error\":\"timeout\"}");
+            return;
+        }
+        json m = json::parse(meta, nullptr, false);
+        if (m.is_discarded() || !m.value("ok", false)) {
+            ctx->response->status_code = HTTP_STATUS_BAD_GATEWAY;
+            ctx->send("{\"error\":\"" +
+                      (m.is_discarded() ? std::string("bad diag response") : m.value("error", std::string("diag failed"))) +
+                      "\"}");
+            return;
+        }
+        std::string name = m.value("name", std::string("diag.tar.gz"));
+        // 文件名只保留安全字符，防止头注入
+        std::string safe;
+        for (char c : name) {
+            if (isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.') safe += c;
+        }
+        if (safe.empty()) safe = "diag.tar.gz";
+        ctx->response->status_code = HTTP_STATUS_OK;
+        ctx->response->SetHeader("Content-Type", "application/gzip");
+        ctx->response->SetHeader("Content-Disposition", "attachment; filename=\"" + safe + "\"");
+        ctx->response->SetHeader("X-Diag-Sha256", m.value("sha256", std::string()));
+        ctx->send(body);
     });
     return HTTP_STATUS_NEXT;
 }

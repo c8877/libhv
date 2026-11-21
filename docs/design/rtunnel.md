@@ -347,6 +347,12 @@ sequenceDiagram
 | `0x35` | `PROC_REQ` | B→C | `str json {op:list|detail|signal,...}`，sid 为请求号 |
 | `0x36` | `PROC_INFO` | C→B | `str json`：进程列表/详情/信号结果，sid 回显 |
 | `0x37` | `WARM_REQ` | B→C | `str json {ttl_ms}`：详情页打开期间续期，agent 每 30s 预热进程/服务缓存 |
+| `0x38` | `POWER_REQ` | B→C | `str json {action:reboot\|poweroff,delay_ms}`，sid 为请求号 |
+| `0x39` | `POWER_ACK` | C→B | `str json {ok,action,delay_ms,error}`，sid 回显 |
+| `0x3A` | `DIAG_REQ` | B→C | `str json {max_mb}`，sid 为请求号 |
+| `0x3B` | `DIAG_INFO` | C→B | `str json {ok,name,size,sha256,error}`，sid 回显 |
+| `0x3C` | `DIAG_DATA` | C→B | 原始字节，按 32KiB 顺序分块，sid 回显 |
+| `0x3D` | `DIAG_END` | C→B | `str json {ok,size,sha256,error}`，sid 回显 |
 
 **会话级（stream_id > 0）**
 

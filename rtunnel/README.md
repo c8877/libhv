@@ -276,7 +276,7 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
 - 概览：CPU/内存/负载/网络累计流量四个 KPI、CPU/内存趋势、存储用量、网卡、
   会话、系统信息与 mTLS 证书状态
 - 顶部摘要条展示设备名、agent 版本、连接信息、流量与采集时间，和一级 tab 一起吸顶
-- 「能力」tab 展示 TCP 端口、Shell、SYSINFO、mTLS、OTA、文件/服务能力与串口白名单；
+- 「能力」tab 展示 TCP 端口、Shell、SYSINFO、mTLS、OTA、电源操作、文件/服务能力与串口白名单；
   manager/admin 可在线编辑
 - 表格默认 10 行/页，支持 5/10/20/50；进程/网络/服务列表的分页与排序在 agent 端完成，
   只回传当前页
@@ -307,11 +307,19 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
   sysinfo（名称/IP/掩码/MAC/MTU/速率/收发字节/错误），在页面本地分页与搜索。
 - 进程：`GET /api/v1/agents/{devid}/procs?sort=cpu|mem|pid|start&q=&page=1&page_size=10`、
   `GET .../procs/{pid}`、`POST .../procs/signal {pid,signal}`
-  （agent 扫 `/proc/<pid>/{stat,status,cmdline}`，CPU 用 300ms 双采样的单核百分比；
+  （agent 扫 `/proc/<pid>/{stat,status,cmdline}`，CPU 首次用 300ms 双采样，之后用两次
+  快照的累计 CPU 时间差计算，窗口就是刷新间隔；
   PID 1 与 agent 自身拒绝发信号；分页与排序在 agent 完成，只回传当前页。查看需要
   `device.proc.read`，信号需要 `device.proc.signal`，两者都受账号设备范围限制。
   打开设备详情页时 relay 下发 `WARM_REQ`，agent 在页面打开期间每 30s 预采样进程与
   服务列表；随后的翻页/搜索直接命中缓存（`cached:true`），不再等 300ms 双采样）
+- 电源操作：`POST /api/v1/agents/{devid}/power {action:"reboot"|"poweroff",delay_ms}`
+  （agent 侧需要 `"power": true`，能力页可开关；ACK 先返回，延迟到点再执行，
+  权限资源 `device.power`。默认关闭，避免误操作）
+- 诊断包：`GET /api/v1/agents/{devid}/diag` 返回 `application/gzip` 附件
+  （agent 汇总 sysinfo、dmesg、journal 500 行、`ip addr/route`、`ss -s`、服务列表、
+  前 30 进程、网络快照与本机配置，打成 tar.gz；生成走查询 worker，上限 8MB，
+  权限资源 `device.diag`）
 - 文件分发：文件页「分发」选择设备与时间窗，创建 `POST /api/v1/distributions`，
   `GET /api/v1/distributions` 查询进度；经 RTNP 推到设备 `--file-dir/dir`
   （默认 `/opt/data/files`），32KiB 分片、256KiB 窗口、sha256 校验、断点续传、
@@ -520,7 +528,8 @@ http://B:9443/device/<devid>/<port>/<path>
   `:8080` / `0.0.0.0:8080` 监听所有网卡（页面会暴露设备型号、IP、串口等只读信息）
 - 页面内容与管理台设备详情同源：单层 tab（概览 / 存储 / 文件 / 服务 / 进程 /
   网络 / 监控 / 串口 / 能力），概览含 CPU/内存/负载/网络 KPI、趋势、存储、
-  网卡、系统信息与 mTLS 证书；非活动 tab 不请求数据，首次进入才加载
+  网卡、会话、系统信息（温度、eMMC/SD 寿命、mTLS 证书）；非活动 tab 不请求数据，
+  首次进入才加载
 - 本地页与 relay 详情共用同一套预热：agent 启动和页面打开时刷新进程/服务缓存，
   页面打开期间由 2s 的 sysinfo 轮询续期（关闭后 90s 停止），
   服务列表不用再等 `systemctl` 首次全量扫描（单核设备约 4s）

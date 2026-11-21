@@ -382,6 +382,8 @@ const PermResDef kPermRes[] = {
     {"device.tty.write", "设备", "修改串口", "串口配置与 allow_tty 白名单"},
     {"device.metrics.write", "设备", "修改采样", "采样指标、间隔与保留点数"},
     {"device.kick", "设备", "断开连接", "强制下线设备或结束会话"},
+    {"device.power", "设备", "电源操作", "重启或关闭设备"},
+    {"device.diag", "设备", "下载诊断包", "生成并下载设备诊断信息"},
     {"device.proc.read", "设备", "查看进程", "进程列表、资源占用与进程详情"},
     {"device.proc.signal", "设备", "管理进程", "结束进程或发送信号"},
 

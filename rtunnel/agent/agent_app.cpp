@@ -18,6 +18,7 @@
 #include <dirent.h>
 #include <ctype.h>
 #include <sys/sysinfo.h>
+#include <sys/reboot.h>
 #include <ifaddrs.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -701,6 +702,7 @@ void AgentApp::loadConfig() {
     }
     if (j.contains("shell") && j["shell"].is_boolean()) allow_shell = j["shell"].get<bool>() ? 1 : 0;
     if (j.contains("ota") && j["ota"].is_boolean()) allow_ota = j["ota"].get<bool>() ? 1 : 0;
+    if (j.contains("power") && j["power"].is_boolean()) allow_power = j["power"].get<bool>() ? 1 : 0;
     if (j.contains("allow_tty") && j["allow_tty"].is_array()) {
         std::string joined;
         for (auto& v : j["allow_tty"]) {
@@ -799,6 +801,7 @@ bool AgentApp::saveConfig() {
     j["svc_enabled"] = svc_enabled != 0;
     j["svc_rw"] = svc_rw != 0;
     j["ota"] = allow_ota != 0;
+    j["power"] = allow_power != 0;
     // local_web 不在这里写：它来自部署配置或命令行，运行期端口占用导致的失败
     // 不能固化成 "local_web": false，否则下次启动本地页会被永久关掉。
     j["metrics"] = nlohmann::json::object();
@@ -1046,6 +1049,19 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
         new_ota = r["ota"].get<bool>() ? 1 : 0;
         ota_set = true;
     }
+    bool power_set = false;
+    int new_power = allow_power;
+    if (r.contains("power")) {
+        if (!r["power"].is_boolean()) {
+            std::string e = "{\"ok\":false,\"error\":\"power must be bool\"}";
+            rtnp::Writer w;
+            w.str(e.c_str());
+            rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
+            return;
+        }
+        new_power = r["power"].get<bool>() ? 1 : 0;
+        power_set = true;
+    }
     bool tty_set = false;
     std::string new_allow_tty = allow_tty;
     if (r.contains("allow_tty")) {
@@ -1106,6 +1122,7 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     }
     if (shell_set) allow_shell = new_shell;
     if (ota_set) allow_ota = new_ota;
+    if (power_set) allow_power = new_power;
     if (tty_set) snprintf(allow_tty, sizeof(allow_tty), "%s", new_allow_tty.c_str());
     if (svc_set) {
         svc_enabled = new_svc_enabled;
@@ -1129,6 +1146,7 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
     ack["svc"] = svc_.ready();
     ack["svc_rw"] = svc_.ready() && svc_rw != 0;
     ack["ota"] = allow_ota != 0;
+    ack["power"] = allow_power != 0;
     ack["allow_tty"] = nlohmann::json::array();
     {
         std::string list = allow_tty;
@@ -1142,8 +1160,8 @@ void AgentApp::handleConfigSet(const rtnp::Frame* f) {
         }
     }
     std::string body = ack.dump();
-    logf_("[agent] config set: ports=%d shell=%d fs=%d svc=%d persisted=%d", allow_ports[0], allow_shell,
-          file_enabled && fs_.ready(), svc_.ready(), (int)persisted);
+    logf_("[agent] config set: ports=%d shell=%d fs=%d svc=%d power=%d persisted=%d", allow_ports[0], allow_shell,
+          file_enabled && fs_.ready(), svc_.ready(), allow_power, (int)persisted);
     rtnp::Writer w;
     w.str(body.c_str());
     rtnp::send(io, rtnp::CONFIG_ACK, f->sid, w.data, (uint16_t)w.len);
@@ -1886,6 +1904,25 @@ void AgentApp::sampleSeries(const std::string& name, const SeriesCfg& cfg) {
         j["load5"] = la[1];
         j["load15"] = la[2];
     }
+    else if (name == "temp") {
+        // 取所有热区的最高温度，单个 zone 过热也能在曲线上看到
+        double max_c = 0;
+        DIR* d = opendir("/sys/class/thermal");
+        if (d) {
+            struct dirent* e;
+            while ((e = readdir(d)) != NULL) {
+                std::string n = e->d_name;
+                if (n.rfind("thermal_zone", 0) != 0) continue;
+                std::ifstream tf("/sys/class/thermal/" + n + "/temp");
+                long long mc = 0;
+                if (!(tf >> mc)) continue;
+                double c = mc > 1000 ? (double)mc / 1000.0 : (double)mc;
+                if (c > max_c) max_c = c;
+            }
+            closedir(d);
+        }
+        j["v"] = (double)((long long)(max_c * 10)) / 10.0;
+    }
     else if (name.rfind("net:", 0) == 0) {
         std::string ifn = name.substr(4);
         auto rd = [&](const char* f) -> unsigned long long {
@@ -2041,6 +2078,86 @@ void AgentApp::fillSysinfoStatic() {
     parseCert();
 }
 
+namespace {
+
+// 读 /sys/class/thermal 的所有热区，返回 [{zone,type,temp_c}]。
+// 温度统一按摄氏度输出；内核给的是毫摄氏度时除以 1000。
+nlohmann::json readTemps() {
+    using nlohmann::json;
+    json arr = json::array();
+    DIR* d = opendir("/sys/class/thermal");
+    if (!d) return arr;
+    struct dirent* e;
+    while ((e = readdir(d)) != NULL) {
+        std::string name = e->d_name;
+        if (name.rfind("thermal_zone", 0) != 0) continue;
+        std::string base = "/sys/class/thermal/" + name;
+        std::ifstream tf(base + "/temp");
+        long long mc = 0;
+        if (!(tf >> mc)) continue;
+        std::string type;
+        {
+            std::ifstream yf(base + "/type");
+            if (yf) std::getline(yf, type);
+        }
+        json o;
+        o["zone"] = name;
+        o["type"] = type;
+        double c = mc > 1000 ? (double)mc / 1000.0 : (double)mc;
+        o["temp_c"] = (double)((long long)(c * 10)) / 10.0;
+        arr.push_back(o);
+    }
+    closedir(d);
+    return arr;
+}
+
+// eMMC/SD 寿命：life_time 两个十六进制字节（SLC/MLC 已用寿命 10%~100%），
+// pre_eol_info 0x01 正常 / 0x02 警告 / 0x03 紧急。
+nlohmann::json readDiskHealth() {
+    using nlohmann::json;
+    json arr = json::array();
+    DIR* d = opendir("/sys/block");
+    if (!d) return arr;
+    struct dirent* e;
+    while ((e = readdir(d)) != NULL) {
+        std::string name = e->d_name;
+        if (name == "." || name == ".." || name.rfind("loop", 0) == 0 ||
+            name.rfind("ram", 0) == 0 || name.rfind("zram", 0) == 0)
+            continue;
+        std::string base = "/sys/block/" + name + "/device";
+        std::ifstream lf(base + "/life_time");
+        std::ifstream pf(base + "/pre_eol_info");
+        if (!lf && !pf) continue;
+        json o;
+        o["device"] = name;
+        if (lf) {
+            std::string a, b;
+            if (lf >> a >> b) {
+                auto pct = [](const std::string& h) -> int {
+                    char* end = nullptr;
+                    long v = strtol(h.c_str(), &end, 16);
+                    return (int)((v & 0x0f) * 10);
+                };
+                o["life_slc"] = pct(a);
+                o["life_mlc"] = pct(b);
+            }
+        }
+        if (pf) {
+            std::string v;
+            if (pf >> v) {
+                int n = (int)strtol(v.c_str(), nullptr, 16);
+                o["pre_eol"] = n;
+                o["pre_eol_text"] = n == 1 ? "正常" : n == 2 ? "警告" : n == 3 ? "紧急" : "未知";
+            }
+        }
+        arr.push_back(o);
+    }
+    closedir(d);
+    return arr;
+}
+
+} // namespace
+
 nlohmann::json AgentApp::buildSysinfo() {
     using nlohmann::json;
     fillSysinfoStatic();
@@ -2147,6 +2264,8 @@ nlohmann::json AgentApp::buildSysinfo() {
         }
         j["nics"] = nics;
     }
+    j["temps"] = readTemps();
+    j["disk_health"] = readDiskHealth();
     {
         // 通过 relay 的 /device/<devid>/10080/ 打开本页时，代理自身会占一条
         // 到本地 Web 端口的 TCP 流；它不是用户会话，不能出现在卡片里。
@@ -2247,6 +2366,8 @@ nlohmann::json AgentApp::buildSysinfo() {
         caps["svc_token"] = svc_.tokenRequired();
         caps["ota"] = allow_ota != 0;
         caps["ota_pkg"] = "tar.gz"; // 支持 install.sh 部署包
+        caps["power"] = allow_power != 0;
+        caps["diag"] = true;        // 支持 DIAG_REQ 诊断包
         caps["net"] = true;         // 支持 NET_REQ 网络/IPC 快照
         caps["proc"] = true;        // 支持 PROC_REQ 进程列表与信号
         caps["warm"] = true;        // 支持 WARM_REQ 详情页预采样
@@ -2434,6 +2555,64 @@ void asyncPostCb(hevent_t* ev) {
         rtnp::send(p->app->io, p->type, p->sid, w.data, (uint16_t)w.len);
     }
     delete p;
+}
+
+// 诊断包：INFO 带元信息，DATA 按 32KB 顺序分块，END 收尾。
+// 在 query worker 里生成，回到 loop 线程发送，避免连接重连后写到旧 io。
+struct DiagPost {
+    hevent_t ev;
+    AgentApp* app = nullptr;
+    uint32_t sid = 0;
+    bool ok = false;
+    std::string meta; // DIAG_INFO 的 json
+    std::string end;  // DIAG_END 的 json
+    std::string body;
+};
+
+void diagPostCb(hevent_t* ev) {
+    DiagPost* p = static_cast<DiagPost*>(hevent_userdata(ev));
+    hio_t* io = p->app ? p->app->io : nullptr;
+    if (io) {
+        rtnp::Writer w;
+        w.str(p->meta.c_str());
+        rtnp::send(io, rtnp::DIAG_INFO, p->sid, w.data, (uint16_t)w.len);
+        if (p->ok && !p->body.empty()) {
+            const size_t kChunk = rtnp::MAX_PAYLOAD;
+            for (size_t off = 0; off < p->body.size(); off += kChunk) {
+                size_t n = p->body.size() - off;
+                if (n > kChunk) n = kChunk;
+                rtnp::send(io, rtnp::DIAG_DATA, p->sid, p->body.data() + off, (uint16_t)n);
+            }
+        }
+        rtnp::Writer e;
+        e.str(p->end.c_str());
+        rtnp::send(io, rtnp::DIAG_END, p->sid, e.data, (uint16_t)e.len);
+    }
+    delete p;
+}
+
+// 执行命令并抓 stdout；截断到 cap，命令本身用 timeout 兜底。
+std::string diagRun(const std::string& cmd, size_t cap) {
+    std::string out;
+    FILE* fp = popen(cmd.c_str(), "r");
+    if (!fp) return out;
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) {
+        if (out.size() >= cap) continue;
+        size_t left = cap - out.size();
+        out.append(buf, n < left ? n : left);
+    }
+    pclose(fp);
+    return out;
+}
+
+bool diagWrite(const std::string& path, const std::string& data) {
+    FILE* fp = fopen(path.c_str(), "w");
+    if (!fp) return false;
+    size_t n = fwrite(data.data(), 1, data.size(), fp);
+    fclose(fp);
+    return n == data.size();
 }
 
 } // namespace
@@ -2849,6 +3028,223 @@ void AgentApp::handleWarmReq(const rtnp::Frame* f) {
     }
 }
 
+namespace {
+struct PowerAction {
+    hevent_t ev;
+    AgentApp* app = nullptr;
+    std::string action;
+};
+} // namespace
+
+// 电源动作延迟执行：先把 ACK 发出去，再重启/关机，避免调用方只看到断连。
+void AgentApp::powerTimerCb(htimer_t* t) {
+    PowerAction* p = static_cast<PowerAction*>(hevent_userdata(t));
+    std::string action = p ? p->action : std::string();
+    delete p;
+    if (action == "poweroff")
+        logf_("[agent] poweroff requested via relay");
+    else
+        logf_("[agent] reboot requested via relay");
+    // systemctl 会正常停服务；没有 systemd 时退回 syscall
+    int rc = system(action == "poweroff" ? "systemctl --no-block poweroff" : "systemctl --no-block reboot");
+    if (rc != 0) {
+        sync();
+        reboot(action == "poweroff" ? RB_POWER_OFF : RB_AUTOBOOT);
+    }
+}
+
+void AgentApp::handlePowerReq(const rtnp::Frame* f) {
+    using nlohmann::json;
+    json rj = json::object();
+    if (f->len) {
+        rtnp::Reader r(f->payload, f->len);
+        std::string req = r.strBytes();
+        if (!r.err) {
+            auto j = json::parse(req, nullptr, false);
+            if (!j.is_discarded() && j.is_object()) rj = j;
+        }
+    }
+    std::string action = rj.value("action", std::string());
+    long long delay = rj.value("delay_ms", 1000LL);
+    if (delay < 0) delay = 0;
+    if (delay > 600000) delay = 600000;
+
+    json ack;
+    ack["action"] = action;
+    ack["delay_ms"] = delay;
+    if (!allow_power) {
+        ack["ok"] = false;
+        ack["error"] = "power disabled";
+    }
+    else if (action != "reboot" && action != "poweroff") {
+        ack["ok"] = false;
+        ack["error"] = "action must be reboot or poweroff";
+    }
+    else {
+        ack["ok"] = true;
+        PowerAction* p = new PowerAction;
+        memset(&p->ev, 0, sizeof p->ev);
+        p->app = this;
+        p->action = action;
+        htimer_t* t = htimer_add(loop, powerTimerCb, (uint32_t)delay, 1);
+        hevent_set_userdata(t, p);
+        logf_("[agent] power %s scheduled in %lldms", action.c_str(), delay);
+    }
+    std::string body = ack.dump();
+    rtnp::Writer w;
+    w.str(body.c_str());
+    rtnp::send(io, rtnp::POWER_ACK, f->sid, w.data, (uint16_t)w.len);
+}
+
+// 诊断包：系统信息 + 内核日志 + journal + 网络 + 服务 + 进程 + 配置。
+// 输出 tar.gz，大小上限 8MB；整个过程在工作线程执行，不阻塞 loop。
+std::string AgentApp::buildDiagBundle(const nlohmann::json& req, std::string& name, std::string& sha,
+                                      std::string& err) {
+    int max_mb = req.value("max_mb", 8);
+    if (max_mb <= 0 || max_mb > 32) max_mb = 8;
+    char tmpl[] = "/tmp/rtunnel-diag.XXXXXX";
+    char* dir = mkdtemp(tmpl);
+    if (!dir) {
+        err = "mkdtemp failed";
+        return std::string();
+    }
+    std::string d(dir);
+    time_t now = time(NULL);
+    struct tm tmv;
+    localtime_r(&now, &tmv);
+    char stamp[32];
+    snprintf(stamp, sizeof stamp, "%04d%02d%02d-%02d%02d%02d", tmv.tm_year + 1900, tmv.tm_mon + 1,
+             tmv.tm_mday, tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+    name = std::string("diag-") + devid + "-" + stamp + ".tar.gz";
+
+    diagWrite(d + "/version.txt",
+              std::string("version: ") + hv_version() + "\nargs: " + args_line + "\ndevid: " + devid + "\n");
+    diagWrite(d + "/sysinfo.json", webSnapshot());
+    diagWrite(d + "/dmesg.txt", diagRun("timeout 5 dmesg 2>/dev/null | tail -n 300", 1 << 20));
+    diagWrite(d + "/journal.txt",
+              diagRun("timeout 10 journalctl -n 500 --no-pager 2>/dev/null", 3 << 20));
+    diagWrite(d + "/network.txt",
+              diagRun("timeout 5 sh -c 'ip addr 2>&1; echo; ip route 2>&1; echo; ss -s 2>&1'", 1 << 20));
+    diagWrite(d + "/services.txt",
+              diagRun("timeout 10 systemctl list-units --type=service --all --no-pager 2>/dev/null", 1 << 20));
+    if (!config_file.empty()) {
+        std::ifstream cf(config_file);
+        if (cf) {
+            std::string cfg((std::istreambuf_iterator<char>(cf)), std::istreambuf_iterator<char>());
+            diagWrite(d + "/agent.json", cfg);
+        }
+    }
+    {
+        nlohmann::json q;
+        q["sort"] = "cpu";
+        q["page"] = 1;
+        q["page_size"] = 30;
+        q["kernel"] = false;
+        q["refresh"] = true;
+        diagWrite(d + "/procs.json", procsListJson(q));
+    }
+    {
+        nlohmann::json q;
+        q["scope"] = "all";
+        q["proc"] = true;
+        q["page"] = 1;
+        q["page_size"] = 50;
+        q["refresh"] = true;
+        diagWrite(d + "/net.json", netSnapshotJson(q));
+    }
+
+    std::string out = d + "/../" + name;
+    std::string cmd = "timeout 30 tar -czf '" + out + "' -C '" + d + "' . 2>/dev/null";
+    int rc = system(cmd.c_str());
+    if (rc != 0) {
+        err = "tar failed";
+        cmd = "rm -rf '" + d + "'";
+        if (system(cmd.c_str()) != 0) { /* 清理失败不影响结果 */ }
+        return std::string();
+    }
+
+    std::string body;
+    {
+        std::ifstream f(out, std::ios::binary);
+        if (!f) {
+            err = "open bundle failed";
+        }
+        else {
+            f.seekg(0, std::ios::end);
+            std::streamoff sz = f.tellg();
+            f.seekg(0, std::ios::beg);
+            if (sz <= 0) err = "empty bundle";
+            else if (sz > (std::streamoff)max_mb * 1024 * 1024) err = "bundle too large";
+            else {
+                body.resize((size_t)sz);
+                f.read(&body[0], sz);
+                if (!f) {
+                    body.clear();
+                    err = "read bundle failed";
+                }
+            }
+        }
+    }
+    if (!body.empty()) sha = sha256File(out);
+    unlink(out.c_str());
+    cmd = "rm -rf '" + d + "'";
+    if (system(cmd.c_str()) != 0) { /* 清理失败不影响结果 */ }
+    return body;
+}
+
+void AgentApp::handleDiagReq(const rtnp::Frame* f) {
+    using nlohmann::json;
+    uint32_t sid = f->sid;
+    json rj = json::object();
+    if (f->len) {
+        rtnp::Reader r(f->payload, f->len);
+        std::string req = r.strBytes();
+        auto j = json::parse(req, nullptr, false);
+        if (!j.is_discarded() && j.is_object()) rj = j;
+    }
+    if (!querySubmit([this, sid, rj]() {
+            std::string name, sha, err;
+            std::string body = buildDiagBundle(rj, name, sha, err);
+            DiagPost* p = new DiagPost;
+            memset(&p->ev, 0, sizeof p->ev);
+            p->ev.cb = diagPostCb;
+            p->ev.userdata = p;
+            p->app = this;
+            p->sid = sid;
+            json meta;
+            if (body.empty()) {
+                meta["ok"] = false;
+                meta["error"] = err.empty() ? std::string("diag failed") : err;
+                p->ok = false;
+            }
+            else {
+                meta["ok"] = true;
+                meta["name"] = name;
+                meta["size"] = (long long)body.size();
+                meta["sha256"] = sha;
+                p->ok = true;
+                p->body = std::move(body);
+            }
+            p->meta = meta.dump();
+            json end;
+            end["ok"] = p->ok;
+            end["size"] = (long long)p->body.size();
+            end["sha256"] = sha;
+            if (!p->ok) end["error"] = meta["error"];
+            p->end = end.dump();
+            hloop_post_event(loop, &p->ev);
+        })) {
+        json e;
+        e["ok"] = false;
+        e["error"] = "busy";
+        std::string body = e.dump();
+        rtnp::Writer w;
+        w.str(body.c_str());
+        rtnp::send(io, rtnp::DIAG_INFO, sid, w.data, (uint16_t)w.len);
+        rtnp::send(io, rtnp::DIAG_END, sid, w.data, (uint16_t)w.len);
+    }
+}
+
 void AgentApp::onFrame(rtnp::Frame* f) {
     switch (f->type) {
     case rtnp::SYSINFO_REQ: {
@@ -2869,6 +3265,8 @@ void AgentApp::onFrame(rtnp::Frame* f) {
     case rtnp::NET_REQ: handleNetReq(f); return;
     case rtnp::PROC_REQ: handleProcReq(f); return;
     case rtnp::WARM_REQ: handleWarmReq(f); return;
+    case rtnp::POWER_REQ: handlePowerReq(f); return;
+    case rtnp::DIAG_REQ: handleDiagReq(f); return;
     case rtnp::TTY_LIST_REQ: {
         nlohmann::json arr = nlohmann::json::array();
         DIR* d = opendir("/dev");

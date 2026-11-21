@@ -64,6 +64,12 @@ enum Type : uint8_t {
     PROC_REQ       = 0x35,   // B→C：str json {op,sort,q,limit,pid,signal}；sid=请求号
     PROC_INFO      = 0x36,   // C→B：str json 进程列表/详情/信号结果；sid 回显请求号
     WARM_REQ       = 0x37,   // B→C：str json {ttl_ms}；详情页打开期间续期，agent 后台预热缓存
+    POWER_REQ      = 0x38,   // B→C：str json {action:"reboot"|"poweroff",delay_ms}；sid=请求号
+    POWER_ACK      = 0x39,   // C→B：str json {ok,action,delay_ms,error}；sid 回显
+    DIAG_REQ       = 0x3A,   // B→C：str json {max_mb}；sid=请求号
+    DIAG_INFO      = 0x3B,   // C→B：str json {ok,name,size,sha256,error}；sid 回显
+    DIAG_DATA      = 0x3C,   // C→B：原始字节（顺序拼接）；sid 回显
+    DIAG_END       = 0x3D,   // C→B：str json {ok,size,sha256,error}；sid 回显
 };
 
 // 错误码
