@@ -3675,21 +3675,14 @@ void AgentApp::onFrame(rtnp::Frame* f) {
 }
 
 void AgentApp::onLinkDown() {
-    // 关闭所有本地连接
+    // 逐个摘链后走统一回收：streamFree 会先清 hio context 再 close，
+    // 避免 close 回调同步重入 onLocalClose 把同一个流释放两次；
+    // 顺带删掉半关闭定时器，防止它稍后引用已释放的流。
     while (streams) {
         LocalStream* s = streams;
         streams = s->next;
-        if (s->close_timer) htimer_del(s->close_timer);
-        if (s->fs_session) {
-            s->fs_session->onClose();
-            delete s->fs_session;
-        }
-        if (s->svc_session) {
-            s->svc_session->onClose();
-            delete s->svc_session;
-        }
-        if (s->local && !hio_is_closed(s->local)) hio_close(s->local);
-        delete s;
+        s->next = nullptr;
+        streamFree(s);
     }
 }
 
@@ -3927,6 +3920,7 @@ int AgentApp::run(int argc, char** argv) {
     svc_.setEnabled(svc_enabled != 0);
     svc_.setWritable(svc_rw != 0);
     svc_.setToken(svc_token);
+    if (svc_enabled) svc_.start();  // --no-svc 不创建后台线程
     if (!svc_enabled)
         logf_("[agent] service manager disabled");
     else if (!svc_.systemd())
@@ -3936,8 +3930,8 @@ int AgentApp::run(int argc, char** argv) {
     init(lp);
 #ifdef RTUNNEL_AGENT_WEB
     if (web_enabled) {
-        // 本地页常驻设备：启动后先预热进程/服务缓存，
-        // 首个打开页面的人不必等 systemctl 首次全量扫描
+        // 只有启用本地页才预热：没有本地页时进程/服务缓存没人用，
+        // 常驻这几 MB 不值得。relay 打开设备详情页会自己发 WARM_REQ。
         requestWarm(60000);
         // 先产出一份快照再起 HTTP，避免首屏拿到 "not ready"
         refreshWebSnapshot();

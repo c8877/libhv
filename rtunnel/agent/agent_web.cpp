@@ -11,6 +11,7 @@
 #include "svc_ui_js.hpp"
 
 #include "HttpServer.h"
+#include "hasync.h"
 #include "HttpService.h"
 #include "WebSocketServer.h"
 
@@ -241,6 +242,9 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
     int port = 0;
     if (!parseListen(listen, host, port, err)) return -1;
 
+    // 异步 handler 跑在 hv::async 线程池。默认 min=1 会常驻一个线程、
+    // max=CPU 核数会让多标签页各占一个；这里按需创建、上限 4、空闲 15s 退出。
+    hv::async::startup(0, 4, 15000);
     // 静态资源在构建时已压成 gzip，这里只按 Accept-Encoding 决定发压缩体还是解压后的正文
     auto* service = new HttpService;
     auto serveJsAsset = [](WebAsset& asset) {

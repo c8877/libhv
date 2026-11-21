@@ -337,7 +337,12 @@ bool Service::systemdAvailable() {
 Service::Service() {
     systemd_ = systemdAvailable();
     enabled_ = systemd_;
-    if (systemd_) th_ = std::thread([this]() { workerLoop(); });
+}
+
+void Service::start() {
+    std::lock_guard<std::mutex> lk(th_mu_);
+    if (!systemd_ || !enabled_.load(std::memory_order_relaxed) || th_.joinable()) return;
+    th_ = std::thread([this]() { workerLoop(); });
 }
 
 Service::~Service() {
@@ -346,10 +351,12 @@ Service::~Service() {
         stop_ = true;
     }
     cv_.notify_all();
+    std::lock_guard<std::mutex> lk(th_mu_);
     if (th_.joinable()) th_.join();
 }
 
 void Service::post(std::function<void()> fn) {
+    start();
     {
         std::lock_guard<std::mutex> lk(mu_);
         if (stop_) return;

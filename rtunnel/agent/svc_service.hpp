@@ -43,6 +43,8 @@ public:
 
     static bool systemdAvailable();
 
+    // 后台线程按需启动：--no-svc 或没有 systemd 时不常驻线程。
+    void start();
     void setEnabled(bool v) { enabled_.store(v, std::memory_order_relaxed); }
     void setWritable(bool v) { writable_.store(v, std::memory_order_relaxed); }
     bool writable() const { return writable_.load(std::memory_order_relaxed); }
@@ -85,6 +87,7 @@ private:
     void invalidateUnitFiles();
     static void unitFilesRefresh(std::shared_ptr<UnitFiles> uf, uint64_t gen);
 
+    std::mutex th_mu_;   // 保护 start()：本地页 HTTP 线程与事件循环都可能触发
     std::mutex mu_;
     std::condition_variable cv_;
     std::deque<std::function<void()>> jobs_;

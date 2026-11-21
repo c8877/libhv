@@ -562,7 +562,8 @@ http://B:9443/device/<devid>/<port>/<path>
   共用同一份查询实现：进程双采样、IPC 采集、指标 ring 读取都带缓存与并发上限；
   `storage/tree` 也复用同一份 `rtstorage`，但走独立扫描线程（整盘遍历较慢），
   不占用进程/网络查询队列
-- HTTP 处理函数在 `hv::async` 线程池执行，不阻塞 IO 线程和 WebSocket
+- 可能阻塞的接口（进程/网络/存储/诊断）用异步 handler 交给 `hv::async` 分发，
+  真正的采集在共享 worker 上串行执行，不占 HTTP IO 线程
 - 页面、`fs-ui.js`、`svc-ui.js`、`storage-ui.js`、`file-view.js`、`cm-editor.js` 在构建时
   压成 gzip 后以字节数组嵌入二进制，运行时直接发压缩体（非 gzip 客户端按需解压一次），
   不再在堆里保留副本
@@ -578,6 +579,26 @@ http://B:9443/device/<devid>/<port>/<path>
   `build/deploy/agent` / `build/deploy/agent-web` 是对应的两份部署目录；
   `deploy/package_agent.sh` 生成带 `install.sh` 的 `.tar.gz` 部署包（OTA 和手工安装共用），
   `deploy/upload_agent.sh` 上传到文件仓库 `agent/` 目录
+
+#### 线程与内存
+
+常驻线程固定，不随连接数增长：
+
+| 线程 | 创建时机 | 作用 |
+|---|---|---|
+| 主事件循环 | 启动 | 隧道帧、定时器、所有 agent 状态 |
+| 查询 worker | 启动 | 进程双采样、网络/IPC 快照、诊断包 |
+| 目录扫描 worker | 启动 | 分区目录树（整盘遍历，单独排队） |
+| 服务 worker | systemd 可用且未 `--no-svc` | systemctl / journalctl |
+| HTTP IO | 启用 `--local-web` | 本地页与 WebSocket |
+| `hv::async` | 首个异步接口请求 | 进程/网络/存储接口，上限 4、空闲 15s 退出 |
+
+纯隧道部署 3–4 个线程；开本地页 5 个；页面轮询期间短暂多一个异步分发线程，
+停止轮询 15s 后自动退出。
+RSS 里约 5–6 MB 是可回收的文件页（二进制、libc/libstdc++/libcrypto/libssl），
+匿名内存主要来自本地页的进程/服务预热缓存；`local_web: false` 时不预热，
+空闲 RSS 与 `rtunnel-agent-noweb` 基本一致。需要更小常驻内存时用 noweb 构建
+或关闭本地页。
 
 ### 共享前端组件
 
@@ -710,7 +731,7 @@ http://B:9443/device/<devid>/<port>/<path>
 - 所有 `systemctl`/`journalctl` 调用在独立工作线程执行，不阻塞隧道和本地 Web 事件循环；
   `journalctl` 输出限制 256 KiB
 - 默认只读：agent 加 `--svc-rw`（或配置 `svc_rw: true`）才允许控制；
-  `--svc-token` 可给本地 Web 写操作加令牌，`--no-svc` 完全关闭。
+  `--svc-token` 可给本地 Web 写操作加令牌，`--no-svc` 完全关闭（也不创建后台线程）。
   非 systemd 设备（无 `/run/systemd/system`）自动隐藏入口并上报 `caps.svc = false`
 - 管理台「能力配置」可启停服务管理、切换只读/可控制，热生效并写入 agent 配置文件
 - 管理台角色：`operator` 及以上可操作，`viewer` 不开放该通道；
