@@ -1869,20 +1869,21 @@ async function applyStoreMenu(open) {
   const cur = storageCache[mount]
   if (!path || !cur) return
   if (open) {
-    const node = cur.map[path]
-    if (node && node.c && !node.kidsLoaded) {
-      // 先展开显示「加载中」，子树回来后再逐层标记
-      storageExpanded[path] = true
-      const ok = await loadStorageKids(mount, path, 32)
-      if (!ok) return
-    }
+    // 全展开需要整棵子树：即使当前层已加载，后代也可能没取过，
+    // 统一按 depth=32 拉一次，再逐层标记，避免留下「加载中」
+    storageExpanded[path] = true
+    const ok = await loadStorageKids(mount, path, 32)
+    if (!ok) return
   }
   const walk = (p) => {
     const node = cur.map[p]
     if (!node) return
     if (open) {
-      storageExpanded[p] = true
-      storageShowAll[p] = true
+      // 子树被截断时有些后代还没取过，不要把它们标成展开（否则一直显示加载中）
+      if (node.kidsLoaded) {
+        storageExpanded[p] = true
+        storageShowAll[p] = true
+      }
     } else {
       delete storageExpanded[p]
       delete storageShowAll[p]
