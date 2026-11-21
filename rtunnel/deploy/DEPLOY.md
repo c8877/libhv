@@ -90,6 +90,19 @@ ss -tn | grep ':18443'        # 设备应自动重连
 
 管理台前端改动要先构建 `rtunnel/relay/admin/web/dist`，否则页面还是旧的。
 
+### 文件仓库（OTA 分发用）
+
+`upload_agent.sh` 需要 `atk-` 令牌，但仓库就是 relay 上的一个目录，列表是按目录实时
+扫描的，直接 scp 进去同样生效：
+
+```bash
+scp build/deploy/packages/rtunnel-agent-*-<版本>-armv7l.tar.gz \
+    guest@192.168.1.133:/tmp/rtunnel/admin/files/agent/
+```
+
+传完 `sha256sum` 对一下，管理台「文件仓库 / agent」里就能看到，可以拿去建分发。
+
+
 ## 部署后怎么报
 
 只报结论：版本、服务状态、隧道是否 ESTAB、线程/RSS。不要贴复述性的清单，
