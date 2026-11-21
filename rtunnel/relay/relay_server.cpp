@@ -1173,6 +1173,29 @@ bool RelayServer::takeDiag(uint32_t rid, std::string& meta, std::string& body) {
     return true;
 }
 
+bool RelayServer::startStorageQuery(const char* devid, const std::string& json, uint32_t& rid,
+                                    std::string& err) {
+    RelayConn* a = findAgent(devid);
+    if (!a || !a->io) {
+        err = "device offline";
+        return false;
+    }
+    rid = ++storage_seq;
+    rtnp::Writer w;
+    w.str(json.c_str());
+    rtnp::send(a->io, rtnp::STORAGE_REQ, rid, w.data, (uint16_t)w.len);
+    return true;
+}
+
+bool RelayServer::takeStorageResult(uint32_t rid, std::string& meta, std::string& body) {
+    auto it = storage_results.find(rid);
+    if (it == storage_results.end()) return false;
+    meta = it->second.meta;
+    body = std::move(it->second.body);
+    storage_results.erase(it);
+    return true;
+}
+
 bool RelayServer::startNetQuery(const char* devid, const std::string& json, uint32_t& rid, std::string& err) {
     RelayConn* a = findAgent(devid);
     if (!a || !a->io) {
@@ -1406,6 +1429,33 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             diag_acc.erase(it);
         }
         if (diag_results.size() > 8) diag_results.erase(diag_results.begin());
+        return;
+    }
+    case rtnp::STORAGE_INFO: {
+        rtnp::Reader rr(f->payload, f->len);
+        static char sm[8192];
+        rr.str(sm, sizeof sm);
+        if (!rr.err) storage_acc[f->sid].meta = std::string(sm);
+        return;
+    }
+    case rtnp::STORAGE_DATA: {
+        DiagAcc& acc = storage_acc[f->sid];
+        // 目录树回传上限 8MB；超过说明 agent 端节点上限失效
+        if (acc.body.size() + f->len > 8 * 1024 * 1024) {
+            acc.body.clear();
+            acc.meta = "{\"ok\":false,\"error\":\"tree too large\"}";
+            return;
+        }
+        acc.body.append((const char*)f->payload, f->len);
+        return;
+    }
+    case rtnp::STORAGE_END: {
+        auto it = storage_acc.find(f->sid);
+        if (it != storage_acc.end()) {
+            storage_results[f->sid] = std::move(it->second);
+            storage_acc.erase(it);
+        }
+        if (storage_results.size() > 8) storage_results.erase(storage_results.begin());
         return;
     }
     case rtnp::FILE_CHECK_ACK: {

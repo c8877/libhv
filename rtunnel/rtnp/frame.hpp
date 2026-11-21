@@ -70,6 +70,10 @@ enum Type : uint8_t {
     DIAG_INFO      = 0x3B,   // C→B：str json {ok,name,size,sha256,error}；sid 回显
     DIAG_DATA      = 0x3C,   // C→B：原始字节（顺序拼接）；sid 回显
     DIAG_END       = 0x3D,   // C→B：str json {ok,size,sha256,error}；sid 回显
+    STORAGE_REQ    = 0x3E,   // B→C：str json {mount,depth}；sid=请求号
+    STORAGE_INFO   = 0x3F,   // C→B：str json {ok,mount,total_kb,used_kb,...,error}；sid 回显
+    STORAGE_DATA   = 0x40,   // C→B：原始字节（JSON 顺序拼接）；sid 回显
+    STORAGE_END    = 0x41,   // C→B：str json {ok,size,error}；sid 回显
 };
 
 // 错误码

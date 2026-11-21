@@ -116,6 +116,7 @@ public:
     std::string procsListJson(const nlohmann::json& req);
     std::string netSnapshotJson(const nlohmann::json& req);
     std::string metricPointsJson(const nlohmann::json& q);
+    std::string storageTreeJson(const nlohmann::json& req);
 
     // 本地页打开期间续期进程/服务预热（与 relay 详情的 WARM_REQ 共用缓存）。
     // 可从 HTTP 工作线程调用，事件循环操作会投递回 loop。
@@ -126,6 +127,11 @@ public:
     // 队列满时返回 false / 空串，调用方回 busy。
     bool querySubmit(std::function<void()> fn);
     std::string querySync(const std::function<std::string()>& fn);
+
+    // 分区目录占用扫描单独占一个线程：整盘遍历要 1-2s，放查询队列会
+    // 让同时打开的进程/网络页一起等。
+    bool storageSubmit(std::function<void()> fn);
+    std::string storageSync(const std::function<std::string()>& fn);
 
     // HTTP 线程在页面请求时调用：记录活跃时间，空闲后首个请求触发一次快照重建。
     void noteWebRequest();
@@ -155,6 +161,18 @@ private:
     std::deque<std::function<void()>> query_q_;
     std::atomic<bool> query_stop_{false};
     static const size_t kQueryMaxQueue = 16;
+
+    // 目录扫描 worker：单线程 + 有限队列，退出时置 cancel 让扫描尽快返回
+    void storageStart();
+    void storageStop();
+    void storageLoop();
+    std::thread storage_thread_;
+    std::mutex storage_mu_;
+    std::condition_variable storage_cv_;
+    std::deque<std::function<void()>> storage_q_;
+    std::atomic<bool> storage_stop_{false};
+    std::atomic<bool> storage_cancel_{false};
+    static const size_t kStorageMaxQueue = 4;
 
     // sysinfo 里不随运行变化的字段只取一次：uname/device-tree/cpuinfo/证书
     struct SysinfoStatic {
@@ -214,6 +232,7 @@ private:
     void handleWarmReq(const rtnp::Frame* f);
     void handlePowerReq(const rtnp::Frame* f);
     void handleDiagReq(const rtnp::Frame* f);
+    void handleStorageReq(const rtnp::Frame* f);
     static void powerTimerCb(htimer_t* t);
     // 校验本机 root 密码（/etc/shadow + crypt）。失败 err 给可展示的原因。
     bool verifyRootPassword(const std::string& password, std::string& err);

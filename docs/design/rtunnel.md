@@ -353,6 +353,10 @@ sequenceDiagram
 | `0x3B` | `DIAG_INFO` | C→B | `str json {ok,name,size,sha256,error}`，sid 回显 |
 | `0x3C` | `DIAG_DATA` | C→B | 原始字节，按 32KiB 顺序分块，sid 回显 |
 | `0x3D` | `DIAG_END` | C→B | `str json {ok,size,sha256,error}`，sid 回显 |
+| `0x3E` | `STORAGE_REQ` | B→C | `str json {mount,depth}`，sid 为请求号 |
+| `0x3F` | `STORAGE_INFO` | C→B | `str json {ok,mount,total_kb,used_kb,free_kb,reserved_kb,dirs,files,scan_ms,truncated,skipped,error}` |
+| `0x40` | `STORAGE_DATA` | C→B | 原始字节：nodes 数组 JSON，按 32KiB 顺序分块 |
+| `0x41` | `STORAGE_END` | C→B | `str json {ok,size,error}`，sid 回显 |
 
 **会话级（stream_id > 0）**
 

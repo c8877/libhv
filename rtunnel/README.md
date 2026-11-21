@@ -273,6 +273,9 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
 - 单层 tab：概览 / 存储 / 文件 / 服务 / 进程 / 网络 / 监控 / 串口 / 能力；
   非活动 tab 不挂载、不请求，首次进入才加载，之后保留状态
 - 一级 tab 同步到 URL 的 `?tab=`，刷新后保持当前 tab；浏览器前进/后退可切换 tab
+- 「存储」tab 每个分区可折叠：展开后扫描目录树，按缩进 + 条形画出瀑布
+  （条长按分区容量归一，可逐级展开、子项过多合并为「其他」，手机端自动收窄）；
+  结果缓存 5 分钟，下钻不再扫描
 - 概览：CPU/内存/负载/网络累计流量四个 KPI、CPU/内存趋势、存储用量、网卡、
   会话、系统信息与 mTLS 证书状态
 - 顶部摘要条展示设备名、agent 版本、连接信息、流量与采集时间，和一级 tab 一起吸顶
@@ -294,8 +297,8 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
 - relay 通过 `SYSINFO` 的 `caps` 获取 agent 的**运行时**能力，设备详情页「能力」tab
   直接展示该结果（含配置文件路径、是否从文件加载、端口/OTA/文件/服务/串口白名单）
 - API：`GET /api/v1/agents/{devid}/sysinfo?mode=full|inc`、`PUT /api/v1/agents/{devid}/caps`
-  （设备详情页「存储」用 `used_kb`/`avail_kb` 计算，使用率口径与 `df` 的 Use% 一致；
-  同一文件系统的 bind mount 只上报最短路径；设备离线或回帧超时时返回带 `cached:true`
+  （设备详情页「存储」的百分比按 已用 / 总量 计算，与同屏数值一致；`avail_kb` 是
+  非特权用户可用空间；同一文件系统的 bind mount 只上报最短路径；设备离线或回帧超时时返回带 `cached:true`
   的缓存快照，等待回帧在后台线程进行，不阻塞管理台其它请求）
 - 网络与 IPC 快照：`GET /api/v1/agents/{devid}/net?scope=tcp|udp|unix|ipc|all&proc=1&page=1&page_size=10`
   （agent 读 `/proc/net/{tcp,tcp6,udp,udp6,unix}` 与 `lsipc -m|-q|-s -J`，
@@ -318,6 +321,11 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
   agent 用 `/etc/shadow` 的哈希校验，连续 5 次失败冷却 5 分钟。
   agent 侧分 `"reboot"` / `"poweroff"` 两个开关（能力页可分别开启），
   ACK 先返回，延迟到点再执行，权限资源 `device.power`。默认关闭
+- 目录占用：`GET /api/v1/agents/{devid}/storage?mount=/` 返回分区目录树
+  （node = `{p,b,n,d,m}`：路径/字节/文件数/子目录数/修改时间），
+  展开分区才触发扫描；agent 端独立扫描线程，不占用进程/网络查询队列；
+  单次上限 20 万目录项 / 20s，跳过无权限目录与其它分区，只读元数据，
+  权限复用 `device.view`
 - 诊断包：`GET /api/v1/agents/{devid}/diag` 返回 `application/gzip` 附件
   （agent 汇总 sysinfo、dmesg、journal 500 行、`ip addr/route`、`ss -s`、服务列表、
   前 30 进程、网络快照与本机配置，打成 tar.gz；生成走查询 worker，上限 8MB，
@@ -530,13 +538,15 @@ http://B:9443/device/<devid>/<port>/<path>
   `:8080` / `0.0.0.0:8080` 监听所有网卡（页面会暴露设备型号、IP、串口等只读信息）
 - 页面内容与管理台设备详情同源：单层 tab（概览 / 存储 / 文件 / 服务 / 进程 /
   网络 / 监控 / 串口 / 能力），概览含 CPU/内存/负载/网络 KPI、趋势、存储、
-  网卡、会话、系统信息（温度、eMMC/SD 寿命、mTLS 证书）；非活动 tab 不请求数据，
+  网卡、会话、系统信息（温度、eMMC/SD 寿命、mTLS 证书）；存储页分区可折叠，
+  展开后按 `GET /api/v1/storage/tree` 拉目录树并画成瀑布；非活动 tab 不请求数据，
   首次进入才加载
 - 本地页与 relay 详情共用同一套预热：agent 启动和页面打开时刷新进程/服务缓存，
   页面打开期间由 2s 的 sysinfo 轮询续期（关闭后 90s 停止），
   服务列表不用再等 `systemctl` 首次全量扫描（单核设备约 4s）
 - HTTP 接口：`GET /`、`GET /api/v1/sysinfo`、`GET /api/v1/procs`、
-  `GET /api/v1/net`、`GET /api/v1/metrics`、`GET /api/v1/health`；
+  `GET /api/v1/net`、`GET /api/v1/metrics`、`GET /api/v1/storage/tree`、
+  `GET /api/v1/health`；
   文件与服务管理走 `GET /ws/fs`、`GET /ws/svc`（WebSocket，见下节）
 - `procs` / `net` / `metrics` 与 relay 的 `PROC_REQ`、`NET_REQ`、`METRICS_QUERY`
   共用同一份查询实现：进程双采样、IPC 采集、指标 ring 读取都带缓存与并发上限；

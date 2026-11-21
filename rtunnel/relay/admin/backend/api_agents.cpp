@@ -770,6 +770,66 @@ int AdminServer::handleAgentDiag(const HttpContextPtr& ctx) {
     return HTTP_STATUS_NEXT;
 }
 
+int AdminServer::handleAgentStorage(const HttpContextPtr& ctx) {
+    std::string devid = ctx->param("devid");
+    if (!ownsDevid(devid)) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"forbidden\"}");
+        return HTTP_STATUS_FORBIDDEN;
+    }
+    std::string mount = ctx->param("mount", "/");
+    if (mount.empty() || mount[0] != '/' || mount.size() > 256) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"bad mount\"}");
+        return HTTP_STATUS_BAD_REQUEST;
+    }
+    json req;
+    req["mount"] = mount;
+    std::string payload = req.dump();
+    uint32_t rid = 0;
+    std::string err;
+    bool sent = callRelay([this, &devid, &payload, &rid, &err]() {
+                    return relay_->startStorageQuery(devid.c_str(), payload, rid, err) ? std::string("1")
+                                                                                       : std::string("0");
+                }) == "1";
+    if (!sent) {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"" + (err.empty() ? std::string("device offline") : err) + "\"}");
+        return HTTP_STATUS_NOT_FOUND;
+    }
+    hv::async([this, ctx, rid]() {
+        std::string meta, body;
+        bool got = false;
+        // 单核设备整盘遍历约 1-2s，入口上限给 30s
+        for (int i = 0; i < 600; ++i) {
+            usleep(50000);
+            got = callRelay([this, rid, &meta, &body]() {
+                      return relay_->takeStorageResult(rid, meta, body) ? std::string("1") : std::string("0");
+                  }) == "1";
+            if (got) break;
+        }
+        if (!got) {
+            ctx->response->status_code = HTTP_STATUS_GATEWAY_TIMEOUT;
+            ctx->send("{\"error\":\"timeout\"}");
+            return;
+        }
+        json m = json::parse(meta, nullptr, false);
+        if (m.is_discarded() || !m.value("ok", false)) {
+            ctx->response->status_code = HTTP_STATUS_BAD_GATEWAY;
+            ctx->send("{\"error\":\"" +
+                      (m.is_discarded() ? std::string("bad storage response")
+                                        : m.value("error", std::string("scan failed"))) +
+                      "\"}");
+            return;
+        }
+        json nodes = json::parse(body, nullptr, false);
+        if (nodes.is_discarded() || !nodes.is_array()) nodes = json::array();
+        m["nodes"] = std::move(nodes);
+        ctx->send(m.dump());
+    });
+    return HTTP_STATUS_NEXT;
+}
+
 int AdminServer::handleAgentProcs(const HttpContextPtr& ctx) {
     std::string devid = ctx->param("devid");
     callRelay([this, &devid]() {

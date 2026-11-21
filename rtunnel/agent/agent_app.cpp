@@ -7,6 +7,7 @@
 #include "fs_session.hpp"
 #include "net_service.hpp"
 #include "proc_service.hpp"
+#include "storage_service.hpp"
 #include "ota_pkg.hpp"
 #ifdef RTUNNEL_AGENT_WEB
 #include "agent_web.hpp"
@@ -2577,36 +2578,39 @@ void asyncPostCb(hevent_t* ev) {
     delete p;
 }
 
-// 诊断包：INFO 带元信息，DATA 按 32KB 顺序分块，END 收尾。
-// 在 query worker 里生成，回到 loop 线程发送，避免连接重连后写到旧 io。
-struct DiagPost {
+// 大块结果（诊断包、目录树）：INFO 带元信息，DATA 按 32KB 顺序分块，END 收尾。
+// 在工作线程里生成，回到 loop 线程发送，避免连接重连后写到旧 io。
+struct ChunkPost {
     hevent_t ev;
     AgentApp* app = nullptr;
     uint32_t sid = 0;
+    uint8_t info_type = 0;
+    uint8_t data_type = 0;
+    uint8_t end_type = 0;
     bool ok = false;
-    std::string meta; // DIAG_INFO 的 json
-    std::string end;  // DIAG_END 的 json
+    std::string meta;
+    std::string end;
     std::string body;
 };
 
-void diagPostCb(hevent_t* ev) {
-    DiagPost* p = static_cast<DiagPost*>(hevent_userdata(ev));
+void chunkPostCb(hevent_t* ev) {
+    ChunkPost* p = static_cast<ChunkPost*>(hevent_userdata(ev));
     hio_t* io = p->app ? p->app->io : nullptr;
     if (io) {
         rtnp::Writer w;
         w.str(p->meta.c_str());
-        rtnp::send(io, rtnp::DIAG_INFO, p->sid, w.data, (uint16_t)w.len);
+        rtnp::send(io, p->info_type, p->sid, w.data, (uint16_t)w.len);
         if (p->ok && !p->body.empty()) {
             const size_t kChunk = rtnp::MAX_PAYLOAD;
             for (size_t off = 0; off < p->body.size(); off += kChunk) {
                 size_t n = p->body.size() - off;
                 if (n > kChunk) n = kChunk;
-                rtnp::send(io, rtnp::DIAG_DATA, p->sid, p->body.data() + off, (uint16_t)n);
+                rtnp::send(io, p->data_type, p->sid, p->body.data() + off, (uint16_t)n);
             }
         }
         rtnp::Writer e;
         e.str(p->end.c_str());
-        rtnp::send(io, rtnp::DIAG_END, p->sid, e.data, (uint16_t)e.len);
+        rtnp::send(io, p->end_type, p->sid, e.data, (uint16_t)e.len);
     }
     delete p;
 }
@@ -3025,6 +3029,142 @@ std::string AgentApp::querySync(const std::function<std::string()>& fn) {
     return out;
 }
 
+// ---------------------------------------------------------------- 目录扫描 worker
+// 整盘遍历在单核设备上要 1-2s，放查询队列会让同时打开的进程/网络页一起等，
+// 因此单独一个线程，队列只保留少量请求。
+void AgentApp::storageStart() {
+    if (storage_thread_.joinable()) return;
+    storage_stop_.store(false);
+    storage_cancel_.store(false);
+    storage_thread_ = std::thread([this]() { storageLoop(); });
+}
+
+void AgentApp::storageStop() {
+    storage_stop_.store(true);
+    storage_cancel_.store(true);
+    {
+        std::lock_guard<std::mutex> lk(storage_mu_);
+        storage_q_.clear();
+    }
+    storage_cv_.notify_all();
+    if (storage_thread_.joinable()) storage_thread_.join();
+}
+
+void AgentApp::storageLoop() {
+    for (;;) {
+        std::function<void()> fn;
+        {
+            std::unique_lock<std::mutex> lk(storage_mu_);
+            storage_cv_.wait(lk, [this]() { return storage_stop_.load() || !storage_q_.empty(); });
+            if (storage_stop_.load()) return;
+            fn = std::move(storage_q_.front());
+            storage_q_.pop_front();
+        }
+        fn();
+    }
+}
+
+bool AgentApp::storageSubmit(std::function<void()> fn) {
+    {
+        std::lock_guard<std::mutex> lk(storage_mu_);
+        if (storage_stop_.load() || storage_q_.size() >= kStorageMaxQueue) return false;
+        storage_q_.push_back(std::move(fn));
+    }
+    storage_cv_.notify_one();
+    return true;
+}
+
+std::string AgentApp::storageSync(const std::function<std::string()>& fn) {
+    std::mutex m;
+    std::condition_variable cv;
+    bool done = false;
+    std::string out;
+    if (!storageSubmit([&]() {
+            std::string r = fn();
+            {
+                std::lock_guard<std::mutex> lk(m);
+                out.swap(r);
+                done = true;
+            }
+            cv.notify_one();
+        })) {
+        return std::string();
+    }
+    std::unique_lock<std::mutex> lk(m);
+    cv.wait(lk, [&]() { return done || storage_stop_.load(); });
+    return out;
+}
+
+// 扫描一个挂载点，返回 rtstorage 的 JSON。relay 的 STORAGE_REQ 与本地页共用。
+std::string AgentApp::storageTreeJson(const nlohmann::json& req) {
+    rtstorage::Options opt;
+    opt.mount = req.value("mount", std::string("/"));
+    int depth = req.value("depth", 0);
+    if (depth > 0) opt.tree_depth = depth > 32 ? 32 : depth;
+    rtstorage::Result r;
+    rtstorage::scan(opt, storage_cancel_, r);
+    return rtstorage::toJson(r);
+}
+
+void AgentApp::handleStorageReq(const rtnp::Frame* f) {
+    using nlohmann::json;
+    uint32_t sid = f->sid;
+    json rj = json::object();
+    if (f->len) {
+        rtnp::Reader r(f->payload, f->len);
+        std::string req = r.strBytes();
+        auto j = json::parse(req, nullptr, false);
+        if (!j.is_discarded() && j.is_object()) rj = j;
+    }
+    if (!storageSubmit([this, sid, rj]() {
+            std::string body = storageTreeJson(rj);
+            json meta;
+            json info = json::parse(body, nullptr, false);
+            if (info.is_discarded() || !info.value("ok", false)) {
+                meta["ok"] = false;
+                meta["mount"] = rj.value("mount", std::string("/"));
+                meta["error"] = info.is_discarded() ? std::string("bad scan result")
+                                                    : info.value("error", std::string("scan failed"));
+            }
+            else {
+                meta = info;
+                meta.erase("nodes");
+            }
+            ChunkPost* p = new ChunkPost;
+            memset(&p->ev, 0, sizeof p->ev);
+            p->ev.cb = chunkPostCb;
+            p->ev.userdata = p;
+            p->app = this;
+            p->sid = sid;
+            p->info_type = rtnp::STORAGE_INFO;
+            p->data_type = rtnp::STORAGE_DATA;
+            p->end_type = rtnp::STORAGE_END;
+            p->ok = meta.value("ok", false);
+            p->meta = meta.dump();
+            if (p->ok) {
+                // 只回传 nodes 数组，元信息已经在 INFO 里，省重复
+                json nodes = info["nodes"];
+                p->body = nodes.dump();
+            }
+            json end;
+            end["ok"] = p->ok;
+            end["size"] = (long long)p->body.size();
+            if (!p->ok) end["error"] = meta["error"];
+            p->end = end.dump();
+            hloop_post_event(loop, &p->ev);
+        })) {
+        json e;
+        e["ok"] = false;
+        e["error"] = "busy";
+        e["mount"] = rj.value("mount", std::string("/"));
+        std::string body = e.dump();
+        rtnp::Writer w;
+        w.str(body.c_str());
+        rtnp::send(io, rtnp::STORAGE_INFO, sid, w.data, (uint16_t)w.len);
+        rtnp::send(io, rtnp::STORAGE_END, sid, w.data, (uint16_t)w.len);
+    }
+}
+
 // B→C：设备详情页打开后按 ttl 续期预热（默认 120s，每 30s 采样一次）。
 void AgentApp::handleWarmReq(const rtnp::Frame* f) {
     using nlohmann::json;
@@ -3282,12 +3422,15 @@ void AgentApp::handleDiagReq(const rtnp::Frame* f) {
     if (!querySubmit([this, sid, rj]() {
             std::string name, sha, err;
             std::string body = buildDiagBundle(rj, name, sha, err);
-            DiagPost* p = new DiagPost;
+            ChunkPost* p = new ChunkPost;
             memset(&p->ev, 0, sizeof p->ev);
-            p->ev.cb = diagPostCb;
+            p->ev.cb = chunkPostCb;
             p->ev.userdata = p;
             p->app = this;
             p->sid = sid;
+            p->info_type = rtnp::DIAG_INFO;
+            p->data_type = rtnp::DIAG_DATA;
+            p->end_type = rtnp::DIAG_END;
             json meta;
             if (body.empty()) {
                 meta["ok"] = false;
@@ -3344,6 +3487,7 @@ void AgentApp::onFrame(rtnp::Frame* f) {
     case rtnp::WARM_REQ: handleWarmReq(f); return;
     case rtnp::POWER_REQ: handlePowerReq(f); return;
     case rtnp::DIAG_REQ: handleDiagReq(f); return;
+    case rtnp::STORAGE_REQ: handleStorageReq(f); return;
     case rtnp::TTY_LIST_REQ: {
         nlohmann::json arr = nlohmann::json::array();
         DIR* d = opendir("/dev");
@@ -3894,7 +4038,9 @@ int AgentApp::run(int argc, char** argv) {
         1000, INFINITE);
     hevent_set_userdata(series_timer, this);
     queryStart();
+    storageStart();
     hloop_run(lp);
+    storageStop();
     queryStop();
 #ifdef RTUNNEL_AGENT_WEB
     if (web_enabled) agentWebStop();

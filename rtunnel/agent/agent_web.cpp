@@ -310,6 +310,15 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
                    "\",\"summary\":{\"tcp\":-1,\"udp\":-1,\"unix\":-1,\"ipc\":-1}}";
         sendJson(req.get(), writer, body);
     });
+    service->GET("/api/v1/storage/tree", [app](const HttpRequestPtr& req, const HttpResponseWriterPtr& writer) {
+        nlohmann::json q;
+        q["mount"] = req->GetParam("mount", "/");
+        int depth = atoi(req->GetParam("depth", "0").c_str());
+        if (depth > 0) q["depth"] = depth;
+        std::string body = app->storageSync([app, q]() { return app->storageTreeJson(q); });
+        if (body.empty()) body = "{\"ok\":false,\"error\":\"busy\"}";
+        sendJson(req.get(), writer, body);
+    });
     service->GET("/api/v1/metrics", [app](const HttpRequestPtr& req, const HttpResponseWriterPtr& writer) {
         std::string series = req->GetParam("series");
         if (series.empty()) {

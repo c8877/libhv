@@ -90,14 +90,39 @@ h2{font-size:14px;margin:0;font-weight:650}
 .kv .v{min-width:0;overflow-wrap:anywhere}
 .cert{margin-top:10px;padding-top:9px;border-top:1px solid var(--line);font-size:12px;overflow-wrap:anywhere}
 .cert .ch{color:var(--muted);margin-bottom:3px}
-.disk{padding:8px 0;border-bottom:1px solid var(--line)}
-.disk:last-child{border-bottom:none}
-.disk-top{display:flex;gap:10px;align-items:baseline;margin-bottom:5px;font-size:12px}
-.disk-top b{font-family:ui-monospace,Menlo,monospace;font-size:13px}
-.disk-top .muted{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.disk-top .pct{margin-left:auto;font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted)}
-.disk-top .pct.warn{color:var(--warn)}.disk-top .pct.bad{color:var(--bad)}
-.disk-sub{color:var(--muted);font-size:12px;margin-top:4px}
+/* 存储：可折叠分区 + 目录瀑布 */
+.store{border-bottom:1px solid var(--line)}
+.store:last-child{border-bottom:none}
+.store-head{display:flex;align-items:center;gap:9px;padding:9px 4px;border-radius:6px;cursor:pointer;font-size:12px}
+.store-head:hover{background:var(--hover)}
+.store-head .caret{flex:none;width:11px;font-size:11px;color:var(--muted)}
+.store-head b{flex:none;min-width:76px;font-family:ui-monospace,Menlo,monospace;font-size:13px}
+.store-head .muted{flex:none;font-size:11px}
+.store-head .sizes{flex:none;min-width:112px;color:var(--muted);font-variant-numeric:tabular-nums;text-align:right}
+.store-head .bar{flex:1 1 120px;min-width:50px;margin-top:0}
+.store-head .pct{flex:none;width:42px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+.store-head .pct.warn{color:var(--warn)}.store-head .pct.bad{color:var(--bad)}
+.store-body{padding:0 2px 12px}
+.store-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:6px}
+.store-loading{display:flex;flex-direction:column;gap:6px;padding:8px 0;font-size:12px;color:var(--muted)}
+.st-row{display:flex;align-items:center;gap:8px;height:29px;padding-right:4px;border-radius:6px;font-size:12px}
+.st-row:hover{background:var(--hover)}
+.st-row .caret{flex:none;width:11px;font-size:11px;color:var(--muted)}
+.st-row .nm{flex:0 1 210px;min-width:50px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.st-row .sz{flex:none;width:70px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+.st-row .bar{flex:1 1 90px;min-width:40px;margin-top:0}
+.st-row .pc{flex:none;width:44px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+.st-row.other .nm{font-style:italic}
+.st-row.foot{height:25px}
+.st-row.foot .nm{color:var(--muted)}
+.st-row .bar i.free{background:var(--bar-bg)}
+.st-row .bar i.reserved{background:var(--line)}
+.st-row .bar i.muted-fill{background:var(--muted);opacity:.45}
+.st-foot{margin-top:8px;padding-top:6px;border-top:1px dashed var(--line)}
+.st-note{margin-top:6px;font-size:11px;line-height:16px;color:var(--muted)}
+.st-warn{margin-top:8px;padding:7px 10px;border-radius:8px;font-size:12px;line-height:17px}
+.st-warn.warn{background:rgba(224,138,46,.12);color:var(--warn)}
+.st-warn.info{background:var(--hover);color:var(--muted);word-break:break-all}
 .nic{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:4px 8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:12px}
 .nic:last-child{border-bottom:none}
 .nic .nm{font-family:ui-monospace,Menlo,monospace;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}
@@ -170,6 +195,13 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
   #chart{height:130px}
   .toolbar .search{flex-basis:100%}
   .toolbar .spacer{display:none}
+  .store-head{flex-wrap:wrap;row-gap:5px;padding:9px 2px}
+  .store-head b{flex:1 1 auto;min-width:0}
+  .store-head .sizes{min-width:0}
+  .store-head .bar{order:5;flex-basis:100%}
+  .st-row .nm{flex-basis:118px}
+  .st-row .sz{width:60px}
+  .st-row .pc{width:38px}
   .hide-sm{display:none!important}
   .panel-head{flex-wrap:wrap}
   .panel-head .hint{flex-basis:100%;order:3;margin-left:0;white-space:normal;font-size:11px;line-height:16px}
@@ -253,7 +285,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     <section data-page="storage" hidden>
       <div class="panel">
         <div class="panel-head"><h2>存储</h2><span class="hint" id="diskHint"></span></div>
-        <div id="disks"></div>
+        <div id="storeList"></div>
       </div>
     </section>
 
@@ -394,7 +426,8 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     ovProc: null, ovProcTs: 0, ovProcLoading: false,
     proc: { data: null, page: 1, per: 10, sort: 'cpu', q: '', kernel: false, auto: 0, timer: null },
     net: { scope: 'nic', page: 1, per: 10, q: '', listen: false, ipcKind: 'shm', data: null, counts: null },
-    mon: { range: 900000, selected: [], data: {}, timer: null }
+    mon: { range: 900000, selected: [], data: {}, timer: null },
+    store: { open: '', loading: false, error: '', elapsed: 0, cache: {}, expanded: {}, showAll: {}, timer: null, seq: 0, sig: '' }
   };
 
   // 相对路径：直接访问（/）和经 relay /device/<devid>/<port>/ 代理都能用
@@ -436,22 +469,227 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
   function caps() { return (state.data && state.data.caps) || {}; }
   function nicUp(n) { return n.operstate ? n.operstate === 'up' : !!n.up; }
   function diskPct(m) {
-    var used = toNum(m.used_kb), avail = toNum(m.avail_kb), base = used + avail;
-    return base ? Math.ceil(used * 100 / base) : 0;
-  }
-
-  function diskHtml(m, withType) {
-    var used = toNum(m.used_kb), total = toNum(m.total_kb), p = diskPct(m), cls = tone(p);
-    return '<div class="disk"><div class="disk-top"><b>' + esc(m.mount) + '</b>' +
-      (withType ? '<span class="muted">' + esc(m.fstype || '') + '</span>' : '') +
-      '<span class="pct ' + cls + '">' + p + '%</span></div>' +
-      '<div class="bar"><i class="' + cls + '" style="width:' + p + '%"></i></div>' +
-      '<div class="disk-sub">' + fmtKB(used) + ' / ' + fmtKB(total) + '</div></div>';
+    var used = toNum(m.used_kb), total = toNum(m.total_kb);
+    return total ? Math.round(used * 100 / total) : 0;
   }
 
   function sortedMounts(d) {
     return (d.mounts || []).slice().sort(function (a, b) { return diskPct(b) - diskPct(a); });
   }
+
+  // ---------------------------------------------------------------- 存储目录树
+  var STORE_TTL = 5 * 60 * 1000;
+
+  function storePct(b, total) {
+    var p = toNum(b) * 100 / Math.max(1, total);
+    return p >= 10 ? Math.round(p) : p >= 1 ? Number(p.toFixed(1)) : p > 0 ? 0.1 : 0;
+  }
+  function storePctText(b, total) {
+    var p = toNum(b) * 100 / Math.max(1, total);
+    if (p <= 0) return '0%';
+    if (p < 1) return '<1%';
+    return p >= 10 ? Math.round(p) + '%' : p.toFixed(1) + '%';
+  }
+  function storeTruncText(r) {
+    return { entries: '达到目录项上限', time: '达到时间上限', depth: '超过统计深度', nodes: '目录节点过多' }[r] || '超出扫描上限';
+  }
+
+  // 每个父节点最多列 10 个子项，其余合并成「其他 N 项」，点开再展开全部
+  function storeKids(c, path) {
+    var node = c.map[path];
+    if (!node || !node.children.length) return [];
+    var all = node.children.slice().sort(function (a, b) { return b.b - a.b; });
+    if (state.store.showAll[path]) return all;
+    var threshold = Math.max(node.b * 0.01, 1), keep = [], rest = [];
+    all.forEach(function (k, i) {
+      if (i < 10 && (k.b >= threshold || i < 3)) keep.push(k);
+      else rest.push(k);
+    });
+    if (rest.length) {
+      keep.push({ other: true, count: rest.length, b: rest.reduce(function (a, x) { return a + x.b; }, 0) });
+    }
+    return keep;
+  }
+
+  function storeRows(c) {
+    var total = Math.max(1, toNum(c.data.total_kb) * 1024), rows = [];
+    function walk(path, depth) {
+      var node = c.map[path];
+      if (!node) return;
+      var kids = storeKids(c, path), open = !!state.store.expanded[path];
+      rows.push({ path: path, name: path.slice(path.lastIndexOf('/') + 1), b: node.b, depth: depth,
+        toggle: kids.length > 0, open: open, pct: Math.max(node.b > 0 ? 0.4 : 0, storePct(node.b, total)),
+        pctText: storePctText(node.b, total) });
+      if (!open) return;
+      kids.forEach(function (kid) {
+        if (kid.other) {
+          rows.push({ path: path, other: true, name: '其他 ' + kid.count + ' 项', b: kid.b, depth: depth + 1,
+            toggle: true, open: false, pct: Math.max(kid.b > 0 ? 0.4 : 0, storePct(kid.b, total)),
+            pctText: storePctText(kid.b, total) });
+        }
+        else walk(kid.p, depth + 1);
+      });
+    }
+    storeKids(c, c.data.mount).forEach(function (kid) {
+      if (kid.other) {
+        rows.push({ path: c.data.mount, other: true, name: '其他 ' + kid.count + ' 项', b: kid.b, depth: 0,
+          toggle: true, open: false, pct: Math.max(kid.b > 0 ? 0.4 : 0, storePct(kid.b, total)),
+          pctText: storePctText(kid.b, total) });
+      }
+      else walk(kid.p, 0);
+    });
+    return rows;
+  }
+
+  function storeRowHtml(r) {
+    return '<div class="st-row' + (r.other ? ' other' : '') + '" data-path="' + esc(r.path) + '"' +
+      (r.other ? ' data-other="1"' : '') + (r.toggle && !r.other ? ' data-kids="1"' : '') +
+      ' style="padding-left:' + (4 + r.depth * 12) + 'px">' +
+      '<span class="caret">' + (r.toggle ? (r.open ? '▾' : '▸') : '') + '</span>' +
+      '<span class="nm mono" title="' + esc(r.path) + '">' + esc(r.name) + '</span>' +
+      '<span class="sz mono">' + fmtBytes(r.b) + '</span>' +
+      '<span class="bar slim"><i class="' + (r.other ? 'muted-fill' : '') + '" style="width:' + r.pct + '%"></i></span>' +
+      '<span class="pc mono">' + r.pctText + '</span></div>';
+  }
+
+  function storeBodyHtml(mount) {
+    var st = state.store, c = st.cache[mount];
+    if (st.loading && !c) {
+      return '<div class="store-loading"><span>正在扫描 ' + esc(mount) + ' … ' + st.elapsed + 's</span>' +
+        '<div class="bar slim"><i style="width:100%;opacity:.35"></i></div></div>';
+    }
+    if (st.error) return '<div class="st-warn warn">' + esc(st.error) + '</div>';
+    if (!c) return '';
+    var d = c.data, total = Math.max(1, toNum(d.total_kb) * 1024), html = '';
+    html += '<div class="store-tools"><span>条长 = 占分区容量 · 缩进 = 层级</span>' +
+      '<span style="margin-left:auto">' + toNum(d.files) + ' 个文件 · 扫描 ' + (toNum(d.scan_ms) / 1000).toFixed(1) + 's</span>' +
+      '<button class="link" type="button" data-rescan="' + esc(mount) + '">重新扫描</button></div>';
+    html += storeRows(c).map(storeRowHtml).join('');
+    html += '<div class="st-foot">';
+    [['已用', d.used_kb, 'used'], ['可用', d.free_kb, 'free'], ['保留', d.reserved_kb, 'reserved']].forEach(function (r) {
+      var p = Math.round(toNum(r[1]) * 1024 * 100 / total);
+      html += '<div class="st-row foot"><span class="nm">' + r[0] + '</span>' +
+        '<span class="sz mono">' + fmtKB(r[1]) + '</span>' +
+        '<span class="bar slim"><i class="' + r[2] + '" style="width:' + Math.min(100, p) + '%"></i></span>' +
+        '<span class="pc mono">' + p + '%</span></div>';
+    });
+    html += '</div>';
+    html += '<div class="st-note">目录合计 ' + fmtBytes(d.bytes) + ' · df 已用 ' + fmtKB(d.used_kb) +
+      ' · 差额来自保留块、已删除未释放的文件和无权限目录</div>';
+    if (d.truncated) html += '<div class="st-warn warn">结果可能偏低：' + esc(storeTruncText(d.truncated_reason)) + '</div>';
+    if (d.skipped && d.skipped.length) {
+      html += '<div class="st-warn info">已跳过 ' + d.skipped.length + ' 个无权限目录：' +
+        esc(d.skipped.slice(0, 3).join('  ')) +
+        (d.skipped.length > 3 ? '  等 ' + d.skipped.length + ' 个' : '') + '</div>';
+    }
+    return html;
+  }
+
+  function renderStore(mounts, force) {
+    var sig = mounts.map(function (m) { return m.mount + ':' + toNum(m.used_kb) + ':' + toNum(m.total_kb); }).join('|');
+    if (!force && sig === state.store.sig) return;
+    state.store.sig = sig;
+    var el = $('#storeList');
+    if (!el) return;
+    el.innerHTML = mounts.length ? mounts.map(function (m) {
+      var p = diskPct(m), cls = tone(p), open = state.store.open === m.mount;
+      var c = state.store.cache[m.mount];
+      return '<div class="store"><div class="store-head" data-mount="' + esc(m.mount) + '">' +
+        '<span class="caret">' + (open ? '▾' : '▸') + '</span>' +
+        '<b>' + esc(m.mount) + '</b>' +
+        '<span class="muted">' + esc(m.fstype || '') + '</span>' +
+        '<span class="sizes mono">' + fmtKB(m.used_kb) + ' / ' + fmtKB(m.total_kb) + '</span>' +
+        '<span class="bar slim"><i class="' + cls + '" style="width:' + p + '%"></i></span>' +
+        '<span class="pct ' + cls + '">' + p + '%</span></div>' +
+        (open ? '<div class="store-body">' + storeBodyHtml(m.mount) + '</div>' : '') +
+        '</div>';
+    }).join('') : '<div class="emptyp">无挂载点信息</div>';
+    $('#diskHint').textContent = mounts.length ? mounts.length + ' 个挂载点' : '';
+  }
+
+  function toggleStore(mount) {
+    var st = state.store;
+    if (st.open === mount) {
+      st.open = '';
+      renderStore(sortedMounts(state.data || {}), true);
+      return;
+    }
+    st.open = mount;
+    st.error = '';
+    var c = st.cache[mount];
+    if (c && Date.now() - c.ts < STORE_TTL) {
+      renderStore(sortedMounts(state.data || {}), true);
+      return;
+    }
+    loadStore(mount, false);
+  }
+
+  function loadStore(mount, force) {
+    var st = state.store, c = st.cache[mount];
+    if (!force && c && Date.now() - c.ts < STORE_TTL) return;
+    var seq = ++st.seq;
+    st.loading = true;
+    st.error = '';
+    st.elapsed = 0;
+    var t0 = Date.now();
+    clearInterval(st.timer);
+    st.timer = setInterval(function () {
+      st.elapsed = Math.round((Date.now() - t0) / 1000);
+      renderStore(sortedMounts(state.data || {}), true);
+    }, 250);
+    fetch('api/v1/storage/tree?mount=' + encodeURIComponent(mount), { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (seq !== st.seq) return;
+        if (!d || !d.ok) throw new Error((d && d.error) || 'scan failed');
+        var map = {};
+        (d.nodes || []).forEach(function (n) { map[n.p] = { p: n.p, b: n.b, n: n.n, d: n.d, m: n.m, children: [] }; });
+        (d.nodes || []).forEach(function (n) {
+          if (n.p === mount) return;
+          var parent = n.p.slice(0, n.p.lastIndexOf('/')) || '/';
+          while (parent && parent !== mount && !map[parent]) parent = parent.slice(0, parent.lastIndexOf('/')) || '/';
+          if (map[parent]) map[parent].children.push(map[n.p]);
+          else if (map[mount]) map[mount].children.push(map[n.p]);
+        });
+        st.cache[mount] = { data: d, map: map, ts: Date.now() };
+      })
+      .catch(function (e) {
+        if (seq === st.seq) st.error = '扫描失败：' + (e.message || e);
+      })
+      .then(function () {
+        if (seq !== st.seq) return;
+        clearInterval(st.timer);
+        st.timer = null;
+        st.loading = false;
+        renderStore(sortedMounts(state.data || {}), true);
+      });
+  }
+
+  $('#storeList').addEventListener('click', function (e) {
+    var rescan = e.target.closest('[data-rescan]');
+    if (rescan) {
+      loadStore(rescan.getAttribute('data-rescan'), true);
+      return;
+    }
+    var head = e.target.closest('.store-head');
+    if (head) {
+      toggleStore(head.getAttribute('data-mount'));
+      return;
+    }
+    var row = e.target.closest('.st-row');
+    if (!row) return;
+    var path = row.getAttribute('data-path');
+    if (row.getAttribute('data-other')) {
+      state.store.showAll[path] = true;
+    }
+    else if (row.getAttribute('data-kids')) {
+      state.store.expanded[path] = !state.store.expanded[path];
+    }
+    else {
+      return;
+    }
+    renderStore(sortedMounts(state.data || {}), true);
+  });
 
   // ---------------------------------------------------------------- tab
   function tabFromHash() {
@@ -644,10 +882,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
       ? mounts.slice(0, 3).map(diskCompact).join('')
       : '<div class="emptyp">无挂载点</div>';
     $('#ovDiskHint').textContent = mounts.length ? mounts.length + ' 个挂载点' : '';
-    $('#disks').innerHTML = mounts.length
-      ? mounts.map(function (m) { return diskHtml(m, true); }).join('')
-      : '<div class="emptyp">无挂载点信息</div>';
-    $('#diskHint').textContent = mounts.length ? mounts.length + ' 个挂载点' : '';
+    renderStore(mounts, false);
 
     var nics = d.nics || [];
     var ovNics = nics.slice(0, 4);

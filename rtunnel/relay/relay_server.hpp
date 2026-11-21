@@ -196,6 +196,9 @@ public:
     std::unordered_map<uint32_t, DiagAcc> diag_acc;      // 分块接收中
     std::unordered_map<uint32_t, DiagAcc> diag_results;  // 已收完，等管理台取走
     uint32_t diag_seq = 0;
+    std::unordered_map<uint32_t, DiagAcc> storage_acc;
+    std::unordered_map<uint32_t, DiagAcc> storage_results;
+    uint32_t storage_seq = 0;
     std::unordered_map<std::string, uint64_t> warm_sent_ms; // devid -> 上次下发预热的时间
     struct NetCache { std::string json; uint64_t ts = 0; };
     std::unordered_map<std::string, NetCache> net_cache;
@@ -285,6 +288,10 @@ private:
     bool         startDiag(const char* devid, const std::string& json, uint32_t& rid, std::string& err);
     // 取走诊断包；meta 是 DIAG_INFO 的 json，body 是 tar.gz 内容。没有结果返回 false。
     bool         takeDiag(uint32_t rid, std::string& meta, std::string& body);
+    bool         startStorageQuery(const char* devid, const std::string& json, uint32_t& rid,
+                                   std::string& err);
+    // 取走目录树；meta 是 STORAGE_INFO 的 json，body 是 nodes 数组 JSON。
+    bool         takeStorageResult(uint32_t rid, std::string& meta, std::string& body);
     uint64_t     agentBootMs(const char* devid);   // 系统开机时间（epoch ms），0 未知
     bool         startFileCheck(const char* devid, const char* dir, const char* name,
                                 uint32_t& cid, std::string& err);

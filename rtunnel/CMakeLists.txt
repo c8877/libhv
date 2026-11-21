@@ -67,7 +67,7 @@ option(RTUNNEL_AGENT_WEB "rtunnel-agent 内置本地 Web 设备详情页" ON)
 set(RTUNNEL_AGENT_SOURCES agent/main.cpp agent/agent_app.cpp agent/ota_pkg.cpp
                            agent/fs_service.cpp agent/fs_session.cpp agent/fs_archive.cpp
                            agent/svc_service.cpp agent/svc_session.cpp agent/net_service.cpp
-                           agent/proc_service.cpp)
+                           agent/proc_service.cpp agent/storage_service.cpp)
 # 共享前端：同一份 fs-ui.js / svc-ui.js / file-view.js 同时给本地 Web 和 relay-admin 使用。
 # 本地 Web 在配置阶段把资源和设备页 HTML 压成 gzip，以字节数组嵌进二进制：
 # 运行时直接发压缩体，不再额外占堆保存副本。没有 gzip 命令的平台退回原文嵌入。

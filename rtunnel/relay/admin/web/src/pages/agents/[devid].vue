@@ -197,18 +197,84 @@
     <div v-if="loadedTabs.feat" v-show="isFeatTab(mainTab)" class="panel feat-panel">
       <el-tabs v-model="featTab" class="feat-tabs hide-nav" @tab-change="onFeatTab">
         <el-tab-pane label="存储" name="storage" lazy>
-          <div v-for="d in disks" :key="d.mount" class="disk">
-            <div class="disk-top">
-              <span class="mount">{{ d.mount }}</span>
-              <span v-if="d.fstype" class="fs">{{ d.fstype }}</span>
-              <span class="pct" :class="diskTone(d.pct)">{{ d.pct }}%</span>
+          <div class="store-list">
+            <div v-for="d in disks" :key="d.mount" class="store" :class="{ open: storageOpen === d.mount }">
+              <div class="store-head" role="button" tabindex="0"
+                   @click="toggleStorage(d.mount)" @keydown.enter.prevent="toggleStorage(d.mount)">
+                <span class="caret">{{ storageOpen === d.mount ? '▾' : '▸' }}</span>
+                <span class="mount mono">{{ d.mount }}</span>
+                <span v-if="d.fstype" class="fs">{{ d.fstype }}</span>
+                <span class="sizes mono">{{ d.used }} / {{ d.total }} {{ d.unit }}</span>
+                <span class="store-bar"><i :style="{ width: d.pct + '%' }" :class="diskTone(d.pct)" /></span>
+                <span class="pct" :class="diskTone(d.pct)">{{ d.pct }}%</span>
+                <span class="dirs muted">{{ storageDirLabel(d.mount) }}</span>
+              </div>
+
+              <div v-if="storageOpen === d.mount" class="store-body">
+                <div class="store-tools">
+                  <span class="muted">条长 = 占分区容量 · 缩进 = 层级</span>
+                  <span class="spacer" />
+                  <span v-if="storeCur" class="muted">
+                    {{ storeCur.data.files }} 个文件 · 扫描 {{ (storeCur.data.scan_ms / 1000).toFixed(1) }}s
+                  </span>
+                  <el-button link type="primary" size="small" :loading="storageLoading"
+                             @click.stop="loadStorageTree(d.mount, true)">重新扫描</el-button>
+                </div>
+
+                <div v-if="storageLoading && !storeCur" class="store-loading">
+                  <span>正在扫描 {{ d.mount }} … {{ storageElapsed }}s</span>
+                  <el-progress :percentage="100" :indeterminate="true" :show-text="false" :stroke-width="3" />
+                </div>
+                <el-alert v-else-if="storageError" :title="storageError" type="error" :closable="false" show-icon />
+                <template v-else-if="storeCur">
+                  <div v-for="row in storageRows" :key="row.key" class="st-row"
+                       :class="{ root: row.depth === 0, other: row.other }"
+                       :style="{ paddingLeft: 6 + row.depth * 14 + 'px' }"
+                       @click="onStorageRow(row)">
+                    <span class="caret">{{ row.toggle ? (row.open ? '▾' : '▸') : '' }}</span>
+                    <span class="nm mono" :title="row.path">{{ row.name }}</span>
+                    <span class="sz mono">{{ bytes(row.b) }}</span>
+                    <span class="st-bar"><i :style="{ width: row.pct + '%' }" :class="{ 'muted-fill': row.other }" /></span>
+                    <span class="pc mono">{{ row.pctText }}</span>
+                  </div>
+
+                  <div class="st-foot">
+                    <div class="st-row foot">
+                      <span class="nm">已用</span>
+                      <span class="sz mono">{{ bytes(storeCur.data.used_kb * 1024) }}</span>
+                      <span class="st-bar"><i class="used" :style="{ width: storeUsedPct + '%' }" /></span>
+                      <span class="pc mono">{{ storeUsedPct }}%</span>
+                    </div>
+                    <div class="st-row foot">
+                      <span class="nm">可用</span>
+                      <span class="sz mono">{{ bytes(storeCur.data.free_kb * 1024) }}</span>
+                      <span class="st-bar"><i class="free" :style="{ width: storeFreePct + '%' }" /></span>
+                      <span class="pc mono">{{ storeFreePct }}%</span>
+                    </div>
+                    <div class="st-row foot">
+                      <span class="nm">保留</span>
+                      <span class="sz mono">{{ bytes(storeCur.data.reserved_kb * 1024) }}</span>
+                      <span class="st-bar"><i class="reserved" :style="{ width: storeReservedPct + '%' }" /></span>
+                      <span class="pc mono">{{ storeReservedPct }}%</span>
+                    </div>
+                  </div>
+                  <div class="st-note muted">
+                    目录合计 {{ bytes(storeCur.data.bytes) }} · df 已用 {{ bytes(storeCur.data.used_kb * 1024) }} ·
+                    差额来自保留块、已删除未释放的文件和无权限目录
+                  </div>
+                  <el-alert v-if="storeCur.data.truncated" class="st-warn" type="warning" :closable="false" show-icon
+                            :title="'结果可能偏低：' + storageTruncText(storeCur.data.truncated_reason)" />
+                  <el-alert v-if="storeCur.data.skipped && storeCur.data.skipped.length" class="st-warn" type="info"
+                            :closable="false" show-icon
+                            :title="'已跳过 ' + storeCur.data.skipped.length + ' 个无权限目录：' +
+                              storeCur.data.skipped.slice(0, 3).join('  ') +
+                              (storeCur.data.skipped.length > 3 ? '  等 ' + storeCur.data.skipped.length + ' 个' : '')" />
+                </template>
+              </div>
             </div>
-            <el-progress :percentage="d.pct" :stroke-width="6" :show-text="false" :color="diskColor(d.pct)" />
-            <div class="size">{{ d.used }} / {{ d.total }} {{ d.unit }}</div>
           </div>
           <el-empty v-if="sys && !disks.length" description="无挂载点" :image-size="60" />
           <el-skeleton v-else-if="!sys" :rows="3" animated />
-
         </el-tab-pane>
         <el-tab-pane label="文件" name="file" lazy>
           <FileManagerCard embedded :devid="devid" :sys="sys" :can-edit="canEdit" />
@@ -1450,8 +1516,7 @@ const disks = computed(() => {
     const used = Number(m.used_kb) || 0
     const avail = Number(m.avail_kb) || 0
     const pair = kbPair(used, total)
-    const base = used + avail
-    const pct = base > 0 ? Math.min(100, Math.max(0, Math.ceil((used * 100) / base))) : 0
+    const pct = total > 0 ? Math.min(100, Math.max(0, Math.round((used * 100) / total))) : 0
     return {
       mount: m.mount,
       fstype: m.fstype || '',
@@ -1462,6 +1527,199 @@ const disks = computed(() => {
     }
   })
 })
+// ---- 存储目录树 ----
+// 展开分区才扫描；结果按挂载点缓存 5 分钟，下钻只用已取回的树，不再请求。
+const STORE_TTL = 5 * 60 * 1000
+const storageOpen = ref('')
+const storageLoading = ref(false)
+const storageError = ref('')
+const storageElapsed = ref(0)
+const storageCache = reactive({})    // mount -> { data, map, ts }
+const storageExpanded = reactive({}) // path -> bool
+const storageShowAll = reactive({})  // path -> bool（「其他」点开后展开全部）
+let storageTimer = null
+let storageSeq = 0
+
+const storeCur = computed(() => (storageOpen.value ? storageCache[storageOpen.value] || null : null))
+const storeTotalBytes = computed(() => {
+  const d = storeCur.value && storeCur.value.data
+  return Math.max(1, (Number(d && d.total_kb) || 0) * 1024)
+})
+function storePctOf(kb) {
+  return Math.max(0, Math.min(100, Math.round(((Number(kb) || 0) * 1024 * 100) / storeTotalBytes.value)))
+}
+const storeUsedPct = computed(() => (storeCur.value ? storePctOf(storeCur.value.data.used_kb) : 0))
+const storeFreePct = computed(() => (storeCur.value ? storePctOf(storeCur.value.data.free_kb) : 0))
+const storeReservedPct = computed(() => (storeCur.value ? storePctOf(storeCur.value.data.reserved_kb) : 0))
+
+function storageDirLabel(mount) {
+  const c = storageCache[mount]
+  return c && c.data ? c.data.dirs + ' 目录' : ''
+}
+
+function storageTruncText(reason) {
+  return {
+    entries: '达到目录项上限',
+    time: '达到时间上限',
+    depth: '超过统计深度',
+    nodes: '目录节点过多，只保留前 5000 个',
+  }[reason] || '超出扫描上限'
+}
+
+function storagePct(b, total) {
+  const p = (Number(b) || 0) * 100 / Math.max(1, total)
+  return p >= 10 ? Math.round(p) : p >= 1 ? Number(p.toFixed(1)) : p > 0 ? 0.1 : 0
+}
+function storagePctText(b, total) {
+  const p = (Number(b) || 0) * 100 / Math.max(1, total)
+  if (p <= 0) return '0%'
+  if (p < 1) return '<1%'
+  return p >= 10 ? Math.round(p) + '%' : p.toFixed(1) + '%'
+}
+
+// 每个父节点最多列 10 个子项，其余合并成「其他 N 项」，点开再展开全部
+function storageKids(cur, path) {
+  const node = cur.map[path]
+  if (!node || !node.children.length) return []
+  const all = node.children.slice().sort((a, b) => b.b - a.b)
+  if (storageShowAll[path]) return all
+  const threshold = Math.max(node.b * 0.01, 1)
+  const keep = []
+  const rest = []
+  all.forEach((k, i) => {
+    if (i < 10 && (k.b >= threshold || i < 3)) keep.push(k)
+    else rest.push(k)
+  })
+  if (rest.length) {
+    keep.push({ other: true, count: rest.length, b: rest.reduce((a, x) => a + x.b, 0) })
+  }
+  return keep
+}
+
+const storageRows = computed(() => {
+  const cur = storeCur.value
+  if (!cur) return []
+  const total = storeTotalBytes.value
+  const rows = []
+  const walk = (path, depth) => {
+    const node = cur.map[path]
+    if (!node) return
+    const kids = storageKids(cur, path)
+    const open = !!storageExpanded[path]
+    rows.push({
+      key: path,
+      path,
+      name: path === cur.data.mount ? path : path.slice(path.lastIndexOf('/') + 1),
+      b: node.b,
+      depth,
+      toggle: kids.length > 0,
+      open,
+      pct: Math.max(Number(node.b) > 0 ? 0.4 : 0, storagePct(node.b, total)),
+      pctText: storagePctText(node.b, total),
+    })
+    if (!open) return
+    for (const kid of kids) {
+      if (kid.other) {
+        rows.push({
+          key: path + '::other',
+          path,
+          name: '其他 ' + kid.count + ' 项',
+          b: kid.b,
+          depth: depth + 1,
+          toggle: true,
+          open: false,
+          other: true,
+          pct: Math.max(kid.b > 0 ? 0.4 : 0, storagePct(kid.b, total)),
+          pctText: storagePctText(kid.b, total),
+        })
+      }
+      else {
+        walk(kid.p, depth + 1)
+      }
+    }
+  }
+  // 分区本身已由头部展示，正文从一级子目录开始
+  for (const kid of storageKids(cur, cur.data.mount)) {
+    if (kid.other) {
+      rows.push({
+        key: cur.data.mount + '::other',
+        path: cur.data.mount,
+        name: '其他 ' + kid.count + ' 项',
+        b: kid.b,
+        depth: 0,
+        toggle: true,
+        open: false,
+        other: true,
+        pct: Math.max(kid.b > 0 ? 0.4 : 0, storagePct(kid.b, total)),
+        pctText: storagePctText(kid.b, total),
+      })
+    }
+    else {
+      walk(kid.p, 0)
+    }
+  }
+  return rows
+})
+
+function toggleStorage(mount) {
+  if (storageOpen.value === mount) {
+    storageOpen.value = ''
+    return
+  }
+  storageOpen.value = mount
+  storageError.value = ''
+  const c = storageCache[mount]
+  if (c && Date.now() - c.ts < STORE_TTL) return
+  loadStorageTree(mount, false)
+}
+
+async function loadStorageTree(mount, force) {
+  const c = storageCache[mount]
+  if (!force && c && Date.now() - c.ts < STORE_TTL) return
+  const seq = ++storageSeq
+  storageLoading.value = true
+  storageError.value = ''
+  storageElapsed.value = 0
+  const t0 = Date.now()
+  clearInterval(storageTimer)
+  storageTimer = setInterval(() => {
+    storageElapsed.value = Math.round((Date.now() - t0) / 1000)
+  }, 250)
+  try {
+    const r = await Api.get(agentBase.value + '/storage?mount=' + encodeURIComponent(mount))
+    if (seq !== storageSeq) return
+    const map = {}
+    const nodes = (r && r.nodes) || []
+    for (const n of nodes) map[n.p] = { ...n, children: [] }
+    for (const n of nodes) {
+      if (n.p === mount) continue
+      let parent = n.p.slice(0, n.p.lastIndexOf('/')) || '/'
+      // 超过回传深度时中间层可能缺失，挂到最近的已有祖先
+      while (parent && parent !== mount && !map[parent]) {
+        parent = parent.slice(0, parent.lastIndexOf('/')) || '/'
+      }
+      if (map[parent]) map[parent].children.push(n)
+      else if (map[mount]) map[mount].children.push(n)
+    }
+    storageCache[mount] = { data: r, map, ts: Date.now() }
+  } catch (e) {
+    if (seq === storageSeq) storageError.value = '扫描失败：' + (e.message || e)
+  } finally {
+    clearInterval(storageTimer)
+    storageTimer = null
+    if (seq === storageSeq) storageLoading.value = false
+  }
+}
+
+function onStorageRow(row) {
+  if (row.other) {
+    storageShowAll[row.path] = true
+    return
+  }
+  if (!row.toggle) return
+  storageExpanded[row.path] = !storageExpanded[row.path]
+}
+
 const nics = computed(() => (sys.value && sys.value.nics) || [])
 
 // ---- 网络与 IPC 快照 ----
@@ -3221,6 +3479,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onProcKeydown)
   if (procQueryTimer) { clearTimeout(procQueryTimer); procQueryTimer = null }
   if (netQueryTimer) { clearTimeout(netQueryTimer); netQueryTimer = null }
+  if (storageTimer) { clearInterval(storageTimer); storageTimer = null }
   stopProcTimer()
   stopTimer()
   stopSample()
@@ -3427,10 +3686,6 @@ onBeforeUnmount(() => {
 .back { margin-right: 2px; padding: 0 6px; }
 .back .el-icon { margin-right: 2px; }
 :deep(.el-table .cell) { white-space: nowrap; }
-.disk { padding: 8px 0; border-bottom: 1px solid var(--el-border-color-lighter); }
-.disk:last-child { border-bottom: 0; }
-.disk-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-.disk-top .mount { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fs {
   font-size: 11px;
   color: var(--el-text-color-secondary);
@@ -3438,10 +3693,43 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   padding: 0 6px;
 }
-.disk-top .pct { margin-left: auto; font-size: 12px; color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums; }
-.disk-top .pct.warn { color: #c98a12; }
-.disk-top .pct.bad { color: #d9534f; }
-.size { margin-top: 3px; font-size: 11px; color: var(--el-text-color-secondary); }
+
+/* ---- 存储：可折叠分区 + 目录瀑布 ---- */
+.store-list { display: flex; flex-direction: column; }
+.store { border-bottom: 1px solid var(--el-border-color-lighter); }
+.store:last-child { border-bottom: 0; }
+.store-head { display: flex; align-items: center; gap: 10px; padding: 10px 6px; border-radius: 6px; cursor: pointer; }
+.store-head:hover { background: var(--el-fill-color-light); }
+.store-head:focus-visible { outline: 2px solid var(--el-color-primary-light-5); outline-offset: -2px; }
+.store-head .caret { flex: none; width: 12px; font-size: 11px; color: var(--el-text-color-secondary); }
+.store-head .mount { flex: none; min-width: 88px; font-size: 13px; font-weight: 600; }
+.store-head .sizes { flex: none; min-width: 118px; font-size: 12px; color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums; }
+.store-head .pct { flex: none; width: 44px; text-align: right; font-size: 12px; color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums; }
+.store-head .pct.warn { color: #c98a12; }
+.store-head .pct.bad { color: #d9534f; }
+.store-head .dirs { flex: none; min-width: 58px; text-align: right; font-size: 12px; }
+.store-bar, .st-bar { flex: 1 1 140px; min-width: 50px; height: 6px; border-radius: 3px; background: var(--el-fill-color); overflow: hidden; }
+.store-bar i, .st-bar i { display: block; height: 100%; border-radius: 3px; background: var(--el-color-primary); }
+.store-bar i.warn { background: #f5a623; }
+.store-bar i.bad { background: #e5534b; }
+.store-body { padding: 0 6px 14px; }
+.store-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; margin-bottom: 6px; }
+.store-loading { display: flex; flex-direction: column; gap: 6px; padding: 10px 0 6px; font-size: 12px; color: var(--el-text-color-secondary); }
+.st-row { display: flex; align-items: center; gap: 8px; height: 30px; padding-right: 4px; border-radius: 6px; font-size: 12px; }
+.st-row:hover { background: var(--el-fill-color-light); }
+.st-row .caret { flex: none; width: 12px; font-size: 11px; color: var(--el-text-color-secondary); }
+.st-row .nm { flex: 0 1 240px; min-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-row .sz { flex: none; width: 76px; text-align: right; color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums; }
+.st-row .pc { flex: none; width: 46px; text-align: right; color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums; }
+.st-row.other .nm { font-style: italic; }
+.st-row.foot { height: 26px; }
+.st-row.foot .nm { color: var(--el-text-color-secondary); }
+.st-bar i.free { background: var(--el-fill-color-darker); }
+.st-bar i.reserved { background: #c8cdd6; }
+.st-bar i.muted-fill { background: var(--el-text-color-placeholder); }
+.st-foot { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--el-border-color-lighter); }
+.st-note { margin-top: 6px; font-size: 11px; line-height: 16px; }
+.st-warn { margin-top: 8px; }
 .chart-box { margin-top: 12px; height: 200px; position: relative; display: flex; flex-direction: column; }
 .chart-title { flex: none; font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 4px; }
 .chart-box canvas { flex: 1 1 auto; min-height: 0; }
@@ -3679,6 +3967,17 @@ onBeforeUnmount(() => {
 @media (max-width: 599px) {
   .net-search { width: 100%; }
   .net-bar { gap: 8px; }
+  /* 分区头在手机上换行：第一行放名称/容量/百分比，进度条独占第二行 */
+  .store-head { flex-wrap: wrap; row-gap: 5px; padding: 9px 4px; }
+  .store-head .mount { flex: 1 1 auto; min-width: 0; }
+  .store-head .sizes { min-width: 0; }
+  .store-head .store-bar { order: 5; flex-basis: 100%; }
+  .store-head .dirs { display: none; }
+  .store-tools { gap: 6px; }
+  .st-row { gap: 6px; }
+  .st-row .nm { flex-basis: 132px; }
+  .st-row .sz { width: 64px; }
+  .st-row .pc { width: 40px; }
   /* 五个 tab 加计数在 390px 下会溢出，收紧内边距和计数徽标 */
   .net-tabs :deep(.el-tabs__item) { padding: 0 7px; }
   .net-tabs .tab-n {
