@@ -152,6 +152,7 @@ private:
     void queryStop();
     void queryLoop();
     std::thread query_thread_;
+    std::mutex query_start_mu_;   // 保护按需启动：本地页 HTTP 线程也会提交
     std::mutex query_mu_;
     std::condition_variable query_cv_;
     std::deque<std::function<void()>> query_q_;
@@ -163,6 +164,7 @@ private:
     void storageStop();
     void storageLoop();
     std::thread storage_thread_;
+    std::mutex storage_start_mu_; // 同上
     std::mutex storage_mu_;
     std::condition_variable storage_cv_;
     std::deque<std::function<void()>> storage_q_;

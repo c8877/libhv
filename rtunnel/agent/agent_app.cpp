@@ -2893,16 +2893,19 @@ void AgentApp::warmKickCb(hevent_t* ev) {
 // ---------------------------------------------------------------- 按需查询 worker
 // 进程扫描（两次读 /proc）与网络快照（fork lsipc）都会阻塞，放在单个线程串行执行：
 // 单核设备上不会出现多份扫描互相抢 CPU，线程数也固定为一个。
+// 按需启动：没人查进程/网络时不占线程。query_stop_ 一旦置位就不再拉起，
+// 避免退出阶段 HTTP 线程的迟到请求把 worker 又启动起来。
 void AgentApp::queryStart() {
-    if (query_thread_.joinable()) return;
-    query_stop_.store(false);
+    std::lock_guard<std::mutex> lk(query_start_mu_);
+    if (query_stop_.load() || query_thread_.joinable()) return;
     query_thread_ = std::thread([this]() { queryLoop(); });
 }
 
 void AgentApp::queryStop() {
+    std::lock_guard<std::mutex> lk(query_start_mu_);
     query_stop_.store(true);
     {
-        std::lock_guard<std::mutex> lk(query_mu_);
+        std::lock_guard<std::mutex> qlk(query_mu_);
         query_q_.clear();
     }
     query_cv_.notify_all();
@@ -2924,6 +2927,7 @@ void AgentApp::queryLoop() {
 }
 
 bool AgentApp::querySubmit(std::function<void()> fn) {
+    queryStart();
     {
         std::lock_guard<std::mutex> lk(query_mu_);
         if (query_stop_.load() || query_q_.size() >= kQueryMaxQueue) return false;
@@ -2959,18 +2963,21 @@ std::string AgentApp::querySync(const std::function<std::string()>& fn) {
 // ---------------------------------------------------------------- 目录扫描 worker
 // 整盘遍历在单核设备上要 1-2s，放查询队列会让同时打开的进程/网络页一起等，
 // 因此单独一个线程，队列只保留少量请求。
+// 按需启动：只有真的展开分区树才需要这个线程。整盘遍历会持续占用扫描队列，
+// 首次使用后线程保留，后续展开/递归展开不再重新创建。
 void AgentApp::storageStart() {
-    if (storage_thread_.joinable()) return;
-    storage_stop_.store(false);
+    std::lock_guard<std::mutex> lk(storage_start_mu_);
+    if (storage_stop_.load() || storage_thread_.joinable()) return;
     storage_cancel_.store(false);
     storage_thread_ = std::thread([this]() { storageLoop(); });
 }
 
 void AgentApp::storageStop() {
+    std::lock_guard<std::mutex> lk(storage_start_mu_);
     storage_stop_.store(true);
     storage_cancel_.store(true);
     {
-        std::lock_guard<std::mutex> lk(storage_mu_);
+        std::lock_guard<std::mutex> qlk(storage_mu_);
         storage_q_.clear();
     }
     storage_cv_.notify_all();
@@ -2992,6 +2999,7 @@ void AgentApp::storageLoop() {
 }
 
 bool AgentApp::storageSubmit(std::function<void()> fn) {
+    storageStart();
     {
         std::lock_guard<std::mutex> lk(storage_mu_);
         if (storage_stop_.load() || storage_q_.size() >= kStorageMaxQueue) return false;
@@ -3920,7 +3928,6 @@ int AgentApp::run(int argc, char** argv) {
     svc_.setEnabled(svc_enabled != 0);
     svc_.setWritable(svc_rw != 0);
     svc_.setToken(svc_token);
-    if (svc_enabled) svc_.start();  // --no-svc 不创建后台线程
     if (!svc_enabled)
         logf_("[agent] service manager disabled");
     else if (!svc_.systemd())
@@ -3967,8 +3974,6 @@ int AgentApp::run(int argc, char** argv) {
         },
         1000, INFINITE);
     hevent_set_userdata(series_timer, this);
-    queryStart();
-    storageStart();
     hloop_run(lp);
     storageStop();
     queryStop();
