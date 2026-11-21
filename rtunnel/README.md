@@ -273,11 +273,12 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
 - 单层 tab：概览 / 存储 / 文件 / 服务 / 进程 / 网络 / 监控 / 串口 / 能力；
   非活动 tab 不挂载、不请求，首次进入才加载，之后保留状态
 - 一级 tab 同步到 URL 的 `?tab=`，刷新后保持当前 tab；浏览器前进/后退可切换 tab
-- 「存储」tab 每个分区可折叠：展开后扫描目录树，按缩进 + 条形画出瀑布
-  （条长按分区容量归一，可逐级展开、子项过多合并为「其他」）。目录与大文件
-  都单独成行，小于 64 KB 的文件按目录聚合为「小文件 N 项」，因此每一层子项
-  之和等于父项；节点右键可「全展开 / 全折叠」递归控制整棵子树，工具栏眼睛
-  按钮切换是否显示以 `.` 开头的项；结果缓存 5 分钟，下钻不再扫描
+- 「存储」tab 每个分区可折叠：展开后只取分区根的一级子项，点开某个目录才按
+  路径请求它的直接子项，右键「全展开」才按需拉整棵子树。目录按缩进 + 条形
+  画成瀑布（条长按分区容量归一），子项过多合并为「其他」；目录与大文件都
+  单独成行，小于 64 KB 的文件按目录聚合为「小文件 N 项」，因此每一层子项
+  之和等于父项；工具栏眼睛按钮切换是否显示以 `.` 开头的项；已取回的节点
+  缓存 5 分钟，收起再展开不重复扫描
 - 概览：CPU/内存/负载/网络累计流量四个 KPI、CPU/内存趋势、存储用量、网卡、
   会话、系统信息与 mTLS 证书状态
 - 顶部摘要条展示设备名、agent 版本、连接信息、流量与采集时间，和一级 tab 一起吸顶
@@ -323,13 +324,14 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
   agent 用 `/etc/shadow` 的哈希校验，连续 5 次失败冷却 5 分钟。
   agent 侧分 `"reboot"` / `"poweroff"` 两个开关（能力页可分别开启），
   ACK 先返回，延迟到点再执行，权限资源 `device.power`。默认关闭
-- 目录占用：`GET /api/v1/agents/{devid}/storage?mount=/` 返回分区目录树
-  （node = `{p,b,n,d,m,t}`：路径/字节/文件数/子目录数/修改时间/类型；
-  `t` 为 `d` 目录、`f` 文件、`o` 小文件聚合）。目录全部回传，文件只回传
+- 目录占用：`GET /api/v1/agents/{devid}/storage?mount=/&path=/usr&depth=1`
+  只回传 `path` 下 `depth` 层内的节点，展开某个目录时再按它的路径请求，
+  不会一次上传整棵树；`path` 为空表示分区根。
+  node = `{p,b,n,d,m,t,c}`：路径/字节/文件数/子目录数/修改时间/类型/是否还有
+  子项；`t` 为 `d` 目录、`f` 文件、`o` 小文件聚合。目录按层级回传，文件只回传
   >= 64 KB 的，其余按目录聚合成一条，保证子项之和等于父项；
-  展开分区才触发扫描；agent 端独立扫描线程，不占用进程/网络查询队列；
-  单次上限 20 万目录项 / 20s，跳过无权限目录与其它分区，只读元数据，
-  权限复用 `device.view`
+  agent 端独立扫描线程，不占用进程/网络查询队列；单次上限 20 万目录项 / 20s，
+  跳过无权限目录与其它分区，只读元数据，权限复用 `device.view`
 - 诊断包：`GET /api/v1/agents/{devid}/diag` 返回 `application/gzip` 附件
   （agent 汇总 sysinfo、dmesg、journal 500 行、`ip addr/route`、`ss -s`、服务列表、
   前 30 进程、网络快照与本机配置，打成 tar.gz；生成走查询 worker，上限 8MB，
@@ -549,8 +551,8 @@ http://B:9443/device/<devid>/<port>/<path>
   页面打开期间由 2s 的 sysinfo 轮询续期（关闭后 90s 停止），
   服务列表不用再等 `systemctl` 首次全量扫描（单核设备约 4s）
 - HTTP 接口：`GET /`、`GET /api/v1/sysinfo`、`GET /api/v1/procs`、
-  `GET /api/v1/net`、`GET /api/v1/metrics`、`GET /api/v1/storage/tree`、
-  `GET /api/v1/health`；
+  `GET /api/v1/net`、`GET /api/v1/metrics`、`GET /api/v1/storage/tree`
+  （`mount` / `path` / `depth`，按目录按需返回）、`GET /api/v1/health`；
   文件与服务管理走 `GET /ws/fs`、`GET /ws/svc`（WebSocket，见下节）
 - `procs` / `net` / `metrics` 与 relay 的 `PROC_REQ`、`NET_REQ`、`METRICS_QUERY`
   共用同一份查询实现：进程双采样、IPC 采集、指标 ring 读取都带缓存与并发上限；

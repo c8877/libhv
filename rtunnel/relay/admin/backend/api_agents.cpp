@@ -783,8 +783,24 @@ int AdminServer::handleAgentStorage(const HttpContextPtr& ctx) {
         ctx->send("{\"error\":\"bad mount\"}");
         return HTTP_STATUS_BAD_REQUEST;
     }
+    // path 为空表示列分区根；depth 是相对 path 的回传层级
+    std::string path = ctx->param("path");
+    if (!path.empty()) {
+        if (path[0] != '/' || path.size() > 1024 ||
+            path.find("/../") != std::string::npos ||
+            (path.size() >= 3 && path.compare(path.size() - 3, 3, "/..") == 0)) {
+            ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+            ctx->send("{\"error\":\"bad path\"}");
+            return HTTP_STATUS_BAD_REQUEST;
+        }
+    }
+    int depth = atoi(ctx->param("depth", "1").c_str());
+    if (depth < 0) depth = 0;
+    if (depth > 64) depth = 64;
     json req;
     req["mount"] = mount;
+    if (!path.empty()) req["path"] = path;
+    req["depth"] = depth;
     std::string payload = req.dump();
     uint32_t rid = 0;
     std::string err;

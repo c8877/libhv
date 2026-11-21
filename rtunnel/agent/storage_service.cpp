@@ -104,9 +104,10 @@ struct Walker {
                 uint64_t sz = (uint64_t)st.st_size;
                 nodes[idx].bytes += sz;
                 ++nodes[idx].files;
-                // 大文件单独成行；小文件按目录聚合，保证子项之和等于父项
+                // 大文件单独成行；小文件按目录聚合，保证子项之和等于父项。
+                // 只有回传层级内的目录才需要生成子项，更深的只做累加。
                 if (sz >= opt.min_file_bytes && !nodes[idx].path.empty() &&
-                    files.size() < opt.max_file_nodes) {
+                    nodes[idx].depth < opt.emit_depth && files.size() < opt.max_file_nodes) {
                     std::string child = nodes[idx].path;
                     if (child.back() != '/') child += '/';
                     child += name;
@@ -141,9 +142,11 @@ struct Walker {
                 continue;
             }
 
-            // 节点数达到上限后只做累加、不保留节点，避免内存随目录数增长
-            bool keep = nodes.size() < opt.max_nodes;
-            if (!keep) {
+            // 超出回传层级或节点数达到上限时只做累加、不保留节点，
+            // 避免内存随目录数增长
+            bool in_range = depth + 1 <= opt.emit_depth;
+            bool keep = in_range && nodes.size() < opt.max_nodes;
+            if (in_range && !keep) {
                 truncated = true;
                 if (reason.empty()) reason = "nodes";
             }
@@ -183,6 +186,34 @@ bool scan(const Options& opt_in, const std::atomic<bool>& cancel, Result& out) {
     out = Result();
     out.mount = opt.mount;
 
+    // 子树根必须是 mount 内的绝对路径；拒绝 .. 与空字节，避免越界读取
+    std::string start = opt.mount;
+    if (!opt.path.empty()) {
+        if (opt.path[0] != '/' || opt.path.size() > 1024 ||
+            opt.path.find('\0') != std::string::npos ||
+            opt.path.find("/../") != std::string::npos ||
+            (opt.path.size() >= 3 && opt.path.compare(opt.path.size() - 3, 3, "/..") == 0)) {
+            out.error = "bad path";
+            return false;
+        }
+        start = opt.path;
+        while (start.size() > 1 && start.back() == '/') start.pop_back();
+        // 合并重复斜杠，保证节点路径与前端拼出来的一致
+        std::string clean;
+        clean.reserve(start.size());
+        for (char c : start) {
+            if (c == '/' && !clean.empty() && clean.back() == '/') continue;
+            clean += c;
+        }
+        start.swap(clean);
+        if (opt.mount != "/" && start != opt.mount &&
+            start.rfind(opt.mount + "/", 0) != 0) {
+            out.error = "path outside mount";
+            return false;
+        }
+    }
+    out.path = start;
+
     struct statvfs vfs;
     if (::statvfs(opt.mount.c_str(), &vfs) != 0) {
         out.error = "statvfs failed: " + std::string(strerror(errno));
@@ -195,7 +226,20 @@ bool scan(const Options& opt_in, const std::atomic<bool>& cancel, Result& out) {
     uint64_t reserved = vfs.f_bfree > vfs.f_bavail ? vfs.f_bfree - vfs.f_bavail : 0;
     out.reserved_kb = reserved * frsize / 1024;
 
-    int fd = ::open(opt.mount.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    int mfd = ::open(opt.mount.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (mfd < 0) {
+        out.error = "open mount failed: " + std::string(strerror(errno));
+        return false;
+    }
+    struct stat mst;
+    if (::fstat(mfd, &mst) != 0) {
+        int e = errno;
+        ::close(mfd);
+        out.error = "stat mount failed: " + std::string(strerror(e));
+        return false;
+    }
+    ::close(mfd);
+    int fd = ::open(start.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     if (fd < 0) {
         out.error = "open failed: " + std::string(strerror(errno));
         return false;
@@ -207,12 +251,17 @@ bool scan(const Options& opt_in, const std::atomic<bool>& cancel, Result& out) {
         out.error = "stat failed: " + std::string(strerror(e));
         return false;
     }
+    if (st.st_dev != mst.st_dev) {
+        ::close(fd);
+        out.error = "path is on another filesystem";
+        return false;
+    }
     Walker w(opt, cancel);
     w.root_dev = st.st_dev;
     w.t0 = std::chrono::steady_clock::now();
     {
         NodeAcc root;
-        root.path = opt.mount;
+        root.path = start;
         root.mtime = (long long)st.st_mtime;
         root.depth = 0;
         w.nodes.push_back(std::move(root));
@@ -240,9 +289,12 @@ bool scan(const Options& opt_in, const std::atomic<bool>& cancel, Result& out) {
     out.dirs = w.nodes[0].dirs;
 
     nlohmann::json arr = nlohmann::json::array();
+    // c=1 表示该目录还有未回传的子项，前端展开时需要按路径再取一次
     auto addDir = [&arr](const NodeAcc& n) {
-        arr.push_back({{"p", n.path}, {"b", n.bytes}, {"n", n.files},
-                       {"d", n.dirs}, {"m", n.mtime}, {"t", "d"}});
+        nlohmann::json o = {{"p", n.path}, {"b", n.bytes}, {"n", n.files},
+                            {"d", n.dirs}, {"m", n.mtime}, {"t", "d"}};
+        if (n.dirs > 0 || n.files > 0) o["c"] = 1;
+        arr.push_back(std::move(o));
     };
     addDir(w.nodes[0]);
     for (size_t i = 1; i < w.nodes.size(); ++i) {
@@ -256,7 +308,7 @@ bool scan(const Options& opt_in, const std::atomic<bool>& cancel, Result& out) {
     }
     // 小于阈值的文件按目录聚合成一条，路径用一个不会与实际文件重名的后缀
     for (const NodeAcc& n : w.nodes) {
-        if (n.path.empty() || n.small_files == 0) continue;
+        if (n.path.empty() || n.small_files == 0 || n.depth >= opt.emit_depth) continue;
         std::string ap = n.path;
         if (ap.back() != '/') ap += '/';
         ap += std::string("\x01") + "files";
@@ -273,6 +325,7 @@ std::string toJson(const Result& r) {
     j["ok"] = r.ok;
     if (!r.error.empty()) j["error"] = r.error;
     j["mount"] = r.mount;
+    j["path"] = r.path;
     j["total_kb"] = r.total_kb;
     j["used_kb"] = r.used_kb;
     j["free_kb"] = r.free_kb;

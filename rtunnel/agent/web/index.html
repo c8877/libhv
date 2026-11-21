@@ -516,13 +516,14 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
   }
 
   // 子项分「目录 / 文件」两组，各自最多列 10 项，其余合并成
-  // 「其他目录 N 项」「其他文件 N 项」；点合并行展开全部
+  // 「其他目录 N 项」「其他文件 N 项」；点合并行展开全部。
+  // 返回 null 表示该目录的子项还没取过，需要按需请求。
   function storeKids(c, path) {
     var node = c.map[path];
-    if (!node || !node.children.length) return [];
+    if (!node) return [];
+    if (!node.kidsLoaded) return null;
     var list = node.children;
     if (!state.store.showHidden) list = list.filter(function (k) { return !isHiddenPath(k.p); });
-    if (!list.length) return [];
     var groups = { dir: [], file: [] };
     list.forEach(function (k) {
       (k.t === 'f' || k.t === 'o' ? groups.file : groups.dir).push(k);
@@ -551,7 +552,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
   }
 
   function storeRows(c) {
-    var total = Math.max(1, toNum(c.data.total_kb) * 1024), rows = [];
+    var total = Math.max(1, toNum(c.info.total_kb) * 1024), rows = [];
     function base(node, depth) {
       return { b: node.b, depth: depth,
         pct: Math.max(node.b > 0 ? 0.4 : 0, storePct(node.b, total)),
@@ -582,18 +583,31 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
       var node = c.map[path];
       if (!node) return;
       var kids = storeKids(c, path), open = !!state.store.expanded[path];
+      var hasKids = kids === null ? !!node.c : kids.length > 0;
       var r = { path: path, kind: 'dir', title: path,
         name: path.slice(path.lastIndexOf('/') + 1),
-        toggle: kids.length > 0, open: open };
+        toggle: hasKids, open: open };
       rows.push(Object.assign(r, base(node, depth)));
-      if (open) emitKids(kids, depth + 1, path);
+      if (!open) return;
+      if (kids === null) {
+        rows.push({ path: '', kind: 'loading', name: '加载中…', depth: depth + 1,
+          toggle: false, open: false, b: 0, pct: 0, pctText: '' });
+        return;
+      }
+      emitKids(kids, depth + 1, path);
     }
     // 分区本身已由头部展示，正文从一级子项开始
-    emitKids(storeKids(c, c.data.mount), 0, c.data.mount);
+    var rootKids = storeKids(c, c.info.mount);
+    if (rootKids) emitKids(rootKids, 0, c.info.mount);
     return rows;
   }
 
   function storeRowHtml(r) {
+    if (r.kind === 'loading') {
+      return '<div class="st-row loading" data-kind="loading" style="padding-left:' +
+        (4 + r.depth * 12) + 'px"><span class="caret"></span>' +
+        '<span class="nm mono">' + esc(r.name) + '</span></div>';
+    }
     return '<div class="st-row' + (r.other ? ' other' : '') +
       (r.kind === 'file' ? ' file' : '') + (r.kind === 'small' ? ' small' : '') +
       '" data-path="' + esc(r.path) + '" data-kind="' + r.kind + '"' +
@@ -612,9 +626,8 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
       return '<div class="store-loading"><span>正在扫描 ' + esc(mount) + ' … ' + st.elapsed + 's</span>' +
         '<div class="bar slim"><i style="width:100%;opacity:.35"></i></div></div>';
     }
-    if (st.error) return '<div class="st-warn warn">' + esc(st.error) + '</div>';
-    if (!c) return '';
-    var d = c.data, total = Math.max(1, toNum(d.total_kb) * 1024), html = '';
+    if (!c) return st.error ? '<div class="st-warn warn">' + esc(st.error) + '</div>' : '';
+    var d = c.info, total = Math.max(1, toNum(d.total_kb) * 1024), html = '';
     var showHidden = st.showHidden;
     html += '<div class="store-tools"><span>条长 = 占分区容量 · 缩进 = 层级</span>' +
       '<span class="store-actions">' +
@@ -624,6 +637,7 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
       (showHidden ? ICON_EYE : ICON_EYE_OFF) + '</button>' +
       '<button class="link" type="button" data-rescan="' + esc(mount) + '">重新扫描</button>' +
       '</span></div>';
+    if (c.error) html += '<div class="st-warn warn">' + esc(c.error) + '</div>';
     html += storeRows(c).map(storeRowHtml).join('');
     html += '<div class="st-foot">';
     [['已用', d.used_kb, 'used'], ['可用', d.free_kb, 'free'], ['保留', d.reserved_kb, 'reserved']].forEach(function (r) {
@@ -653,7 +667,6 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     if (!el) return;
     el.innerHTML = mounts.length ? mounts.map(function (m) {
       var p = diskPct(m), cls = tone(p), open = state.store.open === m.mount;
-      var c = state.store.cache[m.mount];
       return '<div class="store"><div class="store-head" data-mount="' + esc(m.mount) + '">' +
         '<span class="caret">' + (open ? '▾' : '▸') + '</span>' +
         '<b>' + esc(m.mount) + '</b>' +
@@ -681,10 +694,49 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
       renderStore(sortedMounts(state.data || {}), true);
       return;
     }
-    loadStore(mount, false);
+    loadStoreRoot(mount, false);
   }
 
-  function loadStore(mount, force) {
+  function storeUrl(mount, path, depth) {
+    return 'api/v1/storage/tree?mount=' + encodeURIComponent(mount) +
+      (path ? '&path=' + encodeURIComponent(path) : '') + '&depth=' + depth;
+  }
+
+  // 把一次响应合并进缓存；rootPath 的子项以本次结果为准
+  function mergeStore(c, d, rootPath, depth) {
+    var nodes = d.nodes || [];
+    nodes.forEach(function (n) {
+      if (!c.map[n.p]) c.map[n.p] = { p: n.p, b: n.b, n: n.n, d: n.d, m: n.m, t: n.t, c: n.c, children: [], kidsLoaded: false };
+      else {
+        var cur = c.map[n.p];
+        cur.b = n.b; cur.n = n.n; cur.d = n.d; cur.m = n.m; cur.t = n.t; cur.c = n.c;
+        if (!cur.children) cur.children = [];
+      }
+    });
+    if (c.map[rootPath]) {
+      c.map[rootPath].children = [];
+      c.map[rootPath].kidsLoaded = true;
+    }
+    var touched = {};
+    nodes.forEach(function (n) {
+      if (n.p === rootPath) return;
+      var i = n.p.lastIndexOf('/');
+      var parent = i <= 0 ? '/' : n.p.slice(0, i);
+      if (!c.map[parent]) return;
+      if (depth > 1 && !touched[parent]) {
+        touched[parent] = true;
+        c.map[parent].children = [];
+      }
+      c.map[parent].children.push(c.map[n.p]);
+    });
+    if (depth > 1 && !d.truncated) {
+      nodes.forEach(function (n) {
+        if (n.t === 'd' && n.p !== rootPath && c.map[n.p]) c.map[n.p].kidsLoaded = true;
+      });
+    }
+  }
+
+  function loadStoreRoot(mount, force) {
     var st = state.store, c = st.cache[mount];
     if (!force && c && Date.now() - c.ts < STORE_TTL) return;
     var seq = ++st.seq;
@@ -697,21 +749,14 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
       st.elapsed = Math.round((Date.now() - t0) / 1000);
       renderStore(sortedMounts(state.data || {}), true);
     }, 250);
-    fetch('api/v1/storage/tree?mount=' + encodeURIComponent(mount), { cache: 'no-store' })
+    fetch(storeUrl(mount, '', 1), { cache: 'no-store' })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (seq !== st.seq) return;
         if (!d || !d.ok) throw new Error((d && d.error) || 'scan failed');
-        var map = {};
-        (d.nodes || []).forEach(function (n) { map[n.p] = { p: n.p, b: n.b, n: n.n, d: n.d, m: n.m, t: n.t, children: [] }; });
-        (d.nodes || []).forEach(function (n) {
-          if (n.p === mount) return;
-          var parent = n.p.slice(0, n.p.lastIndexOf('/')) || '/';
-          while (parent && parent !== mount && !map[parent]) parent = parent.slice(0, parent.lastIndexOf('/')) || '/';
-          if (map[parent]) map[parent].children.push(map[n.p]);
-          else if (map[mount]) map[mount].children.push(map[n.p]);
-        });
-        st.cache[mount] = { data: d, map: map, ts: Date.now() };
+        var cur = { info: d, map: {}, ts: Date.now(), loading: {} };
+        mergeStore(cur, d, mount, 1);
+        st.cache[mount] = cur;
       })
       .catch(function (e) {
         if (seq === st.seq) st.error = '扫描失败：' + (e.message || e);
@@ -725,10 +770,36 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
       });
   }
 
+  // 取某个目录的直接子项（depth=1）或整棵子树（depth>1）
+  function loadStoreKids(mount, path, depth, done) {
+    var c = state.store.cache[mount];
+    if (!c || c.loading[path]) {
+      if (done) done(false);
+      return;
+    }
+    c.loading[path] = true;
+    fetch(storeUrl(mount, path, depth), { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.ok) throw new Error((d && d.error) || 'scan failed');
+        mergeStore(c, d, path, depth);
+        c.error = '';
+        renderStore(sortedMounts(state.data || {}), true);
+        if (done) done(true);
+      })
+      .catch(function (e) {
+        delete state.store.expanded[path];
+        c.error = '加载 ' + path + ' 失败：' + (e.message || e);
+        renderStore(sortedMounts(state.data || {}), true);
+        if (done) done(false);
+      })
+      .then(function () { c.loading[path] = false; });
+  }
+
   $('#storeList').addEventListener('click', function (e) {
     var rescan = e.target.closest('[data-rescan]');
     if (rescan) {
-      loadStore(rescan.getAttribute('data-rescan'), true);
+      loadStoreRoot(rescan.getAttribute('data-rescan'), true);
       return;
     }
     if (e.target.closest('[data-toggle-hidden]')) {
@@ -742,13 +813,25 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
       return;
     }
     var row = e.target.closest('.st-row');
-    if (!row) return;
+    if (!row || row.getAttribute('data-kind') === 'loading') return;
     var path = row.getAttribute('data-path');
     if (row.getAttribute('data-other')) {
       state.store.showAll[path] = true;
     }
     else if (row.getAttribute('data-kids')) {
-      state.store.expanded[path] = !state.store.expanded[path];
+      if (state.store.expanded[path]) {
+        delete state.store.expanded[path];
+      }
+      else {
+        state.store.expanded[path] = true;
+        var c = state.store.cache[state.store.open];
+        var node = c && c.map[path];
+        if (node && !node.kidsLoaded) {
+          renderStore(sortedMounts(state.data || {}), true);
+          loadStoreKids(state.store.open, path, 1);
+          return;
+        }
+      }
     }
     else {
       return;
@@ -777,32 +860,45 @@ table.dense th,table.dense td{padding:6px 8px;font-size:12px}
     $('#storeMenu').hidden = true;
   }
 
+  // 递归展开整棵子树：先按需把子树取回来，再逐层标记
   function applyStoreMenu(open) {
     var path = state.store.menu.path;
     closeStoreMenu();
-    var c = state.store.cache[state.store.open];
+    var mount = state.store.open;
+    var c = state.store.cache[mount];
     if (!path || !c) return;
-    (function walk(p) {
-      var node = c.map[p];
-      if (!node) return;
-      if (open) {
-        state.store.expanded[p] = true;
-        state.store.showAll[p] = true;
-      }
-      else {
-        delete state.store.expanded[p];
-        delete state.store.showAll[p];
-      }
-      node.children.forEach(function (k) { walk(k.p); });
-    })(path);
-    renderStore(sortedMounts(state.data || {}), true);
+    var mark = function () {
+      (function walk(p) {
+        var node = c.map[p];
+        if (!node) return;
+        if (open) {
+          state.store.expanded[p] = true;
+          state.store.showAll[p] = true;
+        }
+        else {
+          delete state.store.expanded[p];
+          delete state.store.showAll[p];
+        }
+        node.children.forEach(function (k) { walk(k.p); });
+      })(path);
+      renderStore(sortedMounts(state.data || {}), true);
+    };
+    var node = c.map[path];
+    if (open && node && node.c && !node.kidsLoaded) {
+      // 先展开显示「加载中」，子树回来后再逐层标记
+      state.store.expanded[path] = true;
+      renderStore(sortedMounts(state.data || {}), true);
+      loadStoreKids(mount, path, 32, function (ok) { if (ok) mark(); });
+      return;
+    }
+    mark();
   }
 
   $('#storeList').addEventListener('contextmenu', function (e) {
     var row = e.target.closest('.st-row');
     if (!row) return;
     var kind = row.getAttribute('data-kind');
-    if (kind === 'file' || kind === 'small') return;
+    if (kind === 'file' || kind === 'small' || kind === 'loading') return;
     var path = row.getAttribute('data-path');
     if (!path) return;
     var c = state.store.cache[state.store.open];

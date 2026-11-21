@@ -313,8 +313,12 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
     service->GET("/api/v1/storage/tree", [app](const HttpRequestPtr& req, const HttpResponseWriterPtr& writer) {
         nlohmann::json q;
         q["mount"] = req->GetParam("mount", "/");
-        int depth = atoi(req->GetParam("depth", "0").c_str());
-        if (depth > 0) q["depth"] = depth;
+        std::string path = req->GetParam("path");
+        if (!path.empty()) q["path"] = path;
+        int depth = atoi(req->GetParam("depth", "1").c_str());
+        if (depth < 0) depth = 0;
+        if (depth > 64) depth = 64;
+        q["depth"] = depth;
         std::string body = app->storageSync([app, q]() { return app->storageTreeJson(q); });
         if (body.empty()) body = "{\"ok\":false,\"error\":\"busy\"}";
         sendJson(req.get(), writer, body);

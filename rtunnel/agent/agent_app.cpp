@@ -3099,8 +3099,12 @@ std::string AgentApp::storageSync(const std::function<std::string()>& fn) {
 std::string AgentApp::storageTreeJson(const nlohmann::json& req) {
     rtstorage::Options opt;
     opt.mount = req.value("mount", std::string("/"));
-    int depth = req.value("depth", 0);
-    if (depth > 0) opt.tree_depth = depth > 32 ? 32 : depth;
+    opt.path = req.value("path", std::string());
+    // depth 是相对 path 的回传层级：1 = 只回直接子项
+    int depth = req.value("depth", 1);
+    if (depth < 0) depth = 0;
+    if (depth > 64) depth = 64;
+    opt.emit_depth = depth;
     rtstorage::Result r;
     rtstorage::scan(opt, storage_cancel_, r);
     return rtstorage::toJson(r);
@@ -3123,6 +3127,7 @@ void AgentApp::handleStorageReq(const rtnp::Frame* f) {
             if (info.is_discarded() || !info.value("ok", false)) {
                 meta["ok"] = false;
                 meta["mount"] = rj.value("mount", std::string("/"));
+                meta["path"] = rj.value("path", std::string());
                 meta["error"] = info.is_discarded() ? std::string("bad scan result")
                                                     : info.value("error", std::string("scan failed"));
             }
@@ -3157,6 +3162,7 @@ void AgentApp::handleStorageReq(const rtnp::Frame* f) {
         e["ok"] = false;
         e["error"] = "busy";
         e["mount"] = rj.value("mount", std::string("/"));
+        e["path"] = rj.value("path", std::string());
         std::string body = e.dump();
         rtnp::Writer w;
         w.str(body.c_str());
