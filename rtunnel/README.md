@@ -300,7 +300,9 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
 - 监控「指标」下拉里可「添加进程…」：选中进程的 CPU/内存后才开始采样，每个进程两条曲线
   （`proc:<pid>:cpu` / `proc:<pid>:mem`，默认 1 s 一个点、保留 30 分钟）。CPU 折成整机占比，
   和系统 cpu 同一标尺；内存为占总内存百分比。进程曲线单独成图，避免被系统内存压成贴底直线；
-  从采样配置删除后 agent 同时清掉该指标的 ring 和 CPU 增量状态。
+  取消进程指标 chip 会下发 `enabled=false`，立即停止该进程采样；agent 同时清掉 ring、
+  采样时刻和 CPU 增量状态，内存归还。系统指标（cpu/mem/load/net/temp）取消 chip 只隐藏曲线，
+  仍按配置采样。停用的进程指标保留在「采样配置」里，打开开关即可恢复。
   指标 chip 的勾选按设备记在浏览器本地，刷新或换设备后进程曲线仍然显示；本地页的采样配置只读，
   修改入口只在管理台
 

@@ -3516,26 +3516,35 @@ void AgentApp::onFrame(rtnp::Frame* f) {
             series_cfgs[name] = c;
             {
                 std::lock_guard<std::mutex> lk(series_mu_);
-                auto it = series_rings.find(name);
-                if (it != series_rings.end()) {
-                    while ((int)it->second.size() > c.points) it->second.pop_front();
+                if (!c.enabled) {
+                    // 停用的指标立即归还内存：环形缓冲、采样时刻和 CPU 增量都清掉
+                    series_rings.erase(name);
+                }
+                else {
+                    auto it = series_rings.find(name);
+                    if (it != series_rings.end()) {
+                        while ((int)it->second.size() > c.points) it->second.pop_front();
+                    }
                 }
             }
         }
-        // 配置里删掉的指标：环形缓冲和进程增量状态一起清，避免长期占内存
+        // 配置里删掉或停用的指标：环形缓冲和进程增量状态一起清，避免长期占内存
         {
             std::lock_guard<std::mutex> lk(series_mu_);
             for (auto it = series_rings.begin(); it != series_rings.end();) {
-                if (!series_cfgs.count(it->first)) it = series_rings.erase(it);
+                auto cfg = series_cfgs.find(it->first);
+                if (cfg == series_cfgs.end() || !cfg->second.enabled) it = series_rings.erase(it);
                 else ++it;
             }
         }
         for (auto it = series_last_ms.begin(); it != series_last_ms.end();) {
-            if (!series_cfgs.count(it->first)) it = series_last_ms.erase(it);
+            auto cfg = series_cfgs.find(it->first);
+            if (cfg == series_cfgs.end() || !cfg->second.enabled) it = series_last_ms.erase(it);
             else ++it;
         }
         for (auto it = proc_sample_state_.begin(); it != proc_sample_state_.end();) {
-            if (!series_cfgs.count(it->first)) it = proc_sample_state_.erase(it);
+            auto cfg = series_cfgs.find(it->first);
+            if (cfg == series_cfgs.end() || !cfg->second.enabled) it = proc_sample_state_.erase(it);
             else ++it;
         }
         // 采样配置属于能力配置，改完立即落盘，重启后仍生效

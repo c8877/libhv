@@ -779,7 +779,7 @@
             </el-select>
           </div>
           <div v-if="enabledCfg.length" class="series-tip">
-            移除指标 chip 只会隐藏曲线；要停止采样或删除进程指标，请到「采样配置」
+            取消进程指标会停止该进程采样并释放缓存；系统指标只隐藏曲线。恢复采样到「采样配置」打开开关
           </div>
           <div v-if="!enabledCfg.length" class="muted">该设备还没有启用的采样指标，可在「采样配置」中添加</div>
           <template v-else>
@@ -1388,6 +1388,8 @@ const seriesCfg = ref([])
 const enabledCfg = computed(() => seriesCfg.value.filter((c) => c.enabled))
 const unsyncedCount = computed(() => seriesCfg.value.filter((c) => c.enabled && !c.synced).length)
 const selected = ref([])
+// 上一次选择：用来判断 chip 是被勾上还是被取消，取消进程指标要停采样
+const pickedRef = ref([])
 const seriesSelectRef = ref(null)
 const cache = reactive({})
 const lastTs = reactive({})
@@ -2388,6 +2390,7 @@ watch(enabledCfg, (list) => {
   if (keep.length !== selected.value.length) {
     selected.value = keep
     if (!selected.value.length) pickSeries()
+    pickedRef.value = [...selected.value]
     saveSeriesSelection()
     if (mainTab.value === 'monitor' || mainTab.value === 'overview') pullSeries(false)
   }
@@ -2411,6 +2414,7 @@ function pickSeries() {
   const enabled = enabledCfg.value.map((c) => c.series)
   const prefer = enabled.filter((s) => s === 'cpu' || s === 'mem' || s.startsWith('proc:'))
   selected.value = prefer.length ? prefer : enabled.slice(0, 1)
+  pickedRef.value = [...selected.value]
 }
 
 function loadSeriesSelection() {
@@ -2421,6 +2425,7 @@ function loadSeriesSelection() {
   const keep = saved.filter((s) => enabled.includes(s))
   if (!keep.length) return false
   selected.value = [...new Set(keep)]
+  pickedRef.value = [...selected.value]
   return true
 }
 
@@ -2432,6 +2437,7 @@ function syncSeriesSelection() {
   const enabled = enabledCfg.value.map((c) => c.series)
   selected.value = selected.value.filter((s) => enabled.includes(s))
   if (!selected.value.length) pickSeries()
+  pickedRef.value = [...selected.value]
   saveSeriesSelection()
 }
 
@@ -2497,19 +2503,61 @@ async function pullSeries(full) {
   renderCharts()
 }
 
-async function onSeriesPick() {
+// 取消进程指标 chip 等于停止该进程采样：下发 enabled=false，agent 会同时清掉
+// 环形缓冲和 CPU 增量状态。系统指标是设备基础采样，取消只隐藏曲线。
+async function setProcSampling(names, enable) {
+  const wanted = (names || []).filter((s) => String(s).startsWith('proc:'))
+  if (!wanted.length) return false
+  let dirty = false
+  const list = seriesCfg.value.map((c) => {
+    if (!wanted.includes(c.series) || !!c.enabled === enable) return c
+    dirty = true
+    return Object.assign({}, c, { enabled: enable })
+  })
+  if (!dirty) return false
+  try {
+    await putSeriesConfig(list)
+  } catch (e) {
+    ElMessage.error((enable ? '恢复' : '停止') + '进程采样失败：' + e.message)
+    return false
+  }
+  await fetchSeriesCfg()
+  if (!enable) {
+    // 只清曲线数据；进程名保留，采样配置里还能认出是哪一项
+    wanted.forEach((s) => {
+      delete cache[s]
+      delete lastTs[s]
+      delete pullAt[s]
+    })
+  }
+  return true
+}
+
+async function onSeriesPick(val) {
+  const next = Array.isArray(val) ? val.slice() : selected.value.slice()
+  const prev = pickedRef.value
+  const removed = prev.filter((s) => !next.includes(s))
+  const added = next.filter((s) => !prev.includes(s))
+  pickedRef.value = next
   saveSeriesSelection()
+  if (await setProcSampling(removed, false)) ElMessage.success('已停止进程采样并释放缓存')
+  await setProcSampling(added, true)
   await pullSeries(true)
 }
 
 function selectAllSeries() {
   selected.value = enabledCfg.value.map((c) => c.series)
+  pickedRef.value = [...selected.value]
   saveSeriesSelection()
   pullSeries(true)
 }
-function clearSeries() {
+
+async function clearSeries() {
+  const prev = pickedRef.value
   selected.value = []
+  pickedRef.value = []
   saveSeriesSelection()
+  if (await setProcSampling(prev, false)) ElMessage.success('已停止进程采样并释放缓存')
   renderCharts()
 }
 
@@ -3013,15 +3061,19 @@ function onMetricRow(row) {
   metricTable.value && metricTable.value.toggleRowExpansion(row)
 }
 
+function putSeriesConfig(list) {
+  return Api.put(agentBase.value + '/metrics/series/config',
+    list.map((c) => ({
+      series: c.series,
+      enabled: !!c.enabled,
+      interval_sec: Number(c.interval_sec) || 5,
+      points: Number(c.points) || 720,
+    })))
+}
+
 async function saveMetricList(list) {
   try {
-    await Api.put(agentBase.value + '/metrics/series/config',
-      list.map((c) => ({
-        series: c.series,
-        enabled: !!c.enabled,
-        interval_sec: Number(c.interval_sec) || 5,
-        points: Number(c.points) || 720,
-      })))
+    await putSeriesConfig(list)
     await fetchSeriesCfg()
     syncSeriesSelection()
     await pullSeries(true)
@@ -3116,6 +3168,7 @@ async function addProcMetrics() {
   procPickOpen.value = false
   if (!(await saveMetricList(list))) return
   selected.value = [...new Set(selected.value.concat(picked))]
+  pickedRef.value = [...selected.value]
   saveSeriesSelection()
   await pullSeries(true)
   // 下发后 agent 要等下一个采样点；补拉两次，曲线不用等用户点“全量”
