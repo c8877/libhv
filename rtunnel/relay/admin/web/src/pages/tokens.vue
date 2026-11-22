@@ -15,24 +15,28 @@
       Token 继承所属账号的权限组；加入权限组后只能收窄，不会超过归属账号。
     </div>
 
-    <DataTable :data="list" :sort-keys="sortKeys" v-loading="loading">
-      <el-table-column label="名称 / 前缀" :min-width="isPhone ? 150 : 170">
+    <el-table :data="list" v-loading="loading">
+      <el-table-column label="名称 / 前缀" :min-width="isPhone ? 150 : 170" prop="name"
+                       sortable :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
           <b>{{ row.name || '未命名' }}</b>
           <div class="mono muted">{{ row.token_prefix }}</div>
           <div v-if="isPhone && isAdmin" class="muted">{{ row.username }}</div>
         </template>
       </el-table-column>
-      <el-table-column v-if="isAdmin && !isPhone" label="所属账号" min-width="120">
+      <el-table-column v-if="isAdmin && !isPhone" label="所属账号" min-width="120" prop="username"
+                       sortable :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">{{ row.username }}</template>
       </el-table-column>
-      <el-table-column label="状态 / 到期" :min-width="isPhone ? 110 : 140">
+      <el-table-column label="状态 / 到期" :min-width="isPhone ? 110 : 140" prop="status"
+                       sortable :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
           <el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
           <div class="muted">{{ expiryText(row.expires_at_ms) }}</div>
         </template>
       </el-table-column>
-      <el-table-column v-if="!isPhone" label="权限组" min-width="150">
+      <el-table-column v-if="!isPhone" label="权限组" min-width="150" prop="group_count"
+                       sortable :sort-orders="NUM_ORDERS">
         <template #default="{ row }">
           <template v-if="row.group_count > 0">
             <el-tag v-for="g in splitGroups(row.groups)" :key="g" size="small" class="gtag">{{ g }}</el-tag>
@@ -40,7 +44,8 @@
           <span v-else class="muted">全部（继承账号）</span>
         </template>
       </el-table-column>
-      <el-table-column v-if="!isPhone" label="最近使用" min-width="140">
+      <el-table-column v-if="!isPhone" label="最近使用" min-width="140" prop="last_used_ms"
+                       sortable :sort-orders="NUM_ORDERS">
         <template #default="{ row }">
           {{ row.last_used_ms ? time(row.last_used_ms) : '—' }}
           <div v-if="row.last_used_ip" class="muted mono">{{ row.last_used_ip }}</div>
@@ -82,7 +87,7 @@
         </template>
       </el-table-column>
       <template #empty><el-empty description="暂无 API Token" :image-size="70" /></template>
-    </DataTable>
+    </el-table>
   </div>
 
   <!-- 新建 / 编辑 -->
@@ -162,18 +167,10 @@ import { auth, roleOf, ROLE_NAMES } from '@/shared/store.js'
 import { copyText, time } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import ApiDocPanel from '@/components/ApiDocPanel.vue'
-import DataTable from '@/components/DataTable.vue'
+import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
 
 const { isPhone } = useBreakpoint()
 const isAdmin = computed(() => roleOf() === 'admin')
-
-const sortKeys = {
-  '名称 / 前缀': 'name',
-  '所属账号': 'username',
-  '状态 / 到期': 'status',
-  '权限组': { key: 'group_count', type: 'num' },
-  '最近使用': { key: 'last_used_ms', type: 'num' }
-}
 
 const list = ref([])
 const users = ref([])

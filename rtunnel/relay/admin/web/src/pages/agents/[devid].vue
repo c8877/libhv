@@ -236,15 +236,15 @@
             <span v-if="procTruncated" class="muted">· 结果已截断，可搜索缩小范围</span>
           </div>
 
-          <DataTable v-if="!isPhone" :data="procEntries" :sort-keys="procSortKeys"
-                     :sort-key="procSort" :sort-dir="procDir" server-sort
-                     v-loading="procLoading" size="small"
-                     @sort-change="onProcSortChange"
-                     @row-contextmenu="openProcMenu" @row-dblclick="showProcDetail">
-            <el-table-column label="PID" width="82" prop="pid">
+          <el-table v-if="!isPhone" :data="procEntries" v-loading="procLoading" size="small"
+                    :default-sort="{ prop: procSort, order: procDir > 0 ? 'ascending' : 'descending' }"
+                    @sort-change="onProcSortChange"
+                    @row-contextmenu="openProcMenu" @row-dblclick="showProcDetail">
+            <el-table-column label="PID" width="82" prop="pid" sortable="custom" :sort-orders="TEXT_ORDERS">
               <template #default="{ row }"><span class="mono">{{ row.pid }}</span></template>
             </el-table-column>
-            <el-table-column label="用户" min-width="96" prop="user" show-overflow-tooltip>
+            <el-table-column label="用户" min-width="96" prop="user" show-overflow-tooltip
+                             sortable="custom" :sort-orders="TEXT_ORDERS">
               <template #default="{ row }">{{ row.user || '—' }}</template>
             </el-table-column>
             <el-table-column label="状态" width="86">
@@ -252,26 +252,31 @@
                 <el-tag size="small" :type="procStateTone(row)">{{ row.state_text }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="CPU" width="82" align="right" prop="cpu">
+            <el-table-column label="CPU" width="82" align="right" prop="cpu"
+                             sortable="custom" :sort-orders="NUM_ORDERS">
               <template #default="{ row }"><span class="num">{{ row.cpu_pct.toFixed(1) }}%</span></template>
             </el-table-column>
-            <el-table-column label="内存" width="88" align="right" prop="mem">
+            <el-table-column label="内存" width="88" align="right" prop="mem"
+                             sortable="custom" :sort-orders="NUM_ORDERS">
               <template #default="{ row }"><span class="num">{{ kbText(row.rss_kb) }}</span></template>
             </el-table-column>
-            <el-table-column label="线程" width="70" align="right" prop="threads">
+            <el-table-column label="线程" width="70" align="right" prop="threads"
+                             sortable="custom" :sort-orders="NUM_ORDERS">
               <template #default="{ row }"><span class="num">{{ row.threads }}</span></template>
             </el-table-column>
-            <el-table-column label="命令" min-width="260" prop="comm" show-overflow-tooltip>
+            <el-table-column label="命令" min-width="260" prop="comm" show-overflow-tooltip
+                             sortable="custom" :sort-orders="TEXT_ORDERS">
               <template #default="{ row }">
                 <span class="mono pcmd">{{ row.cmd }}</span>
                 <el-tag v-if="row.kernel" size="small" type="info" effect="plain" class="inline-tag">内核</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="启动时间" width="150" prop="start">
+            <el-table-column label="启动时间" width="150" prop="start"
+                             sortable="custom" :sort-orders="NUM_ORDERS">
               <template #default="{ row }"><span class="muted">{{ time(row.start_ms) }}</span></template>
             </el-table-column>
             <template #empty><div class="muted">没有匹配的进程</div></template>
-          </DataTable>
+          </el-table>
 
           <div v-else class="net-cards" v-loading="procLoading">
             <div v-for="r in procEntries" :key="r.pid" class="net-card">
@@ -504,11 +509,13 @@
 
       <!-- 网卡 -->
       <template v-if="netScope === 'nic'">
-        <DataTable v-if="!isPhone" :data="nicRows" :sort-keys="nicSortKeys" size="small" class="net-table">
-          <el-table-column label="网卡" min-width="110">
+        <el-table v-if="!isPhone" :data="nicRows" size="small" class="net-table">
+          <el-table-column label="网卡" min-width="110" prop="name" sortable :sort-orders="TEXT_ORDERS">
             <template #default="{ row }"><span class="mono strong">{{ row.name }}</span></template>
           </el-table-column>
-          <el-table-column label="状态" width="118">
+          <el-table-column label="状态" width="118" prop="link"
+                           sortable :sort-by="(n) => (nicLinkUp(n) ? 'up' : 'down')"
+                           :sort-orders="TEXT_ORDERS">
             <template #default="{ row }">
               <el-tag size="small" :type="nicLinkUp(row) ? 'success' : 'info'">
                 {{ row.operstate || (row.up ? 'up' : 'down') }}
@@ -516,27 +523,34 @@
               <span v-if="row.up === false" class="muted nic-sub">已禁用</span>
             </template>
           </el-table-column>
-          <el-table-column label="IP / 掩码" min-width="180">
+          <el-table-column label="IP / 掩码" min-width="180" prop="ip" sortable
+                           :sort-orders="TEXT_ORDERS">
             <template #default="{ row }">
               <span class="mono">{{ row.ip || '—' }}</span>
               <span v-if="row.netmask" class="muted"> / {{ row.netmask }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="MAC" width="152">
+          <el-table-column label="MAC" width="152" prop="mac" sortable :sort-orders="TEXT_ORDERS">
             <template #default="{ row }"><span class="mono">{{ row.mac || '—' }}</span></template>
           </el-table-column>
-          <el-table-column label="MTU" width="78" align="right">
+          <el-table-column label="MTU" width="78" align="right" prop="mtu" sortable
+                           :sort-orders="NUM_ORDERS">
             <template #default="{ row }">{{ row.mtu || '—' }}</template>
           </el-table-column>
-          <el-table-column label="速率" width="90" align="right">
+          <el-table-column label="速率" width="90" align="right" prop="speed_mbps" sortable
+                           :sort-orders="NUM_ORDERS">
             <template #default="{ row }">{{ row.speed_mbps ? row.speed_mbps + ' M' : '—' }}</template>
           </el-table-column>
-          <el-table-column label="收 / 发" min-width="170">
+          <el-table-column label="收 / 发" min-width="170" prop="rx_bytes"
+                           sortable :sort-by="(n) => (n.rx_bytes || 0) + (n.tx_bytes || 0)"
+                           :sort-orders="NUM_ORDERS">
             <template #default="{ row }">
               <span class="mono">↓ {{ bytes(row.rx_bytes) }} · ↑ {{ bytes(row.tx_bytes) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="错误" width="88" align="right">
+          <el-table-column label="错误" width="88" align="right" prop="errors"
+                           sortable :sort-by="(n) => (n.rx_errors || 0) + (n.tx_errors || 0)"
+                           :sort-orders="NUM_ORDERS">
             <template #default="{ row }">
               <span class="mono" :class="{ 'nic-err': (row.rx_errors || 0) + (row.tx_errors || 0) > 0 }">
                 {{ (row.rx_errors || 0) + (row.tx_errors || 0) }}
@@ -544,7 +558,7 @@
             </template>
           </el-table-column>
           <template #empty><div class="muted">没有网卡信息</div></template>
-        </DataTable>
+        </el-table>
         <div v-else class="net-cards">
           <div v-for="n in nicRows" :key="n.name" class="net-card">
             <div class="nc-top">
@@ -1238,10 +1252,10 @@ import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, r
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, MoreFilled, Refresh } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
-import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
 import { can, canManage } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
+import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
 import { ago, bytes, copyText, downloadJson, duration, kbPair, time } from '@/shared/utils.js'
 const FileManagerCard = defineAsyncComponent(() => import('@/components/FileManagerCard.vue'))
 const SvcManagerCard = defineAsyncComponent(() => import('@/components/SvcManagerCard.vue'))
@@ -1531,17 +1545,6 @@ function stateTone(st) {
   if (st === 'ESTABLISHED' || st === 'ESTAB' || st === 'CONNECTED') return 'primary'
   if (st === 'TIME_WAIT' || st === 'CLOSE_WAIT' || st === 'CLOSING') return 'warning'
   return 'info'
-}
-
-const nicSortKeys = {
-  '网卡': 'name',
-  '状态': { key: 'link', type: 'text', value: (n) => (nicLinkUp(n) ? 'up' : 'down') },
-  'IP / 掩码': 'ip',
-  'MAC': 'mac',
-  'MTU': { key: 'mtu', type: 'num' },
-  '速率': { key: 'speed_mbps', type: 'num' },
-  '收 / 发': { key: 'rx_bytes', type: 'num' },
-  '错误': { key: 'errors', type: 'num', value: (n) => (n.rx_errors || 0) + (n.tx_errors || 0) }
 }
 
 const nicRows = computed(() => {
@@ -2574,31 +2577,24 @@ async function loadProcs(refresh, silent) {
 
 function onProcPage() { loadProcs(false, false) }
 
-const procSortKeys = {
-  'PID': { key: 'pid', type: 'text' },
-  '用户': { key: 'user', type: 'text' },
-  'CPU': { key: 'cpu', type: 'num' },
-  '内存': { key: 'mem', type: 'num' },
-  '线程': { key: 'threads', type: 'num' },
-  '命令': { key: 'comm', type: 'text' },
-  '启动时间': { key: 'start', type: 'num' }
+const PROC_SORT_TYPES = {
+  pid: 'text', user: 'text',
+  cpu: 'num', mem: 'num', threads: 'num', comm: 'text', start: 'num'
 }
 
-function onProcSortChange({ key, dir }) {
-  procSort.value = key
+function onProcSortChange({ prop, order }) {
+  if (!order) return
+  const dir = order === 'descending' ? -1 : 1
+  if (prop === procSort.value && dir === procDir.value) return
+  procSort.value = prop
   procDir.value = dir
   procPage.value = 1
   loadProcs(false)
 }
 
-function procDefaultDir(key) {
-  const name = Object.keys(procSortKeys).find((k) => procSortKeys[k].key === key)
-  return procSortKeys[name]?.type === 'num' ? -1 : 1
-}
-
 function onProcSort() {
   procPage.value = 1
-  procDir.value = procDefaultDir(procSort.value)
+  procDir.value = PROC_SORT_TYPES[procSort.value] === 'num' ? -1 : 1
   loadProcs(false)
 }
 

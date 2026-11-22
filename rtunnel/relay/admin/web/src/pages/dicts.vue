@@ -29,21 +29,26 @@
       <span v-else class="muted small">设备由 agent 上线自动登记，可改名或临时停用</span>
     </div>
 
-    <DataTable :data="rows" :sort-keys="sortKeys" size="small" v-loading="loading" row-key="id">
+    <el-table :data="rows" size="small" v-loading="loading" row-key="id">
       <template v-if="tab === 'resources'">
-        <el-table-column label="资源键" min-width="170">
+        <el-table-column label="资源键" min-width="170" prop="key"
+                       sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }"><code class="key">{{ row.key }}</code></template>
         </el-table-column>
-        <el-table-column label="分类" width="90">
+        <el-table-column label="分类" width="90" prop="category"
+                       sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }">{{ row.category || '—' }}</template>
         </el-table-column>
-        <el-table-column label="显示名" min-width="150">
+        <el-table-column label="显示名" min-width="150" prop="name"
+                       sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }">{{ row.name || '—' }}</template>
         </el-table-column>
-        <el-table-column label="说明" min-width="220" show-overflow-tooltip>
+        <el-table-column label="说明" min-width="220" show-overflow-tooltip prop="description"
+                       sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }"><span class="muted">{{ row.description || '—' }}</span></template>
         </el-table-column>
-        <el-table-column label="状态" width="80">
+        <el-table-column label="状态" width="80" prop="enabled"
+                       sortable :sort-by="(r) => (r.enabled ? 1 : 0)" :sort-orders="NUM_ORDERS">
           <template #default="{ row }">
             <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '停用' }}</el-tag>
           </template>
@@ -57,27 +62,34 @@
       </template>
 
       <template v-else-if="tab === 'devices'">
-        <el-table-column label="设备 ID" min-width="150">
+        <el-table-column label="设备 ID" min-width="150" prop="devid"
+                       sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }"><code class="key">{{ row.devid }}</code></template>
         </el-table-column>
-        <el-table-column label="名称" min-width="130">
+        <el-table-column label="名称" min-width="130" prop="name"
+                       sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }">{{ row.name || '—' }}</template>
         </el-table-column>
-        <el-table-column label="版本" width="90">
+        <el-table-column label="版本" width="90" prop="version"
+                       sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }">{{ row.version || '—' }}</template>
         </el-table-column>
-        <el-table-column label="状态" width="90">
+        <el-table-column label="状态" width="90" prop="online"
+                       sortable :sort-by="(r) => (r.online ? 1 : 0)" :sort-orders="NUM_ORDERS">
           <template #default="{ row }">
             <el-tag :type="row.online ? 'success' : 'info'" size="small">{{ row.online ? '在线' : '离线' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="所属组" width="80">
+        <el-table-column label="所属组" width="80" prop="group_count"
+                       sortable :sort-orders="NUM_ORDERS">
           <template #default="{ row }">{{ row.group_count || 0 }}</template>
         </el-table-column>
-        <el-table-column v-if="!isPhone" label="最近在线" min-width="140">
+        <el-table-column v-if="!isPhone" label="最近在线" min-width="140" prop="last_seen_ms"
+                       sortable :sort-orders="NUM_ORDERS">
           <template #default="{ row }"><span class="muted">{{ time(row.last_seen_ms) }}</span></template>
         </el-table-column>
-        <el-table-column label="授权" width="80">
+        <el-table-column label="授权" width="80" prop="enabled"
+                       sortable :sort-by="(r) => (r.enabled ? 1 : 0)" :sort-orders="NUM_ORDERS">
           <template #default="{ row }">
             <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '停用' }}</el-tag>
           </template>
@@ -94,16 +106,19 @@
       </template>
 
       <template v-else>
-        <el-table-column :label="tab === 'ports' ? '端口/范围' : '路径/模式'" min-width="170">
+        <el-table-column :label="tab === 'ports' ? '端口/范围' : '路径/模式'" min-width="170" prop="value"
+                       sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }"><code class="key">{{ row.value }}</code></template>
         </el-table-column>
-        <el-table-column v-if="tab === 'ttys'" label="类型" width="90">
+        <el-table-column v-if="tab === 'ttys'" label="类型" width="90" prop="kind"
+                       sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }">{{ row.kind || '—' }}</template>
         </el-table-column>
         <el-table-column label="名称" min-width="130">
           <template #default="{ row }">{{ row.name || '—' }}</template>
         </el-table-column>
-        <el-table-column v-if="!isPhone" label="说明" min-width="200" show-overflow-tooltip>
+        <el-table-column v-if="!isPhone" label="说明" min-width="200" show-overflow-tooltip prop="description"
+                       sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }"><span class="muted">{{ row.description || '—' }}</span></template>
         </el-table-column>
         <el-table-column label="状态" width="80">
@@ -122,7 +137,7 @@
         </el-table-column>
       </template>
       <template #empty><div class="muted empty">暂无字典项</div></template>
-    </DataTable>
+    </el-table>
 
     <div class="pager">
       <el-pagination background layout="total, sizes, prev, pager, next" :total="total"
@@ -163,10 +178,10 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
 import { can } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
+import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
 
 const { isPhone } = useBreakpoint()
 const canWrite = computed(() => can('dict.write'))
@@ -177,38 +192,6 @@ const q = ref('')
 const page = ref(1)
 const size = ref(10)
 const total = ref(0)
-const sortKeys = computed(() => {
-  const enabled = { key: 'enabled', type: 'num', value: (r) => (r.enabled ? 1 : 0) }
-  if (tab.value === 'devices') {
-    return {
-      '设备 ID': 'devid',
-      '名称': 'name',
-      '版本': 'version',
-      '状态': { key: 'online', type: 'num', value: (r) => (r.online ? 1 : 0) },
-      '所属组': { key: 'group_count', type: 'num' },
-      '最近在线': { key: 'last_seen_ms', type: 'num' },
-      '授权': enabled
-    }
-  }
-  if (tab.value === 'resources') {
-    return {
-      '资源键': 'key',
-      '分类': 'category',
-      '显示名': 'name',
-      '说明': 'description',
-      '状态': enabled
-    }
-  }
-  return {
-    '端口/范围': 'value',
-    '路径/模式': 'value',
-    '类型': 'kind',
-    '名称': 'name',
-    '说明': 'description',
-    '状态': enabled
-  }
-})
-
 const rows = ref([])
 const loading = ref(false)
 

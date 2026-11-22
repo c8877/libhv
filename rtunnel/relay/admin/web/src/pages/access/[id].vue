@@ -86,33 +86,38 @@
         </el-tab-pane>
       </el-tabs>
 
-      <DataTable :data="filteredTokens" :sort-keys="sortKeys" v-loading="loading">
-        <el-table-column label="名称 / 前缀" :min-width="isPhone ? 120 : 160">
+      <el-table :data="filteredTokens" v-loading="loading">
+        <el-table-column label="名称 / 前缀" :min-width="isPhone ? 120 : 160" prop="name"
+                         sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }">
             <b>{{ row.name || '未命名' }}</b>
             <div class="mono muted">{{ row.token_prefix }}…</div>
           </template>
         </el-table-column>
-        <el-table-column label="状态 / 到期" :min-width="isPhone ? 110 : 140">
+        <el-table-column label="状态 / 到期" :min-width="isPhone ? 110 : 140" prop="status"
+                         sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }">
             <el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
             <div class="muted">{{ expiryText(row.expires_at_ms) }}</div>
           </template>
         </el-table-column>
-        <el-table-column v-if="!isPhone" label="流量" min-width="170">
+        <el-table-column v-if="!isPhone" label="流量" min-width="170" prop="quota_bytes"
+                         sortable :sort-orders="NUM_ORDERS">
           <template #default="{ row }">
             <el-progress v-if="row.quota_bytes > 0" :percentage="quotaPct(row)" :stroke-width="5"
                          :show-text="false" :color="quotaPct(row) >= 100 ? '#e5534b' : quotaPct(row) >= 80 ? '#f5a623' : '#3b82f6'" />
             <div class="muted">{{ quotaText(row) }}</div>
           </template>
         </el-table-column>
-        <el-table-column v-if="!isPhone" label="频率 · 并发" min-width="150">
+        <el-table-column v-if="!isPhone" label="频率 · 并发" min-width="150" prop="rate_per_min"
+                         sortable :sort-orders="NUM_ORDERS">
           <template #default="{ row }">
             {{ row.rate_per_min ? row.rate_per_min + '/分' : '频率不限' }} · 并发 {{ row.max_sessions || '不限' }}
             <div class="muted">{{ row.rate_per_min ? '突发 ' + (row.burst || row.rate_per_min) : '无频率限制' }}</div>
           </template>
         </el-table-column>
-        <el-table-column v-if="!isPhone" label="最近使用" min-width="150">
+        <el-table-column v-if="!isPhone" label="最近使用" min-width="150" prop="last_used_ms"
+                         sortable :sort-orders="NUM_ORDERS">
           <template #default="{ row }">
             {{ row.last_used_ms ? time(row.last_used_ms) : '—' }}
             <div v-if="row.last_used_ip" class="muted mono">{{ row.last_used_ip }}</div>
@@ -145,7 +150,7 @@
           </template>
         </el-table-column>
         <template #empty><div class="empty-pad muted">暂无 Token</div></template>
-      </DataTable>
+      </el-table>
     </div>
 
     <!-- 编辑账号资料 -->
@@ -230,11 +235,11 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
 import { can, canManage, roleOf } from '@/shared/store.js'
 import { bytes, copyText, time } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
+import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -278,14 +283,6 @@ const counts = computed(() => {
   tokens.value.forEach((t) => { if (c[t.status] != null) c[t.status]++ })
   return c
 })
-const sortKeys = {
-  '名称 / 前缀': 'name',
-  '状态 / 到期': 'status',
-  '流量': { key: 'quota_bytes', type: 'num' },
-  '频率 · 并发': { key: 'rate_per_min', type: 'num' },
-  '最近使用': { key: 'last_used_ms', type: 'num' }
-}
-
 const filteredTokens = computed(() =>
   filter.value === 'all' ? tokens.value : tokens.value.filter((t) => t.status === filter.value))
 

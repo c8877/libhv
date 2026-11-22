@@ -47,35 +47,40 @@
               title="升级会让设备上的 agent 进程重新启动，正在进行的隧道会话会中断；设备需在配置中开启 ota。"
               style="margin-bottom:12px" />
 
-    <DataTable ref="devTable" :data="pageRows" :sort-keys="sortKeys" :sort-key="sort.key" :sort-dir="sort.dir"
-               server-sort v-loading="loading" row-key="devid"
-               @sort-change="onSortChange" @selection-change="onSelect">
+    <el-table ref="devTable" :data="pageRows" v-loading="loading" row-key="devid"
+              :default-sort="{ prop: 'devid', order: 'ascending' }"
+              @sort-change="onSortChange" @selection-change="onSelect">
       <el-table-column type="selection" width="46" reserve-selection :selectable="selectable" />
-      <el-table-column prop="devid" label="设备" min-width="150" />
-      <el-table-column label="架构" width="100">
+      <el-table-column prop="devid" label="设备" min-width="150" sortable="custom"
+                       :sort-orders="TEXT_ORDERS" />
+      <el-table-column prop="arch" label="架构" width="100" sortable="custom"
+                       :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
           <span :class="{ archBad: pkgInfo && row.arch && row.arch !== pkgInfo.arch }">
             {{ row.arch || '—' }}
           </span>
         </template>
       </el-table-column>
-      <el-table-column label="当前版本" width="120">
+      <el-table-column prop="version" label="当前版本" width="120" sortable="custom"
+                       :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">{{ row.version || '—' }}</template>
       </el-table-column>
-      <el-table-column label="OTA" width="90">
+      <el-table-column prop="caps_ota" label="OTA" width="90" sortable="custom"
+                       :sort-orders="NUM_ORDERS">
         <template #default="{ row }">
           <el-tag v-if="row.caps_ota === 1" type="success" size="small">支持</el-tag>
           <el-tag v-else-if="row.caps_ota === 0" type="info" size="small">未开启</el-tag>
           <el-tag v-else type="warning" size="small">未知</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="90">
+      <el-table-column prop="online" label="状态" width="90" sortable="custom"
+                       :sort-orders="NUM_ORDERS">
         <template #default="{ row }">
           <el-tag :type="row.online ? 'success' : 'info'" size="small">{{ row.online ? '在线' : '离线' }}</el-tag>
         </template>
       </el-table-column>
       <template #empty><el-empty description="没有匹配的设备" :image-size="70" /></template>
-    </DataTable>
+    </el-table>
 
     <div class="foot">
       <el-input v-model="q" placeholder="搜索设备" clearable class="w200">
@@ -139,9 +144,8 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
-import { Table } from '@/shared/table.js'
+import { NUM_ORDERS, TEXT_ORDERS, sortByOrder } from '@/shared/tableSort.js'
 import { bytes } from '@/shared/utils.js'
 import {
   taskCanCancel as canCancel, taskCanRetry as canRetry, taskPercent,
@@ -180,28 +184,15 @@ const filtered = computed(() => {
   if (!k) return devices.value
   return devices.value.filter((d) => String(d.devid).toLowerCase().includes(k))
 })
-const sortKeys = {
-  '设备': 'devid',
-  '架构': 'arch',
-  '当前版本': 'version',
-  'OTA': { key: 'caps_ota', type: 'num' },
-  '状态': { key: 'online', type: 'num', value: (r) => (r.online ? 1 : 0) }
-}
-const sort = reactive({ key: '', dir: 0 })
-const sorted = computed(() => {
-  const col = {
-    devid: { key: 'devid', type: 'text' },
-    arch: { key: 'arch', type: 'text' },
-    version: { key: 'version', type: 'text' },
-    caps_ota: { key: 'caps_ota', type: 'num' },
-    online: sortKeys['状态']
-  }[sort.key]
-  return col ? Table.sortRows(filtered.value, sort, [col]) : filtered.value
-})
+const sort = reactive({ prop: '', order: '' })
+const sorted = computed(() => sortByOrder(filtered.value, sort.prop, sort.order, {
+  online: (r) => (r.online ? 1 : 0),
+  caps_ota: (r) => (r.caps_ota == null ? -1 : r.caps_ota)
+}))
 const pageRows = computed(() => sorted.value.slice((page.value - 1) * per, page.value * per))
-function onSortChange({ key, dir }) {
-  sort.key = key
-  sort.dir = dir
+function onSortChange({ prop, order }) {
+  sort.prop = prop || ''
+  sort.order = order || ''
   page.value = 1
 }
 

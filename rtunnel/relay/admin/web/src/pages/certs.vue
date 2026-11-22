@@ -50,8 +50,9 @@
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
       </div>
-      <DataTable :data="filtered" :sort-keys="sortKeys" v-loading="loading">
-        <el-table-column label="SAN（身份）" :min-width="isPhone ? 150 : 200">
+      <el-table :data="filtered" v-loading="loading">
+        <el-table-column label="SAN（身份）" :min-width="isPhone ? 150 : 200" prop="san"
+                       sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }">
             <b :title="row.san">{{ row.san.length > 30 ? row.san.slice(0, 29) + '…' : row.san }}</b>
             <div v-if="isPhone" class="muted">
@@ -60,18 +61,22 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column v-if="!isPhone" label="类型" width="80">
+        <el-table-column v-if="!isPhone" label="类型" width="80" prop="role"
+                       sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }">{{ row.role === 'device' ? '设备' : row.role === 'user' ? '用户' : row.role }}</template>
         </el-table-column>
-        <el-table-column v-if="!isPhone" label="序列号" min-width="150">
+        <el-table-column v-if="!isPhone" label="序列号" min-width="150" prop="serial"
+                       sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }">
             <code :title="serial(row.serial)">{{ serial(row.serial) }}</code>
           </template>
         </el-table-column>
-        <el-table-column v-if="!isPhone" label="到期日" min-width="170">
+        <el-table-column v-if="!isPhone" label="到期日" min-width="170" prop="expire_ms"
+                       sortable :sort-orders="NUM_ORDERS">
           <template #default="{ row }">{{ expiry(row.expire_ms) }}</template>
         </el-table-column>
-        <el-table-column label="状态" :width="isPhone ? 90 : 100">
+        <el-table-column label="状态" :width="isPhone ? 90 : 100" prop="status"
+                       sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }">
             <el-tag :type="certType(row.status)" size="small">{{ certText(row.status) }}</el-tag>
           </template>
@@ -84,27 +89,19 @@
           </template>
         </el-table-column>
         <template #empty><el-empty description="暂无证书" :image-size="70" /></template>
-      </DataTable>
+      </el-table>
     </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
 import { downloadBlob } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
+import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
 
 const { isPhone } = useBreakpoint()
-
-const sortKeys = {
-  'SAN（身份）': 'san',
-  '类型': 'role',
-  '序列号': 'serial',
-  '到期日': { key: 'expire_ms', type: 'num' },
-  '状态': 'status'
-}
 
 const list = ref([])
 const q = ref('')

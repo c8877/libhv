@@ -10,8 +10,9 @@
       <el-button v-if="can('account.write')" type="primary" @click="openCreate">+ 新建账号</el-button>
     </div>
 
-    <DataTable :data="filtered" :sort-keys="sortKeys" v-loading="loading">
-      <el-table-column label="用户名" :min-width="isPhone ? 150 : 160">
+    <el-table :data="filtered" v-loading="loading">
+      <el-table-column label="用户名" :min-width="isPhone ? 150 : 160" prop="username"
+                       sortable :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
           <b>{{ row.username }}</b>
           <el-tag v-if="row.username === me.username" size="small" class="ml6">我</el-tag>
@@ -22,26 +23,30 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column label="角色" :width="isPhone ? 100 : 130">
+      <el-table-column label="角色" :width="isPhone ? 100 : 130" prop="role"
+                       sortable :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
           <el-tag :type="roleType(row.role)" size="small">{{ roleName(row.role) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column v-if="!isPhone" label="状态" width="90">
+      <el-table-column v-if="!isPhone" label="状态" width="90" prop="status"
+                       sortable :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
           <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
             {{ row.status === 'active' ? '启用' : '停用' }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column v-if="!isPhone" label="权限组" min-width="170">
+      <el-table-column v-if="!isPhone" label="权限组" min-width="170" prop="groups"
+                       sortable :sort-by="(r) => (r.groups || []).length" :sort-orders="NUM_ORDERS">
         <template #default="{ row }">
           <span v-if="row.role === 'admin'" class="muted">全部（超级管理员）</span>
           <span v-else-if="groupNames(row).length">{{ groupNames(row).join('、') }}</span>
           <span v-else class="muted">未分配</span>
         </template>
       </el-table-column>
-      <el-table-column v-if="!isPhone" label="创建时间" min-width="150">
+      <el-table-column v-if="!isPhone" label="创建时间" min-width="150" prop="created_ms"
+                       sortable :sort-orders="NUM_ORDERS">
         <template #default="{ row }">{{ time(row.created_ms) }}</template>
       </el-table-column>
       <el-table-column :min-width="isPhone ? 92 : 220" label="操作">
@@ -68,7 +73,7 @@
         </template>
       </el-table-column>
       <template #empty><el-empty description="暂无账号" :image-size="70" /></template>
-    </DataTable>
+    </el-table>
 
     <!-- 新建 -->
     <el-dialog v-model="createDlg" title="新建账号" width="440px">
@@ -139,11 +144,11 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
 import { auth, roleOf, ROLE_NAMES, can } from '@/shared/store.js'
 import { time } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
+import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
 
 const { isPhone } = useBreakpoint()
 const users = ref([])
@@ -151,14 +156,6 @@ const q = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const me = computed(() => auth.me || {})
-
-const sortKeys = {
-  username: 'username',
-  '角色': 'role',
-  '状态': 'status',
-  '权限组': { key: 'groups', type: 'num', value: (r) => (r.groups || []).length },
-  '创建时间': { key: 'created_ms', type: 'num' }
-}
 
 const filtered = computed(() => {
   const k = q.value.trim().toLowerCase()

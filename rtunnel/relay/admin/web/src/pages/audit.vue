@@ -9,7 +9,7 @@
       </el-input>
       <el-button :loading="loading" @click="load">刷新</el-button>
     </div>
-    <DataTable :data="filtered" :sort-keys="sortKeys" v-loading="loading" size="small">
+    <el-table :data="filtered" v-loading="loading" size="small">
       <template v-if="isPhone">
         <el-table-column label="操作 / 详情">
           <template #default="{ row }">
@@ -20,42 +20,35 @@
         </el-table-column>
       </template>
       <template v-else>
-        <el-table-column label="时间" width="170">
+        <el-table-column label="时间" width="170" prop="at" sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }"><span class="muted">{{ row.at }}</span></template>
         </el-table-column>
-        <el-table-column prop="role" label="角色" width="100" />
-        <el-table-column label="操作" min-width="180">
+        <el-table-column prop="role" label="角色" width="100" sortable :sort-orders="TEXT_ORDERS" />
+        <el-table-column label="操作" min-width="180" prop="action" sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }"><code>{{ row.action }}</code></template>
         </el-table-column>
-        <el-table-column label="详情" min-width="260">
+        <el-table-column label="详情" min-width="260" prop="detail" sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }">
             <span :title="row.detail">{{ row.detail.length > 100 ? row.detail.slice(0, 99) + '…' : row.detail }}</span>
           </template>
         </el-table-column>
       </template>
       <template #empty><el-empty description="暂无审计记录" :image-size="70" /></template>
-    </DataTable>
+    </el-table>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
+import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
 
 const { isPhone } = useBreakpoint()
 
 const rows = ref([])
 const q = ref('')
 const loading = ref(false)
-
-const sortKeys = {
-  '时间': 'at',
-  '角色': 'role',
-  '操作': 'action',
-  '详情': 'detail'
-}
 
 const filtered = computed(() => {
   const k = q.value.trim().toLowerCase()

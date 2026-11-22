@@ -10,32 +10,38 @@
     </div>
 
     <div ref="tableWrap">
-      <DataTable :data="filtered" :sort-keys="sortKeys" v-loading="loading" row-class-name="row-click"
+      <el-table :data="filtered" v-loading="loading" row-class-name="row-click"
                 @row-click="openRow" @row-contextmenu="openContextMenu">
-        <el-table-column label="devid" min-width="140">
+        <el-table-column label="devid" min-width="140" prop="devid" sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }"><b>{{ row.devid }}</b></template>
         </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default><el-tag type="success" size="small">在线</el-tag></template>
         </el-table-column>
-        <el-table-column v-if="!isPhone" prop="remote_addr" label="远端地址" min-width="150" />
-        <el-table-column v-if="!isPhone" label="最近活跃" min-width="120">
+        <el-table-column v-if="!isPhone" prop="remote_addr" label="远端地址" min-width="150"
+                         sortable :sort-orders="TEXT_ORDERS" />
+        <el-table-column v-if="!isPhone" label="最近活跃" min-width="120" prop="last_seen_ms"
+                         sortable :sort-orders="NUM_ORDERS">
           <template #default="{ row }">{{ ago(row.last_seen_ms) }} 前活跃</template>
         </el-table-column>
-        <el-table-column v-if="!isPhone" label="系统运行" min-width="110">
+        <el-table-column v-if="!isPhone" label="系统运行" min-width="110" prop="uptime"
+                         sortable :sort-by="(r) => (r.boot_ms ? nowMs - r.boot_ms : 0)" :sort-orders="NUM_ORDERS">
           <template #default="{ row }">
             <span v-if="row.boot_ms">{{ duration(nowMs - row.boot_ms) }}</span>
             <span v-else class="muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="!isPhone" label="在线时长" min-width="110">
+        <el-table-column v-if="!isPhone" label="在线时长" min-width="110" prop="online_ms"
+                         sortable :sort-by="(r) => r.connected_at_ms || 0" :sort-orders="NUM_ORDERS">
           <template #default="{ row }">
             <span v-if="row.connected_at_ms">{{ duration(nowMs - row.connected_at_ms) }}</span>
             <span v-else class="muted">—</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="!isPhone" prop="streams" label="会话数" width="90" align="right" />
-        <el-table-column v-if="!isPhone" label="流量 ↓/↑" min-width="150">
+        <el-table-column v-if="!isPhone" prop="streams" label="会话数" width="90" align="right"
+                         sortable :sort-orders="NUM_ORDERS" />
+        <el-table-column v-if="!isPhone" label="流量 ↓/↑" min-width="150" prop="traffic"
+                         sortable :sort-by="(r) => (r.bytes_in || 0) + (r.bytes_out || 0)" :sort-orders="NUM_ORDERS">
           <template #default="{ row }">{{ bytes(row.bytes_in) }} / {{ bytes(row.bytes_out) }}</template>
         </el-table-column>
         <el-table-column :width="actionWidth" label="操作" align="center">
@@ -45,7 +51,7 @@
           </template>
         </el-table-column>
         <template #empty><el-empty description="暂无在线设备" :image-size="70" /></template>
-      </DataTable>
+      </el-table>
     </div>
 
     <el-dialog v-model="webDlg" :title="'打开 Web · ' + (webRow ? webRow.devid : '')"
@@ -97,12 +103,12 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import DataTable from '@/components/DataTable.vue'
 import RowActions from '@/components/RowActions.vue'
 import { Api } from '@/shared/api.js'
 import { can, canManage, canOperate } from '@/shared/store.js'
 import { ago, bytes, duration } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
+import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
 
 const router = useRouter()
 const { isPhone } = useBreakpoint()
@@ -125,16 +131,6 @@ function actionsOf(row) {
   if (canOperate()) out.push({ key: 'web', label: 'Web' })
   if (canManage()) out.push({ key: 'kick', label: '下线', danger: true })
   return out
-}
-
-const sortKeys = {
-  devid: 'devid',
-  '远端地址': 'remote_addr',
-  '最近活跃': { key: 'last_seen_ms', type: 'num' },
-  '系统运行': { key: 'uptime', type: 'num', value: (r) => (r.boot_ms ? nowMs.value - r.boot_ms : 0) },
-  '在线时长': { key: 'online_ms', type: 'num', value: (r) => (r.connected_at_ms ? nowMs.value - r.connected_at_ms : 0) },
-  '会话数': { key: 'streams', type: 'num' },
-  '流量 ↓/↑': { key: 'traffic', type: 'num', value: (r) => (r.bytes_in || 0) + (r.bytes_out || 0) }
 }
 
 const filtered = computed(() => {

@@ -10,25 +10,29 @@
       <el-button v-if="canManage()" type="primary" @click="openCreate">+ 新建账号</el-button>
     </div>
 
-    <DataTable :data="list" :sort-keys="sortKeys" v-loading="loading" row-class-name="row-click" @row-click="openDetail">
-      <el-table-column label="用户名" :min-width="isPhone ? 150 : 180">
+    <el-table :data="list" v-loading="loading" row-class-name="row-click" @row-click="openDetail">
+      <el-table-column label="用户名" :min-width="isPhone ? 150 : 180" prop="username"
+                       sortable :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
           <b>{{ row.username }}</b>
           <div v-if="row.display_name" class="muted">{{ row.display_name }}</div>
           <div v-if="isPhone" class="muted">{{ row.token_count || 0 }} Token</div>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="90">
+      <el-table-column label="状态" width="90" prop="status"
+                       sortable :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
           <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
             {{ row.status === 'active' ? '启用' : '停用' }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column v-if="!isPhone" label="Token" width="90" align="right">
+      <el-table-column v-if="!isPhone" label="Token" width="90" align="right" prop="token_count"
+                       sortable :sort-orders="NUM_ORDERS">
         <template #default="{ row }">{{ row.token_count || 0 }}</template>
       </el-table-column>
-      <el-table-column v-if="!isPhone" label="最近使用" min-width="160">
+      <el-table-column v-if="!isPhone" label="最近使用" min-width="160" prop="last_used_ms"
+                       sortable :sort-orders="NUM_ORDERS">
         <template #default="{ row }">{{ row.last_used_ms ? time(row.last_used_ms) : '—' }}</template>
       </el-table-column>
       <el-table-column label="操作" width="100">
@@ -37,7 +41,7 @@
         </template>
       </el-table-column>
       <template #empty><el-empty description="暂无接入账号" :image-size="70" /></template>
-    </DataTable>
+    </el-table>
 
     <el-dialog v-model="dlg" title="新建接入账号" width="440px">
       <el-form :model="form" label-width="72px" @submit.prevent>
@@ -63,22 +67,15 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
 import { canManage } from '@/shared/store.js'
 import { time } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
+import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
 
 const { isPhone } = useBreakpoint()
 
 const router = useRouter()
-const sortKeys = {
-  '用户名': 'username',
-  '状态': 'status',
-  'Token': { key: 'token_count', type: 'num' },
-  '最近使用': { key: 'last_used_ms', type: 'num' }
-}
-
 const list = ref([])
 const q = ref('')
 const loading = ref(false)

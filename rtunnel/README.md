@@ -290,9 +290,10 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
 - 「能力」tab 展示 TCP 端口、Shell、SYSINFO、mTLS、OTA、可重启/可关机、文件/服务能力与串口白名单；
   manager/admin 可在线编辑
 - 表格默认 10 行/页，支持 5/10/20/50；进程/服务排序在 agent 端完成，只回传当前页；
-  网卡/串口和文件列表在浏览器端排序。排序默认方向、箭头和比较逻辑统一走
-  `shared/web/table-ui.js`（管理台 `DataTable.vue` 也复用它），本地页、共享组件和
-  管理台不再各写一套
+  网卡/串口和文件列表在浏览器端排序。管理台直接用 Element 的 `sortable` /
+  `sortable="custom"` 与 `@sort-change`，数值列默认降序、文本列默认升序
+  （`shared/tableSort.js` 提供 `NUM_ORDERS` / `TEXT_ORDERS`）；本地页和共享组件
+  没有 Element，排序规则与箭头统一走 `shared/web/table-ui.js`
 - 文件/服务 tab 首次打开时建立会话；进程 tab 支持 1/2/3/5/10/20/30 秒自动刷新
 - 监控 tab 内切换「曲线 / 采样配置」；串口配置独立为一级 tab
 

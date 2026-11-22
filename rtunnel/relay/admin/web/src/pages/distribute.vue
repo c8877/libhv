@@ -33,21 +33,24 @@
         </label>
       </div>
 
-      <DataTable :data="pageRows" :sort-keys="sortKeys" :sort-key="sort.key" :sort-dir="sort.dir"
-                server-sort v-loading="loading" row-key="devid"
+      <el-table :data="pageRows" v-loading="loading" row-key="devid"
+                :default-sort="{ prop: 'devid', order: 'ascending' }"
                 @sort-change="onSortChange" @selection-change="onSelect">
         <el-table-column type="selection" width="46" reserve-selection :selectable="(r) => r.online" />
-        <el-table-column prop="devid" label="设备" min-width="140" />
-        <el-table-column label="状态" width="90">
+        <el-table-column prop="devid" label="设备" min-width="140" sortable="custom"
+                       :sort-orders="TEXT_ORDERS" />
+        <el-table-column prop="online" label="状态" width="90" sortable="custom"
+                         :sort-orders="NUM_ORDERS">
           <template #default="{ row }">
             <el-tag :type="row.online ? 'success' : 'info'" size="small">{{ row.online ? '在线' : '离线' }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column v-if="!isPhone" prop="remote_addr" label="远端地址" min-width="150">
+        <el-table-column v-if="!isPhone" prop="remote_addr" label="远端地址" min-width="150"
+                       sortable="custom" :sort-orders="TEXT_ORDERS">
           <template #default="{ row }">{{ row.remote_addr || '—' }}</template>
         </el-table-column>
         <template #empty><el-empty description="没有匹配的设备" :image-size="70" /></template>
-      </DataTable>
+      </el-table>
 
       <div class="foot">
         <el-pagination v-model:current-page="page" :page-size="per" :total="filtered.length"
@@ -63,9 +66,8 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
-import { Table } from '@/shared/table.js'
+import { NUM_ORDERS, TEXT_ORDERS, sortByOrder } from '@/shared/tableSort.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 
 const route = useRoute()
@@ -92,20 +94,14 @@ const filtered = computed(() => {
   if (!k) return devices.value
   return devices.value.filter((d) => String(d.devid).toLowerCase().includes(k))
 })
-const sortKeys = {
-  '设备': 'devid',
-  '状态': { key: 'online', type: 'num', value: (r) => (r.online ? 1 : 0) },
-  '远端地址': 'remote_addr'
-}
-const sort = reactive({ key: '', dir: 0 })
-const sorted = computed(() => {
-  const col = { devid: { key: 'devid', type: 'text' }, online: sortKeys['状态'], remote_addr: { key: 'remote_addr', type: 'text' } }[sort.key]
-  return col ? Table.sortRows(filtered.value, sort, [col]) : filtered.value
-})
+const sort = reactive({ prop: '', order: '' })
+const sorted = computed(() => sortByOrder(filtered.value, sort.prop, sort.order, {
+  online: (r) => (r.online ? 1 : 0)
+}))
 const pageRows = computed(() => sorted.value.slice((page.value - 1) * per, page.value * per))
-function onSortChange({ key, dir }) {
-  sort.key = key
-  sort.dir = dir
+function onSortChange({ prop, order }) {
+  sort.prop = prop || ''
+  sort.order = order || ''
   page.value = 1
 }
 

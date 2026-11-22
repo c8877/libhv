@@ -12,19 +12,23 @@
     </el-tabs>
     <div class="subj-hint muted">{{ TAB_HINTS[tab] }}</div>
 
-    <DataTable :data="rows" :sort-keys="sortKeys" size="small" row-key="key" :show-header="!isPhone">
-      <el-table-column label="对象" min-width="170">
+    <el-table :data="rows" size="small" row-key="key" :show-header="!isPhone">
+      <el-table-column label="对象" min-width="170" prop="name"
+                       sortable :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
           <b>{{ row.name }}</b>
           <div class="sub">{{ row.detail || row.type }}</div>
         </template>
       </el-table-column>
-      <el-table-column label="类型" width="100">
+      <el-table-column label="类型" width="100" prop="type"
+                       sortable :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
           <el-tag size="small" effect="plain" :type="tagType(row.type)">{{ typeName(row.type) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="所属权限组" min-width="220">
+      <el-table-column label="所属权限组" min-width="220" prop="groups"
+                       sortable :sort-by="(r) => (r.super ? 1e9 : (r.groups || []).length)"
+                       :sort-orders="NUM_ORDERS">
         <template #default="{ row }">
           <span v-if="row.super" class="muted">超级管理员（全部资源）</span>
           <template v-else-if="row.groups && row.groups.length">
@@ -33,18 +37,23 @@
           <span v-else class="muted">{{ row.type === 'user' || row.type === 'atk' ? '未分配（按角色回落）' : '未分配' }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="有效资源" width="110">
+      <el-table-column label="有效资源" width="110" prop="resource_count"
+                       sortable :sort-by="(r) => (r.super || r.all_devices ? 1e9 : (r.resource_count || 0))"
+                       :sort-orders="NUM_ORDERS">
         <template #default="{ row }">
           <span v-if="row.super || row.all_devices" class="num">{{ row.super ? '全部' : row.resource_count }}</span>
           <span v-else class="num">{{ row.resource_count }} 项</span>
         </template>
       </el-table-column>
-      <el-table-column label="设备范围" width="120">
+      <el-table-column label="设备范围" width="120" prop="device_count"
+                       sortable :sort-by="(r) => (r.super || r.all_devices ? 1e9 : (r.device_count || 0))"
+                       :sort-orders="NUM_ORDERS">
         <template #default="{ row }">
           <span class="num">{{ row.super || row.all_devices ? '全部' : row.device_count + ' 台' }}</span>
         </template>
       </el-table-column>
-      <el-table-column v-if="!isPhone" label="状态" width="80">
+      <el-table-column v-if="!isPhone" label="状态" width="80" prop="status"
+                       sortable :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
           <el-tag size="small" :type="row.status === 'active' ? 'success' : 'info'">
             {{ row.status === 'active' ? '启用' : row.status }}
@@ -57,7 +66,7 @@
         </template>
       </el-table-column>
       <template #empty><span class="muted">没有匹配的对象</span></template>
-    </DataTable>
+    </el-table>
 
     <el-dialog v-model="dlg" :title="'分配权限组 · ' + edit.name" :width="isPhone ? '92%' : '560px'">
       <div class="dlg-tip muted">
@@ -90,10 +99,10 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
 import { can } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
+import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
 
 const { isPhone } = useBreakpoint()
 const canWrite = computed(() => can('dict.write'))
@@ -129,15 +138,6 @@ const availableGroups = computed(() => {
 
 function countOf(t) {
   return items.value.filter((x) => x.type === t).length
-}
-
-const sortKeys = {
-  '对象': 'name',
-  '类型': 'type',
-  '所属权限组': { key: 'groups', type: 'num', value: (r) => (r.groups || []).length },
-  '有效资源': { key: 'resource_count', type: 'num' },
-  '设备范围': { key: 'device_count', type: 'num' },
-  '状态': 'status'
 }
 
 const rows = computed(() => {

@@ -8,25 +8,32 @@
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
     </div>
-    <DataTable :data="filtered" :sort-keys="sortKeys" v-loading="loading">
-      <el-table-column label="A 用户:a_sid" :min-width="isPhone ? 150 : 160">
+    <el-table :data="filtered" v-loading="loading">
+      <el-table-column label="A 用户:a_sid" :min-width="isPhone ? 150 : 160" prop="a_user"
+                       sortable :sort-by="(r) => `${r.a_user}:${r.a_sid}`"
+                       :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
           {{ row.a_user }}:{{ row.a_sid }}
           <div v-if="isPhone" class="muted">→ {{ row.c_devid }}:{{ row.c_sid }}</div>
         </template>
       </el-table-column>
-      <el-table-column v-if="!isPhone" label="C 设备:c_sid" min-width="160">
+      <el-table-column v-if="!isPhone" label="C 设备:c_sid" min-width="160" prop="c_devid"
+                       sortable :sort-by="(r) => `${r.c_devid}:${r.c_sid}`"
+                       :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">{{ row.c_devid }}:{{ row.c_sid }}</template>
       </el-table-column>
-      <el-table-column label="状态" :width="isPhone ? 90 : 120">
+      <el-table-column label="状态" :width="isPhone ? 90 : 120" prop="state"
+                       sortable :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
           <el-tag :type="stateType(row.state)" size="small">{{ row.state }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column v-if="!isPhone" label="开启于" min-width="120">
+      <el-table-column v-if="!isPhone" label="开启于" min-width="120" prop="opened_at_ms"
+                       sortable :sort-orders="NUM_ORDERS">
         <template #default="{ row }">{{ ago(row.opened_at_ms) }} 前</template>
       </el-table-column>
-      <el-table-column v-if="!isPhone" label="最近活动" min-width="120">
+      <el-table-column v-if="!isPhone" label="最近活动" min-width="120" prop="last_active_ms"
+                       sortable :sort-orders="NUM_ORDERS">
         <template #default="{ row }">{{ row.last_active_ms ? ago(row.last_active_ms) + ' 前' : '—' }}</template>
       </el-table-column>
       <el-table-column label="操作" width="90">
@@ -35,29 +42,21 @@
         </template>
       </el-table-column>
       <template #empty><el-empty description="当前无会话" :image-size="70" /></template>
-    </DataTable>
+    </el-table>
   </div>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
 import { ago } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
+import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
 
 const { isPhone } = useBreakpoint()
 const list = ref([])
 const q = ref('')
 const loading = ref(false)
-
-const sortKeys = {
-  'A 用户:a_sid': 'a_user',
-  'C 设备:c_sid': 'c_devid',
-  '状态': 'state',
-  '开启于': { key: 'opened_at_ms', type: 'num' },
-  '最近活动': { key: 'last_active_ms', type: 'num' }
-}
 
 const filtered = computed(() => {
   const k = q.value.trim().toLowerCase()
