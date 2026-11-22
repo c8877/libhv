@@ -29,7 +29,7 @@
       <span v-else class="muted small">设备由 agent 上线自动登记，可改名或临时停用</span>
     </div>
 
-    <el-table :data="rows" size="small" v-loading="loading" row-key="id">
+    <DataTable :data="rows" :sort-keys="sortKeys" size="small" v-loading="loading" row-key="id">
       <template v-if="tab === 'resources'">
         <el-table-column label="资源键" min-width="170">
           <template #default="{ row }"><code class="key">{{ row.key }}</code></template>
@@ -122,7 +122,7 @@
         </el-table-column>
       </template>
       <template #empty><div class="muted empty">暂无字典项</div></template>
-    </el-table>
+    </DataTable>
 
     <div class="pager">
       <el-pagination background layout="total, sizes, prev, pager, next" :total="total"
@@ -163,6 +163,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
 import { can } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
@@ -176,6 +177,38 @@ const q = ref('')
 const page = ref(1)
 const size = ref(10)
 const total = ref(0)
+const sortKeys = computed(() => {
+  const enabled = { key: 'enabled', type: 'num', value: (r) => (r.enabled ? 1 : 0) }
+  if (tab.value === 'devices') {
+    return {
+      '设备 ID': 'devid',
+      '名称': 'name',
+      '版本': 'version',
+      '状态': { key: 'online', type: 'num', value: (r) => (r.online ? 1 : 0) },
+      '所属组': { key: 'group_count', type: 'num' },
+      '最近在线': { key: 'last_seen_ms', type: 'num' },
+      '授权': enabled
+    }
+  }
+  if (tab.value === 'resources') {
+    return {
+      '资源键': 'key',
+      '分类': 'category',
+      '显示名': 'name',
+      '说明': 'description',
+      '状态': enabled
+    }
+  }
+  return {
+    '端口/范围': 'value',
+    '路径/模式': 'value',
+    '类型': 'kind',
+    '名称': 'name',
+    '说明': 'description',
+    '状态': enabled
+  }
+})
+
 const rows = ref([])
 const loading = ref(false)
 

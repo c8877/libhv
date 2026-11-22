@@ -9,7 +9,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, useSlots } from 'vue'
+import { computed, reactive, ref, useSlots, watch } from 'vue'
 import { Table } from '@/shared/table.js'
 
 defineOptions({ inheritAttrs: false })
@@ -20,14 +20,26 @@ const props = defineProps({
   sortKeys: { type: Object, default: () => ({}) },
   defaultKey: { type: String, default: '' },
   defaultDir: { type: Number, default: 0 },
+  // 受控排序：父组件排序后再分页时传这两个，配合 server-sort 只收事件
+  sortKey: { type: String, default: null },
+  sortDir: { type: Number, default: null },
   // 服务端已排序/分页时只抛事件，不在前端重排
   serverSort: { type: Boolean, default: false }
 })
 const emit = defineEmits(['sort-change'])
 const slots = useSlots()
 const el = ref(null)
-const sort = reactive({ key: props.defaultKey, dir: props.defaultDir })
+const sort = reactive({
+  key: props.sortKey != null ? props.sortKey : props.defaultKey,
+  dir: props.sortDir != null ? props.sortDir : props.defaultDir
+})
 const active = ref(null)
+
+watch(() => [props.sortKey, props.sortDir], ([k, d]) => {
+  if (k == null) return
+  sort.key = k
+  sort.dir = d || 0
+})
 
 const forwarded = computed(() => Object.keys(slots).filter((k) => k !== 'default'))
 
@@ -63,7 +75,11 @@ function onHeaderClick(column) {
   emit('sort-change', { key: sort.key, dir: sort.dir, column: column.property || column.label })
 }
 
-defineExpose({ el })
+function clearSelection() {
+  el.value && el.value.clearSelection()
+}
+
+defineExpose({ el, clearSelection })
 </script>
 
 <style>

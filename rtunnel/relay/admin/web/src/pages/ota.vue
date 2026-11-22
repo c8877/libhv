@@ -47,7 +47,9 @@
               title="升级会让设备上的 agent 进程重新启动，正在进行的隧道会话会中断；设备需在配置中开启 ota。"
               style="margin-bottom:12px" />
 
-    <el-table ref="devTable" :data="pageRows" v-loading="loading" row-key="devid" @selection-change="onSelect">
+    <DataTable ref="devTable" :data="pageRows" :sort-keys="sortKeys" :sort-key="sort.key" :sort-dir="sort.dir"
+               server-sort v-loading="loading" row-key="devid"
+               @sort-change="onSortChange" @selection-change="onSelect">
       <el-table-column type="selection" width="46" reserve-selection :selectable="selectable" />
       <el-table-column prop="devid" label="设备" min-width="150" />
       <el-table-column label="架构" width="100">
@@ -73,7 +75,7 @@
         </template>
       </el-table-column>
       <template #empty><el-empty description="没有匹配的设备" :image-size="70" /></template>
-    </el-table>
+    </DataTable>
 
     <div class="foot">
       <el-input v-model="q" placeholder="搜索设备" clearable class="w200">
@@ -136,8 +138,10 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
+import { Table } from '@/shared/table.js'
 import { bytes } from '@/shared/utils.js'
 import {
   taskCanCancel as canCancel, taskCanRetry as canRetry, taskPercent,
@@ -176,7 +180,30 @@ const filtered = computed(() => {
   if (!k) return devices.value
   return devices.value.filter((d) => String(d.devid).toLowerCase().includes(k))
 })
-const pageRows = computed(() => filtered.value.slice((page.value - 1) * per, page.value * per))
+const sortKeys = {
+  '设备': 'devid',
+  '架构': 'arch',
+  '当前版本': 'version',
+  'OTA': { key: 'caps_ota', type: 'num' },
+  '状态': { key: 'online', type: 'num', value: (r) => (r.online ? 1 : 0) }
+}
+const sort = reactive({ key: '', dir: 0 })
+const sorted = computed(() => {
+  const col = {
+    devid: { key: 'devid', type: 'text' },
+    arch: { key: 'arch', type: 'text' },
+    version: { key: 'version', type: 'text' },
+    caps_ota: { key: 'caps_ota', type: 'num' },
+    online: sortKeys['状态']
+  }[sort.key]
+  return col ? Table.sortRows(filtered.value, sort, [col]) : filtered.value
+})
+const pageRows = computed(() => sorted.value.slice((page.value - 1) * per, page.value * per))
+function onSortChange({ key, dir }) {
+  sort.key = key
+  sort.dir = dir
+  page.value = 1
+}
 
 function selectable(row) {
   if (row.caps_ota === 0) return false

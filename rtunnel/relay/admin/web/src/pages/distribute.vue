@@ -33,8 +33,9 @@
         </label>
       </div>
 
-      <el-table :data="pageRows" v-loading="loading" row-key="devid"
-                @selection-change="onSelect">
+      <DataTable :data="pageRows" :sort-keys="sortKeys" :sort-key="sort.key" :sort-dir="sort.dir"
+                server-sort v-loading="loading" row-key="devid"
+                @sort-change="onSortChange" @selection-change="onSelect">
         <el-table-column type="selection" width="46" reserve-selection :selectable="(r) => r.online" />
         <el-table-column prop="devid" label="设备" min-width="140" />
         <el-table-column label="状态" width="90">
@@ -46,7 +47,7 @@
           <template #default="{ row }">{{ row.remote_addr || '—' }}</template>
         </el-table-column>
         <template #empty><el-empty description="没有匹配的设备" :image-size="70" /></template>
-      </el-table>
+      </DataTable>
 
       <div class="foot">
         <el-pagination v-model:current-page="page" :page-size="per" :total="filtered.length"
@@ -60,9 +61,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
+import { Table } from '@/shared/table.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 
 const route = useRoute()
@@ -89,7 +92,22 @@ const filtered = computed(() => {
   if (!k) return devices.value
   return devices.value.filter((d) => String(d.devid).toLowerCase().includes(k))
 })
-const pageRows = computed(() => filtered.value.slice((page.value - 1) * per, page.value * per))
+const sortKeys = {
+  '设备': 'devid',
+  '状态': { key: 'online', type: 'num', value: (r) => (r.online ? 1 : 0) },
+  '远端地址': 'remote_addr'
+}
+const sort = reactive({ key: '', dir: 0 })
+const sorted = computed(() => {
+  const col = { devid: { key: 'devid', type: 'text' }, online: sortKeys['状态'], remote_addr: { key: 'remote_addr', type: 'text' } }[sort.key]
+  return col ? Table.sortRows(filtered.value, sort, [col]) : filtered.value
+})
+const pageRows = computed(() => sorted.value.slice((page.value - 1) * per, page.value * per))
+function onSortChange({ key, dir }) {
+  sort.key = key
+  sort.dir = dir
+  page.value = 1
+}
 
 watch(q, () => { page.value = 1 })
 

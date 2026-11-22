@@ -236,14 +236,15 @@
             <span v-if="procTruncated" class="muted">· 结果已截断，可搜索缩小范围</span>
           </div>
 
-          <el-table v-if="!isPhone" :data="procEntries" v-loading="procLoading" size="small"
-                    @row-contextmenu="openProcMenu" @row-dblclick="showProcDetail">
+          <DataTable v-if="!isPhone" :data="procEntries" :sort-keys="procSortKeys"
+                     :sort-key="procSort" :sort-dir="procDir" server-sort
+                     v-loading="procLoading" size="small"
+                     @sort-change="onProcSortChange"
+                     @row-contextmenu="openProcMenu" @row-dblclick="showProcDetail">
             <el-table-column label="PID" width="82" prop="pid">
-              <template #header><span class="th-sort" @click="sortProcBy('pid')">PID{{ procArrow('pid') }}</span></template>
               <template #default="{ row }"><span class="mono">{{ row.pid }}</span></template>
             </el-table-column>
             <el-table-column label="用户" min-width="96" prop="user" show-overflow-tooltip>
-              <template #header><span class="th-sort" @click="sortProcBy('user')">用户{{ procArrow('user') }}</span></template>
               <template #default="{ row }">{{ row.user || '—' }}</template>
             </el-table-column>
             <el-table-column label="状态" width="86">
@@ -252,30 +253,25 @@
               </template>
             </el-table-column>
             <el-table-column label="CPU" width="82" align="right" prop="cpu">
-              <template #header><span class="th-sort" @click="sortProcBy('cpu')">CPU{{ procArrow('cpu') }}</span></template>
               <template #default="{ row }"><span class="num">{{ row.cpu_pct.toFixed(1) }}%</span></template>
             </el-table-column>
             <el-table-column label="内存" width="88" align="right" prop="mem">
-              <template #header><span class="th-sort" @click="sortProcBy('mem')">内存{{ procArrow('mem') }}</span></template>
               <template #default="{ row }"><span class="num">{{ kbText(row.rss_kb) }}</span></template>
             </el-table-column>
             <el-table-column label="线程" width="70" align="right" prop="threads">
-              <template #header><span class="th-sort" @click="sortProcBy('threads')">线程{{ procArrow('threads') }}</span></template>
               <template #default="{ row }"><span class="num">{{ row.threads }}</span></template>
             </el-table-column>
             <el-table-column label="命令" min-width="260" prop="comm" show-overflow-tooltip>
-              <template #header><span class="th-sort" @click="sortProcBy('comm')">命令{{ procArrow('comm') }}</span></template>
               <template #default="{ row }">
                 <span class="mono pcmd">{{ row.cmd }}</span>
                 <el-tag v-if="row.kernel" size="small" type="info" effect="plain" class="inline-tag">内核</el-tag>
               </template>
             </el-table-column>
             <el-table-column label="启动时间" width="150" prop="start">
-              <template #header><span class="th-sort" @click="sortProcBy('start')">启动时间{{ procArrow('start') }}</span></template>
               <template #default="{ row }"><span class="muted">{{ time(row.start_ms) }}</span></template>
             </el-table-column>
             <template #empty><div class="muted">没有匹配的进程</div></template>
-          </el-table>
+          </DataTable>
 
           <div v-else class="net-cards" v-loading="procLoading">
             <div v-for="r in procEntries" :key="r.pid" class="net-card">
@@ -508,7 +504,7 @@
 
       <!-- 网卡 -->
       <template v-if="netScope === 'nic'">
-        <el-table v-if="!isPhone" :data="nicRows" size="small" class="net-table">
+        <DataTable v-if="!isPhone" :data="nicRows" :sort-keys="nicSortKeys" size="small" class="net-table">
           <el-table-column label="网卡" min-width="110">
             <template #default="{ row }"><span class="mono strong">{{ row.name }}</span></template>
           </el-table-column>
@@ -548,7 +544,7 @@
             </template>
           </el-table-column>
           <template #empty><div class="muted">没有网卡信息</div></template>
-        </el-table>
+        </DataTable>
         <div v-else class="net-cards">
           <div v-for="n in nicRows" :key="n.name" class="net-card">
             <div class="nc-top">
@@ -1242,8 +1238,8 @@ import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, r
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, MoreFilled, Refresh } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
+import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
-import { Table } from '@/shared/table.js'
 import { can, canManage } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import { ago, bytes, copyText, downloadJson, duration, kbPair, time } from '@/shared/utils.js'
@@ -1535,6 +1531,17 @@ function stateTone(st) {
   if (st === 'ESTABLISHED' || st === 'ESTAB' || st === 'CONNECTED') return 'primary'
   if (st === 'TIME_WAIT' || st === 'CLOSE_WAIT' || st === 'CLOSING') return 'warning'
   return 'info'
+}
+
+const nicSortKeys = {
+  '网卡': 'name',
+  '状态': { key: 'link', type: 'text', value: (n) => (nicLinkUp(n) ? 'up' : 'down') },
+  'IP / 掩码': 'ip',
+  'MAC': 'mac',
+  'MTU': { key: 'mtu', type: 'num' },
+  '速率': { key: 'speed_mbps', type: 'num' },
+  '收 / 发': { key: 'rx_bytes', type: 'num' },
+  '错误': { key: 'errors', type: 'num', value: (n) => (n.rx_errors || 0) + (n.tx_errors || 0) }
 }
 
 const nicRows = computed(() => {
@@ -2567,28 +2574,32 @@ async function loadProcs(refresh, silent) {
 
 function onProcPage() { loadProcs(false, false) }
 
-const PROC_SORT_TYPE = {
-  pid: 'text', user: 'text', comm: 'text',
-  cpu: 'num', mem: 'num', threads: 'num', start: 'num'
+const procSortKeys = {
+  'PID': { key: 'pid', type: 'text' },
+  '用户': { key: 'user', type: 'text' },
+  'CPU': { key: 'cpu', type: 'num' },
+  '内存': { key: 'mem', type: 'num' },
+  '线程': { key: 'threads', type: 'num' },
+  '命令': { key: 'comm', type: 'text' },
+  '启动时间': { key: 'start', type: 'num' }
+}
+
+function onProcSortChange({ key, dir }) {
+  procSort.value = key
+  procDir.value = dir
+  procPage.value = 1
+  loadProcs(false)
+}
+
+function procDefaultDir(key) {
+  const name = Object.keys(procSortKeys).find((k) => procSortKeys[k].key === key)
+  return procSortKeys[name]?.type === 'num' ? -1 : 1
 }
 
 function onProcSort() {
   procPage.value = 1
-  procDir.value = Table.defaultDir(PROC_SORT_TYPE[procSort.value])
+  procDir.value = procDefaultDir(procSort.value)
   loadProcs(false)
-}
-
-// 表头点击排序：key 就是后端的 sort key
-function sortProcBy(key) {
-  const st = { key: procSort.value, dir: procDir.value }
-  procDir.value = Table.toggle(st, key, PROC_SORT_TYPE[key])
-  procSort.value = st.key
-  procPage.value = 1
-  loadProcs(false)
-}
-
-function procArrow(key) {
-  return Table.arrow({ key: procSort.value, dir: procDir.value }, key)
 }
 
 function onMetricSize(size) {
@@ -3264,8 +3275,6 @@ onBeforeUnmount(() => {
 .proc-search { width: 240px; }
 .proc-sort { width: 108px; }
 .proc-auto { width: 136px; }
-.th-sort { cursor: pointer; user-select: none; }
-.th-sort:hover { color: var(--el-color-primary); }
 .proc-ts { display: flex; gap: 6px; }
 .pcmd { font-size: 12px; }
 .pctx-menu {
