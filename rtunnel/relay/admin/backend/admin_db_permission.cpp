@@ -1,4 +1,5 @@
 #include "admin_db.hpp"
+#include "cpputil/hstring.h"
 #include "cpputil/json.hpp"
 #include "sqlite3.h"
 
@@ -14,15 +15,9 @@ struct PortRange { int lo = 0; int hi = 0; };
 
 std::vector<std::string> splitCsv(const std::string& s) {
     std::vector<std::string> out;
-    size_t pos = 0;
-    while (pos <= s.size()) {
-        size_t comma = s.find(',', pos);
-        std::string one = s.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
-        size_t b = one.find_first_not_of(" \t");
-        size_t e = one.find_last_not_of(" \t");
-        if (b != std::string::npos) out.push_back(one.substr(b, e - b + 1));
-        if (comma == std::string::npos) break;
-        pos = comma + 1;
+    for (auto& one : hv::split(s, ',')) {
+        one = hv::trim(one);
+        if (!one.empty()) out.push_back(one);
     }
     return out;
 }
@@ -93,10 +88,7 @@ std::string joinRanges(std::vector<PortRange> v) {
 }
 
 std::string trimWs(const std::string& s) {
-    size_t b = s.find_first_not_of(" \t\r\n");
-    if (b == std::string::npos) return "";
-    size_t e = s.find_last_not_of(" \t\r\n");
-    return s.substr(b, e - b + 1);
+    return hv::trim(s);
 }
 
 bool wildcard(const std::string& p) { return !p.empty() && p[p.size() - 1] == '*'; }

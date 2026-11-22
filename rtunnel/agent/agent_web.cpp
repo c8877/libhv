@@ -1,4 +1,5 @@
 #include "agent_web.hpp"
+#include "cpputil/hstring.h"
 #include "agent_app.hpp"
 #include "agent_web_html.hpp"
 #include "cm_editor_js.hpp"
@@ -148,7 +149,7 @@ bool acceptsGzip(HttpRequest* req) {
         item = item.substr(b, e - b + 1);
         size_t semi = item.find(';');
         std::string token = item.substr(0, semi);
-        for (size_t i = 0; i < token.size(); ++i) token[i] = (char)tolower((unsigned char)token[i]);
+        hv::tolower(token);
         if (token == "gzip" || token == "*") {
             if (semi != std::string::npos) {
                 size_t q = item.find("q=", semi);

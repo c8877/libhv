@@ -9,11 +9,14 @@
       <el-button @click="$router.push('/agents')">返回设备</el-button>
     </div>
 
-    <div v-if="tabs.length > 1" class="term-tabs">
-      <button v-for="s in tabs" :key="s.id" :class="{ on: s.id === active }" @click="activate(s.id)">
-        {{ s.devid }}<span v-if="!s.alive" class="dead"> ✕</span>
-      </button>
-    </div>
+    <el-tabs v-if="tabs.length > 1" v-model="active" class="term-tabs" type="card"
+             @tab-change="activate">
+      <el-tab-pane v-for="s in tabs" :key="s.id" :name="s.id">
+        <template #label>
+          <span>{{ s.devid }}<span v-if="!s.alive" class="dead"> ✕</span></span>
+        </template>
+      </el-tab-pane>
+    </el-tabs>
 
     <div ref="host" class="term-host" />
   </div>
@@ -138,21 +141,11 @@ onBeforeUnmount(() => {
   height: calc(100vh - 96px);
   margin-bottom: 0;
 }
-.term-tabs { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
-.term-tabs button {
-  border: 1px solid var(--el-border-color);
-  background: var(--el-fill-color-blank);
-  color: var(--el-text-color-regular);
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.term-tabs button.on {
-  border-color: var(--el-color-primary);
-  color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
-}
+.term-tabs { margin-bottom: 8px; }
+.term-tabs :deep(.el-tabs__header) { margin: 0; }
+.term-tabs :deep(.el-tabs__nav-wrap)::after { display: none; }
+.term-tabs :deep(.el-tabs__item) { height: 30px; line-height: 30px; font-size: 12px; }
+.term-tabs :deep(.el-tabs__content) { display: none; }
 .term-tabs .dead { color: var(--el-color-danger); }
 .term-host {
   flex: 1;

@@ -71,11 +71,11 @@
     </el-dialog>
 
     <el-dialog v-model="pwDlg" title="修改密码" width="420px">
-      <el-form :model="pw" label-width="80px">
-        <el-form-item label="当前密码">
+      <el-form ref="pwRef" :model="pw" :rules="pwRules" label-width="80px">
+        <el-form-item label="当前密码" prop="old">
           <el-input v-model="pw.old" type="password" show-password autocomplete="current-password" />
         </el-form-item>
-        <el-form-item label="新密码">
+        <el-form-item label="新密码" prop="new">
           <el-input v-model="pw.new" type="password" show-password autocomplete="new-password"
                     placeholder="至少 8 位" />
         </el-form-item>
@@ -103,6 +103,14 @@ const pfDlg = ref(false)
 const pwDlg = ref(false)
 const pf = reactive({ avatar_color: '#4a9eff', display_name: '', default_page: 'overview', time_format: 'local', term_font: 14 })
 const pw = reactive({ old: '', new: '' })
+const pwRef = ref(null)
+const pwRules = {
+  old: [{ required: true, message: '请填写当前密码', trigger: 'blur' }],
+  new: [
+    { required: true, message: '请填写新密码', trigger: 'blur' },
+    { min: 8, message: '新密码至少 8 位', trigger: 'blur' },
+  ],
+}
 
 async function load() {
   try {
@@ -156,10 +164,8 @@ function openPassword() {
 }
 
 async function savePassword() {
-  if (pw.new.length < 8) {
-    ElMessage.warning('新密码至少 8 位')
-    return
-  }
+  const ok = await pwRef.value.validate().catch(() => false)
+  if (!ok) return
   saving.value = true
   try {
     await Api.put('/api/v1/users/' + auth.me.id + '/password', {

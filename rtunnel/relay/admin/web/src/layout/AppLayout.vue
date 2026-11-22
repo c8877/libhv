@@ -1,29 +1,14 @@
 <template>
   <div class="layout">
-    <aside class="side" :class="{ open: navOpen }">
-      <div class="logo">
-        <span class="mark">◈</span>
-        <span class="name">{{ title }}</span>
-      </div>
-      <el-menu ref="menuRef" :default-active="active" :default-openeds="initialOpen"
-               :unique-opened="true" router class="menu">
-        <el-sub-menu v-for="g in items" :key="g.key" :index="g.key">
-          <template #title><span class="nav-group-title">{{ g.label }}</span></template>
-          <el-menu-item v-for="n in g.items" :key="n.path" :index="n.path">
-            <el-icon><component :is="iconOf(n.icon)" /></el-icon>
-            <span>{{ n.label || titleOf(n.path) }}</span>
-          </el-menu-item>
-        </el-sub-menu>
-      </el-menu>
-      <div class="side-foot">
-        <template v-if="ov">
-          <span class="dot" /> relay 在线 · {{ ov.agents }} 设备 · {{ ov.streams }} 会话
-        </template>
-        <template v-else>…</template>
-      </div>
+    <aside class="side">
+      <NavMenu ref="deskNav" :items="items" :active="active" :initial-open="initialOpen"
+               :title="title" :ov="ov" />
     </aside>
 
-    <div v-if="navOpen" class="nav-mask" @click="navOpen = false" />
+    <el-drawer v-model="navOpen" direction="ltr" :with-header="false" size="232px" class="nav-drawer">
+      <NavMenu ref="drawerNav" :items="items" :active="active" :initial-open="initialOpen"
+               :title="title" :ov="ov" />
+    </el-drawer>
 
     <div class="main">
       <header class="topbar">
@@ -93,14 +78,15 @@ import {
   auth, avatarColor, logout, roleOf, ROLE_NAMES, saveTheme, siteTitle, overview, can,
 } from '@/shared/store.js'
 import { navFor } from '@/shared/nav.js'
-import { iconOf } from '@/shared/icons.js'
+import NavMenu from '@/components/NavMenu.vue'
 import { duration } from '@/shared/utils.js'
 
 const route = useRoute()
 const router = useRouter()
 const navOpen = ref(false)
 const themePop = ref(null)
-const menuRef = ref(null)
+const deskNav = ref(null)
+const drawerNav = ref(null)
 const ov = ref(overview.data)
 
 const items = computed(() => navFor(roleOf(), can))
@@ -135,7 +121,13 @@ watch(() => route.path, async () => {
   const g = activeGroup.value
   if (!g) return
   await nextTick()
-  if (menuRef.value) menuRef.value.open(g)   // unique-opened 会自动收起其它组
+  if (deskNav.value) deskNav.value.openGroup(g)   // unique-opened 会自动收起其它组
+})
+
+watch(navOpen, async (v) => {
+  if (!v) return
+  await nextTick()
+  if (drawerNav.value) drawerNav.value.openGroup(activeGroup.value)
 })
 
 function syncTheme() {
@@ -201,114 +193,6 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 html.dark .side {
   background: linear-gradient(180deg, #0b0f17 0%, #080b11 100%);
 }
-.logo {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 20px 18px 18px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-}
-.logo .mark {
-  width: 30px;
-  height: 30px;
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 9px;
-  color: #fff;
-  font-size: 16px;
-  background: linear-gradient(135deg, var(--el-color-primary), color-mix(in srgb, var(--el-color-primary) 55%, #7c3aed));
-  box-shadow: 0 8px 18px -10px var(--el-color-primary);
-}
-.logo .name { color: #f8fafc; font-size: 16px; }
-.menu {
-  --el-menu-bg-color: transparent;
-  --el-menu-text-color: rgba(203, 213, 225, 0.78);
-  --el-menu-hover-bg-color: rgba(148, 163, 184, 0.1);
-  --el-menu-hover-text-color: #fff;
-  --el-menu-active-color: #fff;
-  --el-menu-item-height: 38px;
-  border-right: 0;
-  flex: 1;
-  padding: 4px 0;
-  overflow-y: auto;
-}
-.menu :deep(.el-sub-menu__title) {
-  height: 34px;
-  line-height: 34px;
-  margin: 2px 10px 0;
-  padding: 0 10px !important;
-  border-radius: 8px;
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  color: rgba(148, 163, 184, 0.55);
-}
-.menu :deep(.el-sub-menu:first-child > .el-sub-menu__title) {
-  margin-top: 0;
-}
-.menu :deep(.el-sub-menu__title:hover) {
-  color: #e2e8f0;
-  background: rgba(148, 163, 184, 0.07);
-}
-.menu :deep(.el-sub-menu__icon-arrow) {
-  right: 10px;
-  margin-top: -5px;
-  font-size: 11px;
-}
-.menu :deep(.el-sub-menu .el-menu-item) {
-  padding-left: 30px !important;
-}
-.menu :deep(.el-menu-item) {
-  position: relative;
-  height: 38px;
-  line-height: 38px;
-  margin: 1px 10px;
-  border-radius: 8px;
-  font-size: 13.5px;
-}
-.menu :deep(.el-menu-item .el-icon) {
-  margin-right: 10px;
-  font-size: 16px;
-  opacity: 0.9;
-}
-.menu :deep(.el-menu-item:hover) {
-  color: #fff;
-}
-.menu :deep(.el-menu-item.is-active) {
-  background: color-mix(in srgb, var(--el-color-primary) 26%, transparent);
-  color: #fff;
-}
-.menu :deep(.el-menu-item.is-active)::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 11px;
-  bottom: 11px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: var(--el-color-primary);
-}
-.side-foot {
-  padding: 12px 18px 14px;
-  font-size: 12px;
-  color: rgba(148, 163, 184, 0.7);
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-right: 6px;
-  border-radius: 50%;
-  background: #34d399;
-  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.15);
-  vertical-align: 1px;
-}
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100vh; }
 .topbar {
   display: flex;
@@ -352,7 +236,6 @@ html.dark .side {
 .who { display: flex; flex-direction: column; line-height: 1.5; }
 .who span { font-size: 12px; color: var(--el-text-color-secondary); }
 .page { --page-pad: 24px; flex: 1; padding: var(--page-pad); min-width: 0; overflow-y: auto; }
-.nav-mask { display: none; }
 
 .theme-box { display: flex; flex-direction: column; gap: 12px; }
 .theme-modes {
@@ -379,24 +262,7 @@ html.dark .side {
 .custom { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--el-text-color-secondary); }
 
 @media (max-width: 959px) {
-  .side {
-    position: fixed;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    z-index: 2200;
-    transform: translateX(-100%);
-    transition: transform 0.22s ease;
-    box-shadow: 8px 0 28px rgba(0, 0, 0, 0.18);
-  }
-  .side.open { transform: none; }
-  .nav-mask {
-    display: block;
-    position: fixed;
-    inset: 0;
-    z-index: 2100;
-    background: rgba(0, 0, 0, 0.45);
-  }
+  .side { display: none; }
   .hamburger { display: inline-flex; }
   .page { --page-pad: 16px; padding: var(--page-pad); }
 }
@@ -404,5 +270,15 @@ html.dark .side {
   .topbar { padding: 0 14px; gap: 8px; height: 56px; }
   .relay-info, .uname { display: none; }
   .page { --page-pad: 12px; padding: var(--page-pad); }
+}
+</style>
+
+<style>
+.nav-drawer .el-drawer__body {
+  padding: 0;
+  background: linear-gradient(180deg, #141b2b 0%, #0f1420 100%);
+}
+html.dark .nav-drawer .el-drawer__body {
+  background: linear-gradient(180deg, #0b0f17 0%, #080b11 100%);
 }
 </style>

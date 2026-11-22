@@ -171,8 +171,8 @@
 
     <!-- 新建 / 编辑 Token -->
     <el-dialog v-model="tokDlg" :title="tokMode === 'create' ? '新建 Token' : '编辑 Token'" width="520px">
-      <el-form :model="tokForm" label-width="96px">
-        <el-form-item label="名称" required>
+      <el-form ref="tokFormRef" :model="tokForm" :rules="tokRules" label-width="96px">
+        <el-form-item label="名称" prop="name">
           <el-input v-model="tokForm.name" maxlength="64" placeholder="例如 构建机 / 巡检" />
         </el-form-item>
         <el-form-item v-if="tokMode === 'create'" label="有效期">
@@ -269,6 +269,10 @@ const tokForm = reactive({
   id: 0, name: '', expires_in_days: 30, expires_at: '', quota_gb: 0,
   quota_period: 'monthly', quota_action: 'cut', rate_per_min: 0, burst: 0, max_sessions: 0,
 })
+const tokFormRef = ref(null)
+const tokRules = {
+  name: [{ required: true, message: '请填写名称', trigger: 'blur' }],
+}
 const expireOptions = [
   { value: 0, label: '永久' }, { value: 7, label: '7 天' }, { value: 30, label: '30 天' },
   { value: 90, label: '90 天' }, { value: 365, label: '1 年' },
@@ -468,10 +472,8 @@ function tokenBody() {
 }
 
 async function saveToken() {
-  if (!tokForm.name.trim()) {
-    ElMessage.warning('请填写名称')
-    return
-  }
+  const ok = await tokFormRef.value.validate().catch(() => false)
+  if (!ok) return
   saving.value = true
   try {
     if (tokMode.value === 'create') {

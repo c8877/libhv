@@ -77,11 +77,11 @@
 
     <!-- 新建 -->
     <el-dialog v-model="createDlg" title="新建账号" width="440px">
-      <el-form :model="createForm" label-width="72px">
-        <el-form-item label="用户名" required>
+      <el-form ref="createRef" :model="createForm" :rules="createRules" label-width="72px">
+        <el-form-item label="用户名" prop="username">
           <el-input v-model="createForm.username" maxlength="64" autocomplete="off" />
         </el-form-item>
-        <el-form-item label="密码" required>
+        <el-form-item label="密码" prop="password">
           <el-input v-model="createForm.password" type="password" show-password autocomplete="new-password"
                     placeholder="至少 8 位" />
         </el-form-item>
@@ -99,7 +99,7 @@
 
     <!-- 编辑 -->
     <el-dialog v-model="editDlg" :title="'编辑 ' + (edit.username || '')" width="520px">
-      <el-form label-width="96px">
+      <el-form ref="editRef" :model="edit" :rules="editRules" label-width="96px">
         <template v-if="canManageTarget(edit.user)">
           <el-form-item label="角色">
             <el-select v-model="edit.role" style="width: 200px">
@@ -112,11 +112,11 @@
           </el-form-item>
         </template>
 
-        <el-form-item v-if="edit.user && edit.user.username === me.username" label="当前密码">
+        <el-form-item v-if="edit.user && edit.user.username === me.username" label="当前密码" prop="old_password">
           <el-input v-model="edit.old_password" type="password" show-password autocomplete="current-password"
                     placeholder="修改自己的密码需先验证" />
         </el-form-item>
-        <el-form-item label="新密码">
+        <el-form-item label="新密码" prop="password">
           <el-input v-model="edit.password" type="password" show-password autocomplete="new-password"
                     placeholder="留空表示不修改，至少 8 位" />
         </el-form-item>
@@ -188,7 +188,15 @@ const showPermGroups = computed(() =>
   can('account.write') && edit.user && edit.user.role !== 'admin')
 
 const createDlg = ref(false)
+const createRef = ref(null)
 const createForm = reactive({ username: '', password: '', role: 'viewer' })
+const createRules = {
+  username: [{ required: true, message: '请填写用户名', trigger: 'blur' }],
+  password: [
+    { required: true, message: '请填写密码', trigger: 'blur' },
+    { min: 8, message: '密码至少 8 位', trigger: 'blur' },
+  ],
+}
 
 const editDlg = ref(false)
 const edit = reactive({
@@ -197,6 +205,20 @@ const edit = reactive({
   permGroups: [], permIds: [], initialPerm: '[]',
 })
 const allPermGroups = ref([])
+const editRef = ref(null)
+const editRules = {
+  password: [{
+    validator: (rule, v, cb) => (!v || v.length >= 8 ? cb() : cb(new Error('新密码至少 8 位'))),
+    trigger: 'blur',
+  }],
+  old_password: [{
+    validator: (rule, v, cb) => {
+      if (!edit.password || !edit.user || edit.user.username !== me.value.username) return cb()
+      return v ? cb() : cb(new Error('修改自己的密码需先验证当前密码'))
+    },
+    trigger: 'blur',
+  }],
+}
 
 function groupNames(row) {
   const ids = row.perm_groups || []
@@ -226,11 +248,9 @@ function openCreate() {
 }
 
 async function createUser() {
+  const ok = await createRef.value.validate().catch(() => false)
+  if (!ok) return
   const username = createForm.username.trim()
-  if (!username || createForm.password.length < 8) {
-    ElMessage.warning('请填写用户名，密码至少 8 位')
-    return
-  }
   saving.value = true
   try {
     await Api.post('/api/v1/users', { username, password: createForm.password, role: createForm.role })
@@ -266,6 +286,8 @@ async function openEdit(u) {
 async function saveUser() {
   const u = edit.user
   if (!u) return
+  const ok = await editRef.value.validate().catch(() => false)
+  if (!ok) return
   saving.value = true
   try {
     if (canManageTarget(u)) {
@@ -273,7 +295,6 @@ async function saveUser() {
       if (edit.status !== u.status) await Api.put('/api/v1/users/' + u.id + '/status', { status: edit.status })
     }
     if (edit.password) {
-      if (edit.password.length < 8) throw new Error('新密码至少 8 位')
       const body = { new_password: edit.password }
       if (u.username === me.value.username) body.old_password = edit.old_password
       await Api.put('/api/v1/users/' + u.id + '/password', body)

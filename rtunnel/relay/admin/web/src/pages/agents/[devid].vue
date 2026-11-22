@@ -62,11 +62,9 @@
         </div>
       </div>
 
-      <nav class="dev-tabs" role="tablist" aria-label="设备视图">
-        <button v-for="t in MAIN_TABS" :key="t.name" role="tab" type="button"
-                :aria-selected="mainTab === t.name" :class="{ on: mainTab === t.name }"
-                @click="switchMainTab(t.name)">{{ t.label }}</button>
-      </nav>
+      <el-tabs class="dev-tabs" :model-value="mainTab" @tab-change="switchMainTab">
+        <el-tab-pane v-for="t in MAIN_TABS" :key="t.name" :label="t.label" :name="t.name" />
+      </el-tabs>
     </div>
 
     <!-- 概览 -->
@@ -75,12 +73,12 @@
         <div class="ov-card ov-kpi">
           <div class="ov-k-head"><span>CPU</span><span class="ov-sub">{{ sys && sys.cpu_count ? sys.cpu_count + ' 核' : '—' }}</span></div>
           <div class="ov-k-val">{{ ovCpuText }}<small>%</small></div>
-          <div class="ov-bar"><i :style="{ width: ovCpuPct + '%' }" /></div>
+          <el-progress class="ov-bar" :percentage="ovCpuPct" :stroke-width="6" :show-text="false" />
         </div>
         <div class="ov-card ov-kpi">
           <div class="ov-k-head"><span>内存</span><span class="ov-sub">{{ ovMemText }}</span></div>
           <div class="ov-k-val">{{ ovMemPct }}<small>%</small></div>
-          <div class="ov-bar"><i :style="{ width: ovMemPct + '%' }" /></div>
+          <el-progress class="ov-bar" :percentage="ovMemPct" :stroke-width="6" :show-text="false" />
         </div>
         <div class="ov-card ov-kpi">
           <div class="ov-k-head"><span>负载</span><span class="ov-sub">1 / 5 / 15 分钟</span></div>
@@ -737,10 +735,8 @@
     </div>
 
     <div v-if="loadedTabs.monitor || loadedTabs.tty" v-show="mainTab === 'monitor' || mainTab === 'tty'" class="panel feat-panel obs-panel">
-      <div v-if="mainTab === 'monitor'" class="monitor-switch">
-        <button type="button" :class="{ on: monitorView === 'series' }" @click="setMonitorView('series')">曲线</button>
-        <button type="button" :class="{ on: monitorView === 'metric' }" @click="setMonitorView('metric')">采样配置</button>
-      </div>
+      <el-segmented v-if="mainTab === 'monitor'" v-model="monitorView" class="monitor-switch" size="small"
+                    :options="MONITOR_VIEWS" @change="setMonitorView" />
       <el-tabs v-model="obsTab" class="feat-tabs hide-nav" @tab-change="onObsTab">
         <el-tab-pane label="采样曲线" name="series">
           <div class="tab-bar">
@@ -1343,6 +1339,11 @@ function loadChart() {
   }
   return chartLoading
 }
+
+const MONITOR_VIEWS = [
+  { label: '曲线', value: 'series' },
+  { label: '采样配置', value: 'metric' },
+]
 
 const MAIN_TABS = [
   { name: 'overview', label: '概览' },
@@ -3342,36 +3343,32 @@ onBeforeUnmount(() => {
 }
 .dh-meta > span { white-space: nowrap; }
 .dh-ts { margin-left: auto; }
-.dev-tabs {
-  display: flex; gap: 2px; padding: 5px 6px; margin-bottom: 12px;
-  background: var(--el-bg-color); border: 1px solid var(--el-border-color-lighter);
-  border-radius: 10px; box-shadow: var(--app-shadow);
-  overflow-x: auto; scrollbar-width: none;
+.dev-tabs { margin-bottom: 12px; }
+.dev-tabs :deep(.el-tabs__header) {
+  margin: 0; padding: 5px 6px; background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter); border-radius: 10px;
+  box-shadow: var(--app-shadow);
 }
-.dev-tabs::-webkit-scrollbar { display: none; }
-.dev-tabs button {
-  flex: none; border: 0; background: transparent; padding: 7px 15px;
-  border-radius: 7px; font: inherit; font-size: 14px; color: var(--el-text-color-regular);
-  cursor: pointer; white-space: nowrap;
+.dev-tabs :deep(.el-tabs__nav-wrap)::after { display: none; }
+.dev-tabs :deep(.el-tabs__nav-scroll) { overflow-x: auto; scrollbar-width: none; }
+.dev-tabs :deep(.el-tabs__nav-scroll)::-webkit-scrollbar { display: none; }
+.dev-tabs :deep(.el-tabs__nav) { display: flex; gap: 2px; }
+.dev-tabs :deep(.el-tabs__active-bar) { display: none; }
+.dev-tabs :deep(.el-tabs__item) {
+  height: auto; padding: 7px 15px !important; line-height: 1.4;
+  font-size: 14px; border-radius: 7px; color: var(--el-text-color-regular);
+  white-space: nowrap;
 }
-.dev-tabs button:hover { background: var(--el-fill-color-light); color: var(--el-text-color-primary); }
-.dev-tabs button.on { background: var(--el-color-primary-light-9); color: var(--el-color-primary); font-weight: 600; }
+.dev-tabs :deep(.el-tabs__item:hover) { background: var(--el-fill-color-light); color: var(--el-text-color-primary); }
+.dev-tabs :deep(.el-tabs__item.is-active) {
+  background: var(--el-color-primary-light-9); color: var(--el-color-primary); font-weight: 600;
+}
+.dev-tabs :deep(.el-tabs__content) { display: none; }
 
 .feat-tabs.hide-nav :deep(.el-tabs__header) { display: none; }
 .feat-tabs.hide-nav :deep(.el-tabs__content) { padding-top: 0; }
 
-.monitor-switch {
-  display: inline-flex; gap: 2px; padding: 3px; margin-bottom: 12px;
-  background: var(--el-fill-color-light); border-radius: 8px;
-}
-.monitor-switch button {
-  border: 0; background: transparent; padding: 5px 14px; border-radius: 6px;
-  font: inherit; font-size: 12px; color: var(--el-text-color-secondary); cursor: pointer;
-}
-.monitor-switch button.on {
-  background: var(--el-bg-color); color: var(--el-text-color-primary);
-  font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-}
+.monitor-switch { margin-bottom: 12px; }
 
 .ov-wrap { display: flex; flex-direction: column; gap: 12px; }
 .ov-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
@@ -3387,8 +3384,7 @@ onBeforeUnmount(() => {
 }
 .ov-k-val.sm { font-size: 16px; font-weight: 600; padding: 11px 0 8px; }
 .ov-k-val small { font-size: 14px; font-weight: 500; color: var(--el-text-color-secondary); margin-left: 2px; }
-.ov-bar { height: 6px; border-radius: 3px; background: var(--el-fill-color); overflow: hidden; margin-top: 10px; }
-.ov-bar i { display: block; height: 100%; border-radius: 3px; background: var(--el-color-primary); }
+.ov-bar { margin-top: 10px; }
 .ov-sub { font-size: 12px; color: var(--el-text-color-secondary); }
 .ov-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr); gap: 12px; }
 .ov-grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
@@ -3450,7 +3446,7 @@ onBeforeUnmount(() => {
     padding: 4px;
     mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
   }
-  .dev-tabs button { padding: 7px 11px; font-size: 13px; }
+  .dev-tabs :deep(.el-tabs__item) { padding: 7px 11px !important; font-size: 13px; }
   .ov-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .ov-grid3 { grid-template-columns: 1fr; }
   .ov-card { padding: 12px; }

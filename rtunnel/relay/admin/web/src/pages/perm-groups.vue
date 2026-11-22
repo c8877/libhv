@@ -18,9 +18,8 @@
     <div class="pg-layout">
       <aside class="pg-side">
         <el-input v-model="groupQ" size="small" placeholder="搜索权限组" clearable class="pg-search" />
-        <div class="pg-list">
-          <button v-for="g in filteredGroups" :key="g.id" class="pg-item"
-                  :class="{ active: form.id === g.id }" @click="selectGroup(g)">
+        <el-menu class="pg-list" :default-active="String(form.id || '')" @select="onGroupSelect">
+          <el-menu-item v-for="g in filteredGroups" :key="g.id" :index="String(g.id)" class="pg-item">
             <span class="pg-name">
               <b>{{ g.name }}</b>
               <el-tag v-if="g.super" size="small" type="danger" effect="plain">超级</el-tag>
@@ -29,9 +28,9 @@
             <span class="pg-meta">
               {{ g.super ? '全部资源' : g.resources.length + ' 资源' }} · {{ g.super || g.all_devices ? '全部' : g.device_count }} 设备 · {{ g.member_count }} 成员
             </span>
-          </button>
+          </el-menu-item>
           <div v-if="!filteredGroups.length" class="muted pg-empty">没有匹配的权限组</div>
-        </div>
+        </el-menu>
       </aside>
 
       <section class="pg-main">
@@ -48,21 +47,19 @@
           </div>
         </div>
 
-        <div class="pg-meta-form">
-          <div class="pg-field">
-            <span class="pg-label">名称</span>
+        <el-form ref="pgFormRef" :model="form" :rules="pgRules" label-width="62px"
+                 class="pg-meta-form" @submit.prevent>
+          <el-form-item label="名称" prop="name">
             <el-input v-model="form.name" size="small" maxlength="64" :disabled="!canWrite" placeholder="例如：产线运维" />
-          </div>
-          <div class="pg-field">
-            <span class="pg-label">允许端口</span>
+          </el-form-item>
+          <el-form-item label="允许端口">
             <el-input v-model="form.ports" size="small" :disabled="!canWrite || form.super"
                       placeholder="* 或 22,80-90" />
-          </div>
-          <div class="pg-field wide">
-            <span class="pg-label">说明</span>
+          </el-form-item>
+          <el-form-item label="说明" class="wide">
             <el-input v-model="form.description" size="small" :disabled="!canWrite" placeholder="这个组负责什么" />
-          </div>
-        </div>
+          </el-form-item>
+        </el-form>
 
         <div class="pg-flags">
           <el-checkbox v-model="form.all_devices" :disabled="!canWrite || form.super">
@@ -273,6 +270,10 @@ const form = reactive({
   devices: [],
   members: [],
 })
+const pgFormRef = ref(null)
+const pgRules = {
+  name: [{ required: true, message: '请填写权限组名称', trigger: 'blur' }],
+}
 
 const leftChecked = ref([])
 const rightChecked = ref([])
@@ -416,11 +417,14 @@ function onMobilePick(id) {
   if (g) selectGroup(g)
 }
 
+function onGroupSelect(id) {
+  const g = groups.value.find((x) => String(x.id) === String(id))
+  if (g) selectGroup(g)
+}
+
 async function save() {
-  if (!form.name.trim()) {
-    ElMessage.error('请填写权限组名称')
-    return
-  }
+  const ok = await pgFormRef.value.validate().catch(() => false)
+  if (!ok) return
   saving.value = true
   try {
     const body = {
@@ -529,14 +533,14 @@ onMounted(reload)
 .pg-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 14px; align-items: start; }
 .pg-side { border-right: 1px solid var(--el-border-color-lighter); padding-right: 12px; }
 .pg-search { margin-bottom: 8px; }
-.pg-list { display: flex; flex-direction: column; gap: 2px; max-height: 560px; overflow: auto; }
-.pg-item {
-  display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 7px 9px;
-  border: 0; border-radius: 6px; background: transparent; color: inherit; text-align: left; cursor: pointer;
+.pg-list { max-height: 560px; overflow: auto; border-right: 0; background: transparent; }
+.pg-list :deep(.el-menu-item) {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  height: auto; line-height: 1.4; padding: 7px 9px; border-radius: 6px;
 }
-.pg-item:hover { background: var(--el-fill-color-light); }
-.pg-item.active { background: var(--el-color-primary-light-9); }
-.pg-item.active .pg-name b { color: var(--el-color-primary); }
+.pg-list :deep(.el-menu-item:hover) { background: var(--el-fill-color-light); }
+.pg-list :deep(.el-menu-item.is-active) { background: var(--el-color-primary-light-9); }
+.pg-list :deep(.el-menu-item.is-active) .pg-name b { color: var(--el-color-primary); }
 .pg-name { display: flex; align-items: center; gap: 6px; }
 .pg-name b { font-size: 13px; font-weight: 600; }
 .pg-meta { font-size: 11px; color: var(--el-text-color-secondary); }
@@ -546,10 +550,8 @@ onMounted(reload)
 .pg-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .pg-actions { margin-left: auto; display: flex; gap: 6px; }
 .pg-meta-form { display: grid; grid-template-columns: 1fr 160px; gap: 8px 18px; margin-bottom: 6px; }
-.pg-field { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.pg-field.wide { grid-column: 1 / -1; }
-.pg-label { flex: none; width: 62px; font-size: 12px; color: var(--el-text-color-secondary); text-align: right; }
-.pg-field :deep(.el-input) { width: 100%; }
+.pg-meta-form :deep(.el-form-item) { margin-bottom: 0; min-width: 0; }
+.pg-meta-form .wide { grid-column: 1 / -1; }
 .pg-flags { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 2px 0 6px; font-size: 12px; }
 .pg-tabs { margin-top: 2px; }
 
@@ -626,7 +628,7 @@ onMounted(reload)
   .pg-side { display: none; }
   .pg-mobile-pick { display: flex; }
   .pg-meta-form { grid-template-columns: 1fr; }
-  .pg-field.wide { grid-column: auto; }
+  .pg-meta-form .wide { grid-column: auto; }
   .transfer { grid-template-columns: 1fr; }
   .tr-ops { flex-direction: row; justify-content: center; }
   .res-grid { grid-template-columns: 1fr; }

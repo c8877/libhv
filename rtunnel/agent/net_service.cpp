@@ -1,5 +1,6 @@
 // 设备网络与 IPC 快照采集（见 net_service.hpp）
 #include "net_service.hpp"
+#include "cpputil/hstring.h"
 
 #include <arpa/inet.h>
 #include <dirent.h>
@@ -69,10 +70,7 @@ std::string readFileText(const char* path, size_t max = kMaxFile) {
 }
 
 std::string trim(const std::string& s) {
-    size_t b = s.find_first_not_of(" \t\r\n");
-    if (b == std::string::npos) return std::string();
-    size_t e = s.find_last_not_of(" \t\r\n");
-    return s.substr(b, e - b + 1);
+    return hv::trim(s);
 }
 
 std::string commOf(int pid) {

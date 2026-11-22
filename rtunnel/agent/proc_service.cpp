@@ -1,4 +1,5 @@
 #include "proc_service.hpp"
+#include "cpputil/hstring.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -200,7 +201,7 @@ double loadOne(const char* path, int idx) {
 
 std::string lower(const std::string& s) {
     std::string o = s;
-    for (size_t i = 0; i < o.size(); ++i) o[i] = (char)tolower((unsigned char)o[i]);
+    hv::tolower(o);
     return o;
 }
 

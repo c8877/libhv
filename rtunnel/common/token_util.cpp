@@ -1,5 +1,6 @@
 #include "token_util.hpp"
 #include "sha256.hpp"
+#include "util/base64.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -93,31 +94,13 @@ bool isClientToken(const std::string& s) {
 std::string newClientToken() {
     unsigned char raw[32];
     if (!randomBytes(raw, sizeof(raw))) return std::string();
-    // base64url（无填充），自实现以免依赖 libhv 的 util 头路径
-    static const char* tbl = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    std::string out = "rtk_";
-    out.reserve(47);
-    size_t i = 0;
-    while (i + 3 <= sizeof(raw)) {
-        uint32_t v = ((uint32_t)raw[i] << 16) | ((uint32_t)raw[i + 1] << 8) | raw[i + 2];
-        out.push_back(tbl[(v >> 18) & 0x3F]);
-        out.push_back(tbl[(v >> 12) & 0x3F]);
-        out.push_back(tbl[(v >> 6) & 0x3F]);
-        out.push_back(tbl[v & 0x3F]);
-        i += 3;
+    std::string b64 = hv::Base64Encode(raw, sizeof(raw));
+    while (!b64.empty() && b64.back() == '=') b64.pop_back();
+    for (char& c : b64) {
+        if (c == '+') c = '-';
+        else if (c == '/') c = '_';
     }
-    size_t rem = sizeof(raw) - i;
-    if (rem == 1) {
-        uint32_t v = (uint32_t)raw[i] << 16;
-        out.push_back(tbl[(v >> 18) & 0x3F]);
-        out.push_back(tbl[(v >> 12) & 0x3F]);
-    } else if (rem == 2) {
-        uint32_t v = ((uint32_t)raw[i] << 16) | ((uint32_t)raw[i + 1] << 8);
-        out.push_back(tbl[(v >> 18) & 0x3F]);
-        out.push_back(tbl[(v >> 12) & 0x3F]);
-        out.push_back(tbl[(v >> 6) & 0x3F]);
-    }
-    return out;
+    return "rtk_" + b64;
 }
 
 std::string tokenPrefix(const std::string& token) {

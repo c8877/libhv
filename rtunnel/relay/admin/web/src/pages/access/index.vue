@@ -44,8 +44,8 @@
     </el-table>
 
     <el-dialog v-model="dlg" title="新建接入账号" width="440px">
-      <el-form :model="form" label-width="72px" @submit.prevent>
-        <el-form-item label="用户名" required>
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="72px" @submit.prevent>
+        <el-form-item label="用户名" prop="username">
           <el-input v-model="form.username" maxlength="64" placeholder="与客户端 --user 一致" />
         </el-form-item>
         <el-form-item label="展示名">
@@ -81,7 +81,11 @@ const q = ref('')
 const loading = ref(false)
 const dlg = ref(false)
 const saving = ref(false)
+const formRef = ref(null)
 const form = reactive({ username: '', display_name: '', note: '' })
+const rules = {
+  username: [{ required: true, message: '请填写用户名', trigger: 'blur' }],
+}
 
 let timer = null
 async function load() {
@@ -113,11 +117,9 @@ function openCreate() {
 }
 
 async function create() {
+  const ok = await formRef.value.validate().catch(() => false)
+  if (!ok) return
   const username = form.username.trim()
-  if (!username) {
-    ElMessage.warning('用户名必填')
-    return
-  }
   saving.value = true
   try {
     await Api.post('/api/v1/client-accounts', {

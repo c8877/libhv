@@ -2,6 +2,7 @@
 // 文件是 admin 自有资源（非 relay 状态），IO 直接在 admin worker 线程完成；
 // 审计照记。文件名白名单防目录穿越，写文件 tmp+rename 原子替换。
 #include "admin_server.hpp"
+#include "cpputil/hstring.h"
 #include "hash_util.hpp"
 #include "proxy_util.hpp"
 #include "cpputil/json.hpp"
@@ -41,7 +42,7 @@ static void walkDir(const std::string& dir, const std::string& rel, const std::s
         if (!isDir && !S_ISREG(st.st_mode)) continue;
         std::string child = rel.empty() ? name : rel + "/" + name;
         std::string low = name;
-        for (size_t i = 0; i < low.size(); i++) low[i] = (char)tolower((unsigned char)low[i]);
+        hv::tolower(low);
         if (low.find(needle) != std::string::npos) {
             out.push_back({name, child, isDir ? 0 : (uint64_t)st.st_size,
                            (uint64_t)st.st_mtime * 1000, isDir});
@@ -95,7 +96,7 @@ void AdminServer::handleFiles(const HttpContextPtr& ctx) {
     // 递归搜索：按名称匹配子目录中的条目，最多返回 500 条
     if (!q.empty() && ctx->param("recursive") == "1") {
         std::string needle = q;
-        for (size_t i = 0; i < needle.size(); i++) needle[i] = (char)tolower((unsigned char)needle[i]);
+        hv::tolower(needle);
         int budget = 500;
         walkDir(abs, rel, needle, files, budget);
         std::sort(files.begin(), files.end(), [](const FileEnt& a, const FileEnt& b) {

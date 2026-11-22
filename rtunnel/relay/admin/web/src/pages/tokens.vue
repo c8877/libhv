@@ -92,14 +92,14 @@
 
   <!-- 新建 / 编辑 -->
   <el-dialog v-model="dlg" :title="mode === 'create' ? '新建 API Token' : '编辑 API Token'" width="480px">
-    <el-form :model="form" label-width="88px">
+    <el-form ref="formRef" :model="form" :rules="rules" label-width="88px">
       <el-form-item v-if="mode === 'create' && isAdmin" label="所属账号">
         <el-select v-model="form.user_id" filterable style="width: 100%">
           <el-option v-for="u in users" :key="u.id" :label="u.username + ' · ' + (ROLE_NAMES[u.role] || u.role)"
                      :value="u.id" />
         </el-select>
       </el-form-item>
-      <el-form-item label="名称" required>
+      <el-form-item label="名称" prop="name">
         <el-input v-model="form.name" maxlength="64" placeholder="例如 构建机 / 监控采集" />
       </el-form-item>
       <el-form-item v-if="mode === 'create'" label="有效期">
@@ -181,6 +181,10 @@ const saving = ref(false)
 const dlg = ref(false)
 const mode = ref('create')
 const form = reactive({ id: 0, user_id: 0, name: '', expires_in_days: 30, expires_at: '' })
+const formRef = ref(null)
+const rules = {
+  name: [{ required: true, message: '请填写名称', trigger: 'blur' }],
+}
 const expireOptions = [
   { value: 0, label: '永久' }, { value: 7, label: '7 天' }, { value: 30, label: '30 天' },
   { value: 90, label: '90 天' }, { value: 365, label: '1 年' },
@@ -264,10 +268,8 @@ function openEdit(row) {
 }
 
 async function save() {
-  if (!form.name.trim()) {
-    ElMessage.warning('请填写名称')
-    return
-  }
+  const ok = await formRef.value.validate().catch(() => false)
+  if (!ok) return
   saving.value = true
   try {
     if (mode.value === 'create') {

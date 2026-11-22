@@ -2,7 +2,12 @@
 
 #include <string.h>
 
+#if defined(WITH_OPENSSL)
+#include "openssl/sha.h"
+#endif
+
 namespace rtutil {
+#if !defined(WITH_OPENSSL)
 namespace {
 
 constexpr uint32_t K[64] = {
@@ -46,8 +51,12 @@ void block(uint32_t h[8], const uint8_t* p) {
 }
 
 } // namespace
+#endif
 
 void sha256(const void* data, size_t len, uint8_t out[32]) {
+#if defined(WITH_OPENSSL)
+    SHA256((const unsigned char*)data, len, out);
+#else
     uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
                      0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
     const uint8_t* p = (const uint8_t*)data;
@@ -71,6 +80,7 @@ void sha256(const void* data, size_t len, uint8_t out[32]) {
         out[i * 4 + 2] = (uint8_t)(h[i] >> 8);
         out[i * 4 + 3] = (uint8_t)h[i];
     }
+#endif
 }
 
 std::string sha256Hex(const void* data, size_t len) {

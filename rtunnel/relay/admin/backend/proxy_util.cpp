@@ -1,6 +1,7 @@
 // 设备代理共用的 RTNP 帧工具
 #include "proxy_util.hpp"
 #include "rtnp/codec.hpp"
+#include "cpputil/hstring.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -111,24 +112,12 @@ std::string urlDecode(const std::string& in) {
 }
 
 std::string lower(std::string s) {
-    for (auto& c : s) c = (char)tolower((unsigned char)c);
+    hv::tolower(s);
     return s;
 }
 
 std::string trim(const std::string& s) {
-    size_t a = 0, b = s.size();
-    while (a < b && (s[a] == ' ' || s[a] == '\t')) ++a;
-    while (b > a && (s[b - 1] == ' ' || s[b - 1] == '\t' || s[b - 1] == '\r')) --b;
-    return s.substr(a, b - a);
-}
-
-std::string replaceAll(std::string s, const std::string& from, const std::string& to) {
-    size_t pos = 0;
-    while ((pos = s.find(from, pos)) != std::string::npos) {
-        s.replace(pos, from.size(), to);
-        pos += to.size();
-    }
-    return s;
+    return hv::trim(s);
 }
 
 std::string dechunk(const std::string& in) {

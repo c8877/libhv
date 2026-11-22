@@ -1,4 +1,5 @@
 #include "admin_db.hpp"
+#include "common/sha256.hpp"
 #include "cpputil/json.hpp"
 #include "common/logging.hpp"
 
@@ -11,7 +12,6 @@
 #if defined(WITH_OPENSSL)
 #include "openssl/evp.h"
 #include "openssl/rand.h"
-#include "openssl/sha.h"
 #endif
 
 namespace {
@@ -79,14 +79,7 @@ std::string AdminDb::randomHex(int bytes) {
 }
 
 std::string AdminDb::sha256Hex(const std::string& data) {
-#if defined(WITH_OPENSSL)
-    unsigned char md[SHA256_DIGEST_LENGTH];
-    SHA256((const unsigned char*)data.data(), data.size(), md);
-    return hexEncode(md, sizeof(md));
-#else
-    (void)data;
-    return "";
-#endif
+    return rtutil::sha256Hex(data);
 }
 
 std::string AdminDb::hashPassword(const std::string& pass, std::string& err) {

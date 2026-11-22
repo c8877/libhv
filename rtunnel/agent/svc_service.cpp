@@ -1,4 +1,5 @@
 #include "svc_service.hpp"
+#include "cpputil/hstring.h"
 
 #include <algorithm>
 #include <cctype>
@@ -151,7 +152,7 @@ int fileRank(const std::string& st) {
 
 std::string lowerStr(const std::string& s) {
     std::string o = s;
-    for (size_t i = 0; i < o.size(); ++i) o[i] = (char)tolower((unsigned char)o[i]);
+    hv::tolower(o);
     return o;
 }
 

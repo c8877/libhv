@@ -20,7 +20,6 @@ std::string rtnpStr(const std::string& s);
 std::string urlDecode(const std::string& in);
 std::string lower(std::string s);
 std::string trim(const std::string& s);
-std::string replaceAll(std::string s, const std::string& from, const std::string& to);
 std::string dechunk(const std::string& in);
 int openStream(const AdminConfig& cfg, const std::string& devid, int port, std::string& err);
 int openTtyStream(const AdminConfig& cfg, const std::string& devid, const std::string& path,
