@@ -786,10 +786,12 @@
             </div>
             <div v-show="hasUnit('proc-cpu')" class="chart-box">
               <div class="chart-title">进程 CPU (%)</div>
+              <div v-if="!unitHasPoints('proc-cpu')" class="chart-empty">等待第一个采样点…</div>
               <canvas ref="procCpuEl" />
             </div>
             <div v-show="hasUnit('proc-mem')" class="chart-box">
               <div class="chart-title">进程内存 (%)</div>
+              <div v-if="!unitHasPoints('proc-mem')" class="chart-empty">等待第一个采样点…</div>
               <canvas ref="procMemEl" />
             </div>
             <div v-show="hasUnit('load')" class="chart-box">
@@ -809,6 +811,7 @@
         <el-tab-pane label="采样配置" name="metric" lazy>
           <div class="tab-bar">
             <span class="muted">{{ seriesCfg.length }} 项 · {{ unsyncedCount }} 项未同步</span>
+            <span v-if="!canMetricEdit" class="muted">· 本地页只读，采样配置请在管理台修改</span>
             <span class="spacer" />
             <el-button v-if="canMetricEdit" size="small" @click="openAddMetric">+ 添加指标</el-button>
           </div>
@@ -2266,6 +2269,10 @@ function procSeriesParts(name) {
   const m = /^proc:(\d+):(cpu|mem)$/.exec(String(name || ''))
   return m ? { pid: m[1], kind: m[2] } : null
 }
+function unitHasPoints(u) {
+  return selected.value.some((s) => unitOf(s) === u && (cache[s] || []).length > 0)
+}
+
 function seriesLabel(name) {
   const p = procSeriesParts(name)
   if (!p) return name
@@ -2367,6 +2374,19 @@ async function loadAll(opts = {}) {
   if (notify) ElMessage.success('已刷新')
 }
 
+// 配置换了设备或指标被删除时，清掉已不在启用列表里的 chip，
+// 避免出现无法选中、无处可删的孤儿指标
+watch(enabledCfg, (list) => {
+  const names = new Set(list.map((c) => c.series))
+  const keep = selected.value.filter((s) => names.has(s))
+  if (keep.length !== selected.value.length) {
+    selected.value = keep
+    if (!selected.value.length) pickSeries()
+    saveSeriesSelection()
+    if (mainTab.value === 'monitor' || mainTab.value === 'overview') pullSeries(false)
+  }
+})
+
 async function fetchSeriesCfg() {
   try {
     const list = await Api.get(agentBase.value + '/metrics/series/config')
@@ -2376,16 +2396,37 @@ async function fetchSeriesCfg() {
   }
 }
 
+function seriesSelKey() {
+  return 'rtunnel.device.series.' + (devid.value || 'local')
+}
+
+// 进程指标是用户显式添加的，默认就要显示；其它指标没有选择记录时仍只默认 cpu/mem
 function pickSeries() {
   const enabled = enabledCfg.value.map((c) => c.series)
-  const prefer = enabled.filter((s) => s === 'cpu' || s === 'mem')
+  const prefer = enabled.filter((s) => s === 'cpu' || s === 'mem' || s.startsWith('proc:'))
   selected.value = prefer.length ? prefer : enabled.slice(0, 1)
+}
+
+function loadSeriesSelection() {
+  const enabled = enabledCfg.value.map((c) => c.series)
+  let saved = null
+  try { saved = JSON.parse(localStorage.getItem(seriesSelKey()) || 'null') } catch (e) { saved = null }
+  if (!Array.isArray(saved)) return false
+  const keep = saved.filter((s) => enabled.includes(s))
+  if (!keep.length) return false
+  selected.value = [...new Set(keep)]
+  return true
+}
+
+function saveSeriesSelection() {
+  try { localStorage.setItem(seriesSelKey(), JSON.stringify(selected.value)) } catch (e) { /* ignore */ }
 }
 
 function syncSeriesSelection() {
   const enabled = enabledCfg.value.map((c) => c.series)
   selected.value = selected.value.filter((s) => enabled.includes(s))
   if (!selected.value.length) pickSeries()
+  saveSeriesSelection()
 }
 
 function seriesPoints(name) {
@@ -2451,15 +2492,18 @@ async function pullSeries(full) {
 }
 
 async function onSeriesPick() {
+  saveSeriesSelection()
   await pullSeries(true)
 }
 
 function selectAllSeries() {
   selected.value = enabledCfg.value.map((c) => c.series)
+  saveSeriesSelection()
   pullSeries(true)
 }
 function clearSeries() {
   selected.value = []
+  saveSeriesSelection()
   renderCharts()
 }
 
@@ -3066,6 +3110,7 @@ async function addProcMetrics() {
   procPickOpen.value = false
   if (!(await saveMetricList(list))) return
   selected.value = [...new Set(selected.value.concat(picked))]
+  saveSeriesSelection()
   await pullSeries(true)
   // 下发后 agent 要等下一个采样点；补拉两次，曲线不用等用户点“全量”
   if (procPullTimer) clearTimeout(procPullTimer)
@@ -3328,6 +3373,12 @@ async function init() {
   metricPage.value = 1
   metricPer.value = 10
   addMetricOpen.value = false
+  // 进程挑选状态和 pid->comm 缓存都是按设备的，切设备必须清掉
+  procPickOpen.value = false
+  procPickPick.value = []
+  procPickRows.value = []
+  procPickErr.value = ''
+  Object.keys(procNames).forEach((k) => delete procNames[k])
   mainTab.value = startTab
   monitorView.value = 'series'
   loadedTabs.feat = false
@@ -3374,7 +3425,8 @@ async function init() {
   Object.keys(lastTs).forEach((k) => delete lastTs[k])
   Object.keys(pullAt).forEach((k) => delete pullAt[k])
   await fetchSeriesCfg()
-  pickSeries()
+  // 记住上次勾选的指标，进程曲线刷新后仍然可见；没有记录时默认 cpu/mem + 进程指标
+  if (!loadSeriesSelection()) pickSeries()
   await loadAll()
   // 加载期间 URL 可能被前进/后退改到别的 tab，以最新 URL 为准
   const currentTab = tabFromRoute()
@@ -3614,6 +3666,11 @@ onBeforeUnmount(() => {
 .chart-box { margin-top: 12px; height: 200px; position: relative; display: flex; flex-direction: column; }
 .chart-title { flex: none; font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 4px; }
 .chart-box canvas { flex: 1 1 auto; min-height: 0; }
+.chart-empty {
+  position: absolute; left: 0; right: 0; top: 30px; bottom: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; color: var(--el-text-color-secondary); pointer-events: none;
+}
 .series-bar { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 12px; }
 .series-label { flex: none; font-size: 12px; line-height: 30px; color: var(--el-text-color-secondary); }
 .series-select { flex: 1; min-width: 0; }
