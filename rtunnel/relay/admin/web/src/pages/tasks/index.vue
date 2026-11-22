@@ -20,30 +20,36 @@
       </el-tab-pane>
     </el-tabs>
 
-    <el-table :data="items" v-loading="loading">
-      <el-table-column v-if="!isPhone" prop="id" label="ID" width="60" />
-      <el-table-column prop="file_name" label="文件" min-width="130">
+    <el-table :data="items" v-loading="loading" @sort-change="onSortChange">
+      <el-table-column v-if="!isPhone" prop="id" label="ID" width="60" sortable="custom"
+                       :sort-orders="NUM_ORDERS" />
+      <el-table-column prop="file_name" label="文件" min-width="130" sortable="custom"
+                       :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
           {{ row.file_name }}
           <div v-if="row.kind === 'ota'" class="muted">目标版本 {{ row.target_version }}</div>
           <div v-if="isPhone" class="muted">{{ row.devid }}</div>
         </template>
       </el-table-column>
-      <el-table-column label="类型" width="76">
+      <el-table-column prop="kind" label="类型" width="76" sortable="custom" :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
           <el-tag :type="row.kind === 'ota' ? 'warning' : 'info'" size="small">
             {{ row.kind === 'ota' ? 'OTA' : '文件' }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column v-if="!isPhone" prop="devid" label="设备" min-width="100" />
-      <el-table-column v-if="!isPhone" prop="target_path" label="目标路径" min-width="130">
+      <el-table-column v-if="!isPhone" prop="devid" label="设备" min-width="100" sortable="custom"
+                       :sort-orders="TEXT_ORDERS" />
+      <el-table-column v-if="!isPhone" prop="target_path" label="目标路径" min-width="130"
+                       sortable="custom" :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">{{ row.target_path || '—' }}</template>
       </el-table-column>
-      <el-table-column v-if="!isPhone" label="进度 / 大小" min-width="120">
+      <el-table-column v-if="!isPhone" prop="file_size" label="进度 / 大小" min-width="120"
+                       sortable="custom" :sort-orders="NUM_ORDERS">
         <template #default="{ row }">{{ progressText(row) }}</template>
       </el-table-column>
-      <el-table-column label="状态" :min-width="isPhone ? 100 : 110">
+      <el-table-column prop="status" label="状态" :min-width="isPhone ? 100 : 110"
+                       sortable="custom" :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
           <el-tag :type="statusType(row.status)" size="small" :title="row.error || ''">
             {{ statusText(row.status) }}
@@ -51,10 +57,12 @@
           <div v-if="isPhone" class="muted">{{ progressText(row) }}</div>
         </template>
       </el-table-column>
-      <el-table-column v-if="!isPhone" label="重试" width="70">
+      <el-table-column v-if="!isPhone" prop="retry_count" label="重试" width="70"
+                       sortable="custom" :sort-orders="NUM_ORDERS">
         <template #default="{ row }">{{ row.retry_count }} / {{ row.max_retries }}</template>
       </el-table-column>
-      <el-table-column v-if="!isPhone" label="截止" min-width="140">
+      <el-table-column v-if="!isPhone" prop="deadline_at_ms" label="截止" min-width="140"
+                       sortable="custom" :sort-orders="NUM_ORDERS">
         <template #default="{ row }">{{ time(row.deadline_at_ms) }}</template>
       </el-table-column>
       <el-table-column :min-width="isPhone ? 92 : 210" label="操作">
@@ -93,11 +101,12 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Api } from '@/shared/api.js'
 import { bytes, time } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
+import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
 import {
   askExtendDeadline, taskCanCancel as canCancel, taskCanRetry as canRetry,
   taskStatusText as statusText, taskStatusType as statusType,
@@ -111,6 +120,7 @@ const tab = ref('all')
 const q = ref('')
 const page = ref(1)
 const per = 20
+const sort = reactive({ key: '', dir: 0 })
 const batch = ref(String(route.query.batch || ''))
 const items = ref([])
 const total = ref(0)
@@ -134,7 +144,8 @@ function progressText(t) {
 
 async function load(silent) {
   if (!silent) loading.value = true
-  let url = '/api/v1/distributions?page=' + page.value + '&per_page=' + per
+  let url = '/api/v1/distributions?page=' + page.value + '&per_page=' + per +
+    (sort.key ? '&sort=' + encodeURIComponent(sort.key) + '&dir=' + sort.dir : '')
   if (tab.value !== 'all') url += '&status=' + tab.value
   if (q.value.trim()) url += '&q=' + encodeURIComponent(q.value.trim())
   if (batch.value) url += '&batch=' + encodeURIComponent(batch.value)
@@ -160,7 +171,19 @@ async function load(silent) {
 }
 
 let debounce = null
-function onTab() { page.value = 1; load() }
+function onSortChange({ prop, order }) {
+  sort.key = order ? prop : ''
+  sort.dir = order === 'descending' ? -1 : (order === 'ascending' ? 1 : 0)
+  page.value = 1
+  load()
+}
+
+function onTab() {
+  page.value = 1
+  sort.key = ''
+  sort.dir = 0
+  load()
+}
 function clearBatch() {
   batch.value = ''
   page.value = 1

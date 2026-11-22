@@ -181,6 +181,10 @@ void AdminServer::handleDistList(const HttpContextPtr& ctx) {
     std::string q = ctx->param("q");
     std::string batch = ctx->param("batch");
     std::string kind = ctx->param("kind");
+    std::string sort = ctx->param("sort");
+    if (sort.size() > 32) sort.clear();
+    int dir = atoi(ctx->param("dir").c_str());
+    dir = dir > 0 ? 1 : (dir < 0 ? -1 : 0);
     int page = atoi(ctx->param("page").c_str());
     int per = atoi(ctx->param("per_page").c_str());
     if (page < 1) page = 1;
@@ -196,7 +200,7 @@ void AdminServer::handleDistList(const HttpContextPtr& ctx) {
             return;
         }
     }
-    db_.distList(status, q, batch, kind, devs, page, per, arr, total);
+    db_.distList(status, q, batch, kind, devs, sort, dir, page, per, arr, total);
     ctx->send("{\"total\":" + std::to_string(total) + ",\"page\":" + std::to_string(page) +
               ",\"per_page\":" + std::to_string(per) + ",\"items\":" + arr + "}");
 }

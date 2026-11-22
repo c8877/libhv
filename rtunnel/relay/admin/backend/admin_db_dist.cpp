@@ -147,6 +147,7 @@ static void appendDevidFilter(std::string& where, std::vector<std::string>& args
 
 bool AdminDb::distList(const std::string& status, const std::string& q, const std::string& batch,
                        const std::string& kind, const std::vector<std::string>& devids,
+                       const std::string& sort, int dir,
                        int page, int per_page, std::string& json_out, int& total) {
     std::lock_guard<std::mutex> lk(mu_);
     std::string where = " WHERE 1=1";
@@ -184,10 +185,32 @@ bool AdminDb::distList(const std::string& status, const std::string& q, const st
     if (sqlite3_step(st) == SQLITE_ROW) total = sqlite3_column_int(st, 0);
     sqlite3_finalize(st);
 
+    // 排序键白名单，直接拼列名，不接受任意输入
+    std::string order;
+    if (sort == "id") order = "id";
+    else if (sort == "file_name") order = "file_name";
+    else if (sort == "kind") order = "kind";
+    else if (sort == "devid") order = "devid";
+    else if (sort == "target_path") order = "target_path";
+    else if (sort == "file_size") order = "file_size";
+    else if (sort == "sent") order = "sent";
+    else if (sort == "status") order = "status";
+    else if (sort == "retry_count") order = "retry_count";
+    else if (sort == "deadline_at_ms") order = "deadline_at_ms";
+    else if (sort == "target_version") order = "target_version";
+    else if (sort == "created_ms") order = "created_ms";
+    else if (sort == "time") order = "CASE WHEN finished_ms>0 THEN finished_ms ELSE created_ms END";
+    if (order.empty()) {
+        order = "id DESC";
+    } else {
+        order += dir > 0 ? " ASC" : " DESC";
+        if (sort != "id") order += ", id DESC";
+    }
+
     std::string sql = "SELECT id,batch_id,devid,file_name,file_size,sub_dir,target_path,status,"
         "start_at_ms,deadline_at_ms,retry_count,max_retries,next_retry_ms,extend_count,sent,error,"
         "relay_tid,actor,created_ms,started_ms,finished_ms,file_sha,kind,target_version FROM distribution_tasks" + where +
-        " ORDER BY id DESC LIMIT ? OFFSET ?";
+        " ORDER BY " + order + " LIMIT ? OFFSET ?";
     if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return false;
     int idx = 1;
     for (size_t i = 0; i < args.size(); ++i)

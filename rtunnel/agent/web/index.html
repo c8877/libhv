@@ -405,7 +405,7 @@ th .arw{font-size:9px;color:var(--brand);margin-left:3px}
     ovProc: null, ovProcTs: 0, ovProcLoading: false,
     proc: { data: null, page: 1, per: 10, sort: 'cpu', dir: -1, q: '', kernel: false, auto: 0, timer: null },
     net: { scope: 'nic', page: 1, per: 10, q: '', listen: false, ipcKind: 'shm', data: null, counts: null,
-           nicSort: { key: '', dir: 0 } },
+           nicSort: { key: '', dir: 0 }, sort: { key: '', dir: 0 } },
     serialSort: { key: '', dir: 0 },
     mon: { range: 900000, selected: [], data: {}, timer: null }
   };
@@ -948,6 +948,62 @@ th .arw{font-size:9px;color:var(--brand);margin-left:3px}
       value: function (n) { return toNum(n.rx_errors) + toNum(n.tx_errors); } }
   ];
 
+  // 网络/UNIX/IPC 表由 agent 排序后再分页，前端只传 sort/dir
+  var NET_COLS = {
+    tcp: [
+      { key: 'local', label: '本地', type: 'text' },
+      { key: 'remote', label: '远端', type: 'text' },
+      { key: 'state', label: '状态', type: 'text' },
+      { key: 'pid', label: '进程', type: 'num', cls: 'hide-sm' }
+    ],
+    unix: [
+      { key: 'path', label: '路径', type: 'text' },
+      { key: 'type', label: '类型', type: 'text', cls: 'hide-sm' },
+      { key: 'state', label: '状态', type: 'text' },
+      { key: 'pid', label: '进程', type: 'num', cls: 'hide-sm' }
+    ],
+    ipc: {
+      shm: [
+        { key: 'key', label: '键', type: 'text' },
+        { key: 'id', label: 'ID', type: 'num', cls: 'num' },
+        { key: 'perms', label: '权限', type: 'text' },
+        { key: 'size', label: '大小', type: 'num', cls: 'num' },
+        { key: 'nattch', label: '连接', type: 'num', cls: 'num' },
+        { key: 'owner', label: '属主', type: 'text' },
+        { key: 'pid', label: '进程', type: 'num' }
+      ],
+      msg: [
+        { key: 'key', label: '键', type: 'text' },
+        { key: 'id', label: 'ID', type: 'num', cls: 'num' },
+        { key: 'perms', label: '权限', type: 'text' },
+        { key: 'used', label: '已用', type: 'num', cls: 'num' },
+        { key: 'msgs', label: '消息', type: 'num', cls: 'num' },
+        { key: 'owner', label: '属主', type: 'text' }
+      ],
+      sem: [
+        { key: 'key', label: '键', type: 'text' },
+        { key: 'id', label: 'ID', type: 'num', cls: 'num' },
+        { key: 'perms', label: '权限', type: 'text' },
+        { key: 'nsems', label: '信号量', type: 'num', cls: 'num' },
+        { key: 'owner', label: '属主', type: 'text' }
+      ],
+      posix: [
+        { key: 'name', label: '名称', type: 'text' },
+        { key: 'size', label: '大小', type: 'num', cls: 'num' },
+        { key: 'perms', label: '权限', type: 'text' },
+        { key: 'owner', label: '属主', type: 'text' },
+        { key: 'mtime_ms', label: '修改时间', type: 'num' }
+      ]
+    }
+  };
+
+  NET_COLS.udp = NET_COLS.tcp;
+
+  function netCols() {
+    if (state.net.scope === 'ipc') return NET_COLS.ipc[state.net.ipcKind] || NET_COLS.ipc.shm;
+    return NET_COLS[state.net.scope] || null;
+  }
+
   function procQuery(refresh) {
     var p = state.proc;
     return 'sort=' + encodeURIComponent(p.sort) +
@@ -1073,6 +1129,8 @@ th .arw{font-size:9px;color:var(--brand);margin-left:3px}
     if (state.net.scope === scope) return;
     state.net.scope = scope;
     state.net.page = 1;
+    state.net.sort.key = '';
+    state.net.sort.dir = 0;
     ipcTried = null;
     state.net.q = '';
     state.net.listen = false;
@@ -1120,6 +1178,8 @@ th .arw{font-size:9px;color:var(--brand);margin-left:3px}
         ipcTried[k] = true;
         state.net.ipcKind = k;
         state.net.page = 1;
+        state.net.sort.key = '';
+        state.net.sort.dir = 0;
         syncIpcKind();
         loadNet(false);
         return true;
@@ -1135,7 +1195,9 @@ th .arw{font-size:9px;color:var(--brand);margin-left:3px}
     $('#netHint').textContent = n.scope === 'ipc' ? 'IPC 采集中…' : '加载中…';
     var qs = 'scope=' + n.scope + '&page=' + n.page + '&page_size=' + n.per +
       '&q=' + encodeURIComponent(n.q) + '&listen=' + (n.listen ? '1' : '0') +
-      '&ipc_kind=' + n.ipcKind + '&proc=1' + (fresh ? '&refresh=1' : '');
+      '&ipc_kind=' + n.ipcKind + '&proc=1' +
+      '&sort=' + encodeURIComponent(n.sort.key) + '&dir=' + n.sort.dir +
+      (fresh ? '&refresh=1' : '');
     fetch('api/v1/net?' + qs, { cache: 'no-store' }).then(function (r) {
       return r.json();
     }).then(function (d) {
@@ -1203,7 +1265,8 @@ th .arw{font-size:9px;color:var(--brand);margin-left:3px}
       pageData = sec;
       var rows = sec.entries || [];
       html = rows.length
-        ? '<div class="table-wrap"><table class="dense"><thead><tr><th>本地</th><th>远端</th><th>状态</th><th class="hide-sm">进程</th></tr></thead><tbody>' +
+        ? '<div class="table-wrap"><table class="dense"><thead>' +
+          RtunnelTable.headHTML(NET_COLS[scope], state.net.sort) + '</thead><tbody>' +
           rows.map(function (r) {
             return '<tr><td class="mono">' + esc(netAddr(r.local_addr, r.local_port)) + '</td>' +
               '<td class="mono">' + esc(toNum(r.remote_port) ? netAddr(r.remote_addr, r.remote_port) : '—') + '</td>' +
@@ -1217,7 +1280,8 @@ th .arw{font-size:9px;color:var(--brand);margin-left:3px}
       pageData = us;
       var urows = us.entries || [];
       html = urows.length
-        ? '<div class="table-wrap"><table class="dense"><thead><tr><th>路径</th><th class="hide-sm">类型</th><th>状态</th><th class="hide-sm">进程</th></tr></thead><tbody>' +
+        ? '<div class="table-wrap"><table class="dense"><thead>' +
+          RtunnelTable.headHTML(NET_COLS.unix, state.net.sort) + '</thead><tbody>' +
           urows.map(function (r) {
             return '<tr><td class="mono ipath" title="' + esc(r.path) + '">' + esc(r.path || '—') + '</td>' +
               '<td class="hide-sm">' + esc(r.type || '—') + '</td><td>' + esc(r.state || '—') + '</td>' +
@@ -1231,15 +1295,10 @@ th .arw{font-size:9px;color:var(--brand);margin-left:3px}
       var kind = ipc.kind || state.net.ipcKind;
       var list = ipc[kind] || [];
       if (tryNextIpcKind(ipc, list, kind)) return;
-      var heads = {
-        shm: ['键', 'ID', '权限', '大小', '连接', '属主', '进程'],
-        msg: ['键', 'ID', '权限', '已用', '消息', '属主'],
-        sem: ['键', 'ID', '权限', '信号量', '属主'],
-        posix: ['名称', '大小', '权限', '属主', '修改时间']
-      }[kind] || ['键'];
+      var cols = NET_COLS.ipc[kind] || NET_COLS.ipc.shm;
       html = list.length
-        ? '<div class="table-wrap"><table class="dense"><thead><tr>' +
-          heads.map(function (h) { return '<th>' + h + '</th>'; }).join('') + '</tr></thead><tbody>' +
+        ? '<div class="table-wrap"><table class="dense"><thead>' +
+          RtunnelTable.headHTML(cols, state.net.sort) + '</thead><tbody>' +
           list.map(function (r) {
             if (kind === 'shm') {
               return '<tr><td class="mono">' + esc(r.key || '—') + '</td><td class="mono">' + esc(r.id || '—') + '</td>' +
@@ -1574,13 +1633,21 @@ th .arw{font-size:9px;color:var(--brand);margin-left:3px}
     if (state.data) render(state.data);
   });
   $('#netBody').addEventListener('click', function (e) {
-    if (state.net.scope !== 'nic') return;
     var th = sortTh(e.target, this);
     if (!th) return;
     var key = th.getAttribute('data-sort');
-    var num = key === 'mtu' || key === 'speed_mbps' || key === 'rx_bytes' || key === 'errors';
-    RtunnelTable.toggle(state.net.nicSort, key, num ? 'num' : 'text');
-    renderNicTable();
+    if (state.net.scope === 'nic') {
+      var num = key === 'mtu' || key === 'speed_mbps' || key === 'rx_bytes' || key === 'errors';
+      RtunnelTable.toggle(state.net.nicSort, key, num ? 'num' : 'text');
+      renderNicTable();
+      return;
+    }
+    var cols = netCols() || [];
+    var type = 'text';
+    for (var i = 0; i < cols.length; i++) if (cols[i].key === key) type = cols[i].type || 'text';
+    RtunnelTable.toggle(state.net.sort, key, type);
+    state.net.page = 1;
+    loadNet(false);
   });
   $('#procKernel').addEventListener('change', function (e) {
     state.proc.kernel = e.target.checked;
@@ -1613,6 +1680,8 @@ th .arw{font-size:9px;color:var(--brand);margin-left:3px}
     b.addEventListener('click', function () {
       state.net.ipcKind = b.getAttribute('data-kind');
       state.net.page = 1;
+      state.net.sort.key = '';
+      state.net.sort.dir = 0;
       ipcTried = null;
       syncIpcKind();
       loadNet(false);

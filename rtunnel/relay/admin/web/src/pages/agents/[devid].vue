@@ -575,25 +575,30 @@
 
       <!-- TCP / UDP -->
       <template v-else-if="netScope === 'tcp' || netScope === 'udp'">
-        <el-table v-if="!isPhone" :data="netPageRows" v-loading="netLoading" size="small" class="net-table">
-          <el-table-column label="本地地址" min-width="150">
+        <el-table :key="netScope + '|tcp'" v-if="!isPhone" :data="netPageRows" v-loading="netLoading"
+                  size="small" class="net-table" @sort-change="onNetSortChange">
+          <el-table-column label="本地地址" min-width="150" prop="local_addr" sortable="custom"
+                           :sort-orders="TEXT_ORDERS">
             <template #default="{ row }"><span class="mono">{{ row.local_addr }}</span></template>
           </el-table-column>
-          <el-table-column label="本地端口" width="96" align="right">
+          <el-table-column label="本地端口" width="96" align="right" prop="local_port" sortable="custom"
+                           :sort-orders="NUM_ORDERS">
             <template #default="{ row }"><span class="mono">{{ row.local_port }}</span></template>
           </el-table-column>
-          <el-table-column label="对端地址" min-width="150">
+          <el-table-column label="对端地址" min-width="150" prop="remote_addr" sortable="custom"
+                           :sort-orders="TEXT_ORDERS">
             <template #default="{ row }"><span class="mono">{{ row.remote_addr }}</span></template>
           </el-table-column>
-          <el-table-column label="对端端口" width="96" align="right">
+          <el-table-column label="对端端口" width="96" align="right" prop="remote_port" sortable="custom"
+                           :sort-orders="NUM_ORDERS">
             <template #default="{ row }"><span class="mono">{{ row.remote_port || '—' }}</span></template>
           </el-table-column>
-          <el-table-column label="状态" width="132">
+          <el-table-column label="状态" width="132" prop="state" sortable="custom" :sort-orders="TEXT_ORDERS">
             <template #default="{ row }">
               <el-tag size="small" :type="stateTone(row.state)">{{ row.state }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="进程" min-width="150">
+          <el-table-column label="进程" min-width="150" prop="pid" sortable="custom" :sort-orders="NUM_ORDERS">
             <template #default="{ row }">{{ procText(row) }}</template>
           </el-table-column>
           <template #empty><div class="muted">没有匹配的连接</div></template>
@@ -615,25 +620,26 @@
 
       <!-- UNIX -->
       <template v-else-if="netScope === 'unix'">
-        <el-table v-if="!isPhone" :data="netPageRows" v-loading="netLoading" size="small" class="net-table">
-          <el-table-column label="路径" min-width="240">
+        <el-table :key="netScope + '|unix'" v-if="!isPhone" :data="netPageRows" v-loading="netLoading"
+                  size="small" class="net-table" @sort-change="onNetSortChange">
+          <el-table-column label="路径" min-width="240" prop="path" sortable="custom" :sort-orders="TEXT_ORDERS">
             <template #default="{ row }">
               <span class="mono">{{ row.path || '— 匿名' }}</span>
               <el-tag v-if="row.abstract" size="small" type="info" class="inline-tag">抽象</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="类型" width="110">
+          <el-table-column label="类型" width="110" prop="type" sortable="custom" :sort-orders="TEXT_ORDERS">
             <template #default="{ row }">{{ row.type }}</template>
           </el-table-column>
-          <el-table-column label="状态" width="132">
+          <el-table-column label="状态" width="132" prop="state" sortable="custom" :sort-orders="TEXT_ORDERS">
             <template #default="{ row }">
               <el-tag size="small" :type="stateTone(row.state)">{{ row.state }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="inode" width="110">
+          <el-table-column label="inode" width="110" prop="inode" sortable="custom" :sort-orders="NUM_ORDERS">
             <template #default="{ row }"><span class="mono">{{ row.inode }}</span></template>
           </el-table-column>
-          <el-table-column label="进程" min-width="150">
+          <el-table-column label="进程" min-width="150" prop="pid" sortable="custom" :sort-orders="NUM_ORDERS">
             <template #default="{ row }">{{ procText(row) }}</template>
           </el-table-column>
           <template #empty><div class="muted">没有匹配的 UNIX socket</div></template>
@@ -668,40 +674,41 @@
           设备没有 SysV 共享内存/消息队列/信号量（lsipc 为空）；使用 /dev/shm 的 POSIX 对象请在「POSIX」中查看。
         </div>
 
-        <el-table v-if="!isPhone" :data="netPageRows" v-loading="netLoading" size="small" class="net-table">
+        <el-table :key="netScope + '|' + netIpcTab" v-if="!isPhone" :data="netPageRows" v-loading="netLoading"
+                  size="small" class="net-table" @sort-change="onNetSortChange">
           <template v-if="netIpcTab === 'shm'">
-            <el-table-column label="键" width="130"><template #default="{ row }"><span class="mono">{{ row.key }}</span></template></el-table-column>
-            <el-table-column label="ID" width="80"><template #default="{ row }"><span class="mono">{{ row.id }}</span></template></el-table-column>
-            <el-table-column label="权限" width="110"><template #default="{ row }"><span class="mono">{{ row.perms }}</span></template></el-table-column>
-            <el-table-column label="大小" width="90"><template #default="{ row }">{{ row.size }}</template></el-table-column>
-            <el-table-column label="附加" width="80"><template #default="{ row }">{{ row.nattch }}</template></el-table-column>
-            <el-table-column label="属主" min-width="110"><template #default="{ row }">{{ row.owner }}</template></el-table-column>
+            <el-table-column label="键" width="130" prop="key" sortable="custom" :sort-orders="TEXT_ORDERS"><template #default="{ row }"><span class="mono">{{ row.key }}</span></template></el-table-column>
+            <el-table-column label="ID" width="80" prop="id" sortable="custom" :sort-orders="NUM_ORDERS"><template #default="{ row }"><span class="mono">{{ row.id }}</span></template></el-table-column>
+            <el-table-column label="权限" width="110" prop="perms" sortable="custom" :sort-orders="TEXT_ORDERS"><template #default="{ row }"><span class="mono">{{ row.perms }}</span></template></el-table-column>
+            <el-table-column label="大小" width="90" prop="size" sortable="custom" :sort-orders="NUM_ORDERS"><template #default="{ row }">{{ row.size }}</template></el-table-column>
+            <el-table-column label="附加" width="80" prop="nattch" sortable="custom" :sort-orders="NUM_ORDERS"><template #default="{ row }">{{ row.nattch }}</template></el-table-column>
+            <el-table-column label="属主" min-width="110" prop="owner" sortable="custom" :sort-orders="TEXT_ORDERS"><template #default="{ row }">{{ row.owner }}</template></el-table-column>
             <el-table-column label="创建时间" width="100"><template #default="{ row }">{{ row.ctime || '—' }}</template></el-table-column>
-            <el-table-column label="创建进程" min-width="140"><template #default="{ row }">{{ procText(row) }}</template></el-table-column>
+            <el-table-column label="创建进程" min-width="140" prop="pid" sortable="custom" :sort-orders="NUM_ORDERS"><template #default="{ row }">{{ procText(row) }}</template></el-table-column>
           </template>
           <template v-else-if="netIpcTab === 'msg'">
-            <el-table-column label="键" width="130"><template #default="{ row }"><span class="mono">{{ row.key }}</span></template></el-table-column>
-            <el-table-column label="ID" width="80"><template #default="{ row }"><span class="mono">{{ row.id }}</span></template></el-table-column>
-            <el-table-column label="权限" width="110"><template #default="{ row }"><span class="mono">{{ row.perms }}</span></template></el-table-column>
-            <el-table-column label="已用" width="90"><template #default="{ row }">{{ row.used }}</template></el-table-column>
-            <el-table-column label="消息数" width="90"><template #default="{ row }">{{ row.msgs }}</template></el-table-column>
-            <el-table-column label="最后发送" width="100"><template #default="{ row }">{{ row.lspid || '—' }}</template></el-table-column>
-            <el-table-column label="最后接收" width="100"><template #default="{ row }">{{ row.lrpid || '—' }}</template></el-table-column>
-            <el-table-column label="属主" min-width="110"><template #default="{ row }">{{ row.owner }}</template></el-table-column>
+            <el-table-column label="键" width="130" prop="key" sortable="custom" :sort-orders="TEXT_ORDERS"><template #default="{ row }"><span class="mono">{{ row.key }}</span></template></el-table-column>
+            <el-table-column label="ID" width="80" prop="id" sortable="custom" :sort-orders="NUM_ORDERS"><template #default="{ row }"><span class="mono">{{ row.id }}</span></template></el-table-column>
+            <el-table-column label="权限" width="110" prop="perms" sortable="custom" :sort-orders="TEXT_ORDERS"><template #default="{ row }"><span class="mono">{{ row.perms }}</span></template></el-table-column>
+            <el-table-column label="已用" width="90" prop="used" sortable="custom" :sort-orders="NUM_ORDERS"><template #default="{ row }">{{ row.used }}</template></el-table-column>
+            <el-table-column label="消息数" width="90" prop="msgs" sortable="custom" :sort-orders="NUM_ORDERS"><template #default="{ row }">{{ row.msgs }}</template></el-table-column>
+            <el-table-column label="最后发送" width="100" prop="lspid" sortable="custom" :sort-orders="NUM_ORDERS"><template #default="{ row }">{{ row.lspid || '—' }}</template></el-table-column>
+            <el-table-column label="最后接收" width="100" prop="lrpid" sortable="custom" :sort-orders="NUM_ORDERS"><template #default="{ row }">{{ row.lrpid || '—' }}</template></el-table-column>
+            <el-table-column label="属主" min-width="110" prop="owner" sortable="custom" :sort-orders="TEXT_ORDERS"><template #default="{ row }">{{ row.owner }}</template></el-table-column>
           </template>
           <template v-else-if="netIpcTab === 'sem'">
-            <el-table-column label="键" width="130"><template #default="{ row }"><span class="mono">{{ row.key }}</span></template></el-table-column>
-            <el-table-column label="ID" width="80"><template #default="{ row }"><span class="mono">{{ row.id }}</span></template></el-table-column>
-            <el-table-column label="权限" width="110"><template #default="{ row }"><span class="mono">{{ row.perms }}</span></template></el-table-column>
-            <el-table-column label="信号量" width="100"><template #default="{ row }">{{ row.nsems }}</template></el-table-column>
-            <el-table-column label="属主" min-width="110"><template #default="{ row }">{{ row.owner }}</template></el-table-column>
+            <el-table-column label="键" width="130" prop="key" sortable="custom" :sort-orders="TEXT_ORDERS"><template #default="{ row }"><span class="mono">{{ row.key }}</span></template></el-table-column>
+            <el-table-column label="ID" width="80" prop="id" sortable="custom" :sort-orders="NUM_ORDERS"><template #default="{ row }"><span class="mono">{{ row.id }}</span></template></el-table-column>
+            <el-table-column label="权限" width="110" prop="perms" sortable="custom" :sort-orders="TEXT_ORDERS"><template #default="{ row }"><span class="mono">{{ row.perms }}</span></template></el-table-column>
+            <el-table-column label="信号量" width="100" prop="nsems" sortable="custom" :sort-orders="NUM_ORDERS"><template #default="{ row }">{{ row.nsems }}</template></el-table-column>
+            <el-table-column label="属主" min-width="110" prop="owner" sortable="custom" :sort-orders="TEXT_ORDERS"><template #default="{ row }">{{ row.owner }}</template></el-table-column>
           </template>
           <template v-else>
-            <el-table-column label="名称" min-width="240"><template #default="{ row }"><span class="mono">{{ row.name }}</span></template></el-table-column>
-            <el-table-column label="大小" width="100"><template #default="{ row }">{{ row.size }}</template></el-table-column>
-            <el-table-column label="权限" width="100"><template #default="{ row }"><span class="mono">{{ row.perms }}</span></template></el-table-column>
-            <el-table-column label="属主" width="120"><template #default="{ row }">{{ row.owner }}</template></el-table-column>
-            <el-table-column label="修改时间" min-width="160"><template #default="{ row }">{{ time(row.mtime_ms) }}</template></el-table-column>
+            <el-table-column label="名称" min-width="240" prop="name" sortable="custom" :sort-orders="TEXT_ORDERS"><template #default="{ row }"><span class="mono">{{ row.name }}</span></template></el-table-column>
+            <el-table-column label="大小" width="100" prop="size" sortable="custom" :sort-orders="NUM_ORDERS"><template #default="{ row }">{{ row.size }}</template></el-table-column>
+            <el-table-column label="权限" width="100" prop="perms" sortable="custom" :sort-orders="TEXT_ORDERS"><template #default="{ row }"><span class="mono">{{ row.perms }}</span></template></el-table-column>
+            <el-table-column label="属主" width="120" prop="owner" sortable="custom" :sort-orders="TEXT_ORDERS"><template #default="{ row }">{{ row.owner }}</template></el-table-column>
+            <el-table-column label="修改时间" min-width="160" prop="mtime_ms" sortable="custom" :sort-orders="NUM_ORDERS"><template #default="{ row }">{{ time(row.mtime_ms) }}</template></el-table-column>
           </template>
           <template #empty>
             <div class="muted">没有 {{ netIpcTab === 'shm' ? '共享内存段' : netIpcTab === 'msg' ? '消息队列' : netIpcTab === 'sem' ? '信号量' : '/dev/shm 对象' }}</div>
@@ -1482,6 +1489,7 @@ const netOffline = ref(false)
 const netStale = ref(false)
 const netPage = ref(1)
 const netPer = ref(10)
+const netSort = reactive({ key: '', dir: 0 })
 // tab 上的计数保留最近一次已知值：切到 TCP 后 agent 不再返回 ipc 计数，
 // 不能让 IPC 标签变成「—」。首次进入网络 tab 时单独拉一次汇总。
 const netCounts = reactive({ tcp: null, udp: null, unix: null, ipc: null })
@@ -1657,6 +1665,7 @@ async function loadNet(silent, refresh) {
       '&q=' + q + '&listen=' + (netOnlyListen.value ? '1' : '0') +
       '&utype=' + encodeURIComponent(netUnixType.value) +
       '&ipc_kind=' + encodeURIComponent(netIpcTab.value) +
+      '&sort=' + encodeURIComponent(netSort.key) + '&dir=' + netSort.dir +
       (refresh ? '&refresh=1' : ''))
     net.value = r || null
     applyNetMeta(r)
@@ -1701,8 +1710,17 @@ const netAgeText = computed(() => {
   return d < 60000 ? '刚刚采集' : ago(netTs.value) + ' 前采集'
 })
 
+function onNetSortChange({ prop, order }) {
+  netSort.key = order ? prop : ''
+  netSort.dir = order === 'descending' ? -1 : (order === 'ascending' ? 1 : 0)
+  netPage.value = 1
+  loadNet(false, false)
+}
+
 async function onNetTab() {
   netPage.value = 1
+  netSort.key = ''
+  netSort.dir = 0
   if (netScope.value === 'nic') {
     netErr.value = ''
     return
@@ -1724,6 +1742,8 @@ watch(netQ, () => {
 })
 watch([netOnlyListen, netUnixType, netIpcTab], () => {
   netPage.value = 1
+  netSort.key = ''
+  netSort.dir = 0
   loadNet(false, false)
 })
 

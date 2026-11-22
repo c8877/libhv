@@ -254,6 +254,105 @@ std::string lowerText(const std::string& s) {
     return o;
 }
 
+std::string jstr(const json& j, const char* key);
+
+int cmpText(const std::string& a, const std::string& b) {
+    std::string x = lowerText(a);
+    std::string y = lowerText(b);
+    if (x < y) return -1;
+    if (x > y) return 1;
+    return 0;
+}
+
+int cmpNum(long long a, long long b) {
+    if (a < b) return -1;
+    if (a > b) return 1;
+    return 0;
+}
+
+// "8.0K" / "1.2M" / "8192" 都按字节比较
+long long parseSizeText(const std::string& s) {
+    if (s.empty()) return 0;
+    char* end = nullptr;
+    double v = strtod(s.c_str(), &end);
+    if (end == s.c_str()) return 0;
+    double mul = 1;
+    if (*end == 'K' || *end == 'k') mul = 1024.0;
+    else if (*end == 'M' || *end == 'm') mul = 1048576.0;
+    else if (*end == 'G' || *end == 'g') mul = 1073741824.0;
+    return (long long)(v * mul);
+}
+
+long long jsonNum(const json& j, const char* key) {
+    if (!j.is_object() || !j.contains(key)) return 0;
+    const json& v = j[key];
+    if (v.is_number_integer()) return v.get<long long>();
+    if (v.is_number_unsigned()) return (long long)v.get<unsigned long long>();
+    if (v.is_string()) return parseSizeText(v.get<std::string>());
+    return 0;
+}
+
+bool sockSortValid(const std::string& k) {
+    return k == "local" || k == "local_addr" || k == "local_port" || k == "remote" ||
+           k == "remote_addr" || k == "remote_port" || k == "state" || k == "pid" ||
+           k == "comm" || k == "inode";
+}
+
+int sockCmp(const SockEntry& a, const SockEntry& b, const std::string& k) {
+    if (k == "local") {
+        int c = cmpText(a.local_addr, b.local_addr);
+        return c ? c : cmpNum(a.local_port, b.local_port);
+    }
+    if (k == "local_addr") return cmpText(a.local_addr, b.local_addr);
+    if (k == "local_port") return cmpNum(a.local_port, b.local_port);
+    if (k == "remote") {
+        int c = cmpText(a.remote_addr, b.remote_addr);
+        return c ? c : cmpNum(a.remote_port, b.remote_port);
+    }
+    if (k == "remote_addr") return cmpText(a.remote_addr, b.remote_addr);
+    if (k == "remote_port") return cmpNum(a.remote_port, b.remote_port);
+    if (k == "state") return cmpText(a.state, b.state);
+    if (k == "pid") return cmpNum(a.pid, b.pid);
+    if (k == "comm") return cmpText(a.comm, b.comm);
+    if (k == "inode") return cmpNum((long long)a.inode, (long long)b.inode);
+    return 0;
+}
+
+bool unixSortValid(const std::string& k) {
+    return k == "path" || k == "type" || k == "state" || k == "pid" || k == "comm" ||
+           k == "inode";
+}
+
+int unixCmp(const UnixEntry& a, const UnixEntry& b, const std::string& k) {
+    if (k == "path") return cmpText(a.path, b.path);
+    if (k == "type") return cmpText(a.type, b.type);
+    if (k == "state") return cmpText(a.state, b.state);
+    if (k == "pid") return cmpNum(a.pid, b.pid);
+    if (k == "comm") return cmpText(a.comm, b.comm);
+    if (k == "inode") return cmpNum((long long)a.inode, (long long)b.inode);
+    return 0;
+}
+
+bool ipcSortValid(const std::string& kind, const std::string& k) {
+    if (k == "key" || k == "id" || k == "perms" || k == "owner") return true;
+    if (kind == "posix") return k == "name" || k == "size" || k == "mtime_ms";
+    if (kind == "shm")
+        return k == "size" || k == "nattch" || k == "pid" || k == "comm";
+    if (kind == "msg") return k == "used" || k == "msgs" || k == "lspid" || k == "lrpid";
+    if (kind == "sem") return k == "nsems";
+    return false;
+}
+
+bool ipcSortNum(const std::string& k) {
+    return k == "id" || k == "size" || k == "nattch" || k == "pid" || k == "used" ||
+           k == "msgs" || k == "lspid" || k == "lrpid" || k == "nsems" || k == "mtime_ms";
+}
+
+int ipcCmp(const json& a, const json& b, const std::string& k) {
+    if (ipcSortNum(k)) return cmpNum(jsonNum(a, k.c_str()), jsonNum(b, k.c_str()));
+    return cmpText(jstr(a, k.c_str()), jstr(b, k.c_str()));
+}
+
 void pageBounds(int matched, const Options& opt, int& page, int& page_size, int& pages, size_t& begin,
                 size_t& end) {
     page_size = opt.page_size;
@@ -561,7 +660,13 @@ json ipcPage(json o, const Options& opt) {
         }
         rows.push_back(e);
     }
-    if (kind == "posix") {
+    if (ipcSortValid(kind, opt.sort)) {
+        bool desc = opt.dir < 0;
+        std::stable_sort(rows.begin(), rows.end(), [&](const json& a, const json& b) {
+            int c = ipcCmp(a, b, opt.sort);
+            return desc ? c > 0 : c < 0;
+        });
+    } else if (kind == "posix") {
         std::sort(rows.begin(), rows.end(), [](const json& a, const json& b) {
             return jstr(a, "name") < jstr(b, "name");
         });
@@ -661,9 +766,10 @@ json sockSection(const std::vector<SockEntry>& all, bool want_entries, const Opt
         }
         rows.push_back(e);
     }
-    // 搜索进程名需要先反查 owner；只在有关键字时做一次全量映射
+    // 搜索进程名或按进程排序时需要先反查 owner；做一次全量映射
+    bool sortByOwner = opt.sort == "pid" || opt.sort == "comm";
     std::map<unsigned long, std::pair<int, std::string>> searched_owners;
-    if (!q.empty() && opt.with_proc) {
+    if ((!q.empty() || sortByOwner) && opt.with_proc) {
         std::set<unsigned long> want;
         for (auto& e : rows)
             if (e.inode) want.insert(e.inode);
@@ -688,14 +794,22 @@ json sockSection(const std::vector<SockEntry>& all, bool want_entries, const Opt
         rows.swap(kept);
     }
 
-    std::sort(rows.begin(), rows.end(), [tcp](const SockEntry& a, const SockEntry& b) {
-        bool la = tcp ? a.state_code == 0x0A : a.state_code == 0x07;
-        bool lb = tcp ? b.state_code == 0x0A : b.state_code == 0x07;
-        if (la != lb) return la;
-        if (a.local_port != b.local_port) return a.local_port < b.local_port;
-        if (a.local_addr != b.local_addr) return a.local_addr < b.local_addr;
-        return a.remote_port < b.remote_port;
-    });
+    if (sockSortValid(opt.sort)) {
+        bool desc = opt.dir < 0;
+        std::stable_sort(rows.begin(), rows.end(), [&](const SockEntry& a, const SockEntry& b) {
+            int c = sockCmp(a, b, opt.sort);
+            return desc ? c > 0 : c < 0;
+        });
+    } else {
+        std::sort(rows.begin(), rows.end(), [tcp](const SockEntry& a, const SockEntry& b) {
+            bool la = tcp ? a.state_code == 0x0A : a.state_code == 0x07;
+            bool lb = tcp ? b.state_code == 0x0A : b.state_code == 0x07;
+            if (la != lb) return la;
+            if (a.local_port != b.local_port) return a.local_port < b.local_port;
+            if (a.local_addr != b.local_addr) return a.local_addr < b.local_addr;
+            return a.remote_port < b.remote_port;
+        });
+    }
 
     int matched = (int)rows.size();
     int page = 1, page_size = 10, pages = 1;
@@ -771,7 +885,8 @@ json unixSection(const std::vector<UnixEntry>& all, bool want_entries, const Opt
         if ((opt.utype == "STREAM" || opt.utype == "DGRAM") && e.type != opt.utype) continue;
         rows.push_back(e);
     }
-    if (!q.empty() && opt.with_proc) {
+    bool sortByOwner = opt.sort == "pid" || opt.sort == "comm";
+    if ((!q.empty() || sortByOwner) && opt.with_proc) {
         std::set<unsigned long> want;
         for (auto& e : rows)
             if (e.inode) want.insert(e.inode);
@@ -796,13 +911,21 @@ json unixSection(const std::vector<UnixEntry>& all, bool want_entries, const Opt
         rows.swap(kept);
     }
 
-    std::sort(rows.begin(), rows.end(), [](const UnixEntry& a, const UnixEntry& b) {
-        bool la = a.state_code == 0x01;
-        bool lb = b.state_code == 0x01;
-        if (la != lb) return la;
-        if (a.path != b.path) return a.path < b.path;
-        return a.inode < b.inode;
-    });
+    if (unixSortValid(opt.sort)) {
+        bool desc = opt.dir < 0;
+        std::stable_sort(rows.begin(), rows.end(), [&](const UnixEntry& a, const UnixEntry& b) {
+            int c = unixCmp(a, b, opt.sort);
+            return desc ? c > 0 : c < 0;
+        });
+    } else {
+        std::sort(rows.begin(), rows.end(), [](const UnixEntry& a, const UnixEntry& b) {
+            bool la = a.state_code == 0x01;
+            bool lb = b.state_code == 0x01;
+            if (la != lb) return la;
+            if (a.path != b.path) return a.path < b.path;
+            return a.inode < b.inode;
+        });
+    }
 
     int matched = (int)rows.size();
     int page = 1, page_size = 10, pages = 1;
@@ -824,9 +947,15 @@ json unixSection(const std::vector<UnixEntry>& all, bool want_entries, const Opt
         j["type"] = e.type;
         j["state"] = e.state;
         j["inode"] = (unsigned long long)e.inode;
+        int pid = e.pid;
+        std::string comm = e.comm;
         auto it = owners.find(e.inode);
-        j["pid"] = (it != owners.end() && it->second.first > 0) ? json(it->second.first) : json(nullptr);
-        j["comm"] = it != owners.end() ? it->second.second : std::string();
+        if (it != owners.end()) {
+            pid = it->second.first;
+            comm = it->second.second;
+        }
+        j["pid"] = pid > 0 ? json(pid) : json(nullptr);
+        j["comm"] = comm;
         if (!pushEntry(arr, j, used, budget, truncated)) break;
     }
     sec["entries"] = arr;

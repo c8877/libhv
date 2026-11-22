@@ -2643,6 +2643,8 @@ std::string AgentApp::netSnapshotJson(const nlohmann::json& rj) {
     opt.page = rj.value("page", 1);
     opt.page_size = rj.value("page_size", 10);
     opt.q = rj.value("q", std::string());
+    opt.sort = rj.value("sort", std::string());
+    opt.dir = rj.value("dir", 0);
     opt.listen_only = rj.value("listen", false);
     opt.utype = rj.value("utype", std::string("all"));
     opt.ipc_kind = rj.value("ipc_kind", std::string("shm"));

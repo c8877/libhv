@@ -312,6 +312,8 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
         q["page"] = atoi(req->GetParam("page", "1").c_str());
         q["page_size"] = atoi(req->GetParam("page_size", "10").c_str());
         q["q"] = req->GetParam("q");
+        q["sort"] = req->GetParam("sort");
+        q["dir"] = atoi(req->GetParam("dir", "0").c_str());
         q["listen"] = req->GetParam("listen", "0") == "1";
         q["utype"] = req->GetParam("utype", "all");
         q["ipc_kind"] = req->GetParam("ipc_kind", "shm");

@@ -97,6 +97,7 @@ public:
     // devids 为空表示不按设备过滤；受限账号必须传入自己的设备集
     bool distList(const std::string& status, const std::string& q, const std::string& batch,
                   const std::string& kind, const std::vector<std::string>& devids,
+                  const std::string& sort, int dir,
                   int page, int per_page, std::string& json_out, int& total);
     bool distGet(long long id, std::string& json_out);
     bool distDue(std::string& json_out);   // status/start/deadline/retry 字段列表

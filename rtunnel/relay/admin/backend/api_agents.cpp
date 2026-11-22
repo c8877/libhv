@@ -468,9 +468,13 @@ int AdminServer::handleAgentNet(const HttpContextPtr& ctx) {
     if (utype.empty()) utype = "all";
     std::string ipc_kind = ctx->param("ipc_kind");
     if (ipc_kind != "msg" && ipc_kind != "sem" && ipc_kind != "posix") ipc_kind = "shm";
+    std::string sort = ctx->param("sort");
+    if (sort.size() > 32) sort.clear();
+    int dir = atoi(ctx->param("dir").c_str());
+    dir = dir > 0 ? 1 : (dir < 0 ? -1 : 0);
     std::string key = devid + "|" + scope + "|" + (with_proc ? "1" : "0") + "|" + std::to_string(page) +
                       "|" + std::to_string(page_size) + "|" + q + "|" + (listen_only ? "1" : "0") + "|" +
-                      utype + "|" + ipc_kind;
+                      utype + "|" + ipc_kind + "|" + sort + "|" + std::to_string(dir);
 
     if (!refresh) {
         std::string cj;
@@ -536,6 +540,8 @@ int AdminServer::handleAgentNet(const HttpContextPtr& ctx) {
     req["listen"] = listen_only;
     req["utype"] = utype;
     req["ipc_kind"] = ipc_kind;
+    req["sort"] = sort;
+    req["dir"] = dir;
     req["refresh"] = refresh;
     std::string payload = req.dump();
     uint32_t rid = 0;

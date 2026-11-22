@@ -92,15 +92,17 @@ ss -tn | grep ':18443'        # 设备应自动重连
 
 ### 文件仓库（OTA 分发用）
 
-`upload_agent.sh` 需要 `atk-` 令牌，但仓库就是 relay 上的一个目录，列表是按目录实时
-扫描的，直接 scp 进去同样生效：
+`upload_agent.sh` 里内置了测试环境的默认令牌（`ATK="${ATK:-atk-...}"`），直接跑即可；
+轮换后改那一行。`/tmp` 脚本里的旧令牌都已失效，不要复用。
 
 ```bash
-scp build/deploy/packages/rtunnel-agent-*-<版本>-armv7l.tar.gz \
-    guest@192.168.1.133:/tmp/rtunnel/admin/files/agent/
+RT=https://192.168.1.133:9443 INSECURE=1 RTUNNEL_ARCH=armv7l \
+    bash rtunnel/deploy/upload_agent.sh <版本>
 ```
 
-传完 `sha256sum` 对一下，管理台「文件仓库 / agent」里就能看到，可以拿去建分发。
+不想用令牌时直接 scp 到 `guest@192.168.1.133:/tmp/rtunnel/admin/files/agent/`，
+列表按目录实时扫描，效果一样。
+
 
 
 ## 部署后怎么报

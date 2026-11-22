@@ -16,7 +16,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 DEPLOY="${RTUNNEL_DEPLOY_DIR:-$ROOT/build/deploy}"
 RT="${RT:?请设置 RT，例如 https://192.168.1.133:9443}"
-ATK="${ATK:?请设置 ATK（管理台账号 API Token，atk- 开头）}"
+# 测试环境默认令牌；轮换后改这一行即可（不想内置就用 ATK=... 覆盖）
+ATK="${ATK:-atk-9b56973835029c3e59b4e4be52b4a762a441092655cb67d013f988134b229b29}"
 LITE="$DEPLOY/agent/bin/rtunnel-agent"
 ARCH="${RTUNNEL_ARCH:-$(uname -m)}"
 VER="${1:-}"

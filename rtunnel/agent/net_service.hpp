@@ -22,6 +22,8 @@ struct Options {
     int page = 1;              // 从 1 开始
     int page_size = 10;        // 1..200
     std::string q;             // 地址/端口/路径/进程关键字
+    std::string sort;          // 排序键，空表示默认顺序（监听/端口/路径优先）
+    int dir = 0;               // 1 升序，-1 降序，0 用默认方向
     bool listen_only = false;  // TCP LISTEN / UDP UNCONN
     std::string utype;         // UNIX: STREAM|DGRAM|all
     std::string ipc_kind = "shm"; // shm|msg|sem

@@ -107,10 +107,13 @@
       </el-select>
       <el-button @click="loadTasks">刷新</el-button>
     </div>
-    <el-table :data="tasks" v-loading="taskLoading" size="small">
-      <el-table-column prop="devid" label="设备" min-width="140" />
-      <el-table-column prop="target_version" label="目标版本" width="110" />
-      <el-table-column label="状态" width="100">
+    <el-table :data="tasks" v-loading="taskLoading" size="small" @sort-change="onTaskSortChange">
+      <el-table-column prop="devid" label="设备" min-width="140" sortable="custom"
+                       :sort-orders="TEXT_ORDERS" />
+      <el-table-column prop="target_version" label="目标版本" width="110" sortable="custom"
+                       :sort-orders="TEXT_ORDERS" />
+      <el-table-column prop="status" label="状态" width="100" sortable="custom"
+                       :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
           <el-tag :type="statusType(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
         </template>
@@ -124,7 +127,8 @@
       <el-table-column label="错误" min-width="200">
         <template #default="{ row }"><span class="muted">{{ row.error || '—' }}</span></template>
       </el-table-column>
-      <el-table-column label="时间" width="160">
+      <el-table-column prop="time" label="时间" width="160" sortable="custom"
+                       :sort-orders="NUM_ORDERS">
         <template #default="{ row }">{{ ts(row.finished_ms || row.created_ms) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="130" fixed="right">
@@ -174,6 +178,7 @@ const taskLoading = ref(false)
 const taskStatus = ref('')
 const taskPage = ref(1)
 const taskPer = 20
+const taskSort = reactive({ key: '', dir: 0 })
 const taskTotal = ref(0)
 let timer = null
 
@@ -275,11 +280,19 @@ async function load() {
   }
 }
 
+function onTaskSortChange({ prop, order }) {
+  taskSort.key = order ? prop : ''
+  taskSort.dir = order === 'descending' ? -1 : (order === 'ascending' ? 1 : 0)
+  taskPage.value = 1
+  loadTasks()
+}
+
 async function loadTasks() {
   taskLoading.value = true
   try {
     const r = await Api.get('/api/v1/distributions?kind=ota&page=' + taskPage.value +
       '&per_page=' + taskPer +
+      (taskSort.key ? '&sort=' + encodeURIComponent(taskSort.key) + '&dir=' + taskSort.dir : '') +
       (taskStatus.value ? '&status=' + encodeURIComponent(taskStatus.value) : ''))
     tasks.value = r.items || []
     taskTotal.value = r.total || 0
