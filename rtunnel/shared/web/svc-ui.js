@@ -129,6 +129,9 @@
         'th.op,td.op{text-align:right;width:224px}',
         'th.c-start,td.c-start{width:104px;white-space:nowrap}',
         'th.c-mem,td.c-mem{width:96px;padding-right:16px;text-align:right;font-variant-numeric:tabular-nums}',
+        'th.c-rest,td.c-rest{width:64px;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}',
+        'td.c-rest.warn{color:var(--warn);font-weight:600}',
+        'td.c-rest.bad{color:var(--bad);font-weight:600}',
         'th.c-up,td.c-up{width:112px;padding-left:12px;white-space:nowrap}',
         'th.st,td.st{width:206px}',
         'th.sortable{cursor:pointer;user-select:none}',
@@ -183,6 +186,7 @@
         '.win.narrow th.st,.win.narrow td.st{width:170px}',
         '.win.narrow th.op,.win.narrow td.op{width:180px}',
         '.win.small th.c-start,.win.small td.c-start,.win.small th.c-mem,.win.small td.c-mem,',
+        '.win.small th.c-rest,.win.small td.c-rest,',
         '.win.small th.c-up,.win.small td.c-up{display:none}',
         '.win.small .up-inline{display:block}',
         '.win.small .pnums{display:none}.win.small .pcur{display:inline}',
@@ -324,6 +328,7 @@
             ['服务', 'name', ''],
             ['状态', 'status', 'st'],
             ['自启', 'start', 'c-start'],
+            ['重启', 'restarts', 'c-rest'],
             ['内存', 'mem', 'c-mem'],
             ['运行时长', 'uptime', 'c-up'],
             ['操作', '', 'op']
@@ -696,6 +701,10 @@
         tr.appendChild(tdSt);
 
         tr.appendChild(h('td', 'c-start', FILE_STATE[s.file_state] || s.file_state || '—'));
+        var rest = Number(s.restarts) || 0;
+        var tdRest = h('td', 'c-rest', rest > 0 ? String(rest) : '—');
+        if (rest > 0) tdRest.classList.add(st.cls === 'bad' ? 'bad' : 'warn');
+        tr.appendChild(tdRest);
         tr.appendChild(h('td', 'c-mem', fmtMem(s.mem)));
         tr.appendChild(h('td', 'c-up', st.up || '—'));
 
@@ -743,6 +752,7 @@
         kv('Unit', s.name);
         kv('Load', s.load);
         kv('Active', (s.active || '') + (s.sub ? ' (' + s.sub + ')' : ''));
+        kv('重启次数', (Number(s.restarts) || 0) + ' 次');
         kv('Main PID', s.pid ? String(s.pid) : '—');
         if (s.active === 'active' && s.active_ms >= 0) kv('已运行', fmtDur(s.active_ms));
         body.appendChild(meta);

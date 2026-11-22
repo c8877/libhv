@@ -203,6 +203,8 @@ nlohmann::json applyListPage(const nlohmann::json& full, const ListOptions& opt)
         int c = 0;
         if (key == "mem") {
             c = cmpMissing(a.value("mem", -1LL), b.value("mem", -1LL), dir);
+        } else if (key == "restarts") {
+            c = cmpMissing(a.value("restarts", 0LL), b.value("restarts", 0LL), dir);
         } else if (key == "uptime") {
             long long ua = a.value("active", "") == "active" ? a.value("active_ms", -1LL) : -1;
             long long ub = b.value("active", "") == "active" ? b.value("active_ms", -1LL) : -1;
@@ -267,6 +269,7 @@ void parseShow(const std::string& text, double uptime_sec, std::vector<nlohmann:
         s["pid"] = parseLongLong(kv["MainPID"], n) ? n : 0;
         s["mem"] = parseLongLong(kv["MemoryCurrent"], n) ? n : -1;
         s["exit"] = parseLongLong(kv["ExecMainStatus"], n) ? n : 0;
+        s["restarts"] = parseLongLong(kv["NRestarts"], n) ? n : 0;
         long long mono_us = 0;
         long long active_ms = -1;
         if (parseLongLong(kv["ActiveEnterTimestampMonotonic"], mono_us) && mono_us > 0 &&
@@ -447,7 +450,7 @@ void Service::listAsync(const ListOptions& opt, Callback cb) {
         double up = readUptimeSec();
         CmdResult c = runCmd({"systemctl", "show", "*.service", "-p",
                               "Id,Description,LoadState,ActiveState,SubState,UnitFileState,MainPID,"
-                              "MemoryCurrent,Result,ExecMainStatus,ActiveEnterTimestampMonotonic"},
+                              "MemoryCurrent,Result,ExecMainStatus,NRestarts,ActiveEnterTimestampMonotonic"},
                              15000, 4 * 1024 * 1024);
         if (c.code != 0 || c.timeout) {
             r["ok"] = false;
