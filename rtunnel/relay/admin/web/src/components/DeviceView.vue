@@ -778,8 +778,11 @@
               </template>
             </el-select>
           </div>
-          <div v-if="enabledCfg.length" class="series-tip">
+          <div v-if="enabledCfg.length && canMetricEdit" class="series-tip">
             取消进程指标会停止该进程采样并释放缓存；系统指标只隐藏曲线。恢复采样到「采样配置」打开开关
+          </div>
+          <div v-else-if="enabledCfg.length" class="series-tip">
+            本地页只读：取消 chip 只隐藏曲线，采样配置请在管理台修改
           </div>
           <div v-if="!enabledCfg.length" class="muted">该设备还没有启用的采样指标，可在「采样配置」中添加</div>
           <template v-else>
@@ -2540,8 +2543,11 @@ async function onSeriesPick(val) {
   const added = next.filter((s) => !prev.includes(s))
   pickedRef.value = next
   saveSeriesSelection()
-  if (await setProcSampling(removed, false)) ElMessage.success('已停止进程采样并释放缓存')
-  await setProcSampling(added, true)
+  // 本地页没有写接口，chip 只控制显示，不改设备采样
+  if (canMetricEdit.value) {
+    if (await setProcSampling(removed, false)) ElMessage.success('已停止进程采样并释放缓存')
+    await setProcSampling(added, true)
+  }
   await pullSeries(true)
 }
 
@@ -2557,7 +2563,7 @@ async function clearSeries() {
   selected.value = []
   pickedRef.value = []
   saveSeriesSelection()
-  if (await setProcSampling(prev, false)) ElMessage.success('已停止进程采样并释放缓存')
+  if (canMetricEdit.value && await setProcSampling(prev, false)) ElMessage.success('已停止进程采样并释放缓存')
   renderCharts()
 }
 
