@@ -322,29 +322,18 @@
         var tw = h('div', 'tw');
         var table = h('table');
         var thead = h('thead');
-        var tr = h('tr');
-        this.q.arw = {};
-        [
-            ['服务', 'name', ''],
-            ['状态', 'status', 'st'],
-            ['自启', 'start', 'c-start'],
-            ['重启', 'restarts', 'c-rest'],
-            ['内存', 'mem', 'c-mem'],
-            ['运行时长', 'uptime', 'c-up'],
-            ['操作', '', 'op']
-        ].forEach(function (c) {
-            var th = h('th', c[2], c[0]);
-            if (c[1]) {
-                th.classList.add('sortable');
-                th.title = '点击排序';
-                var arw = h('span', 'arw', '');
-                th.appendChild(arw);
-                self.q.arw[c[1]] = arw;
-                th.addEventListener('click', function () { self.sortBy(c[1]); });
-            }
-            tr.appendChild(th);
+        this.q.head = RtunnelTable.createHead([
+            { label: '服务', key: 'name', type: 'text' },
+            { label: '状态', key: 'status', type: 'text', cls: 'st' },
+            { label: '自启', key: 'start', type: 'text', cls: 'c-start' },
+            { label: '重启', key: 'restarts', type: 'num', cls: 'c-rest' },
+            { label: '内存', key: 'mem', type: 'num', cls: 'c-mem' },
+            { label: '运行时长', key: 'uptime', type: 'num', cls: 'c-up' },
+            { label: '操作', cls: 'op' }
+        ], {
+            onSort: function (key, type) { self.sortBy(key, type); }
         });
-        thead.appendChild(tr);
+        thead.appendChild(this.q.head.tr);
         table.appendChild(thead);
         this.q.tbody = h('tbody');
         table.appendChild(this.q.tbody);
@@ -603,9 +592,10 @@
         this.q.err.hidden = !this.err;
     };
 
-    Manager.prototype.sortBy = function (key) {
-        if (this.sortKey === key) this.sortDir = -this.sortDir;
-        else { this.sortKey = key; this.sortDir = 1; }
+    Manager.prototype.sortBy = function (key, type) {
+        var st = { key: this.sortKey, dir: this.sortDir };
+        this.sortDir = RtunnelTable.toggle(st, key, type);
+        this.sortKey = st.key;
         this.page = 1;
         this.load();
     };
@@ -625,9 +615,7 @@
             ? (this.services.length ? '没有匹配的服务' : '没有可管理的服务')
             : '正在连接设备…';
 
-        for (var k2 in this.q.arw) {
-            this.q.arw[k2].textContent = this.sortKey === k2 ? (this.sortDir > 0 ? '▲' : '▼') : '';
-        }
+        this.q.head.update({ key: this.sortKey, dir: this.sortDir });
 
         var rows = this.services;
         this.q.empty.hidden = rows.length > 0;

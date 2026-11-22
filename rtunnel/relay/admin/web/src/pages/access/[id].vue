@@ -86,7 +86,7 @@
         </el-tab-pane>
       </el-tabs>
 
-      <el-table :data="filteredTokens" v-loading="loading">
+      <DataTable :data="filteredTokens" :sort-keys="sortKeys" v-loading="loading">
         <el-table-column label="名称 / 前缀" :min-width="isPhone ? 120 : 160">
           <template #default="{ row }">
             <b>{{ row.name || '未命名' }}</b>
@@ -145,7 +145,7 @@
           </template>
         </el-table-column>
         <template #empty><div class="empty-pad muted">暂无 Token</div></template>
-      </el-table>
+      </DataTable>
     </div>
 
     <!-- 编辑账号资料 -->
@@ -230,6 +230,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
 import { can, canManage, roleOf } from '@/shared/store.js'
 import { bytes, copyText, time } from '@/shared/utils.js'
@@ -277,6 +278,14 @@ const counts = computed(() => {
   tokens.value.forEach((t) => { if (c[t.status] != null) c[t.status]++ })
   return c
 })
+const sortKeys = {
+  '名称 / 前缀': 'name',
+  '状态 / 到期': 'status',
+  '流量': { key: 'quota_bytes', type: 'num' },
+  '频率 · 并发': { key: 'rate_per_min', type: 'num' },
+  '最近使用': { key: 'last_used_ms', type: 'num' }
+}
+
 const filteredTokens = computed(() =>
   filter.value === 'all' ? tokens.value : tokens.value.filter((t) => t.status === filter.value))
 

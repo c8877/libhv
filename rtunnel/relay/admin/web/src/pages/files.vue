@@ -24,6 +24,7 @@ import { auth, canManage, canOperate } from '@/shared/store.js'
 import { bytes } from '@/shared/utils.js'
 import { createRepoBackend } from '@/shared/repo-backend.js'
 import editorUrl from '../../../../../shared/web/cm-editor.bundle.js?url'
+import '../../../../../shared/web/table-ui.js'
 import '../../../../../shared/web/fs-ui.js'
 import '../../../../../shared/web/file-view.js'
 

@@ -10,7 +10,7 @@
       <el-button v-if="canManage()" type="primary" @click="openCreate">+ 新建账号</el-button>
     </div>
 
-    <el-table :data="list" v-loading="loading" row-class-name="row-click" @row-click="openDetail">
+    <DataTable :data="list" :sort-keys="sortKeys" v-loading="loading" row-class-name="row-click" @row-click="openDetail">
       <el-table-column label="用户名" :min-width="isPhone ? 150 : 180">
         <template #default="{ row }">
           <b>{{ row.username }}</b>
@@ -37,7 +37,7 @@
         </template>
       </el-table-column>
       <template #empty><el-empty description="暂无接入账号" :image-size="70" /></template>
-    </el-table>
+    </DataTable>
 
     <el-dialog v-model="dlg" title="新建接入账号" width="440px">
       <el-form :model="form" label-width="72px" @submit.prevent>
@@ -63,6 +63,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
 import { canManage } from '@/shared/store.js'
 import { time } from '@/shared/utils.js'
@@ -71,6 +72,13 @@ import { useBreakpoint } from '@/shared/useBreakpoint.js'
 const { isPhone } = useBreakpoint()
 
 const router = useRouter()
+const sortKeys = {
+  '用户名': 'username',
+  '状态': 'status',
+  'Token': { key: 'token_count', type: 'num' },
+  '最近使用': { key: 'last_used_ms', type: 'num' }
+}
+
 const list = ref([])
 const q = ref('')
 const loading = ref(false)

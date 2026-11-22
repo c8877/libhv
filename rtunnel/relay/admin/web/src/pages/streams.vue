@@ -8,7 +8,7 @@
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
     </div>
-    <el-table :data="filtered" v-loading="loading">
+    <DataTable :data="filtered" :sort-keys="sortKeys" v-loading="loading">
       <el-table-column label="A 用户:a_sid" :min-width="isPhone ? 150 : 160">
         <template #default="{ row }">
           {{ row.a_user }}:{{ row.a_sid }}
@@ -35,12 +35,13 @@
         </template>
       </el-table-column>
       <template #empty><el-empty description="当前无会话" :image-size="70" /></template>
-    </el-table>
+    </DataTable>
   </div>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
 import { ago } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
@@ -49,6 +50,14 @@ const { isPhone } = useBreakpoint()
 const list = ref([])
 const q = ref('')
 const loading = ref(false)
+
+const sortKeys = {
+  'A 用户:a_sid': 'a_user',
+  'C 设备:c_sid': 'c_devid',
+  '状态': 'state',
+  '开启于': { key: 'opened_at_ms', type: 'num' },
+  '最近活动': { key: 'last_active_ms', type: 'num' }
+}
 
 const filtered = computed(() => {
   const k = q.value.trim().toLowerCase()

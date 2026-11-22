@@ -1243,6 +1243,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, MoreFilled, Refresh } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import { Api } from '@/shared/api.js'
+import { Table } from '@/shared/table.js'
 import { can, canManage } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import { ago, bytes, copyText, downloadJson, duration, kbPair, time } from '@/shared/utils.js'
@@ -1362,7 +1363,7 @@ const NET_TABS = [
 const loadedTabs = reactive({ feat: false, net: false, monitor: false, tty: false })
 const featTab = ref('storage')
 const procSort = ref('cpu')
-const procDir = ref(0)
+const procDir = ref(-1)
 const procQuery = ref('')
 const procShowKernel = ref(false)
 const procs = ref(null)
@@ -2566,31 +2567,28 @@ async function loadProcs(refresh, silent) {
 
 function onProcPage() { loadProcs(false, false) }
 
+const PROC_SORT_TYPE = {
+  pid: 'text', user: 'text', comm: 'text',
+  cpu: 'num', mem: 'num', threads: 'num', start: 'num'
+}
+
 function onProcSort() {
   procPage.value = 1
-  procDir.value = 0
+  procDir.value = Table.defaultDir(PROC_SORT_TYPE[procSort.value])
   loadProcs(false)
 }
 
 // 表头点击排序：key 就是后端的 sort key
-function procDefaultDir(key) {
-  return key === 'pid' || key === 'user' || key === 'comm' ? 1 : -1
-}
-
 function sortProcBy(key) {
-  if (procSort.value === key) {
-    procDir.value = (procDir.value || procDefaultDir(key)) === 1 ? -1 : 1
-  } else {
-    procSort.value = key
-    procDir.value = procDefaultDir(key)
-  }
+  const st = { key: procSort.value, dir: procDir.value }
+  procDir.value = Table.toggle(st, key, PROC_SORT_TYPE[key])
+  procSort.value = st.key
   procPage.value = 1
   loadProcs(false)
 }
 
 function procArrow(key) {
-  if (procSort.value !== key) return ''
-  return (procDir.value || procDefaultDir(key)) === 1 ? ' ↑' : ' ↓'
+  return Table.arrow({ key: procSort.value, dir: procDir.value }, key)
 }
 
 function onMetricSize(size) {

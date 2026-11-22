@@ -23,6 +23,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { bytes } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import editorUrl from '../../../../../shared/web/cm-editor.bundle.js?url'
+import '../../../../../shared/web/table-ui.js'
 import '../../../../../shared/web/fs-ui.js'
 import '../../../../../shared/web/file-view.js'
 

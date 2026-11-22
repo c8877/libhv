@@ -15,7 +15,7 @@
       Token 继承所属账号的权限组；加入权限组后只能收窄，不会超过归属账号。
     </div>
 
-    <el-table :data="list" v-loading="loading">
+    <DataTable :data="list" :sort-keys="sortKeys" v-loading="loading">
       <el-table-column label="名称 / 前缀" :min-width="isPhone ? 150 : 170">
         <template #default="{ row }">
           <b>{{ row.name || '未命名' }}</b>
@@ -82,7 +82,7 @@
         </template>
       </el-table-column>
       <template #empty><el-empty description="暂无 API Token" :image-size="70" /></template>
-    </el-table>
+    </DataTable>
   </div>
 
   <!-- 新建 / 编辑 -->
@@ -162,9 +162,18 @@ import { auth, roleOf, ROLE_NAMES } from '@/shared/store.js'
 import { copyText, time } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import ApiDocPanel from '@/components/ApiDocPanel.vue'
+import DataTable from '@/components/DataTable.vue'
 
 const { isPhone } = useBreakpoint()
 const isAdmin = computed(() => roleOf() === 'admin')
+
+const sortKeys = {
+  '名称 / 前缀': 'name',
+  '所属账号': 'username',
+  '状态 / 到期': 'status',
+  '权限组': { key: 'group_count', type: 'num' },
+  '最近使用': { key: 'last_used_ms', type: 'num' }
+}
 
 const list = ref([])
 const users = ref([])

@@ -50,7 +50,7 @@
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
       </div>
-      <el-table :data="filtered" v-loading="loading">
+      <DataTable :data="filtered" :sort-keys="sortKeys" v-loading="loading">
         <el-table-column label="SAN（身份）" :min-width="isPhone ? 150 : 200">
           <template #default="{ row }">
             <b :title="row.san">{{ row.san.length > 30 ? row.san.slice(0, 29) + '…' : row.san }}</b>
@@ -84,18 +84,27 @@
           </template>
         </el-table-column>
         <template #empty><el-empty description="暂无证书" :image-size="70" /></template>
-      </el-table>
+      </DataTable>
     </div>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
 import { downloadBlob } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 
 const { isPhone } = useBreakpoint()
+
+const sortKeys = {
+  'SAN（身份）': 'san',
+  '类型': 'role',
+  '序列号': 'serial',
+  '到期日': { key: 'expire_ms', type: 'num' },
+  '状态': 'status'
+}
 
 const list = ref([])
 const q = ref('')

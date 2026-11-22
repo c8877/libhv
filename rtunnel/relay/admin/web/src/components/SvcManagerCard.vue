@@ -20,6 +20,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import '../../../../../shared/web/table-ui.js'
 import '../../../../../shared/web/svc-ui.js'
 
 const RtunnelSvc = window.RtunnelSvc

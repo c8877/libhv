@@ -10,7 +10,7 @@
       <el-button v-if="can('account.write')" type="primary" @click="openCreate">+ 新建账号</el-button>
     </div>
 
-    <el-table :data="filtered" v-loading="loading">
+    <DataTable :data="filtered" :sort-keys="sortKeys" v-loading="loading">
       <el-table-column label="用户名" :min-width="isPhone ? 150 : 160">
         <template #default="{ row }">
           <b>{{ row.username }}</b>
@@ -68,7 +68,7 @@
         </template>
       </el-table-column>
       <template #empty><el-empty description="暂无账号" :image-size="70" /></template>
-    </el-table>
+    </DataTable>
 
     <!-- 新建 -->
     <el-dialog v-model="createDlg" title="新建账号" width="440px">
@@ -139,6 +139,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
+import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
 import { auth, roleOf, ROLE_NAMES, can } from '@/shared/store.js'
 import { time } from '@/shared/utils.js'
@@ -150,6 +151,14 @@ const q = ref('')
 const loading = ref(false)
 const saving = ref(false)
 const me = computed(() => auth.me || {})
+
+const sortKeys = {
+  username: 'username',
+  '角色': 'role',
+  '状态': 'status',
+  '权限组': { key: 'groups', type: 'num', value: (r) => (r.groups || []).length },
+  '创建时间': { key: 'created_ms', type: 'num' }
+}
 
 const filtered = computed(() => {
   const k = q.value.trim().toLowerCase()

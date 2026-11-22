@@ -12,7 +12,7 @@
     </el-tabs>
     <div class="subj-hint muted">{{ TAB_HINTS[tab] }}</div>
 
-    <el-table :data="rows" size="small" row-key="key" :show-header="!isPhone">
+    <DataTable :data="rows" :sort-keys="sortKeys" size="small" row-key="key" :show-header="!isPhone">
       <el-table-column label="对象" min-width="170">
         <template #default="{ row }">
           <b>{{ row.name }}</b>
@@ -57,7 +57,7 @@
         </template>
       </el-table-column>
       <template #empty><span class="muted">没有匹配的对象</span></template>
-    </el-table>
+    </DataTable>
 
     <el-dialog v-model="dlg" :title="'分配权限组 · ' + edit.name" :width="isPhone ? '92%' : '560px'">
       <div class="dlg-tip muted">
@@ -90,6 +90,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
 import { can } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
@@ -128,6 +129,15 @@ const availableGroups = computed(() => {
 
 function countOf(t) {
   return items.value.filter((x) => x.type === t).length
+}
+
+const sortKeys = {
+  '对象': 'name',
+  '类型': 'type',
+  '所属权限组': { key: 'groups', type: 'num', value: (r) => (r.groups || []).length },
+  '有效资源': { key: 'resource_count', type: 'num' },
+  '设备范围': { key: 'device_count', type: 'num' },
+  '状态': 'status'
 }
 
 const rows = computed(() => {

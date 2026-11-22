@@ -201,6 +201,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}
 thead th{position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--line);text-align:left;padding:7px 8px;
   color:var(--muted);font-weight:600;font-size:12px;white-space:nowrap;cursor:pointer;z-index:1}
 thead th.c{cursor:default;width:30px}
+thead th .arw{font-size:9px;color:var(--accent);margin-left:3px}
 tbody td{border-bottom:1px solid var(--line-soft);padding:6px 8px;vertical-align:middle}
 tbody tr:hover{background:var(--hover)}
 tbody tr.sel{background:var(--sel)}
@@ -421,9 +422,9 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
       <table>
         <thead><tr>
           <th class="c"><input type="checkbox" id="all"></th>
-          <th data-sort="name">名称</th>
-          <th data-sort="size">大小</th>
-          <th data-sort="mtime">修改时间</th>
+          <th data-sort="name" data-type="text">名称<span class="arw"></span></th>
+          <th data-sort="size" data-type="num">大小<span class="arw"></span></th>
+          <th data-sort="mtime" data-type="num">修改时间<span class="arw"></span></th>
           <th style="text-align:right">操作</th>
         </tr></thead>
         <tbody id="rows"></tbody>
@@ -804,8 +805,10 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         this.sh.querySelectorAll('th[data-sort]').forEach(function (th) {
             th.addEventListener('click', function () {
                 var k = th.getAttribute('data-sort');
-                if (self.sortKey === k) self.sortDir = -self.sortDir;
-                else { self.sortKey = k; self.sortDir = 1; }
+                var st = { key: self.sortKey, dir: self.sortDir };
+                RtunnelTable.toggle(st, k, th.getAttribute('data-type'));
+                self.sortKey = st.key;
+                self.sortDir = st.dir;
                 self.render();
             });
         });
@@ -1838,6 +1841,11 @@ footer{display:flex;align-items:center;gap:12px;padding:8px 14px;border-top:1px 
         var tree = this.isTree();
         var table = this.sh.querySelector('table');
         if (table) table.classList.toggle('tree', tree);
+        var sortState = { key: this.sortKey, dir: this.sortDir };
+        this.sh.querySelectorAll('th[data-sort]').forEach(function (th) {
+            var arw = th.querySelector('.arw');
+            if (arw) arw.textContent = RtunnelTable.arrow(sortState, th.getAttribute('data-sort'));
+        });
         // 操作列可用宽度 → 最多平铺几个按钮，剩下的进 ⋯
         var wrapW = rows.parentElement ? rows.parentElement.clientWidth : 0;
         var avail = wrapW >= 560 ? wrapW - 480 : 0;

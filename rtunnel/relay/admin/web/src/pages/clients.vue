@@ -6,7 +6,7 @@
       <span class="spacer" />
       <el-button :loading="loading" @click="load">刷新</el-button>
     </div>
-    <el-table :data="list" v-loading="loading">
+    <DataTable :data="list" :sort-keys="sortKeys" v-loading="loading">
       <el-table-column label="用户" min-width="140">
         <template #default="{ row }">
           <b>{{ row.user }}</b>
@@ -27,19 +27,28 @@
         </template>
       </el-table-column>
       <template #empty><el-empty description="暂无在线客户端" :image-size="70" /></template>
-    </el-table>
+    </DataTable>
   </div>
 </template>
 
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import DataTable from '@/components/DataTable.vue'
 import { Api } from '@/shared/api.js'
 import { ago, bytes } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 
 const router = useRouter()
 const { isPhone } = useBreakpoint()
+const sortKeys = {
+  '用户': 'user',
+  '远端地址': 'remote_addr',
+  '最近活跃': { key: 'last_seen_ms', type: 'num' },
+  '会话数': { key: 'streams', type: 'num' },
+  '流量 ↓/↑': { key: 'traffic', type: 'num', value: (r) => (r.bytes_in || 0) + (r.bytes_out || 0) }
+}
+
 const list = ref([])
 const loading = ref(false)
 

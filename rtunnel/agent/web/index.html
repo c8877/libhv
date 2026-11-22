@@ -134,8 +134,9 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:6px 0 0}
 th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
 td.bad{color:var(--bad)}
 table.dense th,table.dense td{padding:6px 8px;font-size:12px}
-table.dense th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
-table.dense th.sortable:hover{color:var(--brand)}
+th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+th.sortable:hover{color:var(--brand)}
+th .arw{font-size:9px;color:var(--brand);margin-left:3px}
 .tag.sm{height:22px;padding:0 8px;font-size:11px}
 .ipath{max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chartbox{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
@@ -382,6 +383,7 @@ table.dense th.sortable:hover{color:var(--brand)}
 
   <footer id="foot">本地页面 · agent 采集</footer>
 </div>
+<script src="assets/table-ui.js"></script>
 <script src="assets/fs-ui.js"></script>
 <script src="assets/svc-ui.js"></script>
 <script src="assets/file-view.js"></script>
@@ -391,12 +393,20 @@ table.dense th.sortable:hover{color:var(--brand)}
   'use strict';
   var $ = function (s) { return document.querySelector(s); };
   var $$ = function (s) { return Array.prototype.slice.call(document.querySelectorAll(s)); };
+  function sortTh(target, root) {
+    for (var el = target; el && el !== root; el = el.parentNode) {
+      if (el.tagName === 'TH' && el.getAttribute('data-sort')) return el;
+    }
+    return null;
+  }
   var TABS = ['overview', 'storage', 'file', 'service', 'proc', 'net', 'monitor', 'tty', 'caps'];
   var state = {
     data: null, hist: [], timer: null, period: 2000, tab: 'overview',
     ovProc: null, ovProcTs: 0, ovProcLoading: false,
-    proc: { data: null, page: 1, per: 10, sort: 'cpu', dir: 0, q: '', kernel: false, auto: 0, timer: null },
-    net: { scope: 'nic', page: 1, per: 10, q: '', listen: false, ipcKind: 'shm', data: null, counts: null },
+    proc: { data: null, page: 1, per: 10, sort: 'cpu', dir: -1, q: '', kernel: false, auto: 0, timer: null },
+    net: { scope: 'nic', page: 1, per: 10, q: '', listen: false, ipcKind: 'shm', data: null, counts: null,
+           nicSort: { key: '', dir: 0 } },
+    serialSort: { key: '', dir: 0 },
     mon: { range: 900000, selected: [], data: {}, timer: null }
   };
 
@@ -711,10 +721,20 @@ table.dense th.sortable:hover{color:var(--brand)}
 
     var serial = d.serial || [];
     $('#ttyCount').textContent = serial.length ? serial.length + ' 个' : '';
-    $('#serial').innerHTML = serial.length
-      ? '<table><thead><tr><th>设备</th><th>参数</th><th>RX</th><th>TX</th><th>状态</th></tr></thead><tbody>' +
-        serial.map(function (s) {
-          var param = s.configured ? (s.baud + ' · ' + s.data_bits + s.parity + s.stop_bits) : '—';
+    var serialRows = serial.map(function (s) {
+      return {
+        s: s, path: s.path,
+        param: s.configured ? (s.baud + ' · ' + s.data_bits + s.parity + s.stop_bits) : '',
+        rx: toNum(s.rx), tx: toNum(s.tx),
+        state: s.configured ? (s.enabled ? '启用' : '禁用') : '未配置'
+      };
+    });
+    serialRows = RtunnelTable.sortRows(serialRows, state.serialSort, SERIAL_COLS);
+    $('#serial').innerHTML = serialRows.length
+      ? '<table><thead>' + RtunnelTable.headHTML(SERIAL_COLS, state.serialSort) + '</thead><tbody>' +
+        serialRows.map(function (r) {
+          var s = r.s;
+          var param = r.param || '—';
           var tag = s.configured ? (s.enabled ? '<span class="tag ok">启用</span>' : '<span class="tag">禁用</span>')
                                  : '<span class="tag">未配置</span>';
           return '<tr><td class="mono">' + esc(s.path) + '</td><td class="mono">' + esc(param) +
@@ -895,6 +915,39 @@ table.dense th.sortable:hover{color:var(--brand)}
   var PROC_PER = [10, 20, 50];
   var procSeq = 0;
 
+  var PROC_COLS = [
+    { key: 'pid', label: 'PID', type: 'text' },
+    { key: 'user', label: '用户', type: 'text', cls: 'hide-sm' },
+    { key: 'comm', label: '名称', type: 'text' },
+    { key: 'cpu', label: 'CPU', type: 'num', cls: 'num' },
+    { key: 'mem', label: '内存', type: 'num', cls: 'num' },
+    { label: '状态' },
+    { key: 'threads', label: '线程', type: 'num', cls: 'num hide-sm' },
+    { key: 'start', label: '启动', type: 'num', cls: 'hide-sm' }
+  ];
+  var PROC_SORT_TYPE = {};
+  PROC_COLS.forEach(function (c) { PROC_SORT_TYPE[c.key] = c.type; });
+
+  var SERIAL_COLS = [
+    { key: 'path', label: '设备', type: 'text' },
+    { key: 'param', label: '参数', type: 'text' },
+    { key: 'rx', label: 'RX', type: 'num' },
+    { key: 'tx', label: 'TX', type: 'num' },
+    { key: 'state', label: '状态', type: 'text' }
+  ];
+
+  var NIC_COLS = [
+    { key: 'name', label: '网卡', type: 'text' },
+    { key: 'up', label: '状态', type: 'text', value: function (n) { return nicUp(n) ? 'up' : 'down'; } },
+    { key: 'ip', label: 'IP', type: 'text' },
+    { key: 'mac', label: 'MAC', type: 'text', cls: 'hide-sm' },
+    { key: 'mtu', label: 'MTU', type: 'num', cls: 'num hide-sm' },
+    { key: 'speed_mbps', label: '速率', type: 'num', cls: 'num hide-sm' },
+    { key: 'rx_bytes', label: '↓ / ↑', type: 'num', cls: 'num' },
+    { key: 'errors', label: '错误', type: 'num', cls: 'num hide-sm',
+      value: function (n) { return toNum(n.rx_errors) + toNum(n.tx_errors); } }
+  ];
+
   function procQuery(refresh) {
     var p = state.proc;
     return 'sort=' + encodeURIComponent(p.sort) +
@@ -936,25 +989,11 @@ table.dense th.sortable:hover{color:var(--brand)}
     return base;
   }
 
-  function procDefaultDir(key) {
-    return (key === 'pid' || key === 'user' || key === 'comm') ? 1 : -1;
-  }
-
-  function procArrow(key) {
-    if (state.proc.sort !== key) return '';
-    var dir = state.proc.dir || procDefaultDir(key);
-    return dir === 1 ? ' ↑' : ' ↓';
-  }
-
-  function procTh(key, label, cls) {
-    return '<th class="sortable' + (cls || '') + '" data-sort="' + key + '">' +
-      label + procArrow(key) + '</th>';
-  }
-
   function sortProcs(key) {
     var p = state.proc;
-    if (p.sort === key) p.dir = (p.dir || procDefaultDir(key)) === 1 ? -1 : 1;
-    else { p.sort = key; p.dir = procDefaultDir(key); }
+    var st = { key: p.sort, dir: p.dir };
+    p.dir = RtunnelTable.toggle(st, key, PROC_SORT_TYPE[key]);
+    p.sort = st.key;
     p.page = 1;
     if ($('#procSort')) $('#procSort').value = key;
     loadProcs(false);
@@ -966,10 +1005,8 @@ table.dense th.sortable:hover{color:var(--brand)}
     $('#procHint').textContent = procHintText(d);
     var rows = d.entries || [];
     $('#procBody').innerHTML = rows.length
-      ? '<table class="dense"><thead><tr>' + procTh('pid', 'PID') + procTh('user', '用户', ' hide-sm') +
-        procTh('comm', '名称') + procTh('cpu', 'CPU', ' num') +
-        procTh('mem', '内存', ' num') + '<th>状态</th>' + procTh('threads', '线程', ' num hide-sm') +
-        procTh('start', '启动', ' hide-sm') + '</tr></thead><tbody>' +
+      ? '<table class="dense"><thead>' + RtunnelTable.headHTML(PROC_COLS, { key: state.proc.sort, dir: state.proc.dir }) +
+        '</thead><tbody>' +
         rows.map(function (r) {
           var cpu = toNum(r.cpu_pct);
           return '<tr><td class="mono">' + toNum(r.pid) + '</td><td class="hide-sm">' + esc(r.user || '—') + '</td>' +
@@ -1125,12 +1162,12 @@ table.dense th.sortable:hover{color:var(--brand)}
 
   function renderNicTable() {
     var nics = (state.data && state.data.nics) || [];
+    nics = RtunnelTable.sortRows(nics, state.net.nicSort, NIC_COLS);
     $('#netHint').textContent = nics.length ? nics.length + ' 个网卡' : '';
     $('#netPager').innerHTML = '';
     $('#netBody').innerHTML = nics.length
-      ? '<div class="table-wrap"><table class="dense"><thead><tr><th>网卡</th><th>状态</th><th>IP</th>' +
-        '<th class="hide-sm">MAC</th><th class="num hide-sm">MTU</th><th class="num hide-sm">速率</th>' +
-        '<th class="num">↓ / ↑</th><th class="num hide-sm">错误</th></tr></thead><tbody>' +
+      ? '<div class="table-wrap"><table class="dense"><thead>' +
+        RtunnelTable.headHTML(NIC_COLS, state.net.nicSort) + '</thead><tbody>' +
         nics.map(function (n) {
           var errs = toNum(n.rx_errors) + toNum(n.tx_errors);
           return '<tr><td class="mono ipath" title="' + esc(n.name) + '">' + esc(n.name) + '</td>' +
@@ -1519,18 +1556,31 @@ table.dense th.sortable:hover{color:var(--brand)}
     loadProcs(false);
   }, 300));
   $('#procSort').addEventListener('change', function (e) {
-    state.proc.sort = e.target.value;
-    state.proc.dir = 0;
+    var key = e.target.value;
+    state.proc.sort = key;
+    state.proc.dir = RtunnelTable.defaultDir(PROC_SORT_TYPE[key]);
     state.proc.page = 1;
     loadProcs(false);
   });
   $('#procBody').addEventListener('click', function (e) {
-    for (var el = e.target; el && el !== this; el = el.parentNode) {
-      if (el.tagName === 'TH' && el.getAttribute('data-sort')) {
-        sortProcs(el.getAttribute('data-sort'));
-        return;
-      }
-    }
+    var th = sortTh(e.target, this);
+    if (th) sortProcs(th.getAttribute('data-sort'));
+  });
+  $('#serial').addEventListener('click', function (e) {
+    var th = sortTh(e.target, this);
+    if (!th) return;
+    var key = th.getAttribute('data-sort');
+    RtunnelTable.toggle(state.serialSort, key, key === 'rx' || key === 'tx' ? 'num' : 'text');
+    if (state.data) render(state.data);
+  });
+  $('#netBody').addEventListener('click', function (e) {
+    if (state.net.scope !== 'nic') return;
+    var th = sortTh(e.target, this);
+    if (!th) return;
+    var key = th.getAttribute('data-sort');
+    var num = key === 'mtu' || key === 'speed_mbps' || key === 'rx_bytes' || key === 'errors';
+    RtunnelTable.toggle(state.net.nicSort, key, num ? 'num' : 'text');
+    renderNicTable();
   });
   $('#procKernel').addEventListener('change', function (e) {
     state.proc.kernel = e.target.checked;

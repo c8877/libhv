@@ -10,7 +10,7 @@
     </div>
 
     <div ref="tableWrap">
-      <el-table :data="filtered" v-loading="loading" row-class-name="row-click"
+      <DataTable :data="filtered" :sort-keys="sortKeys" v-loading="loading" row-class-name="row-click"
                 @row-click="openRow" @row-contextmenu="openContextMenu">
         <el-table-column label="devid" min-width="140">
           <template #default="{ row }"><b>{{ row.devid }}</b></template>
@@ -45,7 +45,7 @@
           </template>
         </el-table-column>
         <template #empty><el-empty description="暂无在线设备" :image-size="70" /></template>
-      </el-table>
+      </DataTable>
     </div>
 
     <el-dialog v-model="webDlg" :title="'打开 Web · ' + (webRow ? webRow.devid : '')"
@@ -97,6 +97,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import DataTable from '@/components/DataTable.vue'
 import RowActions from '@/components/RowActions.vue'
 import { Api } from '@/shared/api.js'
 import { can, canManage, canOperate } from '@/shared/store.js'
@@ -124,6 +125,16 @@ function actionsOf(row) {
   if (canOperate()) out.push({ key: 'web', label: 'Web' })
   if (canManage()) out.push({ key: 'kick', label: '下线', danger: true })
   return out
+}
+
+const sortKeys = {
+  devid: 'devid',
+  '远端地址': 'remote_addr',
+  '最近活跃': { key: 'last_seen_ms', type: 'num' },
+  '系统运行': { key: 'uptime', type: 'num', value: (r) => (r.boot_ms ? nowMs.value - r.boot_ms : 0) },
+  '在线时长': { key: 'online_ms', type: 'num', value: (r) => (r.connected_at_ms ? nowMs.value - r.connected_at_ms : 0) },
+  '会话数': { key: 'streams', type: 'num' },
+  '流量 ↓/↑': { key: 'traffic', type: 'num', value: (r) => (r.bytes_in || 0) + (r.bytes_out || 0) }
 }
 
 const filtered = computed(() => {
