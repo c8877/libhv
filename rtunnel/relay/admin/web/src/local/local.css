@@ -1,0 +1,11 @@
+.local-shell {
+  min-height: 100%;
+  padding: 16px;
+  max-width: 1440px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+@media (max-width: 720px) {
+  .local-shell { padding: 10px; }
+}

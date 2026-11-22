@@ -288,13 +288,13 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
   会话、系统信息与 mTLS 证书状态
 - 顶部摘要条展示设备名、agent 版本、连接信息、流量与采集时间，和一级 tab 一起吸顶
 - 「能力」tab 展示 TCP 端口、Shell、SYSINFO、mTLS、OTA、可重启/可关机、文件/服务能力与串口白名单；
-  manager/admin 可在线编辑
+  管理台 manager/admin 可在线编辑，设备本地页只读
 - 表格默认 10 行/页，支持 5/10/20/50；进程、服务、网络（TCP/UDP、Unix、IPC）和
   分发/OTA 任务都在服务端排序后再分页，只回传当前页；网卡/串口和文件列表在浏览器端排序。
-  管理台直接用 Element 的 `sortable` / `sortable="custom"` 与 `@sort-change`，
-  数值列默认降序、文本列默认升序（`shared/tableSort.js` 提供 `NUM_ORDERS` /
-  `TEXT_ORDERS`）；本地页和共享组件没有 Element，排序规则与箭头统一走
-  `shared/web/table-ui.js`
+  管理台和设备本地页共用 `components/DeviceView.vue`，都用 Element 的
+  `sortable` / `sortable="custom"` 与 `@sort-change`；数值列默认降序、文本列默认升序
+  （`shared/tableSort.js` 提供 `NUM_ORDERS` / `TEXT_ORDERS`）。共享渲染组件
+  （`fs-ui` / `svc-ui`）内部的表格仍走 `shared/web/table-ui.js`
 - 文件/服务 tab 首次打开时建立会话；进程 tab 支持 1/2/3/5/10/20/30 秒自动刷新
 - 监控 tab 内切换「曲线 / 采样配置」；串口配置独立为一级 tab
 
@@ -531,7 +531,7 @@ http://B:9443/device/<devid>/<port>/<path>
 | `--allow 22,80` / `--allow-all` | 目标端口白名单 |
 | `--allow-shell` / `--max-idle` | 允许 `OPEN_SHELL` / 空闲自退秒数 |
 | `--allow-ota` | 允许 relay 通知安装 file_dir 中的新版本（命令行默认关；部署包自带配置为开） |
-| `--local-web [ADDR:]PORT` | 本地只读设备详情页（带 Web 构建），默认 `127.0.0.1:8080` |
+| `--local-web [ADDR:]PORT` | 本地设备详情页（内置单文件 Web），默认 `127.0.0.1:8080` |
 | `--file-root DIR` | 文件管理根目录，默认同 `--file-dir`（`/opt/data/files`） |
 | `--file-rw` / `--file-ro` | 允许/禁止写操作；二进制默认只读，部署服务默认开启读写 |
 | `--file-max-mb N` | 单文件上传上限，默认 512 |
@@ -551,9 +551,13 @@ http://B:9443/device/<devid>/<port>/<path>
 
 - `--local-web [ADDR:]PORT`：`8080` / `127.0.0.1:8080` 只监听本机；
   `:8080` / `0.0.0.0:8080` 监听所有网卡（页面会暴露设备型号、IP、串口等只读信息）
-- 页面内容与管理台设备详情同源：单层 tab（概览 / 存储 / 文件 / 服务 / 进程 /
-  网络 / 监控 / 串口 / 能力），概览含 CPU/内存/负载/网络 KPI、趋势、存储、
-  网卡、会话、系统信息（温度、eMMC/SD 寿命、mTLS 证书）；存储页分区可折叠，
+- 页面与管理台设备详情是同一份 Vue 源码（`relay/admin/web/src/components/DeviceView.vue`），
+  本地入口在 `src/local`，通过 API 适配直连 agent；`npm run build:local` 构建成
+  单个 HTML 后写入 `agent/web/index.html`，由 CMake 内嵌，不加载外部页面资源
+- 单层 tab（概览 / 存储 / 文件 / 服务 / 进程 / 网络 / 监控 / 串口 / 能力），
+  概览含 CPU/内存/负载/网络 KPI、趋势、存储、
+  网卡、系统信息（温度、eMMC/SD 寿命、mTLS 证书）；本地页没有 relay 会话，
+  概览不显示「会话」卡，能力/采样/串口配置为只读；存储页分区可折叠，
   展开后按 `GET /api/v1/storage/tree` 拉目录树并画成瀑布；非活动 tab 不请求数据，
   首次进入才加载
 - 本地页与 relay 详情共用同一套预热：agent 启动和页面打开时刷新进程/服务缓存，
@@ -613,15 +617,15 @@ RSS 里约 5–6 MB 是可回收的文件页（二进制、libc/libstdc++/libcry
 
 ### 共享前端组件
 
-管理台与设备本地页是两套页面，但文件、服务、存储三块交互只有一份实现，
-放在 `shared/web/`，由两边各自挂载：
+管理台与设备本地页的页面外壳是同一套（`DeviceView.vue`），文件、服务、存储三块
+交互再共用 `shared/web/`，由两边各自挂载：
 
-| 组件 | 作用 | 本地页 | 管理台 |
+| 组件 | 作用 | 设备本地页 | 管理台 |
 |---|---|---|---|
-| `fs-ui.js` | 文件管理（WebSocket 会话、上传下载、编辑器） | 内嵌资源 `/assets/fs-ui.js` | `FileManagerCard.vue` 异步引入 |
-| `svc-ui.js` | 服务管理（systemd 列表/日志/启停） | 内嵌资源 `/assets/svc-ui.js` | `SvcManagerCard.vue` 异步引入 |
-| `storage-ui.js` | 存储分区折叠、目录瀑布、右键递归展开 | 内嵌资源 `/assets/storage-ui.js` | `StorageTreeCard.vue` 异步引入 |
-| `file-view.js` | Hex / 文本 / 图片查看器 | 内嵌资源 `/assets/file-view.js` | 与 `fs-ui` 共用 |
+| `fs-ui.js` | 文件管理（WebSocket 会话、上传下载、编辑器） | 打包进本地页单文件 | `FileManagerCard.vue` 异步引入 |
+| `svc-ui.js` | 服务管理（systemd 列表/日志/启停） | 打包进本地页单文件 | `SvcManagerCard.vue` 异步引入 |
+| `storage-ui.js` | 存储分区折叠、目录瀑布、右键递归展开 | 打包进本地页单文件 | `StorageTreeCard.vue` 异步引入 |
+| `file-view.js` | Hex / 文本 / 图片查看器 | 打包进本地页单文件 | 与 `fs-ui` 共用 |
 
 组件都用 `createXxx(opts)` 挂到传入的容器上，样式自带作用域
 （`fs-ui` 用 Shadow DOM，`storage-ui` 的规则全部挂在 `.rtstore` 下），

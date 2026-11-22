@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "precompress": "node scripts/precompress.mjs dist",
     "check:docs": "node scripts/check-api-docs.mjs",
-    "check:ui": "node scripts/check-ui-rules.mjs"
+    "check:ui": "node scripts/check-ui-rules.mjs",
+    "build:local": "npm run check:ui && vite build --config vite.local.config.js && node scripts/inline-local-page.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",

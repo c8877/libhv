@@ -34,7 +34,11 @@ const props = defineProps({
   devid: { type: String, default: '' },
   sys: { type: Object, default: null },
   canEdit: { type: Boolean, default: false },
-  embedded: { type: Boolean, default: false }   // 嵌在 tab 里时不画 .panel 与外层标题
+  embedded: { type: Boolean, default: false },   // 嵌在 tab 里时不画 .panel 与外层标题
+  // 本地页经 relay 路径前缀访问，WS 地址由外层传入；管理台留空用默认地址
+  wsUrl: { type: String, default: '' },
+  // 本地页的编辑器脚本由 agent 内置资源提供
+  editorUrl: { type: String, default: '' }
 })
 
 const caps = computed(() => (props.sys && props.sys.caps) || {})
@@ -80,9 +84,9 @@ function ensureManager() {
   fm = RtunnelFs.createManager({
     inline: true,
     container: fsHost.value,
-    wsUrl: proto + location.host + '/ws/fs/' + encodeURIComponent(props.devid),
+    wsUrl: props.wsUrl || (proto + location.host + '/ws/fs/' + encodeURIComponent(props.devid)),
     title: '文件管理 - ' + props.devid,
-    editorUrl,
+    editorUrl: props.editorUrl || editorUrl,
     note: noteText.value,
     noteWarn: !writable.value,
     onClose: () => { expanded.value = false },

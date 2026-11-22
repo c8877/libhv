@@ -1,11 +1,19 @@
 // 管理接口封装：统一 JSON、错误消息与 401 跳登录
+// 设备本地页（src/local/main.js）会安装一个适配器，把 /api/v1/agents/<devid>/*
+// 映射到 agent 自己暴露的 /api/v1/*，管理台不设置适配器，行为不变。
 let onUnauthorized = null
+let adapter = null
+
+export function setApiAdapter(fn) {
+  adapter = fn
+}
 
 export function setUnauthorizedHandler(fn) {
   onUnauthorized = fn
 }
 
 async function req(path, opt = {}) {
+  if (adapter) return adapter(path, opt)
   const headers = Object.assign({ 'X-Requested-With': 'fetch' }, opt.headers || {})
   const r = await fetch(path, Object.assign({ cache: 'no-store' }, opt, { headers }))
   if (r.status === 401) {

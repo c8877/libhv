@@ -362,7 +362,7 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
             ch->close();
             return;
         }
-        if (req->path == "/ws/fs") {
+        if (req->path == "/ws/fs" || req->path.compare(0, 7, "/ws/fs/") == 0) {
             if (!app->fsReady()) {
                 ch->close();
                 return;
@@ -376,7 +376,7 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
             g_fs_conns[ch.get()] = conn;
             return;
         }
-        if (req->path == "/ws/svc") {
+        if (req->path == "/ws/svc" || req->path.compare(0, 8, "/ws/svc/") == 0) {
             if (!app->svcReady()) {
                 ch->close();
                 return;

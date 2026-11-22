@@ -127,9 +127,11 @@ GitHub Actions (`.github/workflows/CI.yml`): builds and tests on Linux (with Ope
 - 上传文件仓库用 `deploy/upload_agent.sh`；atk 内置在该脚本的默认值里，轮换后改那一行，需要新的就直接开口要。
 - 汇报只说结果：版本、服务状态、隧道是否 ESTAB、线程/RSS。不要复述步骤清单。
 
-## 前端（管理台）组件规则
+## 前端（管理台与设备本地页）组件规则
 
-管理台在 `rtunnel/relay/admin/web`（Vue 3 + Element Plus 2.x）。**Element 已有的能力必须直接用，禁止再实现一份**；框架不满足时，用它的扩展点（插槽、`sortable="custom"` + `@sort-change`、`el-table` 的 `#empty` 等）扩展，不要另写一套替换。
+管理台在 `rtunnel/relay/admin/web`（Vue 3 + Element Plus 2.x）。设备本地页与管理台共用
+`src/components/DeviceView.vue`，由 `src/local` 入口构建成单文件 HTML 内置到 agent，
+不再单独维护一套页面。**Element 已有的能力必须直接用，禁止再实现一份**；框架不满足时，用它的扩展点（插槽、`sortable="custom"` + `@sort-change`、`el-table` 的 `#empty` 等）扩展，不要另写一套替换。
 
 | 需求 | 必须用 | 禁止 |
 |---|---|---|
@@ -144,9 +146,10 @@ GitHub Actions (`.github/workflows/CI.yml`): builds and tests on Linux (with Ope
 | 菜单 | `el-menu` / `el-dropdown` + `el-dropdown-menu` | 手写列表菜单；光标定位的右键菜单 Element 无原生支持，自建需标注 |
 | DOM | 模板 + 响应式状态 | `document.createElement` / `innerHTML` / `insertAdjacentHTML` |
 
-- 改完管理台必须跑 `cd rtunnel/relay/admin/web && npm run check:ui`；`npm run build` 和 `npm run dev` 已内置，违反会直接失败。
+- 改完管理台或设备页必须跑 `cd rtunnel/relay/admin/web && npm run check:ui`；`npm run build`、`npm run dev`、`npm run build:local` 已内置，违反会直接失败。
 - Element 确实没有对应能力时才允许自建，并写清原因，否则检查失败：
   `<!-- ui-allow: 原因 -->`（单行，可写在标签上一行）或 `<!-- ui-allow-begin: 原因 --> … <!-- ui-allow-end -->`（成块）；脚本区用 `// ui-allow: 原因`。
 - 表格排序、表单校验、弹层、tab、分页不属于可放行范围。
-- 设备本地页（`rtunnel/agent/web`、`rtunnel/shared/web`）不加载 Vue/Element，继续共用 `table-ui.js` / `fs-ui.js` / `svc-ui.js`，不适用上表。
+- 设备本地页不要另写页面：管理台与本地页共用 `components/DeviceView.vue`，差异只通过 `mode`、API 适配（`src/local/api.js`）和资源权限处理。`npm run build:local` 生成 `rtunnel/agent/web/index.html`，这是构建产物，不要手改。
+- `shared/web/*.js`（`fs-ui` / `svc-ui` / `storage-ui` / `table-ui`）只作为 Vue 卡片/组件内部的渲染内核；不要再基于它们写页面级表格、表单或弹层。
 

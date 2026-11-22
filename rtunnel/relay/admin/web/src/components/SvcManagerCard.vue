@@ -29,7 +29,9 @@ const props = defineProps({
   devid: { type: String, default: '' },
   sys: { type: Object, default: null },
   canEdit: { type: Boolean, default: false },
-  embedded: { type: Boolean, default: false }   // 嵌在 tab 里时不画 .panel 与外层标题
+  embedded: { type: Boolean, default: false },   // 嵌在 tab 里时不画 .panel 与外层标题
+  // 本地页经 relay 路径前缀访问，WS 地址由外层传入；管理台留空用默认地址
+  wsUrl: { type: String, default: '' }
 })
 
 const caps = computed(() => (props.sys && props.sys.caps) || {})
@@ -54,7 +56,7 @@ function ensureManager() {
   sm = RtunnelSvc.createManager({
     inline: true,
     container: svcHost.value,
-    wsUrl: proto + location.host + '/ws/svc/' + encodeURIComponent(props.devid),
+    wsUrl: props.wsUrl || (proto + location.host + '/ws/svc/' + encodeURIComponent(props.devid)),
     title: '服务管理 - ' + props.devid,
     onClose: () => { expanded.value = false }
   })
