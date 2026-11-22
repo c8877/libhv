@@ -213,11 +213,14 @@
             <span class="spacer" />
             <el-input v-model="procQuery" size="small" clearable class="proc-search"
                       placeholder="PID / 名称 / 命令行 / 用户" />
-            <el-select v-model="procSort" size="small" class="proc-sort" @change="onProcSort">
+            <el-select v-if="isPhone" v-model="procSort" size="small" class="proc-sort" @change="onProcSort">
               <el-option label="按 CPU" value="cpu" />
               <el-option label="按内存" value="mem" />
               <el-option label="按 PID" value="pid" />
               <el-option label="按启动" value="start" />
+              <el-option label="按用户" value="user" />
+              <el-option label="按名称" value="comm" />
+              <el-option label="按线程" value="threads" />
             </el-select>
             <el-checkbox v-model="procShowKernel" size="small">内核线程</el-checkbox>
             <el-select v-model="procPeriod" size="small" class="proc-auto" @change="onProcPeriod">
@@ -235,10 +238,12 @@
 
           <el-table v-if="!isPhone" :data="procEntries" v-loading="procLoading" size="small"
                     @row-contextmenu="openProcMenu" @row-dblclick="showProcDetail">
-            <el-table-column label="PID" width="82">
+            <el-table-column label="PID" width="82" prop="pid">
+              <template #header><span class="th-sort" @click="sortProcBy('pid')">PID{{ procArrow('pid') }}</span></template>
               <template #default="{ row }"><span class="mono">{{ row.pid }}</span></template>
             </el-table-column>
-            <el-table-column label="用户" min-width="96" show-overflow-tooltip>
+            <el-table-column label="用户" min-width="96" prop="user" show-overflow-tooltip>
+              <template #header><span class="th-sort" @click="sortProcBy('user')">用户{{ procArrow('user') }}</span></template>
               <template #default="{ row }">{{ row.user || '—' }}</template>
             </el-table-column>
             <el-table-column label="状态" width="86">
@@ -246,22 +251,27 @@
                 <el-tag size="small" :type="procStateTone(row)">{{ row.state_text }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="CPU" width="82" align="right">
+            <el-table-column label="CPU" width="82" align="right" prop="cpu">
+              <template #header><span class="th-sort" @click="sortProcBy('cpu')">CPU{{ procArrow('cpu') }}</span></template>
               <template #default="{ row }"><span class="num">{{ row.cpu_pct.toFixed(1) }}%</span></template>
             </el-table-column>
-            <el-table-column label="内存" width="88" align="right">
+            <el-table-column label="内存" width="88" align="right" prop="mem">
+              <template #header><span class="th-sort" @click="sortProcBy('mem')">内存{{ procArrow('mem') }}</span></template>
               <template #default="{ row }"><span class="num">{{ kbText(row.rss_kb) }}</span></template>
             </el-table-column>
-            <el-table-column label="线程" width="70" align="right">
+            <el-table-column label="线程" width="70" align="right" prop="threads">
+              <template #header><span class="th-sort" @click="sortProcBy('threads')">线程{{ procArrow('threads') }}</span></template>
               <template #default="{ row }"><span class="num">{{ row.threads }}</span></template>
             </el-table-column>
-            <el-table-column label="命令" min-width="260" show-overflow-tooltip>
+            <el-table-column label="命令" min-width="260" prop="comm" show-overflow-tooltip>
+              <template #header><span class="th-sort" @click="sortProcBy('comm')">命令{{ procArrow('comm') }}</span></template>
               <template #default="{ row }">
                 <span class="mono pcmd">{{ row.cmd }}</span>
                 <el-tag v-if="row.kernel" size="small" type="info" effect="plain" class="inline-tag">内核</el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="启动时间" width="150">
+            <el-table-column label="启动时间" width="150" prop="start">
+              <template #header><span class="th-sort" @click="sortProcBy('start')">启动时间{{ procArrow('start') }}</span></template>
               <template #default="{ row }"><span class="muted">{{ time(row.start_ms) }}</span></template>
             </el-table-column>
             <template #empty><div class="muted">没有匹配的进程</div></template>
@@ -1352,6 +1362,7 @@ const NET_TABS = [
 const loadedTabs = reactive({ feat: false, net: false, monitor: false, tty: false })
 const featTab = ref('storage')
 const procSort = ref('cpu')
+const procDir = ref(0)
 const procQuery = ref('')
 const procShowKernel = ref(false)
 const procs = ref(null)
@@ -2532,7 +2543,8 @@ async function loadProcs(refresh, silent) {
   if (!silent) procLoading.value = true
   try {
     const q = encodeURIComponent(procQuery.value.trim())
-    const r = await Api.get(agentBase.value + '/procs?sort=' + procSort.value + '&q=' + q +
+    const r = await Api.get(agentBase.value + '/procs?sort=' + procSort.value +
+      '&dir=' + procDir.value + '&q=' + q +
       '&kernel=' + (procShowKernel.value ? '1' : '0') +
       '&page=' + procPage.value + '&page_size=' + procPer.value +
       (refresh ? '&refresh=1' : ''))
@@ -2556,7 +2568,29 @@ function onProcPage() { loadProcs(false, false) }
 
 function onProcSort() {
   procPage.value = 1
+  procDir.value = 0
   loadProcs(false)
+}
+
+// 表头点击排序：key 就是后端的 sort key
+function procDefaultDir(key) {
+  return key === 'pid' || key === 'user' || key === 'comm' ? 1 : -1
+}
+
+function sortProcBy(key) {
+  if (procSort.value === key) {
+    procDir.value = (procDir.value || procDefaultDir(key)) === 1 ? -1 : 1
+  } else {
+    procSort.value = key
+    procDir.value = procDefaultDir(key)
+  }
+  procPage.value = 1
+  loadProcs(false)
+}
+
+function procArrow(key) {
+  if (procSort.value !== key) return ''
+  return (procDir.value || procDefaultDir(key)) === 1 ? ' ↑' : ' ↓'
 }
 
 function onMetricSize(size) {
@@ -3232,6 +3266,8 @@ onBeforeUnmount(() => {
 .proc-search { width: 240px; }
 .proc-sort { width: 108px; }
 .proc-auto { width: 136px; }
+.th-sort { cursor: pointer; user-select: none; }
+.th-sort:hover { color: var(--el-color-primary); }
 .proc-ts { display: flex; gap: 6px; }
 .pcmd { font-size: 12px; }
 .pctx-menu {

@@ -370,22 +370,46 @@ nlohmann::json render(const Snapshot& snap, const Options& opt, uint64_t age_ms)
     }
 
     std::string sort = opt.sort;
-    if (sort != "mem" && sort != "pid" && sort != "start") sort = "cpu";
+    if (sort != "mem" && sort != "pid" && sort != "start" && sort != "threads" && sort != "user" &&
+        sort != "comm")
+        sort = "cpu";
+    // dir: 1 升序，-1 降序，0 用该列的默认方向（数值列降序、文本和 PID 升序）
+    int dir = opt.dir;
+    if (dir != 1 && dir != -1) dir = (sort == "pid" || sort == "user" || sort == "comm") ? 1 : -1;
+    auto byNum = [&](long long a, long long b) { return dir > 0 ? a < b : a > b; };
+    auto byDouble = [&](double a, double b) { return dir > 0 ? a < b : a > b; };
+    auto byText = [&](const std::string& a, const std::string& b) {
+        int c = lower(a).compare(lower(b));
+        return dir > 0 ? c < 0 : c > 0;
+    };
     if (sort == "mem") {
         std::stable_sort(hits.begin(), hits.end(), [&](size_t a, size_t b) {
-            return rows[a].value("rss_kb", 0LL) > rows[b].value("rss_kb", 0LL);
+            return byNum(rows[a].value("rss_kb", 0LL), rows[b].value("rss_kb", 0LL));
         });
     } else if (sort == "pid") {
         std::stable_sort(hits.begin(), hits.end(), [&](size_t a, size_t b) {
-            return rows[a].value("pid", 0) < rows[b].value("pid", 0);
+            return byNum(rows[a].value("pid", 0), rows[b].value("pid", 0));
         });
     } else if (sort == "start") {
         std::stable_sort(hits.begin(), hits.end(), [&](size_t a, size_t b) {
-            return rows[a].value("start_ms", 0ULL) > rows[b].value("start_ms", 0ULL);
+            return byNum((long long)rows[a].value("start_ms", 0ULL),
+                         (long long)rows[b].value("start_ms", 0ULL));
+        });
+    } else if (sort == "threads") {
+        std::stable_sort(hits.begin(), hits.end(), [&](size_t a, size_t b) {
+            return byNum(rows[a].value("threads", 0), rows[b].value("threads", 0));
+        });
+    } else if (sort == "user") {
+        std::stable_sort(hits.begin(), hits.end(), [&](size_t a, size_t b) {
+            return byText(rows[a].value("user", std::string()), rows[b].value("user", std::string()));
+        });
+    } else if (sort == "comm") {
+        std::stable_sort(hits.begin(), hits.end(), [&](size_t a, size_t b) {
+            return byText(rows[a].value("comm", std::string()), rows[b].value("comm", std::string()));
         });
     } else {
         std::stable_sort(hits.begin(), hits.end(), [&](size_t a, size_t b) {
-            return rows[a].value("cpu_pct", 0.0) > rows[b].value("cpu_pct", 0.0);
+            return byDouble(rows[a].value("cpu_pct", 0.0), rows[b].value("cpu_pct", 0.0));
         });
     }
 

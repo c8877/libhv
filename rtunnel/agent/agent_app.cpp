@@ -2709,6 +2709,7 @@ std::string AgentApp::procsListJson(const nlohmann::json& rj) {
     using nlohmann::json;
     rtproc::Options opt;
     opt.sort = rj.value("sort", std::string("cpu"));
+    opt.dir = rj.value("dir", 0);
     opt.q = rj.value("q", std::string());
     opt.kernel = rj.value("kernel", false);
     opt.page = rj.value("page", 1);

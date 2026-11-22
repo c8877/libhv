@@ -884,8 +884,12 @@ int AdminServer::handleAgentProcs(const HttpContextPtr& ctx) {
     json req;
     req["op"] = "list";
     std::string sort = ctx->param("sort");
-    if (sort != "mem" && sort != "pid" && sort != "start") sort = "cpu";
+    if (sort != "mem" && sort != "pid" && sort != "start" && sort != "threads" && sort != "user" &&
+        sort != "comm")
+        sort = "cpu";
     req["sort"] = sort;
+    int dir = atoi(ctx->param("dir").c_str());
+    req["dir"] = (dir == 1 || dir == -1) ? dir : 0;
     req["q"] = ctx->param("q");
     req["kernel"] = ctx->param("kernel") == "1";
     int page = atoi(ctx->param("page").c_str());

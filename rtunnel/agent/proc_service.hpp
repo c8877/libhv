@@ -20,7 +20,8 @@
 namespace rtproc {
 
 struct Options {
-    std::string sort = "cpu"; // cpu|mem|pid|start
+    std::string sort = "cpu"; // cpu|mem|pid|start|threads|user|comm
+    int dir = 0;              // 1 升序，-1 降序，0 用该列默认方向
     std::string q;            // 匹配 pid / 名称 / 命令行 / 用户
     bool kernel = false;      // 是否包含内核线程
     int page = 1;             // 从 1 开始

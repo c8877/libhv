@@ -291,6 +291,7 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
     service->GET("/api/v1/procs", [app](const HttpRequestPtr& req, const HttpResponseWriterPtr& writer) {
         nlohmann::json q;
         q["sort"] = req->GetParam("sort", "cpu");
+        q["dir"] = atoi(req->GetParam("dir", "0").c_str());
         q["q"] = req->GetParam("q");
         q["kernel"] = req->GetParam("kernel", "0") == "1";
         q["page"] = atoi(req->GetParam("page", "1").c_str());
