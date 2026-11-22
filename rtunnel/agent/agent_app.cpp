@@ -1143,14 +1143,7 @@ struct FileRx {
 static std::map<uint32_t, FileRx> g_file_rx;
 
 std::string AgentApp::sha256File(const std::string& path) {
-    FILE* fp0 = fopen(path.c_str(), "rb");
-    if (!fp0) return std::string();
-    rtutil::Sha256 ctx;
-    char b[64 * 1024];
-    size_t n;
-    while ((n = fread(b, 1, sizeof(b), fp0)) > 0) ctx.update(b, n);
-    fclose(fp0);
-    return ctx.hex();
+    return rtutil::sha256File(path);
 }
 
 void AgentApp::handleFileFrame(const rtnp::Frame* f) {

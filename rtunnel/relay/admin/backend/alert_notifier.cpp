@@ -4,11 +4,12 @@
 
 #include "admin_tls.hpp"
 #include "common/logging.hpp"
-#include "common/sha256.hpp"
 #include "cpputil/json.hpp"
 
 #include "util/base64.h"
 #include "http/client/HttpClient.h"
+
+#include "openssl/hmac.h"
 
 #include <ctype.h>
 #include <set>
@@ -24,28 +25,12 @@ namespace {
 
 // ---------------------------------------------------------------- 加密/编码
 
-// HMAC-SHA256（复用 rtunnel 自带的 sha256 实现，无 OpenSSL 依赖）
+// HMAC-SHA256 直接用 OpenSSL，避免自己拼 ipad/opad
 void hmacSha256(const std::string& key, const std::string& msg, uint8_t out[32]) {
-    uint8_t k[64];
-    memset(k, 0, sizeof(k));
-    if (key.size() > sizeof(k)) {
-        rtutil::sha256(key.data(), key.size(), k);
-    } else if (!key.empty()) {
-        memcpy(k, key.data(), key.size());
-    }
-    uint8_t ipad[64], opad[64];
-    for (size_t i = 0; i < sizeof(k); ++i) {
-        ipad[i] = (uint8_t)(k[i] ^ 0x36);
-        opad[i] = (uint8_t)(k[i] ^ 0x5c);
-    }
-    uint8_t inner[32];
-    std::string in((const char*)ipad, sizeof(ipad));
-    in += msg;
-    rtutil::sha256(in.data(), in.size(), inner);
-
-    std::string outer((const char*)opad, sizeof(opad));
-    outer.append((const char*)inner, sizeof(inner));
-    rtutil::sha256(outer.data(), outer.size(), out);
+    unsigned int len = 0;
+    HMAC(EVP_sha256(), key.data(), (int)key.size(),
+         (const unsigned char*)msg.data(), msg.size(), out, &len);
+    if (len != 32) memset(out, 0, 32);
 }
 
 std::string hmacHex(const std::string& key, const std::string& msg) {

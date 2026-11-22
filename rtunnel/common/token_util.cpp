@@ -2,13 +2,10 @@
 #include "sha256.hpp"
 #include "util/base64.h"
 
-#include <stdio.h>
+#include "openssl/rand.h"
+
 #include <string.h>
 #include <time.h>
-
-#if defined(WITH_OPENSSL)
-#include "openssl/rand.h"
-#endif
 
 namespace rtutil {
 
@@ -45,15 +42,7 @@ int64_t monthStart(int64_t ms) {
 }
 
 bool randomBytes(unsigned char* out, size_t len) {
-#if defined(WITH_OPENSSL)
     return RAND_bytes(out, (int)len) == 1;
-#else
-    FILE* f = fopen("/dev/urandom", "rb");
-    if (f == NULL) return false;
-    size_t n = fread(out, 1, len, f);
-    fclose(f);
-    return n == len;
-#endif
 }
 
 } // namespace

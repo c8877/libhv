@@ -1,5 +1,10 @@
 # rtunnel：A/B/C 三件套（协议见 docs/design/rtunnel.md）
 # C++ 对象化结构：rtnp/ 协议库 + common/ 共享组件 + client|agent|relay 各自目录
+if(NOT WITH_OPENSSL)
+    message(STATUS "rtunnel: 需要 OpenSSL（SHA-256/HMAC/随机数/证书都复用 libssl），WITH_OPENSSL=OFF 时跳过")
+    return()
+endif()
+
 include_directories(${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/base ${PROJECT_SOURCE_DIR}/event ${PROJECT_SOURCE_DIR}/ssl
                     ${PROJECT_SOURCE_DIR}/http ${PROJECT_SOURCE_DIR}/http/server ${PROJECT_SOURCE_DIR}/evpp ${PROJECT_SOURCE_DIR}/cpputil
                     ${CMAKE_CURRENT_SOURCE_DIR})

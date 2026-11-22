@@ -5,14 +5,12 @@
 
 #include "sqlite3.h"
 
+#include "openssl/evp.h"
+#include "openssl/rand.h"
+
 #include <time.h>
 #include <string.h>
 #include <stdio.h>
-
-#if defined(WITH_OPENSSL)
-#include "openssl/evp.h"
-#include "openssl/rand.h"
-#endif
 
 namespace {
 
@@ -68,14 +66,9 @@ long long AdminDb::nowMs() {
 }
 
 std::string AdminDb::randomHex(int bytes) {
-#if defined(WITH_OPENSSL)
     std::vector<unsigned char> buf(bytes);
     if (RAND_bytes(buf.data(), bytes) != 1) return "";
     return hexEncode(buf.data(), buf.size());
-#else
-    (void)bytes;
-    return "";
-#endif
 }
 
 std::string AdminDb::sha256Hex(const std::string& data) {
@@ -83,7 +76,6 @@ std::string AdminDb::sha256Hex(const std::string& data) {
 }
 
 std::string AdminDb::hashPassword(const std::string& pass, std::string& err) {
-#if defined(WITH_OPENSSL)
     unsigned char salt[SALT_LEN], key[KEY_LEN];
     if (RAND_bytes(salt, sizeof(salt)) != 1) { err = "rand failed"; return ""; }
     if (PKCS5_PBKDF2_HMAC(pass.data(), (int)pass.size(), salt, sizeof(salt),
@@ -94,15 +86,9 @@ std::string AdminDb::hashPassword(const std::string& pass, std::string& err) {
     char head[64];
     snprintf(head, sizeof(head), "pbkdf2$%d$", PBKDF2_ITER);
     return std::string(head) + hexEncode(salt, sizeof(salt)) + "$" + hexEncode(key, sizeof(key));
-#else
-    (void)pass;
-    err = "built without OpenSSL";
-    return "";
-#endif
 }
 
 bool AdminDb::verifyPassword(const std::string& pass, const std::string& stored) {
-#if defined(WITH_OPENSSL)
     int iter = 0;
     char salt_hex[64] = {0}, key_hex[128] = {0};
     if (sscanf(stored.c_str(), "pbkdf2$%d$%63[0-9a-f]$%127[0-9a-f]", &iter, salt_hex, key_hex) != 3) return false;
@@ -114,10 +100,6 @@ bool AdminDb::verifyPassword(const std::string& pass, const std::string& stored)
     unsigned char diff = 0;
     for (int i = 0; i < KEY_LEN; ++i) diff |= (unsigned char)(got[i] ^ want[i]);
     return diff == 0;
-#else
-    (void)pass; (void)stored;
-    return false;
-#endif
 }
 
 bool AdminDb::exec(const char* sql, std::string& err) {
