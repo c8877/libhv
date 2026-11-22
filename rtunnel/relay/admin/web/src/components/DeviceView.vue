@@ -2952,7 +2952,7 @@ async function loadTtys(force) {
   } catch (e) {
     ttys.value = []
   }
-  if (canTtyEdit.value) {
+  if (canTtyEdit.value || isLocal.value) {
     try {
       const d = await Api.get(agentBase.value + '/ttys/discovered')
       ttyDisc.value = Array.isArray(d) ? d : []
