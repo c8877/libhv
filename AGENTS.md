@@ -146,6 +146,7 @@ GitHub Actions (`.github/workflows/CI.yml`): builds and tests on Linux (with Ope
 | 菜单 | `el-menu` / `el-dropdown` + `el-dropdown-menu` | 手写列表菜单；光标定位的右键菜单 Element 无原生支持，自建需标注 |
 | DOM | 模板 + 响应式状态 | `document.createElement` / `innerHTML` / `insertAdjacentHTML` |
 
+- **体积不是复制实现的理由**。需要更小的部署包时发 lite 变体（`rtunnel-agent-noweb`，不含本地页），不要为体积另写一套页面、表格或组件，也不要靠构建裁剪维护第二份源码。功能差异只放在构建入口、路由和权限层。
 - 改完管理台或设备页必须跑 `cd rtunnel/relay/admin/web && npm run check:ui`；`npm run build`、`npm run dev`、`npm run build:local` 已内置，违反会直接失败。
 - Element 确实没有对应能力时才允许自建，并写清原因，否则检查失败：
   `<!-- ui-allow: 原因 -->`（单行，可写在标签上一行）或 `<!-- ui-allow-begin: 原因 --> … <!-- ui-allow-end -->`（成块）；脚本区用 `// ui-allow: 原因`。

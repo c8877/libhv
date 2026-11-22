@@ -582,6 +582,7 @@ http://B:9443/device/<devid>/<port>/<path>
   无人访问降到 10s 一次；页面发起请求时会立即补一次重建，首屏不等定时器
 - 数据由 agent 主循环采集并缓存，HTTP 线程只读快照或调用带锁的共享查询，不直接访问隧道状态
 - 两个构建变体：`rtunnel-agent`（带 Web）与 `rtunnel-agent-noweb`（纯隧道，体积更小）。
+  体积敏感的场景选 lite 包，不要为了减体积再写一套精简页面；两边的页面、取数和组件源码只有一份。
   两者共用一个 `rtunnel-agent.service`，变体只由 `bin/rtunnel-agent` 软链指向哪个版本决定；
   带 Web 的构建默认监听 `127.0.0.1:8080`，可在 `rtunnel-agent.json` 用
   `"local_web": "0.0.0.0:8080"` 改地址，或用 `false` 关闭。
