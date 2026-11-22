@@ -778,6 +778,9 @@
               </template>
             </el-select>
           </div>
+          <div v-if="enabledCfg.length" class="series-tip">
+            移除指标 chip 只会隐藏曲线；要停止采样或删除进程指标，请到「采样配置」
+          </div>
           <div v-if="!enabledCfg.length" class="muted">该设备还没有启用的采样指标，可在「采样配置」中添加</div>
           <template v-else>
             <div v-show="hasUnit('percent')" class="chart-box">
@@ -1185,10 +1188,13 @@
           <template #default="{ row }">
             <el-checkbox :model-value="hasProcSeries(row.pid, 'cpu') || isProcPicked(row.pid, 'cpu')"
                          :disabled="hasProcSeries(row.pid, 'cpu')"
+                         :title="hasProcSeries(row.pid, 'cpu') ? '已添加，删除请到采样配置' : ''"
                          @change="(v) => toggleProcPick(row, 'cpu', v)">CPU</el-checkbox>
             <el-checkbox :model-value="hasProcSeries(row.pid, 'mem') || isProcPicked(row.pid, 'mem')"
                          :disabled="hasProcSeries(row.pid, 'mem')"
+                         :title="hasProcSeries(row.pid, 'mem') ? '已添加，删除请到采样配置' : ''"
                          @change="(v) => toggleProcPick(row, 'mem', v)">内存</el-checkbox>
+            <span v-if="hasProcSeries(row.pid, 'cpu') && hasProcSeries(row.pid, 'mem')" class="added">已添加</span>
           </template>
         </el-table-column>
         <template #empty><div class="muted">{{ procPickErr || '没有匹配的进程' }}</div></template>
@@ -3675,8 +3681,10 @@ onBeforeUnmount(() => {
 .series-label { flex: none; font-size: 12px; line-height: 30px; color: var(--el-text-color-secondary); }
 .series-select { flex: 1; min-width: 0; }
 .proc-pick-query { width: 240px; }
+.proc-pick-added, .added { margin-left: 6px; font-size: 11px; color: var(--el-text-color-secondary); }
 .series-pop-head { margin-bottom: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
 .series-pop-actions { display: flex; justify-content: flex-end; gap: 4px; }
+.series-tip { margin: -4px 0 10px; font-size: 12px; color: var(--el-text-color-secondary); }
 
 .kv-rows { border: 1px solid var(--el-border-color-lighter); border-radius: 8px; overflow: hidden; }
 .kv-row { display: flex; align-items: flex-start; gap: 12px; padding: 9px 12px; border-bottom: 1px solid var(--el-border-color-lighter); }
