@@ -763,14 +763,15 @@
           </div>
           <div class="series-bar">
             <span class="series-label">指标</span>
-            <el-select v-model="selected" multiple collapse-tags collapse-tags-tooltip filterable
+            <el-select ref="seriesSelectRef" v-model="selected" multiple filterable
                        placeholder="选择指标" class="series-select" @change="onSeriesPick">
               <template #header>
                 <div class="series-pop-head">已选 {{ selected.length }} / {{ enabledCfg.length }}</div>
               </template>
-              <el-option v-for="c in enabledCfg" :key="c.series" :label="c.series" :value="c.series" />
+              <el-option v-for="c in enabledCfg" :key="c.series" :label="seriesLabel(c.series)" :value="c.series" />
               <template #footer>
                 <div class="series-pop-actions">
+                  <el-button v-if="canMetricEdit" size="small" text @click.stop="openProcPick">添加进程…</el-button>
                   <el-button size="small" text @click.stop="selectAllSeries">全选</el-button>
                   <el-button size="small" text @click.stop="clearSeries">清空</el-button>
                 </div>
@@ -782,6 +783,14 @@
             <div v-show="hasUnit('percent')" class="chart-box">
               <div class="chart-title">百分比</div>
               <canvas ref="percentEl" />
+            </div>
+            <div v-show="hasUnit('proc-cpu')" class="chart-box">
+              <div class="chart-title">进程 CPU (%)</div>
+              <canvas ref="procCpuEl" />
+            </div>
+            <div v-show="hasUnit('proc-mem')" class="chart-box">
+              <div class="chart-title">进程内存 (%)</div>
+              <canvas ref="procMemEl" />
             </div>
             <div v-show="hasUnit('load')" class="chart-box">
               <div class="chart-title">负载</div>
@@ -844,7 +853,7 @@
               <template #default="{ row }">
                 <div class="metric-card">
                   <div class="metric-card-top">
-                    <b>{{ row.series }}</b><span class="sub">{{ unitLabel(row.series) }}</span>
+                    <b>{{ seriesLabel(row.series) }}</b><span class="sub">{{ unitLabel(row.series) }}</span>
                     <span class="grow" />
                     <el-switch :model-value="row.enabled" :disabled="!canMetricEdit" @click.stop @change="(v) => toggleMetric(row, v)" />
                   </div>
@@ -860,7 +869,7 @@
             </el-table-column>
             <el-table-column v-if="!isPhone" label="指标" min-width="150">
               <template #default="{ row }">
-                <b>{{ row.series }}</b><span class="sub">{{ unitLabel(row.series) }}</span>
+                <b>{{ seriesLabel(row.series) }}</b><span class="sub">{{ unitLabel(row.series) }}</span>
               </template>
             </el-table-column>
             <el-table-column v-if="!isPhone" label="间隔" width="90">
@@ -1146,6 +1155,49 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="procPickOpen" title="添加进程指标" width="640px">
+      <div class="tab-bar">
+        <el-input v-model="procPickQuery" size="small" placeholder="搜索进程名或 PID" clearable
+                  class="proc-pick-query" @keyup.enter="loadProcPick" @clear="loadProcPick" />
+        <el-button size="small" @click="loadProcPick">搜索</el-button>
+        <span class="spacer" />
+        <span class="muted">采样间隔 1 s · 保留 30 分钟 · CPU 为整机占比</span>
+      </div>
+      <el-table :data="procPickRows" v-loading="procPickLoading" size="small" row-key="pid" max-height="380">
+        <el-table-column prop="pid" label="PID" width="82" />
+        <el-table-column label="进程" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <b>{{ row.comm }}</b><span class="sub">{{ row.user }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="CPU（整机）" width="110" align="right">
+          <template #default="{ row }">
+            <span class="num">{{ (Number(row.cpu_pct || 0) / Math.max(1, Number(sys && sys.cpu_count) || 1)).toFixed(1) }}%</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="内存" width="100" align="right">
+          <template #default="{ row }"><span class="num">{{ kbText(row.rss_kb) }}</span></template>
+        </el-table-column>
+        <el-table-column label="加入监控" width="168">
+          <template #default="{ row }">
+            <el-checkbox :model-value="hasProcSeries(row.pid, 'cpu') || isProcPicked(row.pid, 'cpu')"
+                         :disabled="hasProcSeries(row.pid, 'cpu')"
+                         @change="(v) => toggleProcPick(row, 'cpu', v)">CPU</el-checkbox>
+            <el-checkbox :model-value="hasProcSeries(row.pid, 'mem') || isProcPicked(row.pid, 'mem')"
+                         :disabled="hasProcSeries(row.pid, 'mem')"
+                         @change="(v) => toggleProcPick(row, 'mem', v)">内存</el-checkbox>
+          </template>
+        </el-table-column>
+        <template #empty><div class="muted">{{ procPickErr || '没有匹配的进程' }}</div></template>
+      </el-table>
+      <template #footer>
+        <el-button @click="procPickOpen = false">取消</el-button>
+        <el-button type="primary" :disabled="!procPickPick.length" @click="addProcMetrics">
+          添加{{ procPickPick.length ? ' ' + procPickPick.length + ' 项' : '' }}
+        </el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="ttyDialog" :title="ttyEditing.isNew ? '添加串口' : '编辑串口'" width="480px">
       <div class="tty-form">
         <label>别名<el-input v-model="ttyEditing.alias" placeholder="设备内唯一，可留空" /></label>
@@ -1327,6 +1379,7 @@ const seriesCfg = ref([])
 const enabledCfg = computed(() => seriesCfg.value.filter((c) => c.enabled))
 const unsyncedCount = computed(() => seriesCfg.value.filter((c) => c.enabled && !c.synced).length)
 const selected = ref([])
+const seriesSelectRef = ref(null)
 const cache = reactive({})
 const lastTs = reactive({})
 const pullAt = reactive({})
@@ -1338,6 +1391,8 @@ const percentEl = ref(null)
 const loadEl = ref(null)
 const rateEl = ref(null)
 const tempEl = ref(null)
+const procCpuEl = ref(null)
+const procMemEl = ref(null)
 const charts = {}
 // chart.js 只在真正要画曲线时加载，概览首屏不背这块代码
 let ChartCtor = null
@@ -1439,6 +1494,15 @@ const capsRefreshing = ref(false)
 
 const addMetricOpen = ref(false)
 const addMetricPick = ref([])
+const procPickOpen = ref(false)
+const procPickQuery = ref('')
+const procPickRows = ref([])
+const procPickLoading = ref(false)
+const procPickPick = ref([])
+const procPickErr = ref('')
+// pid -> comm：刚加入的进程还没采到点时，chip/图例先用弹窗里的进程名
+const procNames = reactive({})
+let procPullTimer = null
 
 const ttys = ref([])
 const ttyDisc = ref([])
@@ -2198,14 +2262,34 @@ async function powerAction(action) {
   }
 }
 
+function procSeriesParts(name) {
+  const m = /^proc:(\d+):(cpu|mem)$/.exec(String(name || ''))
+  return m ? { pid: m[1], kind: m[2] } : null
+}
+function seriesLabel(name) {
+  const p = procSeriesParts(name)
+  if (!p) return name
+  const pts = cache[name] || []
+  let comm = procNames[p.pid] || ''
+  for (let i = pts.length - 1; i >= 0; i--) {
+    if (pts[i] && pts[i].name) { comm = String(pts[i].name); break }
+  }
+  return (comm ? comm + '[' + p.pid + ']' : 'PID ' + p.pid) + (p.kind === 'cpu' ? ' CPU' : ' 内存')
+}
 function unitOf(name) {
+  const p = procSeriesParts(name)
+  // 进程曲线单独一张图，避免被系统内存的 50% 压成贴底的直线
+  if (p) return p.kind === 'cpu' ? 'proc-cpu' : 'proc-mem'
   if (name === 'cpu' || name === 'mem') return 'percent'
   if (name === 'load') return 'load'
   if (name === 'temp') return 'temp'
   return 'rate'
 }
 function unitLabel(name) {
-  return { percent: '百分比', load: '负载', rate: '速率', temp: '温度' }[unitOf(name)]
+  return {
+    percent: '百分比', load: '负载', rate: '速率', temp: '温度',
+    'proc-cpu': 'CPU %', 'proc-mem': '内存 %',
+  }[unitOf(name)]
 }
 function hasUnit(u) {
   return selected.value.some((s) => unitOf(s) === u)
@@ -2413,13 +2497,17 @@ function stopSample() {
 const palette = ['#4a9eff', '#f5a623', '#57ab5a', '#b083f0', '#e5534b']
 
 async function renderCharts() {
-  const groups = { percent: [], load: [], rate: [], temp: [] }
+  const unitsAll = ['percent', 'load', 'rate', 'temp', 'proc-cpu', 'proc-mem']
+  const groups = { percent: [], load: [], rate: [], temp: [], 'proc-cpu': [], 'proc-mem': [] }
   selected.value.forEach((s) => groups[unitOf(s)].push(s))
-  const els = { percent: percentEl.value, load: loadEl.value, rate: rateEl.value, temp: tempEl.value }
-  const units = ['percent', 'load', 'rate', 'temp'].filter((u) => els[u] && groups[u].length)
+  const els = {
+    percent: percentEl.value, load: loadEl.value, rate: rateEl.value, temp: tempEl.value,
+    'proc-cpu': procCpuEl.value, 'proc-mem': procMemEl.value,
+  }
+  const units = unitsAll.filter((u) => els[u] && groups[u].length)
   if (!units.length) {
     chartSeq++
-    for (const unit of ['percent', 'load', 'rate', 'temp']) {
+    for (const unit of unitsAll) {
       if (charts[unit]) {
         charts[unit].destroy()
         delete charts[unit]
@@ -2464,13 +2552,13 @@ async function renderCharts() {
       const v = data[name]
       if (Array.isArray(v)) {
         datasets.push({
-          label: name, data: put(v), borderColor: color, backgroundColor: color + '1f',
+          label: seriesLabel(name), data: put(v), borderColor: color, backgroundColor: color + '1f',
           borderWidth: 2, pointRadius: 0, fill: true, tension: 0.2,
         })
       } else {
-        datasets.push({ label: name + ' RX', data: put(v.rx), borderColor: color, borderWidth: 2, pointRadius: 0 })
+        datasets.push({ label: seriesLabel(name) + ' RX', data: put(v.rx), borderColor: color, borderWidth: 2, pointRadius: 0 })
         datasets.push({
-          label: name + ' TX', data: put(v.tx), borderColor: color, borderDash: [4, 3],
+          label: seriesLabel(name) + ' TX', data: put(v.tx), borderColor: color, borderDash: [4, 3],
           borderWidth: 2, pointRadius: 0,
         })
       }
@@ -2888,8 +2976,10 @@ async function saveMetricList(list) {
     syncSeriesSelection()
     await pullSeries(true)
     ElMessage.success('采样配置已下发')
+    return true
   } catch (e) {
     ElMessage.error('保存失败：' + e.message)
+    return false
   }
 }
 
@@ -2904,7 +2994,7 @@ async function toggleMetric(row, v) {
 
 async function deleteMetric(row) {
   try {
-    await ElMessageBox.confirm('确定删除指标 ' + row.series + '？', '删除指标', {
+    await ElMessageBox.confirm('确定删除指标 ' + seriesLabel(row.series) + '？', '删除指标', {
       type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消',
     })
   } catch (e) { return }
@@ -2914,6 +3004,80 @@ async function deleteMetric(row) {
 async function cancelMetric() {
   await fetchSeriesCfg()
   syncSeriesSelection()
+}
+
+function procSeriesName(pid, kind) {
+  return 'proc:' + pid + ':' + kind
+}
+function hasProcSeries(pid, kind) {
+  return seriesCfg.value.some((c) => c.series === procSeriesName(pid, kind))
+}
+function isProcPicked(pid, kind) {
+  return procPickPick.value.includes(procSeriesName(pid, kind))
+}
+
+function openProcPick() {
+  seriesSelectRef.value && seriesSelectRef.value.blur()
+  procPickOpen.value = true
+  procPickQuery.value = ''
+  procPickPick.value = []
+  procPickErr.value = ''
+  loadProcPick()
+}
+
+async function loadProcPick() {
+  if (!can('device.proc.read')) {
+    procPickRows.value = []
+    procPickErr.value = '当前账号没有进程读取权限'
+    return
+  }
+  procPickLoading.value = true
+  procPickErr.value = ''
+  try {
+    const q = encodeURIComponent(procPickQuery.value.trim())
+    const r = await Api.get(agentBase.value + '/procs?sort=cpu&dir=-1&q=' + q +
+      '&kernel=0&page=1&page_size=50')
+    procPickRows.value = (r && r.entries) || []
+  } catch (e) {
+    procPickRows.value = []
+    procPickErr.value = '进程列表加载失败：' + e.message
+  } finally {
+    procPickLoading.value = false
+  }
+}
+
+function toggleProcPick(row, kind, v) {
+  if (hasProcSeries(row.pid, kind)) return
+  if (row.comm) procNames[row.pid] = row.comm
+  const name = procSeriesName(row.pid, kind)
+  const set = new Set(procPickPick.value)
+  if (v) set.add(name)
+  else set.delete(name)
+  procPickPick.value = [...set]
+}
+
+async function addProcMetrics() {
+  const picked = procPickPick.value.filter(Boolean)
+  if (!picked.length) return
+  // 进程曲线默认 1 s 一个点、保留 30 分钟，够看清尖峰
+  const list = seriesCfg.value.concat(picked.map((s) => ({
+    series: s, enabled: true, interval_sec: 1, points: 1800,
+  })))
+  procPickOpen.value = false
+  if (!(await saveMetricList(list))) return
+  selected.value = [...new Set(selected.value.concat(picked))]
+  await pullSeries(true)
+  // 下发后 agent 要等下一个采样点；补拉两次，曲线不用等用户点“全量”
+  if (procPullTimer) clearTimeout(procPullTimer)
+  procPullTimer = setTimeout(async () => {
+    procPullTimer = null
+    if (mainTab.value !== 'monitor') return
+    await pullSeries(false)
+    procPullTimer = setTimeout(() => {
+      procPullTimer = null
+      if (mainTab.value === 'monitor') pullSeries(false)
+    }, 3000)
+  }, 2200)
 }
 
 function openAddMetric() {
@@ -3244,6 +3408,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', closeProcMenu)
   window.removeEventListener('keydown', onProcKeydown)
   if (procQueryTimer) { clearTimeout(procQueryTimer); procQueryTimer = null }
+  if (procPullTimer) { clearTimeout(procPullTimer); procPullTimer = null }
   if (netQueryTimer) { clearTimeout(netQueryTimer); netQueryTimer = null }
   stopProcTimer()
   stopTimer()
@@ -3452,6 +3617,7 @@ onBeforeUnmount(() => {
 .series-bar { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 12px; }
 .series-label { flex: none; font-size: 12px; line-height: 30px; color: var(--el-text-color-secondary); }
 .series-select { flex: 1; min-width: 0; }
+.proc-pick-query { width: 240px; }
 .series-pop-head { margin-bottom: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
 .series-pop-actions { display: flex; justify-content: flex-end; gap: 4px; }
 

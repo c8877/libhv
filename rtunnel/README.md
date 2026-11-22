@@ -297,6 +297,10 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
   （`fs-ui` / `svc-ui`）内部的表格仍走 `shared/web/table-ui.js`
 - 文件/服务 tab 首次打开时建立会话；进程 tab 支持 1/2/3/5/10/20/30 秒自动刷新
 - 监控 tab 内切换「曲线 / 采样配置」；串口配置独立为一级 tab
+- 监控「指标」下拉里可「添加进程…」：选中进程的 CPU/内存后才开始采样，每个进程两条曲线
+  （`proc:<pid>:cpu` / `proc:<pid>:mem`，默认 1 s 一个点、保留 30 分钟）。CPU 折成整机占比，
+  和系统 cpu 同一标尺；内存为占总内存百分比。进程曲线单独成图，避免被系统内存压成贴底直线；
+  从采样配置删除后 agent 同时清掉该指标的 ring 和 CPU 增量状态
 
 采集与配置：
 

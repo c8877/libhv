@@ -1739,6 +1739,45 @@ static bool readTtyCounters(const std::string& want, unsigned long long& rx, uns
     return found;
 }
 
+// /proc/<pid>/stat 解析：comm 里可能有空格和括号，用最后一个 ')' 切分。
+// 返回 utime+stime（jiffies）、starttime 和 RSS 页数。
+struct ProcStatInfo {
+    std::string comm;
+    unsigned long long ticks = 0;
+    unsigned long long starttime = 0;
+    long long rss_pages = 0;
+};
+
+static bool readProcStatInfo(int pid, ProcStatInfo& out) {
+    std::ifstream sf("/proc/" + std::to_string(pid) + "/stat");
+    std::string line;
+    if (!std::getline(sf, line)) return false;
+    size_t lp = line.find('(');
+    size_t rp = line.rfind(')');
+    if (lp == std::string::npos || rp == std::string::npos || rp <= lp) return false;
+    out.comm = line.substr(lp + 1, rp - lp - 1);
+    std::istringstream is(line.substr(rp + 1));
+    std::string tok;
+    std::vector<std::string> t;
+    while (is >> tok) t.push_back(tok);
+    // ')' 之后从 state（字段 3）开始：utime=11, stime=12, starttime=19, rss=21
+    if (t.size() < 22) return false;
+    out.ticks = strtoull(t[11].c_str(), nullptr, 10) + strtoull(t[12].c_str(), nullptr, 10);
+    out.starttime = strtoull(t[19].c_str(), nullptr, 10);
+    out.rss_pages = atoll(t[21].c_str());
+    return true;
+}
+
+static long long readMemTotalKb() {
+    std::ifstream mf("/proc/meminfo");
+    std::string line;
+    while (std::getline(mf, line)) {
+        long long v = 0;
+        if (sscanf(line.c_str(), "MemTotal: %lld", &v) == 1) return v;
+    }
+    return 0;
+}
+
 void AgentApp::sampleSeries(const std::string& name, const SeriesCfg& cfg) {
     nlohmann::json j;
     j["ts"] = (long long)time(NULL) * 1000;
@@ -1786,6 +1825,56 @@ void AgentApp::sampleSeries(const std::string& name, const SeriesCfg& cfg) {
             closedir(d);
         }
         j["v"] = (double)((long long)(max_c * 10)) / 10.0;
+    }
+    else if (name.rfind("proc:", 0) == 0) {
+        // proc:<pid>:cpu | proc:<pid>:mem，只有配置里存在时才走到这里
+        std::string spec = name.substr(5);
+        size_t colon = spec.find(':');
+        std::string pidText = colon == std::string::npos ? spec : spec.substr(0, colon);
+        std::string kind = colon == std::string::npos ? "cpu" : spec.substr(colon + 1);
+        int pid = atoi(pidText.c_str());
+        if (pid <= 0) return;
+        auto& st = proc_sample_state_[name];
+        ProcStatInfo ps;
+        long long now = (long long)wallMs();
+        if (!readProcStatInfo(pid, ps)) {
+            // 进程退出后继续留点，曲线回落到 0，避免前端断线
+            j["v"] = 0.0;
+            j["gone"] = true;
+            if (!st.comm.empty()) j["name"] = st.comm;
+            st.valid = false;
+        } else {
+            j["name"] = ps.comm;
+            if (kind == "mem") {
+                long page = sysconf(_SC_PAGESIZE);
+                if (page <= 0) page = 4096;
+                long long rss_kb = ps.rss_pages * (long long)page / 1024;
+                long long total = readMemTotalKb();
+                j["rss_kb"] = rss_kb;
+                j["v"] = total > 0 ? (double)rss_kb * 100.0 / (double)total : 0.0;
+            } else {
+                double pct = 0;
+                long long maxGap = (long long)cfg.interval * 3000 + 2000;
+                if (st.valid && st.starttime == ps.starttime && now > st.ts_ms && now - st.ts_ms <= maxGap) {
+                    long hz = sysconf(_SC_CLK_TCK);
+                    if (hz <= 0) hz = 100;
+                    long cores = sysconf(_SC_NPROCESSORS_ONLN);
+                    if (cores < 1) cores = 1;
+                    double used = (double)(ps.ticks - st.ticks) / (double)hz;
+                    double elapsed = (double)(now - st.ts_ms) / 1000.0;
+                    // 折成全机占比，和系统 cpu 曲线同一 0-100 标尺
+                    pct = elapsed > 0 ? used * 100.0 / elapsed / (double)cores : 0.0;
+                    if (pct < 0) pct = 0;
+                    if (pct > 100) pct = 100;
+                }
+                j["v"] = (double)((long long)(pct * 100 + 0.5)) / 100.0;
+            }
+            st.ticks = ps.ticks;
+            st.ts_ms = now;
+            st.starttime = ps.starttime;
+            st.comm = ps.comm;
+            st.valid = true;
+        }
     }
     else if (name.rfind("net:", 0) == 0) {
         std::string ifn = name.substr(4);
@@ -3432,6 +3521,22 @@ void AgentApp::onFrame(rtnp::Frame* f) {
                     while ((int)it->second.size() > c.points) it->second.pop_front();
                 }
             }
+        }
+        // 配置里删掉的指标：环形缓冲和进程增量状态一起清，避免长期占内存
+        {
+            std::lock_guard<std::mutex> lk(series_mu_);
+            for (auto it = series_rings.begin(); it != series_rings.end();) {
+                if (!series_cfgs.count(it->first)) it = series_rings.erase(it);
+                else ++it;
+            }
+        }
+        for (auto it = series_last_ms.begin(); it != series_last_ms.end();) {
+            if (!series_cfgs.count(it->first)) it = series_last_ms.erase(it);
+            else ++it;
+        }
+        for (auto it = proc_sample_state_.begin(); it != proc_sample_state_.end();) {
+            if (!series_cfgs.count(it->first)) it = proc_sample_state_.erase(it);
+            else ++it;
         }
         // 采样配置属于能力配置，改完立即落盘，重启后仍生效
         bool persisted = saveConfig();

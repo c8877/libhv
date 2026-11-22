@@ -284,6 +284,15 @@ private:
     std::mutex series_mu_; // loop 写 ring，本地页 HTTP 线程读
     std::map<std::string, std::deque<std::string>> series_rings;
     std::map<std::string, long long> series_last_ms;
+    // 进程级采样（proc:<pid>:cpu / proc:<pid>:mem）的 CPU 增量状态
+    struct ProcSampleState {
+        unsigned long long ticks = 0;      // 上次 utime+stime
+        long long ts_ms = 0;               // 上次采样时刻
+        unsigned long long starttime = 0;  // 进程启动时间，用于识别 PID 复用
+        std::string comm;
+        bool valid = false;
+    };
+    std::map<std::string, ProcSampleState> proc_sample_state_;
     int series_revision = 0;
     void seriesTick();
     void sampleSeries(const std::string& name, const SeriesCfg& cfg);
