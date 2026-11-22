@@ -22,6 +22,8 @@ API Token，见 `README.md` 的「Agent OTA 升级」。
 
 ```bash
 cd <repo 根目录>
+# 设备本地页与设备详情共用 DeviceView；改过前端后先生成单文件 HTML
+(cd rtunnel/relay/admin/web && npm run build:local)
 ./build_mp135.sh                      # 产物 build/deploy/agent{,-web}/bin/rtunnel-agent
 SYSROOT=/opt/st/myir-yf13x/4.0.4-snapshot/sysroots/cortexa7t2hf-neon-vfpv4-ostl-linux-gnueabi
 RTUNNEL_ARCH=armv7l RTUNNEL_PKG_RUNNER="qemu-arm-static -L $SYSROOT" \
