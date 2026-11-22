@@ -1171,6 +1171,7 @@
     </el-dialog>
 
     <teleport to="body">
+      <!-- ui-allow-begin: 右键菜单跟随光标坐标，el-dropdown 只按触发元素定位 -->
       <div v-if="procCtx.open" class="pctx-menu" :style="{ left: procCtx.x + 'px', top: procCtx.y + 'px' }"
            @contextmenu.prevent @mousedown.stop>
         <div class="pctx-title mono">PID {{ procCtx.row && procCtx.row.pid }}</div>
@@ -1180,6 +1181,7 @@
           <button class="pctx-item danger" @click="procCtxAction('kill')">结束进程</button>
         </template>
       </div>
+      <!-- ui-allow-end -->
     </teleport>
 
     <el-dialog v-model="procDetailOpen" title="进程详情" width="560px">
@@ -2095,7 +2097,7 @@ async function downloadDiag() {
     const blob = await resp.blob()
     const cd = resp.headers.get('Content-Disposition') || ''
     const m = /filename="([^"]+)"/.exec(cd)
-    const a = document.createElement('a')
+    const a = document.createElement('a')  // ui-allow: 浏览器下载要临时 <a>，Element 没有对应组件
     a.href = URL.createObjectURL(blob)
     a.download = m ? m[1] : 'diag-' + devid.value + '.tar.gz'
     document.body.appendChild(a)

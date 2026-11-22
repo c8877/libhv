@@ -3,12 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "npm run build:editor && vite",
-    "build": "npm run build:editor && vite build && node scripts/precompress.mjs dist",
+    "dev": "npm run check:ui && npm run build:editor && vite",
+    "build": "npm run check:ui && npm run build:editor && vite build && node scripts/precompress.mjs dist",
     "build:editor": "vite build --config vite.editor.config.js",
     "preview": "vite preview",
     "precompress": "node scripts/precompress.mjs dist",
-    "check:docs": "node scripts/check-api-docs.mjs"
+    "check:docs": "node scripts/check-api-docs.mjs",
+    "check:ui": "node scripts/check-ui-rules.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",

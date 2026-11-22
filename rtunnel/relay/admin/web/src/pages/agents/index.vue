@@ -82,6 +82,7 @@
     </el-dialog>
 
     <teleport to="body">
+      <!-- ui-allow-begin: 右键菜单跟随光标坐标，el-dropdown 只按触发元素定位 -->
       <div v-if="ctx.open" class="ctx-menu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }"
            @contextmenu.prevent @mousedown.stop>
         <div class="ctx-head">{{ ctx.row && ctx.row.devid }}</div>
@@ -92,6 +93,7 @@
         <div v-if="canManage()" class="ctx-sep" />
         <button v-if="canManage()" class="ctx-item danger" @click="ctxAction('kick')">强制下线</button>
       </div>
+      <!-- ui-allow-end -->
     </teleport>
   </div>
 </template>

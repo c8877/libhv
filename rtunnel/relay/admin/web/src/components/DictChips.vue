@@ -21,6 +21,7 @@
                      :title="titleOf(opt)" @change="toggle(opt)">
           <span class="dc-label">{{ opt.label }}</span>
           <span v-if="opt.sub && opt.sub !== opt.label" class="dc-sub">{{ opt.sub }}</span>
+          <!-- ui-allow: 复选框标签内不能再嵌套 el-button，移除按钮只能用原生 button -->
           <button v-if="canEdit && stateOf(opt.key) !== 'none'" class="dc-x" type="button"
                   aria-label="移除" @click.stop.prevent="clearOption(opt)">×</button>
         </el-checkbox>
@@ -29,6 +30,7 @@
               :title="customTitle(v)">
           <span class="dc-check">✓</span>
           <span class="dc-label">{{ v }}</span>
+          <!-- ui-allow: 标签内不能再嵌套 el-button，移除按钮只能用原生 button -->
           <button v-if="canEdit" class="dc-x" type="button" aria-label="移除"
                   @click.stop="removeValue(v)">×</button>
         </span>

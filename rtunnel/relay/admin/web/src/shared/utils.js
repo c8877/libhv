@@ -69,7 +69,7 @@ export function kbPair(usedKb, totalKb) {
 
 export function downloadBlob(blob, name) {
   const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
+  const a = document.createElement('a')  // ui-allow: 浏览器下载要临时 <a>，Element 没有对应组件
   a.href = url
   a.download = name
   a.click()

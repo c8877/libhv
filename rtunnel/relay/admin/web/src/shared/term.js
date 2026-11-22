@@ -10,6 +10,7 @@ export const TermMgr = {
 
   open(devid, fontSize) {
     const id = devid + '#' + (++seq)
+    // ui-allow: xterm 需要挂载到 DOM 节点，不能用 Element 组件替代
     const box = document.createElement('div')
     box.className = 'term-box'
 

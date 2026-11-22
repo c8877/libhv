@@ -124,5 +124,29 @@ GitHub Actions (`.github/workflows/CI.yml`): builds and tests on Linux (with Ope
 
 - 测试环境用直推：板子跑 `install.sh`，relay 换静态二进制 + `admin/web` 目录。**直推不需要 `RT` / `ATK`**；只有「上传文件仓库 → OTA 分发」才需要令牌，别把直推当成缺凭据。
 - 部署前先找本机已有的脚本和通道（`/tmp/*.py`、免密 SSH、`relay.opts`），找不到再问；不要用"需要你提供……"收尾。
+- 上传文件仓库用 `deploy/upload_agent.sh`；atk 内置在该脚本的默认值里，轮换后改那一行，需要新的就直接开口要。
 - 汇报只说结果：版本、服务状态、隧道是否 ESTAB、线程/RSS。不要复述步骤清单。
+
+## 前端（管理台）组件规则
+
+管理台在 `rtunnel/relay/admin/web`（Vue 3 + Element Plus 2.x）。**Element 已有的能力必须直接用，禁止再实现一份**；框架不满足时，用它的扩展点（插槽、`sortable="custom"` + `@sort-change`、`el-table` 的 `#empty` 等）扩展，不要另写一套替换。
+
+| 需求 | 必须用 | 禁止 |
+|---|---|---|
+| 数据表 | `el-table` / `el-table-column` | 手写 `<table>`、表头点击自排序、自绘排序箭头 |
+| 服务端分页/排序 | `sortable="custom"` + `@sort-change` | 前端只排当前页、自己维护排序状态 |
+| 表单校验 | `el-form` + `rules` + `validate()` | 提交前手写 `if (!x) ElMessage.warning()` |
+| 输入 / 下拉 / 开关 | `el-input` / `el-select` / `el-switch` / `el-date-picker` | 原生 `<input>` / `<select>` |
+| 按钮 / 选择 | `el-button` / `el-checkbox` / `el-radio-group` | 原生 `<button>`、`div role="button"`、伪 checkbox |
+| 弹层 | `el-dialog` / `el-drawer` / `el-popover` / `ElMessageBox` | 手写遮罩、`position: fixed` 弹层 |
+| 分页 | `el-pagination` | 自绘页码 |
+| 进度 / 标签页 / 分段 | `el-progress` / `el-tabs` / `el-segmented` | 自绘进度条、tab 按钮、切换按钮组 |
+| 菜单 | `el-menu` / `el-dropdown` + `el-dropdown-menu` | 手写列表菜单；光标定位的右键菜单 Element 无原生支持，自建需标注 |
+| DOM | 模板 + 响应式状态 | `document.createElement` / `innerHTML` / `insertAdjacentHTML` |
+
+- 改完管理台必须跑 `cd rtunnel/relay/admin/web && npm run check:ui`；`npm run build` 和 `npm run dev` 已内置，违反会直接失败。
+- Element 确实没有对应能力时才允许自建，并写清原因，否则检查失败：
+  `<!-- ui-allow: 原因 -->`（单行，可写在标签上一行）或 `<!-- ui-allow-begin: 原因 --> … <!-- ui-allow-end -->`（成块）；脚本区用 `// ui-allow: 原因`。
+- 表格排序、表单校验、弹层、tab、分页不属于可放行范围。
+- 设备本地页（`rtunnel/agent/web`、`rtunnel/shared/web`）不加载 Vue/Element，继续共用 `table-ui.js` / `fs-ui.js` / `svc-ui.js`，不适用上表。
 

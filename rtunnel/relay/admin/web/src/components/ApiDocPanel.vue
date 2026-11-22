@@ -96,6 +96,7 @@
               <div class="ep-summary">{{ d.summary }}</div>
               <div v-show="isOpen(d)" class="ep-body">
                 <div v-if="d.note" class="note">{{ d.note }}</div>
+                <!-- ui-allow: 接口参数是固定文档展示表，没有排序/分页/选择，不适合 el-table -->
                 <table v-if="d.params && d.params.length" class="params">
                   <tr v-for="p in d.params" :key="p.name">
                     <td class="pname mono">{{ p.name }}</td>
