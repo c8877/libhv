@@ -64,14 +64,21 @@ void put16(std::string& s, uint16_t v) { s.push_back((char)(v >> 8)); s.push_bac
 void put32(std::string& s, uint32_t v) { for (int i = 3; i >= 0; --i) s.push_back((char)(v >> (8 * i))); }
 
 void sendFrame(int fd, uint8_t type, uint32_t sid, const std::string& payload, uint16_t flags) {
-    std::string h = "RTNP";
-    h.push_back(1); h.push_back((char)type);
-    put16(h, flags);
-    put32(h, sid);
-    put16(h, (uint16_t)payload.size());
-    put16(h, 0);
-    writeAll(fd, h.data(), h.size());
-    if (!payload.empty()) writeAll(fd, payload.data(), payload.size());
+    // RTNP 单帧 payload 上限 32K，超过则拆成多个同类型帧，接收端按序拼接
+    size_t off = 0;
+    do {
+        size_t n = payload.size() - off;
+        if (n > rtnp::MAX_PAYLOAD) n = rtnp::MAX_PAYLOAD;
+        std::string h = "RTNP";
+        h.push_back(1); h.push_back((char)type);
+        put16(h, flags);
+        put32(h, sid);
+        put16(h, (uint16_t)n);
+        put16(h, 0);
+        writeAll(fd, h.data(), h.size());
+        if (n) writeAll(fd, payload.data() + off, n);
+        off += n;
+    } while (off < payload.size());
 }
 
 void sendData(int fd, uint32_t sid, const std::string& p) { sendFrame(fd, 0x13, sid, p); }

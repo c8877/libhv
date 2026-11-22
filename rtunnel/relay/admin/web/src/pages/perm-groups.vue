@@ -149,16 +149,17 @@
                   </el-button>
                 </div>
                 <div class="res-grid">
-                  <label v-for="r in cat.items" :key="r.key" class="res-item"
-                         :class="{ on: form.resources.includes(r.key), off: !r.enabled }">
-                    <el-checkbox :model-value="form.resources.includes(r.key)" :disabled="!canWrite || !r.enabled"
-                                 @change="(v) => toggleResource(r.key, v)" />
+                  <el-checkbox v-for="r in cat.items" :key="r.key" class="res-item"
+                               :class="{ on: form.resources.includes(r.key), off: !r.enabled }"
+                               :model-value="form.resources.includes(r.key)"
+                               :disabled="!canWrite || !r.enabled"
+                               @change="(v) => toggleResource(r.key, v)">
                     <span class="res-text">
                       <b>{{ r.name }}</b>
                       <code>{{ r.key }}</code>
                       <em>{{ r.description }}</em>
                     </span>
-                  </label>
+                  </el-checkbox>
                 </div>
               </div>
             </div>
@@ -584,7 +585,12 @@ onMounted(reload)
 .res-cat-head .spacer { flex: 1; }
 .res-cat-head b { font-size: 12.5px; }
 .res-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 16px; margin-top: 4px; }
-.res-item { display: flex; align-items: flex-start; gap: 6px; padding: 4px 6px; border-radius: 5px; cursor: pointer; }
+.res-item {
+  display: flex; align-items: flex-start; gap: 6px; height: auto;
+  margin-right: 0; padding: 4px 6px; border-radius: 5px;
+}
+.res-item :deep(.el-checkbox__input) { margin-top: 1px; }
+.res-item :deep(.el-checkbox__label) { display: block; min-width: 0; padding-left: 0; }
 .res-item:hover { background: var(--el-fill-color-light); }
 .res-item.on { background: var(--el-color-primary-light-9); }
 .res-item.off { opacity: 0.45; }

@@ -1,6 +1,9 @@
 // 设备 WebSocket 代理
 #include "admin_server.hpp"
 #include "proxy_util.hpp"
+#include "common/logging.hpp"
+#include "http/WebSocketParser.h"
+#include "http/wsdef.h"
 #include "util/base64.h"
 
 #include <memory>
@@ -20,9 +23,7 @@ struct WsProxySession {
     std::string devid;
     int         port = 0;
     std::string rtnpbuf;    // relay 帧缓冲
-    std::string inbuf;      // 设备→浏览器 的 WS 帧缓冲
-    std::string frag;       // 分片聚合
-    int         frag_op = 0;
+    WebSocketParserPtr parser;  // 设备→浏览器 的 WS 帧解析
     bool        closed = false;
 };
 
@@ -30,21 +31,12 @@ std::mutex g_ws_mu;
 std::unordered_map<hv::WebSocketChannel*, std::shared_ptr<WsProxySession>> g_ws;
 
 std::string buildClientFrame(const std::string& payload, int opcode) {
-    std::string f;
-    f.push_back((char)(0x80 | (opcode & 0x0f)));
-    size_t n = payload.size();
-    if (n < 126) f.push_back((char)(0x80 | n));
-    else if (n < 65536) { f.push_back((char)(0x80 | 126)); f.push_back((char)(n >> 8)); f.push_back((char)n); }
-    else { f.push_back((char)(0x80 | 127)); for (int i = 7; i >= 0; --i) f.push_back((char)((uint64_t)n >> (8 * i))); }
-    unsigned char mask[4];
-    std::random_device rd;
-    for (int i = 0; i < 4; ++i) mask[i] = (unsigned char)(rd() & 0xff);
-    f.append((char*)mask, 4);
-    for (size_t i = 0; i < n; ++i) f.push_back((char)(payload[i] ^ mask[i & 3]));
+    int data_len = (int)payload.size();
+    std::string f((size_t)ws_calc_frame_size(data_len, true), '\0');
+    int n = ws_client_build_frame(&f[0], payload.data(), data_len, (enum ws_opcode)opcode);
+    if (n > 0) f.resize((size_t)n);
     return f;
 }
-
-void wsParse(WsProxySession* s);
 
 void wsProxyReadCb(hio_t* io, void* buf, int n) {
     auto* s = (WsProxySession*)hio_context(io);
@@ -61,59 +53,18 @@ void wsProxyReadCb(hio_t* io, void* buf, int n) {
         std::string payload = s->rtnpbuf.substr(16, len);
         s->rtnpbuf.erase(0, 16 + len);
         if (type == 0x13 && !payload.empty()) {
-            s->inbuf += payload;
+            if (s->parser && s->parser->FeedRecvData(payload.data(), payload.size()) < 0) {
+                if (s->ws && s->ws->isConnected()) s->ws->close();
+                s->closed = true;
+                hio_close(io);
+                return;
+            }
             sendWindow(hio_fd(io), sid ? sid : 1, (uint32_t)payload.size());
         } else if (type == 0x15 || type == 0x16) {
             if (s->ws && s->ws->isConnected()) s->ws->close();
             s->closed = true;
             hio_close(io);
             return;
-        }
-    }
-    wsParse(s);
-}
-
-void wsParse(WsProxySession* s) {
-    while (!s->closed) {
-        if (s->inbuf.size() < 2) return;
-        unsigned char b0 = (unsigned char)s->inbuf[0];
-        unsigned char b1 = (unsigned char)s->inbuf[1];
-        int opcode = b0 & 0x0f;
-        bool fin = (b0 & 0x80) != 0;
-        size_t len = b1 & 0x7f, off = 2;
-        if (len == 126) { if (s->inbuf.size() < 4) return; len = ((unsigned char)s->inbuf[2] << 8) | (unsigned char)s->inbuf[3]; off = 4; }
-        else if (len == 127) {
-            if (s->inbuf.size() < 10) return;
-            len = 0; for (int i = 0; i < 8; ++i) len = (len << 8) | (unsigned char)s->inbuf[2 + i];
-            off = 10;
-        }
-        if (b1 & 0x80) off += 4;   // 设备→浏览器不应带 mask，容错跳过
-        if (s->inbuf.size() < off + len) return;
-        std::string payload = s->inbuf.substr(off, len);
-        s->inbuf.erase(0, off + len);
-
-        if (opcode == 0x9) {        // ping → pong
-            std::string pf = buildClientFrame(payload, 0xA);
-            sendData(hio_fd(s->link), 1, pf);
-            continue;
-        }
-        if (opcode == 0xA) continue;
-        if (opcode == 0x8) {
-            if (s->ws && s->ws->isConnected()) s->ws->close();
-            s->closed = true;
-            if (s->link) hio_close(s->link);
-            return;
-        }
-        if (!fin || opcode == 0) {
-            if (opcode != 0) s->frag_op = opcode;
-            s->frag += payload;
-            if (!fin) continue;
-            payload.swap(s->frag);
-            s->frag.clear();
-            opcode = s->frag_op;
-        }
-        if (s->ws && s->ws->isConnected()) {
-            s->ws->send(payload, opcode == 0x1 ? WS_OPCODE_TEXT : WS_OPCODE_BINARY);
         }
     }
 }
@@ -167,6 +118,7 @@ void AdminServer::handleDeviceWsOpen(const WebSocketChannelPtr& channel, const H
     std::string role;
     AdminActor actor;
     if (!wsAuthorize(req, actor, role) || !hasPerm("device.terminal") || !ownsDevid(devid)) {
+        logf_("[admin] device ws denied: %s", devid.c_str());
         channel->close();
         return;
     }
@@ -174,7 +126,11 @@ void AdminServer::handleDeviceWsOpen(const WebSocketChannelPtr& channel, const H
     audit(role, "proxy.open", devid + ":" + port_s);
     std::string err;
     int fd = openStream(cfg_, devid, port, err);
-    if (fd < 0) { channel->close(); return; }
+    if (fd < 0) {
+        logf_("[admin] device ws open %s:%d failed: %s", devid.c_str(), port, err.c_str());
+        channel->close();
+        return;
+    }
 
     // 只转发本设备命名空间的 Cookie
     std::string cookieOut;
@@ -197,6 +153,7 @@ void AdminServer::handleDeviceWsOpen(const WebSocketChannelPtr& channel, const H
     }
     std::string proto = req->GetHeader("Sec-WebSocket-Protocol");
     if (!deviceWsHandshake(fd, devid, port, sub, cookieOut, proto)) {
+        logf_("[admin] device ws handshake %s:%d%s failed", devid.c_str(), port, sub.c_str());
         close(fd);
         channel->close();
         return;
@@ -206,6 +163,26 @@ void AdminServer::handleDeviceWsOpen(const WebSocketChannelPtr& channel, const H
     s->ws = channel;
     s->devid = devid;
     s->port = port;
+    s->parser = std::make_shared<WebSocketParser>();
+    WsProxySession* raw = s.get();
+    s->parser->onMessage = [raw](int opcode, const std::string& msg) {
+        if (raw->closed) return;
+        if (opcode == WS_OPCODE_PING) {
+            std::string pong = buildClientFrame(msg, WS_OPCODE_PONG);
+            if (raw->link) sendData(hio_fd(raw->link), 1, pong);
+            return;
+        }
+        if (opcode == WS_OPCODE_PONG) return;
+        if (opcode == WS_OPCODE_CLOSE) {
+            if (raw->ws && raw->ws->isConnected()) raw->ws->close();
+            raw->closed = true;
+            if (raw->link) hio_close(raw->link);
+            return;
+        }
+        if (raw->ws && raw->ws->isConnected()) {
+            raw->ws->send(msg, opcode == WS_OPCODE_TEXT ? WS_OPCODE_TEXT : WS_OPCODE_BINARY);
+        }
+    };
     hloop_t* loop = hevent_loop(channel->io());
     s->link = hio_get(loop, fd);
     if (!s->link) { close(fd); channel->close(); return; }

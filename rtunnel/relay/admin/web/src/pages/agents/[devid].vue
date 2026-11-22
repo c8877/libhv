@@ -748,35 +748,19 @@
           </div>
           <div class="series-bar">
             <span class="series-label">指标</span>
-            <el-popover v-model:visible="seriesPopOpen" placement="bottom-start" :width="250" trigger="click">
-              <template #reference>
-                <div ref="seriesWrapEl" class="series-select" role="button" tabindex="0"
-                     :aria-expanded="String(seriesPopOpen)"
-                     @keydown.enter.prevent="seriesPopOpen = !seriesPopOpen"
-                     @keydown.space.prevent="seriesPopOpen = !seriesPopOpen">
-                  <template v-if="selected.length">
-                    <span v-for="(s, i) in selected" v-show="isPhone || i < seriesVisible" :key="s" class="series-chip">
-                      {{ s }}<button class="chip-x" aria-label="移除" @click.stop="removeSeries(s)">×</button>
-                    </span>
-                    <span v-if="seriesHidden" class="series-more">+{{ seriesHidden }}<span class="more-caret">▾</span></span>
-                  </template>
-                  <span v-else class="series-empty">选择指标</span>
-                  <div v-if="!isPhone" ref="seriesMeasureEl" class="series-measure" aria-hidden="true">
-                    <span v-for="s in selected" :key="'m-' + s" class="series-chip">{{ s }}<span class="chip-x">×</span></span>
-                  </div>
+            <el-select v-model="selected" multiple collapse-tags collapse-tags-tooltip filterable
+                       placeholder="选择指标" class="series-select" @change="onSeriesPick">
+              <template #header>
+                <div class="series-pop-head">已选 {{ selected.length }} / {{ enabledCfg.length }}</div>
+              </template>
+              <el-option v-for="c in enabledCfg" :key="c.series" :label="c.series" :value="c.series" />
+              <template #footer>
+                <div class="series-pop-actions">
+                  <el-button size="small" text @click.stop="selectAllSeries">全选</el-button>
+                  <el-button size="small" text @click.stop="clearSeries">清空</el-button>
                 </div>
               </template>
-              <div class="series-pop">
-                <div class="series-pop-head">已选 {{ selected.length }} / {{ enabledCfg.length }}</div>
-                <el-checkbox-group v-model="selected" class="series-options" @change="onSeriesPick">
-                  <el-checkbox v-for="c in enabledCfg" :key="c.series" :value="c.series">{{ c.series }}</el-checkbox>
-                </el-checkbox-group>
-                <div class="series-pop-actions">
-                  <el-button size="small" text @click="selectAllSeries">全选</el-button>
-                  <el-button size="small" text @click="clearSeries">清空</el-button>
-                </div>
-              </div>
-            </el-popover>
+            </el-select>
           </div>
           <div v-if="!enabledCfg.length" class="muted">该设备还没有启用的采样指标，可在「采样配置」中添加</div>
           <template v-else>
@@ -1308,11 +1292,6 @@ const seriesCfg = ref([])
 const enabledCfg = computed(() => seriesCfg.value.filter((c) => c.enabled))
 const unsyncedCount = computed(() => seriesCfg.value.filter((c) => c.enabled && !c.synced).length)
 const selected = ref([])
-const seriesWrapEl = ref(null)
-const seriesMeasureEl = ref(null)
-const seriesVisible = ref(999)
-const seriesPopOpen = ref(false)
-const seriesHidden = computed(() => (isPhone.value ? 0 : Math.max(0, selected.value.length - seriesVisible.value)))
 const cache = reactive({})
 const lastTs = reactive({})
 const pullAt = reactive({})
@@ -2219,12 +2198,15 @@ function mergeSysinfo(p) {
 
 async function loadSysinfo(silent) {
   try {
+    const hadSys = !!sys.value
     const mode = sysFull ? 'inc' : 'full'
     const r = await Api.get(agentBase.value + '/sysinfo?mode=' + mode)
     if (r.mode === 'inc') mergeSysinfo(r.sysinfo)
     else {
       sys.value = r.sysinfo
       sysFull = true
+      // 先切到能力页、后拿到 sysinfo 时补填一次，避免表单留空
+      if (!hadSys && mainTab.value === 'caps') fillCapsFromSys()
     }
     sysCached.value = !!r.cached
     sysTs.value = r.ts || 0
@@ -2338,42 +2320,6 @@ async function pullSeries(full) {
 
 async function onSeriesPick() {
   await pullSeries(true)
-}
-
-function removeSeries(name) {
-  selected.value = selected.value.filter((s) => s !== name)
-  pullSeries(true)
-}
-
-// 桌面单行铺开：按容器宽度算出能放下几个 chip，剩余收进 +N；手机不限行数
-function measureSeries() {
-  const n = selected.value.length
-  if (isPhone.value || !seriesWrapEl.value || !seriesMeasureEl.value) {
-    seriesVisible.value = n
-    return
-  }
-  const chips = Array.from(seriesMeasureEl.value.children)
-  if (!chips.length) {
-    seriesVisible.value = 0
-    return
-  }
-  const avail = seriesWrapEl.value.clientWidth - 16
-  const gap = 8
-  const total = chips.reduce((a, c) => a + c.offsetWidth, 0) + gap * (chips.length - 1)
-  if (total <= avail) {
-    seriesVisible.value = chips.length
-    return
-  }
-  const reserve = 52
-  let used = 0
-  let fit = 0
-  for (const c of chips) {
-    const add = (fit ? gap : 0) + c.offsetWidth
-    if (used + add > avail - reserve) break
-    used += add
-    fit++
-  }
-  seriesVisible.value = Math.max(1, fit)
 }
 
 function selectAllSeries() {
@@ -2728,11 +2674,7 @@ watch(procShowKernel, () => {
 })
 
 function refreshSeriesView() {
-  nextTick(() => {
-    renderCharts()
-    if (seriesRO && seriesWrapEl.value) seriesRO.observe(seriesWrapEl.value)
-    measureSeries()
-  })
+  nextTick(() => { renderCharts() })
 }
 
 function onObsTab(name) {
@@ -3195,7 +3137,6 @@ async function init() {
   procPeriod.value = 0
   stopProcTimer()
   procCtx.open = false
-  seriesPopOpen.value = false
   net.value = null
   netErr.value = ''
   netTs.value = 0
@@ -3237,20 +3178,17 @@ watch([() => route.params.devid, () => route.query.tab], ([dev], [oldDev]) => {
   const name = tabFromRoute()
   if (name !== mainTab.value) applyTab(name)
 })
-watch([selected, isPhone, () => enabledCfg.value.length], () => nextTick(measureSeries), { deep: true })
 
 function onProcKeydown(e) {
   if (e.key === 'Escape') closeProcMenu()
 }
 
-let seriesRO = null
 onMounted(() => {
   init()
   window.addEventListener('click', closeProcMenu)
   window.addEventListener('scroll', closeProcMenu, true)
   window.addEventListener('resize', closeProcMenu)
   window.addEventListener('keydown', onProcKeydown)
-  if (window.ResizeObserver) seriesRO = new ResizeObserver(() => measureSeries())
 })
 onBeforeUnmount(() => {
   window.removeEventListener('click', closeProcMenu)
@@ -3262,7 +3200,6 @@ onBeforeUnmount(() => {
   stopProcTimer()
   stopTimer()
   stopSample()
-  if (seriesRO) { seriesRO.disconnect(); seriesRO = null }
   Object.values(charts).forEach((c) => { try { c.destroy() } catch (e) { /* 已销毁 */ } })
 })
 </script>
@@ -3465,55 +3402,9 @@ onBeforeUnmount(() => {
 .chart-box canvas { flex: 1 1 auto; min-height: 0; }
 .series-bar { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 12px; }
 .series-label { flex: none; font-size: 12px; line-height: 30px; color: var(--el-text-color-secondary); }
-.series-select {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: 8px;
-  min-height: 30px;
-  padding: 2px 8px;
-  border: 1px solid var(--el-border-color);
-  border-radius: 6px;
-  background: var(--el-bg-color);
-  cursor: pointer;
-  overflow: hidden;
-}
-.series-select:hover, .series-select:focus-visible { border-color: var(--el-color-primary); outline: none; }
-.series-chip {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 22px;
-  padding: 0 4px 0 8px;
-  border-radius: 4px;
-  background: var(--el-fill-color);
-  font-size: 12px;
-  line-height: 22px;
-  color: var(--el-text-color-regular);
-}
-.series-chip .chip-x {
-  border: 0;
-  background: transparent;
-  padding: 0 2px;
-  font-size: 13px;
-  line-height: 1;
-  color: var(--el-text-color-secondary);
-  cursor: pointer;
-}
-.series-chip .chip-x:hover { color: var(--el-color-danger); }
-.series-more { flex: none; display: inline-flex; align-items: center; gap: 2px; padding: 0 6px; font-size: 12px; color: var(--el-text-color-secondary); }
-.series-select:hover .series-more { color: var(--el-color-primary); }
-.more-caret { font-size: 9px; line-height: 1; }
-.series-empty { font-size: 12px; color: var(--el-text-color-placeholder); }
-.series-measure { position: absolute; left: 0; top: 0; display: flex; gap: 8px; width: max-content; visibility: hidden; pointer-events: none; }
+.series-select { flex: 1; min-width: 0; }
 .series-pop-head { margin-bottom: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
-.series-options { display: flex; flex-direction: column; gap: 4px; max-height: 260px; overflow-y: auto; }
-.series-options :deep(.el-checkbox) { height: 24px; margin-right: 0; }
-.series-pop-actions { display: flex; justify-content: flex-end; gap: 4px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--el-border-color-lighter); }
+.series-pop-actions { display: flex; justify-content: flex-end; gap: 4px; }
 
 .kv-rows { border: 1px solid var(--el-border-color-lighter); border-radius: 8px; overflow: hidden; }
 .kv-row { display: flex; align-items: flex-start; gap: 12px; padding: 9px 12px; border-bottom: 1px solid var(--el-border-color-lighter); }
@@ -3635,8 +3526,6 @@ onBeforeUnmount(() => {
   .tab-bar .proc-sort { width: 110px; }
   .series-bar { gap: 8px; }
   .series-label { line-height: 28px; }
-  .series-select { flex-wrap: wrap; overflow: visible; padding: 4px 8px; }
-  .series-chip { height: 24px; }
   .row-edit-table :deep(.el-table__body colgroup col:first-child),
   .row-edit-table :deep(.el-table__header colgroup col:first-child) { width: 30px !important; }
   .row-edit-table :deep(.el-table__expand-column) { width: 30px !important; padding: 0 !important; vertical-align: top; }

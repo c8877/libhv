@@ -146,14 +146,14 @@
     </div>
 
     <el-dialog v-model="dlg" :title="dlgTitle" width="min(92vw, 520px)">
-      <el-form label-width="76px" size="small">
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="76px" size="small" @submit.prevent>
         <el-form-item v-if="tab === 'resources'" label="资源键">
           <el-input v-model="form.key" disabled />
         </el-form-item>
         <el-form-item v-else-if="tab === 'devices'" label="设备 ID">
           <el-input v-model="form.devid" disabled />
         </el-form-item>
-        <el-form-item v-else :label="tab === 'ports' ? '端口' : '路径'">
+        <el-form-item v-else :label="tab === 'ports' ? '端口' : '路径'" prop="value">
           <el-input v-model="form.value" :disabled="!!form.id"
                     :placeholder="tab === 'ports' ? '22 或 8000-8100' : '/dev/ttyS0 或 ttyUSB*'" />
         </el-form-item>
@@ -197,7 +197,17 @@ const loading = ref(false)
 
 const dlg = ref(false)
 const saving = ref(false)
+const formRef = ref(null)
 const form = reactive({ id: 0, key: '', value: '', devid: '', name: '', description: '', enabled: true })
+const rules = {
+  value: [{
+    validator: (rule, v, cb) => {
+      if (form.id || String(v || '').trim()) return cb()
+      return cb(new Error(tab.value === 'ports' ? '请填写端口' : '请填写串口路径'))
+    },
+    trigger: 'blur',
+  }],
+}
 
 const dlgTitle = computed(() => {
   if (tab.value === 'resources') return '编辑资源'
@@ -278,6 +288,10 @@ function openEdit(row) {
 }
 
 async function save() {
+  if (tab.value === 'ports' || tab.value === 'ttys') {
+    const ok = await formRef.value.validate().catch(() => false)
+    if (!ok) return
+  }
   saving.value = true
   try {
     if (tab.value === 'resources') {

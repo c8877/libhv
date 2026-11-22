@@ -13,20 +13,17 @@
                 :placeholder="searchPlaceholder" />
 
       <div class="dc-list" :class="{ clamped: clamped }">
-        <span v-for="opt in viewOptions" :key="opt.key"
-              class="dc-chip" :class="[stateOf(opt.key), { off: !opt.enabled }]"
-              :title="titleOf(opt)" role="button" :tabindex="canEdit ? 0 : null"
-              @click="toggle(opt)"
-              @keydown.enter.prevent="toggle(opt)"
-              @keydown.space.prevent="toggle(opt)">
-          <span v-if="stateOf(opt.key) !== 'none'" class="dc-check">
-            {{ stateOf(opt.key) === 'some' ? '−' : '✓' }}
-          </span>
+        <el-checkbox v-for="opt in viewOptions" :key="opt.key"
+                     class="dc-chip" :class="[stateOf(opt.key), { off: !opt.enabled }]"
+                     :model-value="stateOf(opt.key) !== 'none'"
+                     :indeterminate="stateOf(opt.key) === 'some'"
+                     :disabled="!canEdit || (!opt.enabled && stateOf(opt.key) === 'none')"
+                     :title="titleOf(opt)" @change="toggle(opt)">
           <span class="dc-label">{{ opt.label }}</span>
           <span v-if="opt.sub && opt.sub !== opt.label" class="dc-sub">{{ opt.sub }}</span>
           <button v-if="canEdit && stateOf(opt.key) !== 'none'" class="dc-x" type="button"
-                  aria-label="移除" @click.stop="clearOption(opt)">×</button>
-        </span>
+                  aria-label="移除" @click.stop.prevent="clearOption(opt)">×</button>
+        </el-checkbox>
 
         <span v-for="v in customValues" :key="'c' + v" class="dc-chip all custom"
               :title="customTitle(v)">
@@ -247,20 +244,30 @@ function addCustom() {
 .dc-empty { font-size: 12px; }
 .dc-chip {
   display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 24px;
-  padding: 0 8px; border: 1px solid var(--el-border-color); border-radius: 12px;
-  background: var(--el-fill-color-light); color: var(--el-text-color-regular);
-  font-size: 12px; line-height: 1; cursor: pointer; user-select: none;
+  margin-right: 0; padding: 0 8px; border: 1px solid var(--el-border-color); border-radius: 12px;
+  background: var(--el-fill-color-light); font-size: 12px; line-height: 1;
+}
+.dc-chip :deep(.el-checkbox__input) { height: 14px; }
+.dc-chip :deep(.el-checkbox__inner) { width: 12px; height: 12px; border-radius: 3px; }
+.dc-chip :deep(.el-checkbox__inner::after) { left: 4px; top: 1px; height: 6px; }
+.dc-chip :deep(.el-checkbox__label) {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; line-height: 1; color: var(--el-text-color-regular);
 }
 .dc-chip:hover { border-color: var(--el-color-primary-light-5); }
-.dc-chip:focus-visible { outline: 2px solid var(--el-color-primary-light-5); outline-offset: 1px; }
-.dc-chip.all { background: var(--el-color-primary-light-9); border-color: var(--el-color-primary-light-5); color: var(--el-color-primary); }
-.dc-chip.some { background: var(--el-color-primary-light-9); border-style: dashed; border-color: var(--el-color-primary-light-5); color: var(--el-color-primary); }
-.dc-chip.off { border-style: dashed; background: transparent; color: var(--el-text-color-disabled); cursor: not-allowed; }
+.dc-chip.all { background: var(--el-color-primary-light-9); border-color: var(--el-color-primary-light-5); }
+.dc-chip.all :deep(.el-checkbox__label) { color: var(--el-color-primary); }
+.dc-chip.some { background: var(--el-color-primary-light-9); border-style: dashed; border-color: var(--el-color-primary-light-5); }
+.dc-chip.some :deep(.el-checkbox__label) { color: var(--el-color-primary); }
+.dc-chip.off { border-style: dashed; background: transparent; }
+.dc-chip.off :deep(.el-checkbox__label) { color: var(--el-text-color-disabled); }
 .dc-chip.off:hover { border-color: var(--el-border-color); }
 .dc-chip.off.all, .dc-chip.off.some {
-  cursor: pointer; border-style: dashed; border-color: var(--el-border-color);
-  background: var(--el-fill-color-light); color: var(--el-text-color-secondary);
+  border-style: dashed; border-color: var(--el-border-color);
+  background: var(--el-fill-color-light);
 }
+.dc-chip.off.all :deep(.el-checkbox__label),
+.dc-chip.off.some :deep(.el-checkbox__label) { color: var(--el-text-color-secondary); }
 .dc-chip.custom { border-style: dashed; border-color: var(--el-color-warning-light-5); background: var(--el-color-warning-light-9); color: var(--el-color-warning); }
 .dc-check { font-size: 11px; font-weight: 700; }
 .dc-label { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

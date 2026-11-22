@@ -58,17 +58,13 @@
                :width="isPhone ? '92%' : '520px'" append-to-body @closed="webRow = null">
       <div v-loading="webLoading" class="web-pick">
         <div class="web-tip muted">选择 agent 已开放的转发端口</div>
-        <div v-if="webChips.length" class="web-chips">
-          <span v-for="c in webChips" :key="c.port" class="web-chip"
-                :class="{ on: Number(webPort) === c.port }" role="button" tabindex="0"
-                :title="'打开 ' + c.port + ' 端口'"
-                @click="webPort = String(c.port)"
-                @keydown.enter.prevent="webPort = String(c.port)">
-            <span class="web-check">{{ Number(webPort) === c.port ? '✓' : '' }}</span>
+        <el-radio-group v-if="webChips.length" v-model="webPort" class="web-chips">
+          <el-radio v-for="c in webChips" :key="c.port" :value="String(c.port)"
+                    class="web-chip" :title="'打开 ' + c.port + ' 端口'">
             <span class="web-label">{{ c.label }}</span>
             <span v-if="c.sub" class="web-sub">{{ c.sub }}</span>
-          </span>
-        </div>
+          </el-radio>
+        </el-radio-group>
         <div v-else-if="!webLoading" class="web-empty muted">
           该设备尚未上报开放端口，可直接输入端口号
         </div>
@@ -356,18 +352,20 @@ onBeforeUnmount(() => {
 .web-tip { font-size: 12px; margin-bottom: 8px; }
 .web-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .web-chip {
-  display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 10px;
+  display: inline-flex; align-items: center; height: 26px; margin-right: 0; padding: 0 10px;
   border: 1px solid var(--el-border-color); border-radius: 13px;
-  background: var(--el-fill-color-light); color: var(--el-text-color-regular);
-  font-size: 12px; line-height: 1; cursor: pointer; user-select: none;
+  background: var(--el-fill-color-light);
+}
+.web-chip :deep(.el-radio__input) { display: none; }
+.web-chip :deep(.el-radio__label) {
+  display: inline-flex; align-items: center; gap: 4px; padding: 0;
+  font-size: 12px; line-height: 1; color: var(--el-text-color-regular);
 }
 .web-chip:hover { border-color: var(--el-color-primary-light-5); }
-.web-chip:focus-visible { outline: 2px solid var(--el-color-primary-light-5); outline-offset: 1px; }
-.web-chip.on {
+.web-chip.is-checked {
   background: var(--el-color-primary-light-9); border-color: var(--el-color-primary-light-5);
-  color: var(--el-color-primary);
 }
-.web-check { width: 10px; font-size: 11px; font-weight: 700; }
+.web-chip.is-checked :deep(.el-radio__label) { color: var(--el-color-primary); }
 .web-label { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .web-sub { font-size: 11px; opacity: .75; font-family: ui-monospace, Menlo, Consolas, monospace; }
 .web-empty { font-size: 12px; margin-bottom: 8px; }

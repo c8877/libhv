@@ -6,15 +6,20 @@
         <span class="spacer" />
         <el-button :loading="loading" @click="load">刷新列表</el-button>
       </div>
-      <div class="issue-grid">
-        <label>SAN<el-input v-model="issue.san" placeholder="PILE-000200" /></label>
-        <label>类型
+      <el-form ref="issueRef" :model="issue" :rules="issueRules" class="issue-grid"
+               label-position="top" @submit.prevent>
+        <el-form-item label="SAN" prop="san">
+          <el-input v-model="issue.san" placeholder="PILE-000200" />
+        </el-form-item>
+        <el-form-item label="类型">
           <el-select v-model="issue.role">
             <el-option label="设备" value="device" />
             <el-option label="用户" value="user" />
           </el-select>
-        </label>
-        <label>有效期(天)<el-input-number v-model="issue.days" :min="1" :max="3650" /></label>
+        </el-form-item>
+        <el-form-item label="有效期(天)">
+          <el-input-number v-model="issue.days" :min="1" :max="3650" />
+        </el-form-item>
         <div class="issue-foot">
           <el-button type="primary" :loading="issuing" @click="doIssue">签发</el-button>
           <span v-if="issued" class="muted">
@@ -23,13 +28,17 @@
             <el-button link type="primary" @click="downloadPem(issued.san + '.key', issued.key)">下载 key（仅此一次）</el-button>
           </span>
         </div>
-      </div>
+      </el-form>
     </div>
 
     <div class="panel">
       <div class="panel-head"><h2>CSR 签名（私钥不出设备）</h2></div>
-      <el-input v-model="csr" type="textarea" :rows="5" class="mono"
-                placeholder="粘贴 CSR PEM（设备侧生成，SAN 或 CN 为身份）" />
+      <el-form ref="csrRef" :model="csrForm" :rules="csrRules" @submit.prevent>
+        <el-form-item prop="csr" class="csr-item">
+          <el-input v-model="csrForm.csr" type="textarea" :rows="5" class="mono"
+                    placeholder="粘贴 CSR PEM（设备侧生成，SAN 或 CN 为身份）" />
+        </el-form-item>
+      </el-form>
       <div class="csr-foot">
         <span class="muted">有效期(天)</span>
         <el-input-number v-model="csrDays" :min="1" :max="3650" />
@@ -110,9 +119,17 @@ const issuing = ref(false)
 const signing = ref(false)
 const issued = ref(null)
 const signed = ref(null)
-const csr = ref('')
+const csrForm = reactive({ csr: '' })
 const csrDays = ref(30)
 const issue = reactive({ san: '', role: 'device', days: 30 })
+const issueRef = ref(null)
+const issueRules = {
+  san: [{ required: true, message: '请填写 SAN', trigger: 'blur' }],
+}
+const csrRef = ref(null)
+const csrRules = {
+  csr: [{ required: true, message: '请粘贴 CSR', trigger: 'blur' }],
+}
 
 const filtered = computed(() => {
   const k = q.value.trim().toLowerCase()
@@ -154,11 +171,9 @@ function downloadPem(name, text) {
 }
 
 async function doIssue() {
+  const ok = await issueRef.value.validate().catch(() => false)
+  if (!ok) return
   const san = issue.san.trim()
-  if (!san) {
-    ElMessage.warning('请填写 SAN')
-    return
-  }
   issuing.value = true
   try {
     issued.value = await Api.post('/api/v1/certs/issue', {
@@ -174,14 +189,12 @@ async function doIssue() {
 }
 
 async function doSign() {
-  if (!csr.value.trim()) {
-    ElMessage.warning('请粘贴 CSR')
-    return
-  }
+  const ok = await csrRef.value.validate().catch(() => false)
+  if (!ok) return
   signing.value = true
   try {
     signed.value = await Api.post('/api/v1/certs/sign', {
-      csr: csr.value, days: Number(csrDays.value) || 30,
+      csr: csrForm.csr, days: Number(csrDays.value) || 30,
     })
     ElMessage.success('已签发 ' + signed.value.san)
     await load()
@@ -214,9 +227,11 @@ onMounted(load)
   display: grid;
   grid-template-columns: minmax(0, 2fr) 160px 150px;
   gap: 12px;
-  align-items: end;
+  align-items: start;
 }
-.issue-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--el-text-color-secondary); }
+.issue-grid :deep(.el-form-item),
+.csr-item { margin-bottom: 0; }
+.csr-item :deep(.el-form-item__content) { width: 100%; }
 .issue-foot { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; }
 .csr-foot { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .search { width: 220px; }

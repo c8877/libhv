@@ -13,11 +13,49 @@
       </div>
       <div ref="host" class="repo-host"></div>
     </section>
+
+    <el-dialog v-model="deploy.open" title="部署到设备" width="540px" :close-on-click-modal="false"
+               @closed="resetDeploy">
+      <el-form label-width="88px" class="deploy-form" @submit.prevent>
+        <el-form-item label="目标设备">
+          <div class="deploy-dev">
+            <el-select v-model="deploy.devid" :disabled="deploy.busy || !agents.length" class="dev-select">
+              <el-option v-for="a in agents" :key="a.devid"
+                         :label="a.devid + (a.online ? '' : '（离线）')"
+                         :value="a.devid" :disabled="!a.online" />
+            </el-select>
+            <el-tag v-if="deploy.cap === 'rw'" type="success" size="small">可写</el-tag>
+            <el-tag v-else-if="deploy.cap === 'loading'" type="info" size="small">读取能力…</el-tag>
+            <el-tag v-else type="warning" size="small">{{ capLabel(deploy.cap) }}</el-tag>
+          </div>
+        </el-form-item>
+        <el-form-item label="目标路径">
+          <el-input v-model="deploy.path" :disabled="deploy.busy" spellcheck="false" autocomplete="off" />
+        </el-form-item>
+        <el-form-item label="选项">
+          <el-checkbox v-model="deploy.overwrite" :disabled="deploy.busy">覆盖同名文件</el-checkbox>
+          <span class="deploy-hint">目标已存在时默认不覆盖</span>
+        </el-form-item>
+        <el-form-item v-if="deploy.showProgress" label="进度">
+          <el-progress :percentage="deploy.pct" :stroke-width="8" class="deploy-progress" />
+          <div class="deploy-hint">{{ deploy.msg }}</div>
+        </el-form-item>
+        <el-form-item v-else-if="deploy.msg" label=" ">
+          <span :class="deploy.err ? 'deploy-err' : 'deploy-warn'">{{ deploy.msg }}</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="cancelDeploy">{{ deploy.busy ? '取消部署' : '取消' }}</el-button>
+        <el-button type="primary" :disabled="deploy.cap !== 'rw'" :loading="deploy.busy" @click="runDeploy">
+          {{ deploy.conflict ? '覆盖并部署' : '部署' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Api } from '@/shared/api.js'
 import { auth, canManage, canOperate } from '@/shared/store.js'
@@ -47,6 +85,13 @@ const maxEditMb = computed(() => parseInt(auth.settings['file.max_edit_mb'] || '
 const LAST_DEV = 'rtunnel.files.deployDevid'
 const dirKey = (id) => 'rtunnel.files.deployDir.' + id
 
+const deploy = reactive({
+  open: false, devid: '', path: '', overwrite: false, cap: 'none',
+  busy: false, pct: 0, msg: '', err: false, showProgress: false,
+  conflict: false, cancelling: false, repoFile: '', name: '', total: 0,
+})
+let deployWs = null
+
 function readStore(key, def) {
   try { return localStorage.getItem(key) || def } catch (e) { return def }
 }
@@ -66,13 +111,6 @@ function pickDevid() {
 function joinDir(dir, name) {
   const d = (dir || '/').replace(/\/+$/, '')
   return (d === '' ? '' : d) + '/' + name
-}
-
-function el(tag, cls, text) {
-  const e = document.createElement(tag)
-  if (cls) e.className = cls
-  if (text !== undefined) e.textContent = text
-  return e
 }
 
 function capLabel(cap) {
@@ -100,221 +138,152 @@ async function readCap(devid) {
   }
 }
 
+async function refreshCap() {
+  const devid = deploy.devid
+  deploy.cap = devid ? 'loading' : 'none'
+  const got = await readCap(devid)
+  if (deploy.devid !== devid || !deploy.open) return
+  deploy.cap = got
+}
+
 function openDeploy(name, row, repoPath) {
   if (!canManage()) return
-  const repoFile = repoPath || name
-  const absPath = '/' + String(repoFile).replace(/^\/+/, '')
-  const size = Number(row && row.size) || 0
-  let devid = pickDevid()
-  let cap = devid ? 'loading' : 'none'
-  let busy = false
-  let ws = null
+  deploy.repoFile = repoPath || name
+  deploy.name = name
+  deploy.total = Number(row && row.size) || 0
+  const prevDevid = deploy.devid
+  deploy.devid = pickDevid()
+  deploy.path = joinDir(readStore(dirKey(deploy.devid), '/'), name)
+  deploy.overwrite = false
+  deploy.busy = false
+  deploy.pct = 0
+  deploy.msg = ''
+  deploy.err = false
+  deploy.showProgress = false
+  deploy.conflict = false
+  deploy.cancelling = false
+  deploy.open = true
+  // devid 变化时由 watch 刷新；未变化时这里补一次，避免沿用上次的能力状态
+  if (deploy.devid === prevDevid) refreshCap()
+}
 
-  const panel = fm.inlinePanel(absPath, ({ box, close }) => {
-    const r1 = el('div', 'row')
-    r1.appendChild(el('span', 'lb', '目标设备'))
-    const sel = el('select')
-    for (const a of agents) {
-      const o = el('option', '', a.devid + (a.online ? '' : '（离线）'))
-      o.value = a.devid
-      o.disabled = !a.online
-      if (a.devid === devid) o.selected = true
-      sel.appendChild(o)
+watch(() => deploy.devid, (devid) => {
+  if (!deploy.open) return
+  deploy.path = joinDir(readStore(dirKey(devid), '/'), deploy.name)
+  deploy.overwrite = false
+  deploy.msg = ''
+  deploy.conflict = false
+  refreshCap()
+})
+
+function setMsg(text, kind) {
+  deploy.msg = text || ''
+  deploy.err = kind === 'err'
+  deploy.showProgress = false
+}
+
+function closeWs() {
+  if (!deployWs) return
+  try { deployWs.close() } catch (e) { /* ignore */ }
+  deployWs = null
+}
+
+function resetDeploy() {
+  closeWs()
+  deploy.busy = false
+  deploy.cancelling = false
+  deploy.showProgress = false
+  deploy.pct = 0
+  deploy.msg = ''
+}
+
+function cancelDeploy() {
+  if (deploy.busy && deployWs) {
+    if (deploy.cancelling) return
+    try { deployWs.send(JSON.stringify({ op: 'push_cancel', id: 2 })) } catch (e) { /* ignore */ }
+    deploy.cancelling = true
+    return
+  }
+  deploy.open = false
+}
+
+function runDeploy() {
+  const target = deploy.path.trim()
+  if (!/^\//.test(target) || target.indexOf('..') >= 0 || target.length > 1024) {
+    setMsg('请输入合法的绝对路径', 'err')
+    return
+  }
+  if (deploy.cap !== 'rw') {
+    setMsg('目标设备当前不可写', 'err')
+    return
+  }
+  deploy.busy = true
+  deploy.cancelling = false
+  deploy.conflict = false
+  deploy.showProgress = true
+  deploy.pct = 0
+  deploy.msg = '准备部署…'
+  deploy.err = false
+
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://'
+  const ws = new WebSocket(proto + location.host + '/ws/fs/' + encodeURIComponent(deploy.devid))
+  deployWs = ws
+  const devid = deploy.devid
+  ws.onopen = () => {
+    ws.send(JSON.stringify({
+      op: 'push_open', id: 1, repo: deploy.repoFile, path: target, overwrite: !!deploy.overwrite,
+    }))
+  }
+  ws.onmessage = (ev) => {
+    if (typeof ev.data !== 'string' || deployWs !== ws) return
+    let j
+    try { j = JSON.parse(ev.data) } catch (e) { return }
+    if (j.op === 'push_progress') {
+      const sent = Number(j.sent) || 0
+      const all = Number(j.total) || deploy.total
+      deploy.pct = all ? Math.min(100, Math.floor((sent * 100) / all)) : 0
+      deploy.msg = deploy.pct + '% · ' + bytes(sent) + ' / ' + bytes(all)
+    } else if (j.op === 'push_done') {
+      deploy.busy = false
+      deploy.cancelling = false
+      closeWs()
+      if (j.ok) {
+        writeStore(LAST_DEV, devid)
+        const d = target.slice(0, target.lastIndexOf('/')) || '/'
+        writeStore(dirKey(devid), d)
+        deploy.open = false
+        fm.toast('已部署到 ' + devid + ':' + target)
+        fm.load('/')
+      } else if (j.conflict) {
+        deploy.showProgress = false
+        deploy.pct = 0
+        deploy.conflict = true
+        deploy.msg = '目标已存在：' + target + '，勾选「覆盖同名文件」后重试'
+        deploy.err = false
+      } else {
+        setMsg(j.message || '部署失败', 'err')
+      }
+    } else if (j.op === 'error') {
+      deploy.busy = false
+      deploy.cancelling = false
+      setMsg(j.message || '部署失败', 'err')
+      closeWs()
     }
-    if (!agents.length) {
-      const o = el('option', '', '没有在线设备')
-      o.value = ''
-      sel.appendChild(o)
-    }
-    sel.disabled = busy
-    const capTx = el('span', cap === 'rw' ? 'hint' : 'warn', capLabel(cap))
-    r1.appendChild(sel)
-    r1.appendChild(capTx)
-
-    const r2 = el('div', 'row')
-    r2.appendChild(el('span', 'lb', '目标路径'))
-    const inp = el('input')
-    inp.type = 'text'
-    inp.spellcheck = false
-    inp.autocomplete = 'off'
-    inp.value = joinDir(readStore(dirKey(devid), '/'), name)
-    inp.disabled = busy
-    r2.appendChild(inp)
-
-    const r3 = el('div', 'row')
-    r3.appendChild(el('span', 'lb', '选项'))
-    const lab = el('label', 'chk')
-    const ow = el('input')
-    ow.type = 'checkbox'
-    ow.disabled = busy
-    lab.appendChild(ow)
-    lab.appendChild(document.createTextNode(' 覆盖同名文件'))
-    r3.appendChild(lab)
-    r3.appendChild(el('span', 'hint', '目标已存在时默认不覆盖'))
-
-    const r4 = el('div', 'row')
-    const msg = el('span', 'hint', '')
-    const prog = el('div', 'prog')
-    const bar = el('i')
-    prog.appendChild(bar)
-    prog.hidden = true
-    const ok = el('button', 'primary', '部署')
-    ok.disabled = cap !== 'rw'
-    const no = el('button', '', '取消')
-    r4.appendChild(msg)
-    r4.appendChild(prog)
-    r4.appendChild(el('span', 'sp'))
-    r4.appendChild(ok)
-    r4.appendChild(no)
-
-    box.appendChild(r1)
-    box.appendChild(r2)
-    box.appendChild(r3)
-    box.appendChild(r4)
-
-    function setMsg(text, kind) {
-      msg.textContent = text || ''
-      msg.className = kind === 'err' ? 'err' : kind === 'warn' ? 'warn' : 'hint'
-    }
-
-    async function refreshCap() {
-      cap = devid ? 'loading' : 'none'
-      capTx.textContent = capLabel(cap)
-      capTx.className = 'hint'
-      ok.disabled = true
-      const got = await readCap(devid)
-      if (!box.isConnected) return
-      cap = got
-      capTx.textContent = capLabel(cap)
-      capTx.className = cap === 'rw' ? 'hint' : 'warn'
-      ok.disabled = busy || cap !== 'rw'
-    }
-
-    sel.addEventListener('change', () => {
-      devid = sel.value
-      inp.value = joinDir(readStore(dirKey(devid), '/'), name)
-      ow.checked = false
-      setMsg('')
-      refreshCap()
-    })
-
-    no.addEventListener('click', () => {
-      if (busy && ws) {
-        try { ws.send(JSON.stringify({ op: 'push_cancel', id: 2 })) } catch (e) { /* ignore */ }
-        setMsg('正在取消…')
-        return
-      }
-      close()
-    })
-
-    ok.addEventListener('click', () => {
-      const target = inp.value.trim()
-      if (!/^\//.test(target) || target.indexOf('..') >= 0 || target.length > 1024) {
-        setMsg('请输入合法的绝对路径', 'err')
-        return
-      }
-      if (cap !== 'rw') {
-        setMsg('目标设备当前不可写', 'err')
-        return
-      }
-      busy = true
-      ok.disabled = true
-      no.textContent = '取消'
-      sel.disabled = true
-      inp.disabled = true
-      ow.disabled = true
-      prog.hidden = false
-      bar.style.width = '0%'
-      setMsg('准备部署…')
-
-      const proto = location.protocol === 'https:' ? 'wss://' : 'ws://'
-      ws = new WebSocket(proto + location.host + '/ws/fs/' + encodeURIComponent(devid))
-      ws.onopen = () => {
-        ws.send(JSON.stringify({ op: 'push_open', id: 1, repo: repoFile, path: target, overwrite: !!ow.checked }))
-      }
-      ws.onmessage = (ev) => {
-        if (typeof ev.data !== 'string') return
-        let j
-        try { j = JSON.parse(ev.data) } catch (e) { return }
-        if (j.op === 'push_progress') {
-          const sent = Number(j.sent) || 0
-          const all = Number(j.total) || size
-          const pct = all ? Math.floor((sent * 100) / all) : 0
-          bar.style.width = pct + '%'
-          setMsg(pct + '% · ' + bytes(sent) + ' / ' + bytes(all))
-        } else if (j.op === 'push_done') {
-          busy = false
-          try { ws.close() } catch (e) { /* ignore */ }
-          ws = null
-          if (j.ok) {
-            writeStore(LAST_DEV, devid)
-            const d = target.slice(0, target.lastIndexOf('/')) || '/'
-            writeStore(dirKey(devid), d)
-            close()
-            fm.toast('已部署到 ' + devid + ':' + target)
-            fm.load('/')
-          } else if (j.conflict) {
-            bar.style.width = '0%'
-            prog.hidden = true
-            ok.disabled = false
-            ok.textContent = '覆盖并部署'
-            sel.disabled = false
-            inp.disabled = false
-            ow.disabled = false
-            no.textContent = '取消'
-            setMsg('目标已存在：' + target + '，勾选「覆盖同名文件」后重试', 'warn')
-          } else {
-            bar.style.width = '0%'
-            prog.hidden = true
-            sel.disabled = false
-            inp.disabled = false
-            ow.disabled = false
-            ok.disabled = false
-            no.textContent = '取消'
-            setMsg(j.message || '部署失败', 'err')
-          }
-        } else if (j.op === 'error') {
-          busy = false
-          bar.style.width = '0%'
-          prog.hidden = true
-          sel.disabled = false
-          inp.disabled = false
-          ow.disabled = false
-          ok.disabled = false
-          no.textContent = '取消'
-          setMsg(j.message || '部署失败', 'err')
-          try { ws.close() } catch (e) { /* ignore */ }
-          ws = null
-        }
-      }
-      ws.onerror = () => {
-        if (!busy) return
-        busy = false
-        prog.hidden = true
-        ok.disabled = false
-        sel.disabled = false
-        inp.disabled = false
-        ow.disabled = false
-        no.textContent = '取消'
-        setMsg('连接失败', 'err')
-      }
-      ws.onclose = () => {
-        if (!busy) return
-        busy = false
-        prog.hidden = true
-        ok.disabled = false
-        sel.disabled = false
-        inp.disabled = false
-        ow.disabled = false
-        no.textContent = '取消'
-        setMsg('连接已断开', 'err')
-      }
-    })
-
-    refreshCap()
-  })
-
-  return panel
+  }
+  ws.onerror = () => {
+    if (deployWs !== ws) return
+    deploy.busy = false
+    deploy.cancelling = false
+    setMsg('连接失败', 'err')
+    closeWs()
+  }
+  ws.onclose = () => {
+    if (deployWs !== ws) return
+    deploy.busy = false
+    deploy.cancelling = false
+    setMsg('连接已断开', 'err')
+    deployWs = null
+  }
 }
 
 // --------------------------------------------------------------- 挂载
@@ -393,6 +362,13 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.deploy-dev { display: flex; align-items: center; gap: 10px; width: 100%; }
+.dev-select { width: 220px; }
+.deploy-hint { margin-left: 8px; font-size: 12px; color: var(--muted); }
+.deploy-warn { font-size: 12px; color: var(--el-color-warning); }
+.deploy-err { font-size: 12px; color: var(--el-color-danger); }
+.deploy-progress { width: 100%; }
+
 .repo-line {
   color: var(--muted);
   font-size: 12px;
