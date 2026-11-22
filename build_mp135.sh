@@ -21,7 +21,7 @@ cmake -S . -B build_mp135 \
     -DBUILD_EXAMPLES=OFF -DBUILD_UNITTEST=OFF \
     -DWITH_OPENSSL=ON -DWITH_HTTP=ON -DWITH_EVPP=ON \
     -DWITH_RPC=OFF -DWITH_MQTT=OFF -DWITH_KCP=OFF -DWITH_NGHTTP2=OFF \
-    -DRTUNNEL_AGENT_WEB=ON
+    -DRTUNNEL_AGENT_WEB=ON -DHV_SECTION_GC=ON
 
 cmake --build build_mp135 -j"$(nproc)" --target rtunnel-agent rtunnel-agent-noweb
 

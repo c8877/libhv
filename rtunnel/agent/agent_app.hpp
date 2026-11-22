@@ -104,8 +104,10 @@ public:
 
     // 设备详情快照：只在 loop 线程采集，HTTP 线程读缓存字符串
     nlohmann::json buildSysinfo();
-    void refreshWebSnapshot();
     std::string webSnapshot();
+#ifdef RTUNNEL_AGENT_WEB
+    void refreshWebSnapshot();
+#endif
 
     // 本地页与 relay 共用的同步查询；会阻塞（双采样 / fork lsipc），
     // 必须在工作线程调用，不能跑在 loop 上。
@@ -114,23 +116,29 @@ public:
     std::string metricPointsJson(const nlohmann::json& q);
     std::string storageTreeJson(const nlohmann::json& req);
 
+#ifdef RTUNNEL_AGENT_WEB
     // 本地页打开期间续期进程/服务预热（与 relay 详情的 WARM_REQ 共用缓存）。
     // 可从 HTTP 工作线程调用，事件循环操作会投递回 loop。
     void requestWarm(uint64_t ttl_ms);
+#endif
 
     // 按需查询统一在单个 worker 上串行执行：进程扫描、网络快照都会阻塞
     // （双采样、fork lsipc），串行可以把单核设备的 CPU 峰值压住。
     // 队列满时返回 false / 空串，调用方回 busy。
     bool querySubmit(std::function<void()> fn);
+#ifdef RTUNNEL_AGENT_WEB
     std::string querySync(const std::function<std::string()>& fn);
+#endif
 
     // 分区目录占用扫描单独占一个线程：整盘遍历要 1-2s，放查询队列会
     // 让同时打开的进程/网络页一起等。
     bool storageSubmit(std::function<void()> fn);
+#ifdef RTUNNEL_AGENT_WEB
     std::string storageSync(const std::function<std::string()>& fn);
 
     // HTTP 线程在页面请求时调用：记录活跃时间，空闲后首个请求触发一次快照重建。
     void noteWebRequest();
+#endif
 
 protected:
     uint8_t role() const override { return rtnp::ROLE_AGENT; }
@@ -141,11 +149,14 @@ protected:
 
 private:
     std::mutex web_mu_;
-    std::string web_body_;    // refreshWebSnapshot 生成，webSnapshot 复制
-    std::atomic<uint64_t> web_req_ms_{0};      // 最近一次页面请求
-    std::atomic<uint64_t> web_snapshot_ms_{0}; // 最近一次快照生成
+    // 最近一次 sysinfo 快照：本地页定时刷新，lite 用全量 SYSINFO 帧更新，诊断包直接读
+    std::string web_body_;
+    std::atomic<uint64_t> web_snapshot_ms_{0};
+#ifdef RTUNNEL_AGENT_WEB
+    std::atomic<uint64_t> web_req_ms_{0}; // 最近一次页面请求
     std::atomic<int> web_kick_pending_{0};
     static void webKickCb(hevent_t* ev);
+#endif
 
     // 按需查询 worker：单线程 + 有限队列
     void queryStart();
@@ -243,7 +254,9 @@ private:
     void onWarmTick();
     void ensureWarmTimer();
     static void warmTickCb(htimer_t* t);
+#ifdef RTUNNEL_AGENT_WEB
     static void warmKickCb(hevent_t* ev);
+#endif
     static bool otaProbe(const std::string& path, const std::string& expect, std::string& out);
     bool hasOtaPending();
     void clearOtaPending();

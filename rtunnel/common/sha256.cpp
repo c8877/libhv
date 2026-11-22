@@ -7,7 +7,6 @@
 #endif
 
 namespace rtutil {
-#if !defined(WITH_OPENSSL)
 namespace {
 
 constexpr uint32_t K[64] = {
@@ -51,35 +50,72 @@ void block(uint32_t h[8], const uint8_t* p) {
 }
 
 } // namespace
-#endif
+
+Sha256::Sha256() {
+    reset();
+}
+
+void Sha256::reset() {
+    static const uint32_t H[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                                  0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+    for (int i = 0; i < 8; i++) h_[i] = H[i];
+    total_ = 0;
+    n_ = 0;
+}
+
+void Sha256::update(const void* data, size_t len) {
+    const uint8_t* p = (const uint8_t*)data;
+    total_ += len;
+    while (len > 0) {
+        size_t take = 64 - n_;
+        if (take > len) take = len;
+        memcpy(buf_ + n_, p, take);
+        n_ += take;
+        p += take;
+        len -= take;
+        if (n_ == 64) {
+            block(h_, buf_);
+            n_ = 0;
+        }
+    }
+}
+
+void Sha256::final(uint8_t out[32]) {
+    uint64_t bits = total_ * 8;
+    uint8_t pad = 0x80;
+    update(&pad, 1);
+    uint8_t zero = 0;
+    while (n_ != 56) update(&zero, 1);
+    uint8_t lenb[8];
+    for (int i = 0; i < 8; i++) lenb[i] = (uint8_t)(bits >> (56 - i * 8));
+    update(lenb, 8);
+    for (int i = 0; i < 8; i++) {
+        out[i * 4] = (uint8_t)(h_[i] >> 24);
+        out[i * 4 + 1] = (uint8_t)(h_[i] >> 16);
+        out[i * 4 + 2] = (uint8_t)(h_[i] >> 8);
+        out[i * 4 + 3] = (uint8_t)h_[i];
+    }
+}
+
+std::string Sha256::hex() {
+    uint8_t md[32];
+    final(md);
+    static const char* hx = "0123456789abcdef";
+    std::string out(64, '0');
+    for (int i = 0; i < 32; i++) {
+        out[i * 2] = hx[md[i] >> 4];
+        out[i * 2 + 1] = hx[md[i] & 0xF];
+    }
+    return out;
+}
 
 void sha256(const void* data, size_t len, uint8_t out[32]) {
 #if defined(WITH_OPENSSL)
     SHA256((const unsigned char*)data, len, out);
 #else
-    uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-                     0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
-    const uint8_t* p = (const uint8_t*)data;
-    size_t full = len / 64;
-    for (size_t i = 0; i < full; i++) block(h, p + i * 64);
-
-    uint8_t tail[128];
-    size_t rem = len - full * 64;
-    memcpy(tail, p + full * 64, rem);
-    tail[rem++] = 0x80;
-    size_t tail_len = rem <= 56 ? 64 : 128;
-    memset(tail + rem, 0, tail_len - rem - 8);
-    uint64_t bits = (uint64_t)len * 8;
-    for (int i = 0; i < 8; i++) tail[tail_len - 1 - i] = (uint8_t)(bits >> (i * 8));
-    block(h, tail);
-    if (tail_len == 128) block(h, tail + 64);
-
-    for (int i = 0; i < 8; i++) {
-        out[i * 4] = (uint8_t)(h[i] >> 24);
-        out[i * 4 + 1] = (uint8_t)(h[i] >> 16);
-        out[i * 4 + 2] = (uint8_t)(h[i] >> 8);
-        out[i * 4 + 3] = (uint8_t)h[i];
-    }
+    Sha256 ctx;
+    ctx.update(data, len);
+    ctx.final(out);
 #endif
 }
 

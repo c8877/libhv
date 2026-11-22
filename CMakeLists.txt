@@ -7,6 +7,15 @@ cmake_minimum_required(VERSION 3.6)
 set(WITH_MQTT ON CACHE BOOL "compile mqtt")
 set(WITH_RPC ON CACHE BOOL "compile hrpc (libhrpc, needs protobuf)")
 
+# 小体积静态构建：每个函数/数据独立分段，链接时用 --gc-sections 丢掉没有引用的部分。
+# 静态链接 libhv 时单个 .o 里会带进大量用不到的分支（DNS、socks5、HTTP 等），
+# 打开后只保留真正被引用的代码。发布脚本（build_mp135.sh）会显式打开。
+option(HV_SECTION_GC "按函数/数据分段并在链接时回收未引用段" OFF)
+if(HV_SECTION_GC)
+    add_compile_options(-ffunction-sections -fdata-sections)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--gc-sections")
+endif()
+
 include(${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.master)
 
 # 本地新增组件（上游没有，放在 include 之后定义目标）
