@@ -99,6 +99,39 @@ export const DOCS = [
     resp: `{ "ts": 1763349000123, "scope": "tcp", "cached": false, "summary": { "tcp": 12, "udp": 6, "unix": 41, "ipc": 3 }, "tcp": { "total": 12, "listening": 5, "connected": 6, "entries": [{ "local_addr": "0.0.0.0", "local_port": 22, "remote_addr": "0.0.0.0", "remote_port": 0, "state": "LISTEN", "pid": 812, "comm": "sshd" }] } }`,
   },
   {
+    group: 'device', method: 'GET', path: '/api/v1/agents/:devid/storage', minRole: 'viewer',
+    summary: '分区与目录占用（按挂载点/路径/层级）',
+    params: [
+      { name: 'devid', in: 'path', desc: '设备 ID' },
+      { name: 'mount', in: 'query', desc: '挂载点，默认 /' },
+      { name: 'path', in: 'query', desc: '相对挂载点的子目录，省略=列分区根' },
+      { name: 'depth', in: 'query', desc: '相对 path 的回传层级，默认 1，最大 64' },
+    ],
+    note: 'path 必须落在 mount 内；大目录返回 gzip（按 Accept-Encoding），最多等 30s',
+    curl: `curl -sS --compressed -H "Authorization: Bearer $ATK" \\\n     "$RT/api/v1/agents/mp135/storage?mount=/&depth=1"`,
+    resp: `{ "ok": true, "mount": "/", "total_kb": 7456000, "used_kb": 2310000, "nodes": [{ "name": "root", "path": "/", "size_kb": 2310000, "children": 18 }] }`,
+  },
+  {
+    group: 'device', method: 'POST', path: '/api/v1/agents/:devid/power', minRole: 'manager',
+    summary: '设备重启 / 关机',
+    params: [
+      { name: 'devid', in: 'path', desc: '设备 ID' },
+      { name: 'action', in: 'body', desc: 'reboot 或 poweroff' },
+      { name: 'password', in: 'body', desc: '设备 root 密码，agent 侧校验，不落日志' },
+      { name: 'delay_ms', in: 'body', desc: '延迟毫秒，默认 1000，最大 60000' },
+    ],
+    note: '需要 device.power；操作写审计；密码只透传不记录',
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n     -d '{"action":"reboot","password":"***","delay_ms":1000}' "$RT/api/v1/agents/mp135/power"`,
+    resp: `{ "ok": true, "action": "reboot", "delay_ms": 1000 }`,
+  },
+  {
+    group: 'device', method: 'GET', path: '/api/v1/agents/:devid/diag', minRole: 'manager',
+    summary: '下载诊断包（日志 + sysinfo）',
+    params: [{ name: 'devid', in: 'path', desc: '设备 ID' }],
+    note: '返回 application/gzip，响应头 X-Diag-Sha256；最多等 30s；需要 device.diag',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" -o diag.tar.gz "$RT/api/v1/agents/mp135/diag"`,
+  },
+  {
     group: 'device', method: 'GET', path: '/api/v1/agents/:devid/metrics/series', minRole: 'viewer',
     summary: '读取指标时间序列',
     params: [
@@ -465,8 +498,8 @@ export const DOCS = [
   },
   {
     group: 'ops', method: 'GET', path: '/metrics', minRole: 'operator',
-    summary: 'Prometheus 文本指标',
-    note: '绑定分组的 Token 只统计组内设备',
+    summary: 'relay 自身的 Prometheus 文本指标',
+    note: '连接/帧/流/管理面 HTTP/SQLite 耗时；绑定分组的 Token 只看组内设备，全局累计计数不返回',
     curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/metrics"`,
   },
   {

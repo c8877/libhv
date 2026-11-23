@@ -1,8 +1,9 @@
 #pragma once
-// relay 管理台后端：HttpServer 独立 worker 线程跑 HTTP，
-// 所有 relay 状态访问经 hloop_post_event 投递回 relay 线程执行
-// （promise/future 同步），relay 状态因此永远只在 relay 线程被访问，无锁。
-// 角色：admin（唯一）/ manager / operator / viewer，权限见 api_users.cpp。
+// relay 管理台后端：HttpServer 用多个 worker 线程跑 HTTP（--admin-threads），
+// 请求级身份放 thread_local tl_actor；所有 relay 状态访问经 hloop_post_event
+// 投递回 relay 线程执行（promise/future 同步），relay 状态因此永远只在 relay
+// 线程被访问，无锁。数据面（/device 代理、终端/文件 WS）另有独立线程，不占
+// 管理面 worker。角色：admin（唯一）/ manager / operator / viewer，权限见 api_users.cpp。
 
 #include <functional>
 #include <vector>
@@ -45,6 +46,7 @@ struct AdminConfig {
     bool        tls_selfsigned = false;  // --admin-tls-selfsigned
     std::string tls_dir;                 // --admin-tls-dir（默认 cert_dir/admin-tls）
     int         tls_days = 3650;         // --admin-tls-days
+    int         threads = 4;             // --admin-threads（HTTP worker 数，1..32）
 };
 
 struct AdminActor {
@@ -71,6 +73,9 @@ struct AlertEvent {
     std::string details;    // JSON 对象字符串
     int         cooldown_s = 0;   // 0 = 用全局 alert.cooldown_s
 };
+
+// 关闭所有进行中的 /device 代理线程并等待退出（api_proxy.cpp）
+void adminProxyShutdown();
 
 class AdminServer {
 public:
@@ -241,7 +246,7 @@ private:
     void handleAdminTokenDelete(const HttpContextPtr& ctx, const AdminActor& actor);
     void handleDeviceList(const HttpContextPtr& ctx);
     // api_proxy.cpp
-    void handleDeviceProxy(const HttpContextPtr& ctx);
+    int  handleDeviceProxy(const HttpContextPtr& ctx);
     void handleDeviceWsOpen(const WebSocketChannelPtr& channel, const HttpRequestPtr& req);
     bool handleTtyWsOpen(const WebSocketChannelPtr& channel, const HttpRequestPtr& req);
     bool handleTtyWsMessage(const WebSocketChannelPtr& channel, const std::string& msg);
@@ -277,6 +282,7 @@ private:
     std::mutex settings_mu_;
     std::map<long long, uint32_t> dist_active;   // task id -> relay tid
     std::set<std::string> dist_busy_dev;
+    std::atomic<int>      dist_active_count_{0};  // 仅供 /metrics 近似读取（每秒更新）
 
     // 后台 worker：统一受 stop() 管理，避免 detached 线程在析构后访问 this
     std::atomic<bool>       stopping_{false};
@@ -287,9 +293,19 @@ private:
     bool waitStop(int ms);       // 等待 ms；stop 请求时立即返回 true
     void joinWorkers();
 
+    // 管理面 HTTP 统计（pre/postprocessor 写入，/metrics 读取）
+    std::atomic<uint64_t> http_req_total_{0};
+    std::atomic<uint64_t> http_req_2xx_{0};
+    std::atomic<uint64_t> http_req_4xx_{0};
+    std::atomic<uint64_t> http_req_5xx_{0};
+    std::atomic<uint64_t> http_us_total_{0};
+    std::atomic<uint64_t> http_slow_total_{0};
+    std::atomic<int64_t>  http_inflight_{0};
+
     // Web 终端
     hv::WebSocketService ws_service_;
     std::map<hv::WebSocketChannel*, std::shared_ptr<TerminalSession>> terms_;
+    std::mutex terms_mu_;          // 多个 HTTP worker 会并发进出 WS open/message/close
     void onWsOpen(const WebSocketChannelPtr& channel, const HttpRequestPtr& req);
     void onWsMessage(const WebSocketChannelPtr& channel, const std::string& msg);
     void onWsClose(const WebSocketChannelPtr& channel);

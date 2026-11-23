@@ -126,6 +126,21 @@ struct TokenUsage {
     char     last_ip[64] = {0};
 };
 
+// relay 自身累计计数（只在 relay 线程读写，管理台经 callRelay 取快照）
+struct RelayCounters {
+    uint64_t conns_agent_total = 0;
+    uint64_t conns_client_total = 0;
+    uint64_t auth_failed_total = 0;
+    uint64_t frames_in_total = 0;          // 从对端收到的完整帧
+    uint64_t frames_forwarded_total = 0;   // 成功转发给对端的帧
+    uint64_t frame_errors_total = 0;       // 坏帧 / 未知 sid / 协议错
+    uint64_t bytes_in_total = 0;
+    uint64_t bytes_forwarded_total = 0;
+    uint64_t streams_opened_total = 0;
+    uint64_t streams_open_failed_total = 0;
+    uint64_t streams_idle_reset_total = 0;
+};
+
 struct AclEntry {
     char      user[128] = {0};
     char      pattern[128] = {0};
@@ -158,6 +173,7 @@ public:
     hloop_t*    loop = nullptr;
     void*       admin = nullptr;      // AdminServer*（--admin 启用时创建）
     uint64_t    started_at_ms = 0;
+    RelayCounters stats;              // 自身累计指标（relay 线程）
     std::string cert_dir;             // 证书台账目录（--admin-cert-dir）
     std::vector<std::string> revoked_sans;  // 已吊销身份（cert_dir/revoked.txt 持久化）
     RelayConn*  conns = nullptr;      // 全局连接表

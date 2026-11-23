@@ -330,3 +330,13 @@ agent 校验后安装并重启；`OTA_APPLY_ACK` 分 `verified` / `installed` �
 - 抓包后按第 1 节手工解帧即可；payload 是 UTF-8 JSON，`str` 前缀去掉就是原文。
 - `SYSINFO` 的 `caps` 是排查“功能为什么灰掉”的第一入口：能力位、白名单、配置来源都在里面。
 - 管理台的“诊断包”包含最近日志和 `sysinfo.json`，现场问题优先要这个。
+
+## 11. 部署边界
+
+协议本身不定义 relay 之间的状态同步。每个 relay 的管理库（`--admin-db`）是独立的：
+账号、权限组、Token、审计、分发任务、采样配置都不跨实例。多 relay 只能解决链路冗余，
+不能当成管理高可用；设备切换到另一个 relay 后，原 relay 的管理台不会再看到它。
+
+部署约束见 `rtunnel/README.md`「多 relay 与故障切换 / 管理边界」：不要共享 SQLite 文件，
+不要让负载均衡轮询管理请求，需要统一管理时只保留一个 relay 承载管理面。
+

@@ -203,6 +203,7 @@ void RelayServer::sweepStreams() {
         if (s->c && s->c->io && !hio_is_closed(s->c->io)) {
             sendErr(s->c->io, rtnp::RESET, s->c_sid, rtnp::TIMEOUT, "stream idle timeout");
         }
+        ++stats.streams_idle_reset_total;
         s->a_closed = s->c_closed = 1;
         streamRemove(s);
     }
@@ -630,6 +631,9 @@ void RelayServer::streamRemove(RelayStream* s) {
 }
 
 void RelayServer::sendErr(hio_t* io, uint8_t type, uint32_t sid, uint16_t code, const char* msg) {
+    if (type == rtnp::AUTH_FAIL) ++stats.auth_failed_total;
+    if (type == rtnp::OPEN_FAIL) ++stats.streams_open_failed_total;
+    if (code == rtnp::PROTOCOL_ERROR) ++stats.frame_errors_total;
     rtnp::Writer w;
     w.u16(code);
     w.str(msg ? msg : "");
@@ -640,6 +644,8 @@ void RelayServer::forward(RelayConn* to, uint8_t type, uint32_t sid, const uint8
     if (to && to->io && !hio_is_closed(to->io)) {
         if (rtnp::send(to->io, type, sid, payload, len, flags) == 0) {
             to->bytes_out += (uint64_t)len + rtnp::HEADER_SIZE;
+            ++stats.frames_forwarded_total;
+            stats.bytes_forwarded_total += (uint64_t)len + rtnp::HEADER_SIZE;
         }
     }
 }
@@ -1350,6 +1356,8 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         }
         c->role = role;
         c->peer_proto = ver;
+        if (role == rtnp::ROLE_AGENT) ++stats.conns_agent_total;
+        else ++stats.conns_client_total;
         if (ver > rtnp::PROTO_VERSION) {
             logf_("[relay] HELLO proto=%d newer than relay %d, unknown frames will be rejected",
                   ver, rtnp::PROTO_VERSION);
@@ -1928,6 +1936,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         if (f->type == rtnp::OPEN_OK && !s->opened) {
             s->opened = 1;
             s->last_active_ms = hloop_now_ms(loop);
+            ++stats.streams_opened_total;
         }
         forward(s->a, f->type, s->a_sid, f->payload, f->len, f->flags);
         if (f->type == rtnp::OPEN_FAIL) { s->a_closed = s->c_closed = 1; streamRemove(s); }
@@ -1962,6 +1971,7 @@ void RelayServer::onRead(RelayConn* c, void* buf, int readbytes) {
     // 此后只允许使用 io 的局部副本，不得再解引用 c（与原 C 版一致）。
     hio_t* io = c->io;
     c->bytes_in += (uint64_t)readbytes;
+    stats.bytes_in_total += (uint64_t)readbytes;
     c->last_seen_ms = hloop_now_ms(loop);
     if (c->in.append(buf, (size_t)readbytes) != 0) {
         hio_close(io);
@@ -1976,6 +1986,7 @@ void RelayServer::onRead(RelayConn* c, void* buf, int readbytes) {
             hio_close(io);
             return;
         }
+        ++stats.frames_in_total;
         handleFrame(c, &f);
         if (hio_is_closed(io)) return;
     }
@@ -2061,8 +2072,13 @@ void RelayServer::onStats() {
         in += c->bytes_in;
         out += c->bytes_out;
     }
-    logf_("[relay] stats: agents=%d clients=%d streams=%d bytes_in=%llu bytes_out=%llu",
-          nagent, nclient, nstream, (unsigned long long)in, (unsigned long long)out);
+    logf_("[relay] stats: agents=%d clients=%d streams=%d bytes_in=%llu bytes_out=%llu "
+          "frames_in=%llu fwd=%llu auth_fail=%llu open_fail=%llu",
+          nagent, nclient, nstream, (unsigned long long)in, (unsigned long long)out,
+          (unsigned long long)stats.frames_in_total,
+          (unsigned long long)stats.frames_forwarded_total,
+          (unsigned long long)stats.auth_failed_total,
+          (unsigned long long)stats.streams_open_failed_total);
 }
 
 void RelayServer::onDrain(htimer_t* timer) {
@@ -2115,6 +2131,7 @@ int RelayServer::run(int argc, char** argv) {
     const char* admin_tls_dir = NULL;
     int         admin_tls_selfsigned = 0;
     int         admin_tls_days = 3650;
+    int         admin_threads = 4;
     const char* client_users_file = NULL;
     const char* client_token_arg = NULL;
     const char* shell_users_arg = NULL;
@@ -2153,6 +2170,10 @@ int RelayServer::run(int argc, char** argv) {
         } else if (strcmp(argv[i], "--admin-tls-days") == 0 && i + 1 < argc) {
             admin_tls_days = atoi(argv[++i]);
             if (admin_tls_days <= 0) admin_tls_days = 3650;
+        } else if (strcmp(argv[i], "--admin-threads") == 0 && i + 1 < argc) {
+            admin_threads = atoi(argv[++i]);
+            if (admin_threads < 1) admin_threads = 1;
+            if (admin_threads > 32) admin_threads = 32;
         } else if (strcmp(argv[i], "--verbose") == 0) {
             verbose = 1;
         } else if (strcmp(argv[i], "--acl") == 0 && i + 1 < argc) {
@@ -2195,7 +2216,8 @@ int RelayServer::run(int argc, char** argv) {
                 "            [--admin-docroot DIR]\n"
                 "            [--admin-ca-cert C --admin-ca-key K --admin-cert-dir D]\n"
                 "            [--admin-tls-cert C --admin-tls-key K | --admin-tls-selfsigned\n"
-                "             [--admin-tls-dir D] [--admin-tls-days N]]]\n",
+                "             [--admin-tls-dir D] [--admin-tls-days N]]\n"
+                "            [--admin-threads N]]\n",
                 argv[0]);
             return 1;
         }
@@ -2284,6 +2306,7 @@ int RelayServer::run(int argc, char** argv) {
         cfg.tls_selfsigned = admin_tls_selfsigned != 0;
         cfg.tls_dir = admin_tls_dir ? admin_tls_dir : "";
         cfg.tls_days = admin_tls_days;
+        cfg.threads = admin_threads;
         if (adm->start(cfg) != 0) {
             delete adm;
             admin = NULL;

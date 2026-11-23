@@ -46,7 +46,27 @@ const int PBKDF2_ITER = 120000;
 const int SALT_LEN = 16;
 const int KEY_LEN = 32;
 
+void dbProfileCb(void* arg, const char* /*sql*/, sqlite3_uint64 ns) {
+    static_cast<AdminDb*>(arg)->recordQuery((unsigned long long)ns);
+}
+
 } // namespace
+
+void AdminDb::recordQuery(unsigned long long ns) {
+    unsigned long long us = ns / 1000;
+    q_total_.fetch_add(1, std::memory_order_relaxed);
+    q_us_.fetch_add(us, std::memory_order_relaxed);
+    if (us >= 100000) q_slow_.fetch_add(1, std::memory_order_relaxed);
+    unsigned long long cur = q_max_us_.load(std::memory_order_relaxed);
+    while (us > cur && !q_max_us_.compare_exchange_weak(cur, us, std::memory_order_relaxed)) {}
+}
+
+void AdminDb::stats(DbStats& out) const {
+    out.queries = q_total_.load(std::memory_order_relaxed);
+    out.total_us = q_us_.load(std::memory_order_relaxed);
+    out.max_us = q_max_us_.load(std::memory_order_relaxed);
+    out.slow_queries = q_slow_.load(std::memory_order_relaxed);
+}
 
 std::string dbColText(sqlite3_stmt* st, int col) {
     const unsigned char* p = sqlite3_column_text(st, col);
@@ -120,6 +140,8 @@ bool AdminDb::open(const std::string& path, std::string& err) {
         return false;
     }
     sqlite3_busy_timeout(db_, 3000);
+    // 语句耗时统计：/metrics 的 rtunnel_admin_db_* 由此而来
+    sqlite3_profile(db_, dbProfileCb, this);
     std::string e;
     if (!exec("PRAGMA journal_mode=WAL;", e) || !migrate(e)) {
         err = e;

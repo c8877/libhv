@@ -5,6 +5,7 @@
 #include <map>
 #include <set>
 #include <mutex>
+#include <atomic>
 
 struct sqlite3;
 struct sqlite3_stmt;
@@ -53,6 +54,14 @@ struct DbUser {
     std::string role;        // superadmin / admin / user
     std::string status;      // active / disabled
     long long   created_ms = 0;
+};
+
+// SQLite 语句执行统计（sqlite3_profile 回调），供 /metrics 使用
+struct DbStats {
+    unsigned long long queries = 0;
+    unsigned long long total_us = 0;
+    unsigned long long max_us = 0;
+    unsigned long long slow_queries = 0;   // >= 100ms
 };
 
 class AdminDb {
@@ -257,6 +266,10 @@ public:
     static std::string sha256Hex(const std::string& data);
     static long long nowMs();
 
+    // sqlite3_profile 回调入口 + 快照
+    void recordQuery(unsigned long long ns);
+    void stats(DbStats& out) const;
+
 private:
     bool exec(const char* sql, std::string& err);
     bool migrate(std::string& err);
@@ -264,4 +277,8 @@ private:
     sqlite3*   db_ = nullptr;
     std::mutex mu_;
     std::string path_;
+    std::atomic<unsigned long long> q_total_{0};
+    std::atomic<unsigned long long> q_us_{0};
+    std::atomic<unsigned long long> q_max_us_{0};
+    std::atomic<unsigned long long> q_slow_{0};
 };

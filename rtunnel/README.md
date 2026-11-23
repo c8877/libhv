@@ -96,6 +96,32 @@ build/bin/rtunnel-client --server r1.example.com --server r2.example.com --port 
 - client 的按需 agent 继承完整地址列表；client 切到新 relay 时会停掉旧 relay 上的随需 agent
 - `shell <devid>` 子命令在建立会话前也会依次尝试后续地址
 
+### 管理边界：多 relay 只做链路冗余，不是管理高可用
+
+每个 relay 都是**独立管理域**。`--admin-db` 指向本机 SQLite，账号、权限组、API Token、
+接入账号、审计、证书台账、文件仓库、分发/OTA 任务、采样配置各存一份，互不同步：
+
+| 数据 | 多 relay 之间 |
+|---|---|
+| 设备在线状态 / 隧道 | 不共享；设备同一时刻只连一个 relay |
+| 管理台账号、会话、权限组 | 不共享；换 relay 要重新登录，且账号可能不存在 |
+| API Token、接入账号 Token | 不共享；r1 签发的 token 在 r2 无效 |
+| 审计、证书台账、分发/OTA 任务 | 不共享 |
+| agent 本地采样配置 | 跟设备走；但 relay 侧的任务和权限记录不跟 |
+
+因此：
+
+- **设备切到 r2 后，r1 管理台看不到它**，r1 上的会话/统计也不再包含它；这是预期行为，
+  不是“设备丢了”。排查时先确认设备当前连的是哪个 relay（relay 日志或 `GET /api/v1/agents`）。
+- **不要把两个 relay 指向同一个 SQLite 文件**（包括 NFS/共享盘）。SQLite 的锁不跨主机，
+  并发写会损坏库；当前也不支持共享库、主从或集群模式。
+- **负载均衡不要把管理请求轮询到多个 relay**。管理台只应连一个固定 relay；LB 只用于
+  数据端口且需要源地址保持，否则设备和管理台会落到不同实例。
+- 需要“一个入口管所有设备”时，做法是**只保留一个 relay 承担管理**，其余 relay 作为
+  纯链路备份（不暴露管理台、不存业务数据）；或后续引入集中管理库（当前未实现）。
+- 多 relay 部署时，每个 relay 的 `--admin-token`、CA、TLS 证书、文件仓库都要分别初始化；
+  设备侧 `--server` 列表可以共用同一份配置。
+
 ## 测试
 
 ```bash
@@ -140,7 +166,23 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
   后退出；第二次信号立即强退。A/C 断线后按既有退避重连。
 - **流空闲回收**：每 5s 扫描一次已建流，`--stream-idle` 秒内没有任何帧就向两侧发
   `RESET(stream idle timeout)` 并释放会话配额；端口映射这类正常空闲业务请调大或设 0 关闭。
-- **统计**：每 60s 一条 `[relay] stats:` 日志（agents/clients/streams/bytes_in/bytes_out）。
+- **统计**：每 60s 一条 `[relay] stats:` 日志（agents/clients/streams/bytes_in/bytes_out/frames/auth 失败）。
+- **自身指标**：`GET /metrics` 输出 Prometheus 文本，包含在线设备/会话/流、累计连接与认证失败、
+  收发帧与转发字节、打开/失败/空闲回收的流、管理面 HTTP 派发耗时、SQLite 语句耗时与慢查询、
+  告警队列和分发任务数。需要 `device.view` 资源（用 `atk-` Token 最方便）：
+
+  ```yaml
+  scrape_configs:
+    - job_name: rtunnel
+      scheme: https          # 明文管理台改 http
+      authorization:
+        credentials: atk-xxxxxxxx   # 权限组需包含 device.view
+      static_configs:
+        - targets: ["relay.example.com:9443"]
+  ```
+
+  `/metrics` 是 relay 自己的指标；设备侧的 CPU/内存曲线在
+  `GET /api/v1/agents/:devid/metrics/series`，两者不混用。
 
 ## 管理台（admin）
 
@@ -176,9 +218,11 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
   同类事件按冷却时间去重，`GET /api/v1/alerts/status` 看发送结果，
   `POST /api/v1/alerts/test`（或设置页「发送测试」）验证通道。webhook URL 与签名密钥
   对非 admin 脱敏，审计日志不记录明文密钥。
-- 线程模型：HTTP 在 admin worker 线程，relay 状态访问经 `hloop_post_event` 投递回
-  relay 线程执行（promise/future 同步），relay 数据无锁；分发/告警/清理等后台任务
-  由 `AdminServer` 统一管理，`stop()` 时置标志并 join 全部 worker。
+- 线程模型：管理面 HTTP 默认 4 个 worker（`--admin-threads N`，1..32），relay 状态访问经
+  `hloop_post_event` 投递回 relay 线程执行（promise/future 同步），relay 数据无锁；
+  `/device` 的 HTTP 代理每个请求一条独立线程（上限 `proxy.max_concurrent`），终端/文件/服务
+  WebSocket 各有自己的读线程，管理面 worker 不会被长连接或慢设备拖住；分发/告警/清理等
+  后台任务由 `AdminServer` 统一管理，`stop()` 时置标志、收掉代理线程并 join 全部 worker。
 
 ## 账号与权限（SQLite）
 
@@ -515,6 +559,7 @@ http://B:9443/device/<devid>/<port>/<path>
 | `--shell-users u1,u2` / `*` | 允许 `OPEN_SHELL` 的用户；默认空 = 全部拒绝 |
 | `--tls-cert/--tls-key [--tls-ca]` | 服务端 TLS；给 `--tls-ca` 即要求客户端证书（mTLS） |
 | `--admin ADDR --admin-token T` | 管理台监听；token 仅用于首次初始化 |
+| `--admin-threads N` | 管理面 HTTP worker 数，默认 4，范围 1..32 |
 | `--admin-db PATH` | SQLite 账号库，默认 `rtunnel-admin.db`（需 OpenSSL 构建） |
 | `--admin-shell-user U --admin-shell-token T` | Web 终端连本机 relay 的身份与凭证 |
 | `--admin-ca-cert/--admin-ca-key/--admin-cert-dir` | 证书签发 CA 与台账目录 |

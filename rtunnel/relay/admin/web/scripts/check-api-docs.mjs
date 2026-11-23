@@ -29,8 +29,18 @@ for (const m of src.matchAll(/service_\.Handle\("([A-Z]+)",\s*"([^"]+)"/g)) {
   const [, method, path] = m
   if (!ignore(method, path)) routes.set(key(method, path), { method, path })
 }
-// access(ROLE_X, "GET", "/api/v1/xxx", ...)
+// access("<resource>", "GET", "/api/v1/xxx", ...)
+for (const m of src.matchAll(/access\(\s*"[^"]*"\s*,\s*"([A-Z]+)"\s*,\s*"([^"]+)"/g)) {
+  const [, method, path] = m
+  if (!ignore(method, path)) routes.set(key(method, path), { method, path })
+}
+// 旧式 access(ROLE_X, "GET", "/api/v1/xxx", ...)
 for (const m of src.matchAll(/access\(ROLE_[A-Z]+,\s*"([A-Z]+)",\s*"([^"]+)"/g)) {
+  const [, method, path] = m
+  if (!ignore(method, path)) routes.set(key(method, path), { method, path })
+}
+// 兜底：多行书写的 access
+for (const m of src.matchAll(/access\(\s*\n\s*"[^"]*",\s*\n\s*"([A-Z]+)",\s*\n\s*"([^"]+)"/g)) {
   const [, method, path] = m
   if (!ignore(method, path)) routes.set(key(method, path), { method, path })
 }

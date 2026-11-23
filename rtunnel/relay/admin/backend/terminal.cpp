@@ -3,7 +3,6 @@
 // 只有一种实现：不 fork ssh、不起 A 子进程、不经手密码。
 #include "admin_server.hpp"
 #include "common/logging.hpp"
-#include "EventLoop.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -23,8 +22,6 @@ struct TerminalSession {
     bool                 closed = false;
     rtnp::Buffer         pending_input;       // OPEN_OK 前的输入先缓冲
 };
-
-static hloop_t* adminLoop(AdminServer* adm);
 
 static void sessionClose(TerminalSession* s) {
     if (s->closed) return;
@@ -135,7 +132,13 @@ static void directReadCb(hio_t* io, void* buf, int readbytes) {
 }
 
 static void directOpen(AdminServer* adm, TerminalSession* s) {
-    hloop_t* loop = adminLoop(adm);
+    // 和 WebSocket 绑在同一个 worker loop：admin 有多个 HTTP worker 时，
+    // 终端链路的回调与 ws 收发必须同线程，避免跨线程改 link_io/closed。
+    hloop_t* loop = (s->ws && s->ws->io()) ? hevent_loop(s->ws->io()) : NULL;
+    if (loop == NULL) {
+        if (s->ws && s->ws->isConnected()) s->ws->close();
+        return;
+    }
     s->link_io = hloop_create_tcp_client(loop, "127.0.0.1", adm->config().shell_relay_port,
                                          directConnectCb, directCloseCb);
     if (s->link_io == NULL) {
@@ -180,6 +183,7 @@ void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequest
     {
         int maxs = settingInt("term.max_sessions", 4);
         int cur = 0;
+        std::lock_guard<std::mutex> lk(terms_mu_);
         for (auto& kv : terms_) if (kv.second && kv.second->actor == actor.username) cur++;
         if (cur >= maxs) {
             logf_("[terminal] reject: too many sessions for %s", actor.username.c_str());
@@ -205,7 +209,10 @@ void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequest
     s->ws = channel;
     s->devid = devid;
     s->user = user;
-    terms_[channel.get()] = s;
+    {
+        std::lock_guard<std::mutex> lk(terms_mu_);
+        terms_[channel.get()] = s;
+    }
 
     directOpen(this, s.get());
 }
@@ -214,9 +221,14 @@ void AdminServer::onWsMessage(const WebSocketChannelPtr& channel, const std::str
     if (handleTtyWsMessage(channel, msg)) return;
     if (handleAgentWsMessage(channel, msg)) return;
     if (handleDeviceWsMessage(channel, msg)) return;
-    auto it = terms_.find(channel.get());
-    if (it == terms_.end()) return;
-    auto& s = it->second;
+    std::shared_ptr<TerminalSession> s;
+    {
+        std::lock_guard<std::mutex> lk(terms_mu_);
+        auto it = terms_.find(channel.get());
+        if (it == terms_.end()) return;
+        s = it->second;
+    }
+    if (!s) return;
 
     // 控制消息（JSON）与原始键盘输入分离
     if (msg.compare(0, 7, "{\"type\"") == 0) {
@@ -245,15 +257,15 @@ void AdminServer::onWsClose(const WebSocketChannelPtr& channel) {
     if (handleTtyWsClose(channel)) return;
     if (handleAgentWsClose(channel)) return;
     if (handleDeviceWsClose(channel)) return;
-    auto it = terms_.find(channel.get());
-    if (it == terms_.end()) return;
-    sessionClose(it->second.get());
-    terms_.erase(it);
-}
-
-// admin worker loop 的 hloop_t*（http_server 内部 EventLoop）
-static hloop_t* adminLoop(AdminServer* adm) {
-    return adm->httpServer().loop(0)->loop();
+    std::shared_ptr<TerminalSession> s;
+    {
+        std::lock_guard<std::mutex> lk(terms_mu_);
+        auto it = terms_.find(channel.get());
+        if (it == terms_.end()) return;
+        s = it->second;
+        terms_.erase(it);
+    }
+    sessionClose(s.get());
 }
 
 // start() 里调用：绑定 ws 回调

@@ -498,7 +498,12 @@ int AdminServer::start(const AdminConfig& cfg) {
     registerRoutes();
     initTerminal();
     server_.setHost(host);
-    server_.setThreadNum(1);
+    // 管理面用多个 HTTP worker：单线程时一个大文件下载/慢 SQL 会挡住所有管理操作。
+    // 数据面的 /device 代理另有独立线程（api_proxy.cpp），终端/文件 WS 也有各自的读线程。
+    int nthreads = cfg_.threads;
+    if (nthreads < 1) nthreads = 1;
+    if (nthreads > 32) nthreads = 32;
+    server_.setThreadNum(nthreads);
 
     // 管理台 TLS：显式 cert/key 或自签；未配置时维持原有明文行为
     std::string tls_crt = cfg_.tls_cert;
@@ -577,6 +582,8 @@ void AdminServer::stop() {
         stopping_.store(true);
     }
     worker_cv_.notify_all();
+    // 先在管理面 loop 还活着时收掉 /device 代理线程，避免它们继续往已关闭的连接写
+    adminProxyShutdown();
     server_.stop();
     joinWorkers();
 }

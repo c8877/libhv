@@ -3,7 +3,46 @@
 
 #include "cpputil/json.hpp"
 
+#include <chrono>
+
+static uint64_t routeNowUs() {
+    return (uint64_t)std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 void AdminServer::registerRoutes() {
+    // 请求计数与耗时：只在 pre/postprocessor 里碰原子变量，
+    // 业务 handler 不感知；异步接口（返回 NEXT）统计的是 handler 派发耗时。
+    static thread_local uint64_t tl_req_start_us = 0;
+    static thread_local bool     tl_req_timed = false;
+    service_.preprocessor = [this](const HttpContextPtr&) {
+        tl_req_start_us = routeNowUs();
+        tl_req_timed = true;
+        http_req_total_.fetch_add(1, std::memory_order_relaxed);
+        http_inflight_.fetch_add(1, std::memory_order_relaxed);
+        return (int)HTTP_STATUS_NEXT;
+    };
+    service_.postprocessor = [this](const HttpContextPtr& ctx) {
+        if (tl_req_timed) {
+            uint64_t us = routeNowUs() - tl_req_start_us;
+            http_us_total_.fetch_add(us, std::memory_order_relaxed);
+            if (us >= 1000000) http_slow_total_.fetch_add(1, std::memory_order_relaxed);
+            http_inflight_.fetch_sub(1, std::memory_order_relaxed);
+            tl_req_timed = false;
+        }
+        // /device 的响应由数据面线程写，状态码也在那边设置；这里不读，
+        // 避免和代理线程并发改 response。其余路由照常按状态码分桶。
+        bool device_proxy = ctx->request && ctx->request->path.compare(0, 8, "/device/") == 0;
+        if (device_proxy) {
+            http_req_2xx_.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            int code = ctx->response ? (int)ctx->response->status_code : 0;
+            if (code >= 500) http_req_5xx_.fetch_add(1, std::memory_order_relaxed);
+            else if (code >= 400) http_req_4xx_.fetch_add(1, std::memory_order_relaxed);
+            else http_req_2xx_.fetch_add(1, std::memory_order_relaxed);
+        }
+        return (int)HTTP_STATUS_NEXT;
+    };
 
     auto access = [this](const char* need, const char* method, const char* path,
                          void (AdminServer::*h)(const HttpContextPtr&)) {
@@ -498,8 +537,7 @@ void AdminServer::registerRoutes() {
         handleDeviceList(ctx); return (int)ctx->response->status_code;
     });
     auto devproxy = [this](const HttpContextPtr& ctx) {
-        handleDeviceProxy(ctx);
-        return (int)ctx->response->status_code;
+        return handleDeviceProxy(ctx);
     };
     service_.Handle("GET", "/device/*", devproxy);
     service_.Handle("POST", "/device/*", devproxy);

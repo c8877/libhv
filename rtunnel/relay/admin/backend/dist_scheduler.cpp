@@ -40,6 +40,7 @@ void AdminServer::distTick() {
             if (st == "running") running++;
         }
     }
+    dist_active_count_.store((int)dist_active.size(), std::memory_order_relaxed);
 
     auto finishRetry = [&](const json& j, const std::string& err, long long sent, const char* statusNow) {
         long long id = j["id"].get<long long>();
@@ -276,4 +277,5 @@ void AdminServer::distTick() {
             running++;
         }
     }
+    dist_active_count_.store((int)dist_active.size(), std::memory_order_relaxed);
 }
