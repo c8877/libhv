@@ -88,7 +88,7 @@ B → C   AUTH_OK    str username | u32 heartbeat_ms | [u8 flags | u32 quota | .
 |---|---|---|
 | 0x18 | SPAWN_AGENT | str devid |
 | 0x19 | SYSINFO_REQ | 空 |
-| 0x1A | SYSINFO | str json，见 7.2 |
+| 0x1A | SYSINFO | str json，见 7.1 |
 | 0x1B | CONFIG_SET | str json `{ports?,shell?,file?,file_rw?,svc?,svc_rw?,ota?,reboot?,poweroff?,diag?,metrics?}` |
 | 0x1C | CONFIG_ACK | str json `{ok,error?,restart_required?}` |
 | 0x1D | FILE_BEGIN | str name + u64 size + str sha256 |
@@ -108,9 +108,9 @@ B → C   AUTH_OK    str username | u32 heartbeat_ms | [u8 flags | u32 quota | .
 | 0x31 | OTA_APPLY_ACK | str json `{ok,phase,error?}`，phase=verified/installed |
 | 0x32 | OTA_CANCEL | 空 |
 | 0x33 | NET_REQ | str json `{scope,proc,page,page_size,q,listen,utype,ipc_kind,sort,dir,refresh}` |
-| 0x34 | NET_INFO | str json，见 7.4 |
+| 0x34 | NET_INFO | str json，见 7.3 |
 | 0x35 | PROC_REQ | str json `{op,sort,q,kernel,page,page_size,refresh,pid,signal}` |
-| 0x36 | PROC_INFO | str json，见 7.3 |
+| 0x36 | PROC_INFO | str json，见 7.2 |
 | 0x37 | WARM_REQ | str json `{ttl_ms}` |
 | 0x38 | POWER_REQ | str json `{action,delay_ms,password}` |
 | 0x39 | POWER_ACK | str json `{ok,action,delay_ms,error?}` |
@@ -119,7 +119,7 @@ B → C   AUTH_OK    str username | u32 heartbeat_ms | [u8 flags | u32 quota | .
 | 0x3C | DIAG_DATA | 原始字节，按序拼接 |
 | 0x3D | DIAG_END | str json `{ok,size,sha256,error?}` |
 | 0x3E | STORAGE_REQ | str json `{mount,path,depth}` |
-| 0x3F | STORAGE_INFO | str json，见 7.5 |
+| 0x3F | STORAGE_INFO | str json，见 7.4 |
 | 0x40 | STORAGE_DATA | 首字节 1=gzip 0=明文，其余按序拼接 |
 | 0x41 | STORAGE_END | str json `{ok,size,error?}` |
 
