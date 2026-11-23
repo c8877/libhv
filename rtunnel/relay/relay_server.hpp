@@ -81,6 +81,7 @@ struct RelayConn {
     char         remote_addr[64] = {0};
     long long    token_id = 0;           // auth_type=2 通过后填
     char         token_prefix[24] = {0};
+    int          peer_proto = 0;         // HELLO 里的语义版本，0 表示未握手
 };
 
 // OPEN_SHELL 到 a:<user> 但 agent 尚未注册时挂起，等 A 侧 agent 上线后继续

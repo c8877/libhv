@@ -113,6 +113,8 @@ bash rtunnel/tests/net_e2e.sh            # 网络/IPC 快照、进程归属、�
 bash rtunnel/tests/proc_e2e.sh           # 进程列表/详情/信号与 device.proc 权限
 bash rtunnel/tests/storage_e2e.sh        # 目录树按路径/层级、子项求和、越界校验与 gzip 透传
 python3 rtunnel/tests/stream_idle_e2e.py # 流空闲回收：闲置 RESET、活跃流保留
+python3 rtunnel/tests/compat_e2e.py      # HELLO 版本区间、低版本拒绝、高版本向前兼容
+python3 rtunnel/tests/protocol_doc_test.py  # 协议文档覆盖率（帧类型/常量）
 build/bin/rtunnel-endpoint-test          # --server 地址解析单测
 
 rtunnel/tests/ui/run-ui.sh               # 管理台 + 设备本地页 UI 全量（Playwright）

@@ -1340,17 +1340,28 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         char aver[64] = {0};
         r.str(aver, sizeof(aver));
         c->internal = (strstr(aver, "admin") != NULL || strstr(aver, "terminal") != NULL);
-        if (r.err || ver != rtnp::VERSION || (role != rtnp::ROLE_AGENT && role != rtnp::ROLE_CLIENT)) {
+        // 只拒绝低于下限的语义版本；更高的版本按“向前兼容”接受，
+        // 未识别的帧类型回 ERROR，由对端决定是否降级。
+        if (r.err || ver < rtnp::PROTO_MIN_VERSION ||
+            (role != rtnp::ROLE_AGENT && role != rtnp::ROLE_CLIENT)) {
             sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::PROTOCOL_ERROR, "bad hello");
             hio_close(c->io);
             return;
         }
         c->role = role;
+        c->peer_proto = ver;
+        if (ver > rtnp::PROTO_VERSION) {
+            logf_("[relay] HELLO proto=%d newer than relay %d, unknown frames will be rejected",
+                  ver, rtnp::PROTO_VERSION);
+        }
         rtnp::Writer w;
         w.u16(rtnp::MAX_PAYLOAD);
         w.u8(rtnp::AUTH_MTLS);
         w.u32(15000);
         w.u32(0);
+        // 尾部（旧端忽略）：relay 的语义版本与最低支持版本
+        w.u8((uint8_t)rtnp::PROTO_VERSION);
+        w.u8((uint8_t)rtnp::PROTO_MIN_VERSION);
         rtnp::send(c->io, rtnp::HELLO_ACK, 0, w.data, (uint16_t)w.len);
         if (verbose) logf_("[relay] HELLO role=%d fd=%d", role, hio_fd(c->io));
         return;

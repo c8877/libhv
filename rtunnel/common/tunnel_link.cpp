@@ -105,6 +105,26 @@ void TunnelLink::hsTimeoutCb(htimer_t* t) {
 void TunnelLink::handleFrame(rtnp::Frame* f) {
     switch (f->type) {
     case rtnp::HELLO_ACK: {
+        // 可选尾部：u8 proto + u8 proto_min（旧 relay 不发）。
+        // 这里只记录，具体用哪个能力由业务帧自己按对端版本决定。
+        {
+            rtnp::Reader hr(f->payload, f->len);
+            hr.u16();   // max_payload
+            hr.u8();    // auth flags
+            hr.u32();   // heartbeat_ms
+            hr.u32();
+            if (!hr.err && hr.remaining() >= 2) {
+                int rv = hr.u8();
+                int rm = hr.u8();
+                relay_proto_ = rv;
+                if (rv < rtnp::PROTO_VERSION) {
+                    logf_("[%s] relay protocol %d < local %d, 使用兼容路径",
+                          logTag(), rv, rtnp::PROTO_VERSION);
+                } else if (rm > rtnp::PROTO_VERSION) {
+                    logf_("[%s] relay requires protocol >= %d, local %d", logTag(), rm, rtnp::PROTO_VERSION);
+                }
+            }
+        }
         rtnp::Writer w;
         w.str(identity());
         // AUTH：identity + auth_type(0=none,1=静态 token,2=账号 token) + token
@@ -237,7 +257,7 @@ void TunnelLink::onConnect(hio_t* io) {
     snprintf(agent_ver, sizeof(agent_ver), "rtunnel-%s/1", logTag());
     rtnp::Writer w;
     w.u8(role());
-    w.u8(rtnp::VERSION);
+    w.u8(rtnp::PROTO_VERSION);
     w.str(agent_ver);
     w.u32(0);
     rtnp::send(io, rtnp::HELLO, 0, w.data, (uint16_t)w.len);

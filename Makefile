@@ -38,6 +38,8 @@ clean-master:
 # rtunnel 端到端验收（需先 make x86 或 ./enp_build.sh 构建）
 rtunnel_test:
 	python3 rtunnel/tests/e2e.py
+	python3 rtunnel/tests/compat_e2e.py
+	python3 rtunnel/tests/protocol_doc_test.py
 
 # master Makefile 的目标，逐个转交（也可直接 make -f Makefile.master <target>）。
 # 必须是 .PHONY：evpp/、unittest/、examples/ 等同名目录存在，否则会被当成已是最新。

@@ -10,7 +10,13 @@
 
 namespace rtnp {
 
+// 帧格式版本：帧头布局变化时才 +1，解码器要求两端完全一致。
 constexpr int      VERSION       = 1;
+// 语义/载荷版本：HELLO 携带，relay 接受 >= PROTO_MIN_VERSION 的对端。
+// 新增可选字段、新增帧类型不改这个版本；只有破坏性改动才 +1，并把
+// PROTO_MIN_VERSION 抬到新值，让旧端明确知道不能再连。
+constexpr int      PROTO_VERSION     = 1;
+constexpr int      PROTO_MIN_VERSION = 1;
 constexpr size_t   HEADER_SIZE   = 16;
 constexpr uint16_t MAX_PAYLOAD   = 32768;   // 单帧 payload 上限（HELLO_ACK.max_payload）
 constexpr uint32_t DEFAULT_CREDIT = 128 * 1024;
