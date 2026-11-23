@@ -333,6 +333,7 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
         if (depth < 0) depth = 0;
         if (depth > 64) depth = 64;
         q["depth"] = depth;
+        if (req->GetParam("force") == "1") q["force"] = true;
         std::string body = app->storageSync([app, q]() { return app->storageTreeJson(q); });
         if (body.empty()) body = "{\"ok\":false,\"error\":\"busy\"}";
         sendJson(req.get(), writer, body);

@@ -809,6 +809,7 @@ int AdminServer::handleAgentStorage(const HttpContextPtr& ctx) {
     req["mount"] = mount;
     if (!path.empty()) req["path"] = path;
     req["depth"] = depth;
+    if (ctx->param("force") == "1") req["force"] = true;
     std::string payload = req.dump();
     uint32_t rid = 0;
     std::string err;

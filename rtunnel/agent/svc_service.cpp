@@ -343,44 +343,23 @@ Service::Service() {
     enabled_ = systemd_;
 }
 
-void Service::start() {
-    std::lock_guard<std::mutex> lk(th_mu_);
-    if (!systemd_ || !enabled_.load(std::memory_order_relaxed) || th_.joinable()) return;
-    th_ = std::thread([this]() { workerLoop(); });
-}
+Service::~Service() = default;
 
-Service::~Service() {
-    {
-        std::lock_guard<std::mutex> lk(mu_);
-        stop_ = true;
-    }
-    cv_.notify_all();
-    std::lock_guard<std::mutex> lk(th_mu_);
-    if (th_.joinable()) th_.join();
-}
-
+// 不持有线程：所有 systemctl/journalctl 都交给 AgentApp 的统一阻塞 worker。
 void Service::post(std::function<void()> fn) {
-    start();
-    {
-        std::lock_guard<std::mutex> lk(mu_);
-        if (stop_) return;
-        jobs_.push_back(std::move(fn));
+    if (!executor_) {
+        fn();   // 未安装 executor（单测直接构造）：同步执行，保证回调不被吞掉
+        return;
     }
-    cv_.notify_one();
+    executor_(std::move(fn), true);
 }
 
-void Service::workerLoop() {
-    for (;;) {
-        std::function<void()> fn;
-        {
-            std::unique_lock<std::mutex> lk(mu_);
-            cv_.wait(lk, [this]() { return stop_ || !jobs_.empty(); });
-            if (stop_ && jobs_.empty()) return;
-            fn = std::move(jobs_.front());
-            jobs_.pop_front();
-        }
+void Service::postBg(std::function<void()> fn) {
+    if (!executor_) {
         fn();
+        return;
     }
+    executor_(std::move(fn), false);
 }
 
 // 后台刷新 unit-file 清单。只持有 shared_ptr，不引用 Service。
@@ -441,9 +420,9 @@ void Service::listAsync(const ListOptions& opt, Callback cb) {
             std::lock_guard<std::mutex> lk(unit_files_->mu);
             uf_ver = unit_files_->ver;
         }
-        // 详情页预热每 30s 刷新一次，缓存留 40s 保证期间的请求都能直接命中；
+        // systemctl show 在单核设备上约 1s，60s 内复用缓存，避免反复扫；
         // unit-file 清单在后台更新后版本会变，缓存随之失效，下一次请求带上新单元
-        if (!list_cache_.is_null() && now - list_cache_ms_ < 40000 &&
+        if (!list_cache_.is_null() && now - list_cache_ms_ < 60000 &&
             list_files_ver_ == uf_ver) {
             cb(applyListPage(list_cache_, opt));
             return;
@@ -484,7 +463,8 @@ void Service::listAsync(const ListOptions& opt, Callback cb) {
             }
         }
         if (kick_files) {
-            std::thread(Service::unitFilesRefresh, unit_files_, files_gen).detach();
+            std::shared_ptr<UnitFiles> uf = unit_files_;
+            postBg([uf, files_gen]() { unitFilesRefresh(uf, files_gen); });
         }
         for (const auto& kv : files) {
             auto it = index.find(kv.first);

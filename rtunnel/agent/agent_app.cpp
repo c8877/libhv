@@ -31,6 +31,7 @@
 #include <unistd.h>
 #include <fstream>
 #include <chrono>
+#include <pthread.h>
 #include <set>
 #include <sstream>
 #include <thread>
@@ -657,6 +658,15 @@ static uint64_t agentMonotonicMs() {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
+}
+
+// 给 worker 线程起名，ps -L / proc 里能直接看出用途
+static void agentThreadName(const char* name) {
+#if defined(__linux__)
+    pthread_setname_np(pthread_self(), name);
+#else
+    (void)name;
+#endif
 }
 
 static void agentSampleCpu(AgentApp* app) {
@@ -2897,7 +2907,10 @@ void AgentApp::warmKickCb(hevent_t* ev) {
 void AgentApp::queryStart() {
     std::lock_guard<std::mutex> lk(query_start_mu_);
     if (query_stop_.load() || query_thread_.joinable()) return;
-    query_thread_ = std::thread([this]() { queryLoop(); });
+    query_thread_ = std::thread([this]() {
+        agentThreadName("rtagent-query");
+        queryLoop();
+    });
 }
 
 void AgentApp::queryStop() {
@@ -2961,53 +2974,71 @@ std::string AgentApp::querySync(const std::function<std::string()>& fn) {
 }
 #endif
 
-// ---------------------------------------------------------------- 目录扫描 worker
-// 整盘遍历在单核设备上要 1-2s，放查询队列会让同时打开的进程/网络页一起等，
-// 因此单独一个线程，队列只保留少量请求。
-// 按需启动：只有真的展开分区树才需要这个线程。整盘遍历会持续占用扫描队列，
-// 首次使用后线程保留，后续展开/递归展开不再重新创建。
-void AgentApp::storageStart() {
-    std::lock_guard<std::mutex> lk(storage_start_mu_);
-    if (storage_stop_.load() || storage_thread_.joinable()) return;
+// ---------------------------------------------------------------- 阻塞任务 worker
+// 服务管理（systemctl/journalctl）和目录扫描（整盘遍历）都会阻塞数秒，
+// 放事件循环会卡住隧道心跳，各开一个线程又浪费。这里统一成一个线程：
+// 服务请求走 high 队列优先执行，存储扫描走 low 队列，单核上串行跑即可。
+// 按需启动：没人用这些功能时线程不存在；用过后保留，空闲时睡在条件变量。
+void AgentApp::workerStart() {
+    std::lock_guard<std::mutex> lk(worker_start_mu_);
+    if (worker_stop_.load() || worker_thread_.joinable()) return;
     storage_cancel_.store(false);
-    storage_thread_ = std::thread([this]() { storageLoop(); });
+    worker_thread_ = std::thread([this]() {
+        agentThreadName("rtagent-work");
+        workerLoop();
+    });
 }
 
-void AgentApp::storageStop() {
-    std::lock_guard<std::mutex> lk(storage_start_mu_);
-    storage_stop_.store(true);
+void AgentApp::workerStop() {
+    std::lock_guard<std::mutex> lk(worker_start_mu_);
+    worker_stop_.store(true);
     storage_cancel_.store(true);
     {
-        std::lock_guard<std::mutex> qlk(storage_mu_);
-        storage_q_.clear();
+        std::lock_guard<std::mutex> qlk(worker_mu_);
+        worker_hi_.clear();
+        worker_lo_.clear();
     }
-    storage_cv_.notify_all();
-    if (storage_thread_.joinable()) storage_thread_.join();
+    worker_cv_.notify_all();
+    if (worker_thread_.joinable()) worker_thread_.join();
 }
 
-void AgentApp::storageLoop() {
+void AgentApp::workerLoop() {
     for (;;) {
         std::function<void()> fn;
         {
-            std::unique_lock<std::mutex> lk(storage_mu_);
-            storage_cv_.wait(lk, [this]() { return storage_stop_.load() || !storage_q_.empty(); });
-            if (storage_stop_.load()) return;
-            fn = std::move(storage_q_.front());
-            storage_q_.pop_front();
+            std::unique_lock<std::mutex> lk(worker_mu_);
+            worker_cv_.wait(lk, [this]() {
+                return worker_stop_.load() || !worker_hi_.empty() || !worker_lo_.empty();
+            });
+            if (worker_stop_.load()) return;
+            if (!worker_hi_.empty()) {
+                fn = std::move(worker_hi_.front());
+                worker_hi_.pop_front();
+            }
+            else {
+                fn = std::move(worker_lo_.front());
+                worker_lo_.pop_front();
+            }
         }
         fn();
     }
 }
 
-bool AgentApp::storageSubmit(std::function<void()> fn) {
-    storageStart();
+bool AgentApp::workerSubmit(std::function<void()> fn, bool high) {
+    workerStart();
     {
-        std::lock_guard<std::mutex> lk(storage_mu_);
-        if (storage_stop_.load() || storage_q_.size() >= kStorageMaxQueue) return false;
-        storage_q_.push_back(std::move(fn));
+        std::lock_guard<std::mutex> lk(worker_mu_);
+        if (worker_stop_.load()) return false;
+        auto& q = high ? worker_hi_ : worker_lo_;
+        if (q.size() >= kWorkerMaxQueue) return false;
+        q.push_back(std::move(fn));
     }
-    storage_cv_.notify_one();
+    worker_cv_.notify_one();
     return true;
+}
+
+bool AgentApp::storageSubmit(std::function<void()> fn) {
+    return workerSubmit(std::move(fn), false);
 }
 
 #ifdef RTUNNEL_AGENT_WEB
@@ -3028,12 +3059,14 @@ std::string AgentApp::storageSync(const std::function<std::string()>& fn) {
         return std::string();
     }
     std::unique_lock<std::mutex> lk(m);
-    cv.wait(lk, [&]() { return done || storage_stop_.load(); });
+    cv.wait(lk, [&]() { return done || worker_stop_.load(); });
     return out;
 }
 #endif
 
 // 扫描一个挂载点，返回 rtstorage 的 JSON。relay 的 STORAGE_REQ 与本地页共用。
+// 同一 mount/path/depth 在 60s 内重复请求直接复用上次结果，避免反复整盘遍历；
+// 前端「重新扫描」带 force=1 跳过缓存。缓存只在 worker 线程访问。
 std::string AgentApp::storageTreeJson(const nlohmann::json& req) {
     rtstorage::Options opt;
     opt.mount = req.value("mount", std::string("/"));
@@ -3043,9 +3076,24 @@ std::string AgentApp::storageTreeJson(const nlohmann::json& req) {
     if (depth < 0) depth = 0;
     if (depth > 64) depth = 64;
     opt.emit_depth = depth;
+
+    bool force = req.value("force", false);
+    uint64_t now = agentMonotonicMs();
+    std::string key = opt.mount + '\n' + opt.path + '\n' + std::to_string(depth);
+    if (!force && !storage_cache_body_.empty() && storage_cache_key_ == key &&
+        now - (uint64_t)storage_cache_ms_ < 60000) {
+        return storage_cache_body_;
+    }
+
     rtstorage::Result r;
     rtstorage::scan(opt, storage_cancel_, r);
-    return rtstorage::toJson(r);
+    std::string body = rtstorage::toJson(r);
+    if (r.ok) {
+        storage_cache_key_ = std::move(key);
+        storage_cache_body_ = body;
+        storage_cache_ms_ = (long long)agentMonotonicMs();
+    }
+    return body;
 }
 
 void AgentApp::handleStorageReq(const rtnp::Frame* f) {
@@ -3724,6 +3772,14 @@ void AgentApp::onLinkDown() {
 
 // ---------------------------------------------------------------- 入口
 
+AgentApp::AgentApp() {
+    // 服务操作与目录扫描共用 AgentApp 的阻塞 worker：
+    // 高优先级给列表/启停，低优先级给 unit-file 清单这类后台补充。
+    svc_.setExecutor([this](std::function<void()> fn, bool high) {
+        return workerSubmit(std::move(fn), high);
+    });
+}
+
 int AgentApp::run(int argc, char** argv) {
     started_ms_ = agentMonotonicMs();
     for (int i = 0; i < argc; ++i) {
@@ -4003,7 +4059,7 @@ int AgentApp::run(int argc, char** argv) {
         1000, INFINITE);
     hevent_set_userdata(series_timer, this);
     hloop_run(lp);
-    storageStop();
+    workerStop();
     queryStop();
 #ifdef RTUNNEL_AGENT_WEB
     if (web_enabled) agentWebStop();

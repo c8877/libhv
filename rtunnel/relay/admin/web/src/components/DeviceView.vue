@@ -1569,10 +1569,12 @@ const disks = computed(() => {
   })
 })
 // 存储目录树按层级按需取；组件在 shared/web/storage-ui.js，与本地页共用
-function fetchStorageNodes(mount, path, depth) {
+function fetchStorageNodes(mount, path, depth, force) {
   let u = agentBase.value + '/storage?mount=' + encodeURIComponent(mount)
   if (path) u += '&path=' + encodeURIComponent(path)
-  return Api.get(u + '&depth=' + depth)
+  u += '&depth=' + depth
+  if (force) u += '&force=1'
+  return Api.get(u)
 }
 
 const nics = computed(() => (sys.value && sys.value.nics) || [])

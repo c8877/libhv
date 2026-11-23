@@ -61,6 +61,7 @@ struct LocalStream {
 
 class AgentApp : public TunnelLink {
 public:
+    AgentApp();
     int run(int argc, char** argv);
 
     char devid[128] = {0};
@@ -170,18 +171,28 @@ private:
     std::atomic<bool> query_stop_{false};
     static const size_t kQueryMaxQueue = 16;
 
-    // 目录扫描 worker：单线程 + 有限队列，退出时置 cancel 让扫描尽快返回
-    void storageStart();
-    void storageStop();
-    void storageLoop();
-    std::thread storage_thread_;
-    std::mutex storage_start_mu_; // 同上
-    std::mutex storage_mu_;
-    std::condition_variable storage_cv_;
-    std::deque<std::function<void()>> storage_q_;
-    std::atomic<bool> storage_stop_{false};
+    // 阻塞 worker：服务操作（高优先级）与目录扫描（低优先级）共用一个线程。
+    // 单核设备上 systemctl 与整盘遍历串行执行即可，没必要各占一个线程。
+    // 按需启动，空闲时睡在条件变量，不是周期轮询。
+    void workerStart();
+    void workerStop();
+    void workerLoop();
+    bool workerSubmit(std::function<void()> fn, bool high);
+    std::thread worker_thread_;
+    std::mutex worker_start_mu_;
+    std::mutex worker_mu_;
+    std::condition_variable worker_cv_;
+    std::deque<std::function<void()>> worker_hi_;
+    std::deque<std::function<void()>> worker_lo_;
+    std::atomic<bool> worker_stop_{false};
     std::atomic<bool> storage_cancel_{false};
-    static const size_t kStorageMaxQueue = 4;
+    static const size_t kWorkerMaxQueue = 16;
+
+    // 存储扫描 60s 去重：同一 mount/path/depth 的重复请求复用上次结果，
+    // 前端「重新扫描」带 force=1 跳过。只在 worker 线程访问。
+    std::string storage_cache_key_;
+    std::string storage_cache_body_;
+    long long   storage_cache_ms_ = 0;
 
     // sysinfo 里不随运行变化的字段只取一次：uname/device-tree/cpuinfo/证书
     struct SysinfoStatic {

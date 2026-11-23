@@ -6,14 +6,11 @@
 #include "cpputil/json.hpp"
 
 #include <atomic>
-#include <condition_variable>
-#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
 
 namespace rtvs {
 
@@ -43,8 +40,11 @@ public:
 
     static bool systemdAvailable();
 
-    // 后台线程按需启动：--no-svc 或没有 systemd 时不常驻线程。
-    void start();
+    // 阻塞任务交给 AgentApp 的统一 worker：high=true 用于列表/启停，
+    // false 用于 unit-file 清单这类不着急的后台补充。
+    using Executor = std::function<bool(std::function<void()>, bool)>;
+    void setExecutor(Executor ex) { executor_ = std::move(ex); }
+
     void setEnabled(bool v) { enabled_.store(v, std::memory_order_relaxed); }
     void setWritable(bool v) { writable_.store(v, std::memory_order_relaxed); }
     bool writable() const { return writable_.load(std::memory_order_relaxed); }
@@ -61,20 +61,21 @@ public:
 
 private:
     void post(std::function<void()> fn);
-    void workerLoop();
+    void postBg(std::function<void()> fn);
 
     std::atomic<bool> enabled_{true};
     std::atomic<bool> writable_{false};
     bool systemd_ = false;
     std::string token_;
+    Executor executor_;
 
-    // 列表缓存：systemctl show 在单核设备上约 1s，5s 轮询不能每次都跑
+    // 列表缓存：systemctl show 在单核设备上约 1s，60s 内不重复扫
     nlohmann::json list_cache_;
     long long list_cache_ms_ = 0;
     uint64_t list_files_ver_ = 0;   // 建缓存时用的 unit-file 版本
 
-    // unit-file 清单（disabled/masked 等未加载单元）约 2.8s，放后台线程刷新。
-    // 线程只持有 shared_ptr，不引用 Service，进程退出时也不会悬空。
+    // unit-file 清单（disabled/masked 等未加载单元）约 2.8s，放低优先级后台任务刷新。
+    // 任务只持有 shared_ptr，不引用 Service，进程退出时也不会悬空。
     struct UnitFiles {
         std::mutex mu;
         std::map<std::string, std::string> files;
@@ -86,13 +87,6 @@ private:
     std::shared_ptr<UnitFiles> unit_files_ = std::make_shared<UnitFiles>();
     void invalidateUnitFiles();
     static void unitFilesRefresh(std::shared_ptr<UnitFiles> uf, uint64_t gen);
-
-    std::mutex th_mu_;   // 保护 start()：本地页 HTTP 线程与事件循环都可能触发
-    std::mutex mu_;
-    std::condition_variable cv_;
-    std::deque<std::function<void()>> jobs_;
-    std::thread th_;
-    bool stop_ = false;
 };
 
 // 服务名是否合法（只允许 systemd 单元名字符，且必须是 .service）

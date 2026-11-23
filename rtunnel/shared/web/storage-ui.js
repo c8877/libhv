@@ -2,7 +2,7 @@
  *
  *   var tree = RtunnelStorage.createTree({
  *     container: el,                                     // 挂载容器
- *     fetchNodes: function (mount, path, depth) { ... }  // 返回 STORAGE 响应
+ *     fetchNodes: function (mount, path, depth, force) { ... }  // 返回 STORAGE 响应
  *   });
  *   tree.setMounts(sys.mounts);   // [{mount,fstype,used_kb,total_kb,avail_kb}]
  *   tree.destroy();
@@ -502,8 +502,7 @@
     Tree.prototype.loadRoot = function (mount, force) {
         var self = this;
         var c = this.cache[mount];
-        if (!force && c) return;
-        var seq = ++this.seq;
+        if (!force && c) return;        var seq = ++this.seq;
         this.loading = true;
         this.error = '';
         this.elapsed = 0;
@@ -514,7 +513,7 @@
             self.render();
         }, 250);
         this.render();
-        Promise.resolve(this.fetchNodes(mount, '', 1))
+        Promise.resolve(this.fetchNodes(mount, '', 1, !!force))
             .then(function (r) {
                 if (seq !== self.seq) return;
                 if (!r || !r.ok) throw new Error((r && r.error) || 'scan failed');

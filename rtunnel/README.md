@@ -396,7 +396,9 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
   node = `{p,b,n,d,m,t,c}`：路径/字节/文件数/子目录数/修改时间/类型/是否还有
   子项；`t` 为 `d` 目录、`f` 文件、`o` 小文件聚合。目录按层级回传，文件只回传
   >= 64 KB 的，其余按目录聚合成一条，保证子项之和等于父项；
-  agent 端独立扫描线程，不占用进程/网络查询队列；单次上限 20 万目录项 / 20s，
+  agent 端走共享阻塞 worker，与服务管理串行，不占用进程/网络查询队列；
+  同一 `mount/path/depth` 的结果 60s 内复用（`force=1` 强制重扫）；
+  单次上限 20 万目录项 / 20s，
   跳过无权限目录与其它分区，只读元数据，权限复用 `device.view`
 - 诊断包：`GET /api/v1/agents/{devid}/diag` 返回 `application/gzip` 附件
   （agent 汇总 sysinfo、dmesg、journal 500 行、`ip addr/route`、`ss -s`、服务列表、
@@ -623,12 +625,12 @@ http://B:9443/device/<devid>/<port>/<path>
   服务列表不用再等 `systemctl` 首次全量扫描（单核设备约 4s）
 - HTTP 接口：`GET /`、`GET /api/v1/sysinfo`、`GET /api/v1/procs`、
   `GET /api/v1/net`、`GET /api/v1/metrics`、`GET /api/v1/storage/tree`
-  （`mount` / `path` / `depth`，按目录按需返回）、`GET /api/v1/health`；
+  （`mount` / `path` / `depth`，按目录按需返回，`force=1` 跳过 60s 缓存）、`GET /api/v1/health`；
   文件与服务管理走 `GET /ws/fs`、`GET /ws/svc`（WebSocket，见下节）
 - `procs` / `net` / `metrics` 与 relay 的 `PROC_REQ`、`NET_REQ`、`METRICS_QUERY`
   共用同一份查询实现：进程双采样、IPC 采集、指标 ring 读取都带缓存与并发上限；
-  `storage/tree` 也复用同一份 `rtstorage`，但走独立扫描线程（整盘遍历较慢），
-  不占用进程/网络查询队列
+  `storage/tree` 也复用同一份 `rtstorage`，和服务管理共用一个阻塞 worker
+  （整盘遍历较慢，但不占用进程/网络查询队列）
 - 可能阻塞的接口（进程/网络/存储/诊断）用异步 handler 交给 `hv::async` 分发，
   真正的采集在共享 worker 上串行执行，不占 HTTP IO 线程
 - 页面、`fs-ui.js`、`svc-ui.js`、`storage-ui.js`、`file-view.js`、`cm-editor.js` 在构建时
@@ -650,14 +652,14 @@ http://B:9443/device/<devid>/<port>/<path>
 
 #### 线程与内存
 
-线程只在用到对应功能时创建，不随连接数增长：
+线程只在用到对应功能时创建（web 版本地页启动会预热查询），不随连接数增长。
+`ps -L` 或 `/proc/<pid>/task/*/comm` 可直接看到 worker 名称：
 
 | 线程 | 创建时机 | 作用 |
 |---|---|---|
 | 主事件循环 | 启动 | 隧道帧、定时器、所有 agent 状态 |
-| 查询 worker | 首次进程/网络/诊断请求（含详情页预热） | 进程双采样、网络/IPC 快照、诊断包 |
-| 目录扫描 worker | 首次展开存储分区 | 分区目录树（整盘遍历，单独排队） |
-| 服务 worker | 首次服务列表请求（打开服务页 / 手动刷新） | systemctl / journalctl |
+| 查询 worker（`rtagent-query`） | 首次进程/网络/诊断请求；web 版本地页启动预热 | 进程双采样、网络/IPC 快照、诊断包 |
+| 阻塞 worker（`rtagent-work`） | 首次服务列表或展开存储分区 | systemctl/journalctl 与目录树扫描共用一个线程，服务请求优先；存储结果 60s 内复用 |
 | HTTP IO | 启用 `--local-web` | 本地页与 WebSocket |
 | `hv::async` | 首个异步接口请求 | 进程/网络/存储接口，上限 4、空闲 15s 退出 |
 
