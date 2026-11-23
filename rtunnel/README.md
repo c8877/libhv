@@ -114,6 +114,9 @@ bash rtunnel/tests/proc_e2e.sh           # 进程列表/详情/信号与 device.
 bash rtunnel/tests/storage_e2e.sh        # 目录树按路径/层级、子项求和、越界校验与 gzip 透传
 python3 rtunnel/tests/stream_idle_e2e.py # 流空闲回收：闲置 RESET、活跃流保留
 build/bin/rtunnel-endpoint-test          # --server 地址解析单测
+
+rtunnel/tests/ui/run-ui.sh               # 管理台 + 设备本地页 UI 全量（Playwright）
+rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全部
 ```
 
 覆盖：CONNECT 建链、数据回环、离线设备、端口白名单、ACL、并发（两个 A 客户端同 sid 不串流）、

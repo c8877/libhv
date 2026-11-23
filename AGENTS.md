@@ -148,6 +148,9 @@ GitHub Actions (`.github/workflows/CI.yml`): builds and tests on Linux (with Ope
 
 - **体积不是复制实现的理由**。需要更小的部署包时发 lite 变体（`rtunnel-agent-noweb`，不含本地页），不要为体积另写一套页面、表格或组件，也不要靠构建裁剪维护第二份源码。功能差异只放在构建入口、路由和权限层。
 - 改完管理台或设备页必须跑 `cd rtunnel/relay/admin/web && npm run check:ui`；`npm run build`、`npm run dev`、`npm run build:local` 已内置，违反会直接失败。
+- 改管理台/设备页的行为要跑 `rtunnel/tests/ui/run-ui.sh`（Playwright，直连本机 relay + agent）。
+  新增用例放 `rtunnel/tests/ui/{admin,local}/`，用 `lib/harness.js` 的 `check()`，
+  再登记到 `run-ui.sh` 的 `SUITES`；不要再把 UI 测试写到 `/tmp`。
 - Element 确实没有对应能力时才允许自建，并写清原因，否则检查失败：
   `<!-- ui-allow: 原因 -->`（单行，可写在标签上一行）或 `<!-- ui-allow-begin: 原因 --> … <!-- ui-allow-end -->`（成块）；脚本区用 `// ui-allow: 原因`。
 - 表格排序、表单校验、弹层、tab、分页不属于可放行范围。
