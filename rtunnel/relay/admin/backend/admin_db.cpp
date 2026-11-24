@@ -160,7 +160,6 @@ bool AdminDb::migrate(std::string& err) {
         " pass_hash TEXT NOT NULL,"
         " role TEXT NOT NULL,"
         " status TEXT NOT NULL DEFAULT 'active',"
-        " perm_explicit INTEGER NOT NULL DEFAULT 0,"
         " created_ms INTEGER NOT NULL);"
         "CREATE TABLE IF NOT EXISTS sessions("
         " sid_hash TEXT PRIMARY KEY,"
@@ -278,6 +277,7 @@ bool AdminDb::migrate(std::string& err) {
         " super INTEGER NOT NULL DEFAULT 0,"
         " seeded INTEGER NOT NULL DEFAULT 0,"
         " all_devices INTEGER NOT NULL DEFAULT 0,"
+        " global_scope INTEGER NOT NULL DEFAULT 0,"
         " ports TEXT NOT NULL DEFAULT '*',"
         " created_ms INTEGER NOT NULL,"
         " updated_ms INTEGER NOT NULL);"
@@ -340,6 +340,7 @@ bool AdminDb::migrate(std::string& err) {
         " burst INTEGER NOT NULL DEFAULT 0,"
         " max_sessions INTEGER NOT NULL DEFAULT 0,"
         " quota_action TEXT NOT NULL DEFAULT 'cut',"
+        " groups_explicit INTEGER NOT NULL DEFAULT 0,"
         " created_by TEXT NOT NULL DEFAULT '',"
         " created_ms INTEGER NOT NULL,"
         " last_used_ms INTEGER NOT NULL DEFAULT 0,"
@@ -360,8 +361,46 @@ bool AdminDb::migrate(std::string& err) {
         " created_ms INTEGER NOT NULL,"
         " last_used_ms INTEGER NOT NULL DEFAULT 0,"
         " last_used_ip TEXT NOT NULL DEFAULT '',"
-        " revoked_ms INTEGER NOT NULL DEFAULT 0);"
+        " revoked_ms INTEGER NOT NULL DEFAULT 0,"
+        " groups_explicit INTEGER NOT NULL DEFAULT 0);"
         "CREATE INDEX IF NOT EXISTS idx_admin_token_user ON admin_tokens(user_id);"
+        // relay 地址字典 + 有序下发列表 + 同步任务（逐设备行复用 distribution_tasks）
+        "CREATE TABLE IF NOT EXISTS relay_dict("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " host TEXT NOT NULL,"
+        " port INTEGER NOT NULL,"
+        " name TEXT NOT NULL DEFAULT '',"
+        " description TEXT NOT NULL DEFAULT '',"
+        " enabled INTEGER NOT NULL DEFAULT 1,"
+        " created_ms INTEGER NOT NULL,"
+        " updated_ms INTEGER NOT NULL,"
+        " UNIQUE(host,port));"
+        "CREATE TABLE IF NOT EXISTS relay_list("
+        " position INTEGER PRIMARY KEY,"
+        " endpoint_id INTEGER NOT NULL UNIQUE,"
+        " added_by TEXT NOT NULL DEFAULT '',"
+        " added_ms INTEGER NOT NULL DEFAULT 0);"
+        "CREATE TABLE IF NOT EXISTS relay_sync_task("
+        " batch_id TEXT PRIMARY KEY,"
+        " name TEXT NOT NULL DEFAULT '',"
+        " list_json TEXT NOT NULL DEFAULT '',"
+        " list_rev INTEGER NOT NULL DEFAULT 0,"
+        " allow_leave INTEGER NOT NULL DEFAULT 0,"
+        " mode TEXT NOT NULL DEFAULT 'once',"
+        " wave_size INTEGER NOT NULL DEFAULT 0,"
+        " wave_interval_s INTEGER NOT NULL DEFAULT 0,"
+        " fail_threshold_pct INTEGER NOT NULL DEFAULT 0,"
+        " total_waves INTEGER NOT NULL DEFAULT 1,"
+        " current_wave INTEGER NOT NULL DEFAULT 0,"
+        " wave_done_ms INTEGER NOT NULL DEFAULT 0,"
+        " status TEXT NOT NULL DEFAULT 'scheduled',"
+        " start_at_ms INTEGER NOT NULL DEFAULT 0,"
+        " deadline_at_ms INTEGER NOT NULL DEFAULT 0,"
+        " max_retries INTEGER NOT NULL DEFAULT 3,"
+        " actor TEXT NOT NULL DEFAULT '',"
+        " created_ms INTEGER NOT NULL DEFAULT 0,"
+        " finished_ms INTEGER NOT NULL DEFAULT 0);"
+        "CREATE INDEX IF NOT EXISTS idx_relay_task_due ON relay_sync_task(status, start_at_ms);"
         "UPDATE users SET role='admin' WHERE role='superadmin';"
         "UPDATE users SET role='viewer' WHERE role='user';",
         err)) return false;
@@ -386,15 +425,53 @@ bool AdminDb::migrate(std::string& err) {
     if (!hasColumn("distribution_tasks", "target_version")) {
         if (!exec("ALTER TABLE distribution_tasks ADD COLUMN target_version TEXT NOT NULL DEFAULT ''", err)) return false;
     }
-    exec("CREATE INDEX IF NOT EXISTS idx_dist_kind ON distribution_tasks(kind, status)", err);
-    if (!hasColumn("users", "perm_explicit")) {
-        if (!exec("ALTER TABLE users ADD COLUMN perm_explicit INTEGER NOT NULL DEFAULT 0", err)) return false;
+    // relay 同步任务：列表版本与灰度批次（老库没有）
+    if (!hasColumn("distribution_tasks", "payload_rev")) {
+        if (!exec("ALTER TABLE distribution_tasks ADD COLUMN payload_rev INTEGER NOT NULL DEFAULT 0", err)) return false;
     }
+    if (!hasColumn("distribution_tasks", "wave")) {
+        if (!exec("ALTER TABLE distribution_tasks ADD COLUMN wave INTEGER NOT NULL DEFAULT 0", err)) return false;
+    }
+    exec("CREATE INDEX IF NOT EXISTS idx_dist_kind ON distribution_tasks(kind, status)", err);
+    // 任务详情/巡检都按 batch_id + kind + status 过滤
+    exec("CREATE INDEX IF NOT EXISTS idx_dist_batch ON distribution_tasks(batch_id, kind, status)", err);
+    // 角色不再直接授予权限：老库把「未显式分组」的账号补进对应内置组，再删掉旧标记。
+    // 显式分过组（perm_explicit=1）但不属于任何组的账号保持零权限；
+    // 例外：role=admin 的账号没有组时补进超级组，避免唯一管理员被锁在门外。
+    if (hasColumn("users", "perm_explicit")) {
+        if (!exec("INSERT OR IGNORE INTO perm_group_members(group_id,subject_type,subject_id,added_ms)"
+                  " SELECT g.id,'user',CAST(u.id AS TEXT),CAST(strftime('%s','now') AS INTEGER)*1000"
+                  " FROM users u JOIN perm_groups g ON g.builtin_key=u.role"
+                  " WHERE (u.perm_explicit=0 OR u.role='admin') AND NOT EXISTS("
+                  "  SELECT 1 FROM perm_group_members m WHERE m.subject_type='user'"
+                  "  AND m.subject_id=CAST(u.id AS TEXT))",
+                  err))
+            return false;
+        if (!exec("ALTER TABLE users DROP COLUMN perm_explicit", err)) return false;
+    }
+    // 令牌绑定过权限组 = 显式；显式但组为空是「无权限」，不再回落到归属账号
+    if (!hasColumn("admin_tokens", "groups_explicit")) {
+        if (!exec("ALTER TABLE admin_tokens ADD COLUMN groups_explicit INTEGER NOT NULL DEFAULT 0", err))
+            return false;
+    }
+    if (!hasColumn("client_tokens", "groups_explicit")) {
+        if (!exec("ALTER TABLE client_tokens ADD COLUMN groups_explicit INTEGER NOT NULL DEFAULT 0", err))
+            return false;
+    }
+    exec("UPDATE admin_tokens SET groups_explicit=1 WHERE id IN ("
+         "SELECT CAST(subject_id AS INTEGER) FROM perm_group_members WHERE subject_type='atk')", err);
+    exec("UPDATE client_tokens SET groups_explicit=1 WHERE id IN ("
+         "SELECT CAST(subject_id AS INTEGER) FROM perm_group_members WHERE subject_type='rtk')", err);
     if (!hasColumn("perm_groups", "seeded")) {
         if (!exec("ALTER TABLE perm_groups ADD COLUMN seeded INTEGER NOT NULL DEFAULT 0", err)) return false;
     }
     if (!hasColumn("perm_groups", "all_devices")) {
         if (!exec("ALTER TABLE perm_groups ADD COLUMN all_devices INTEGER NOT NULL DEFAULT 0", err)) return false;
+    }
+    if (!hasColumn("perm_groups", "global_scope")) {
+        if (!exec("ALTER TABLE perm_groups ADD COLUMN global_scope INTEGER NOT NULL DEFAULT 0", err)) return false;
+        // 老库的内置角色组按传统语义补上全局权限（设备范围仍由显式授权决定）
+        exec("UPDATE perm_groups SET global_scope=1 WHERE builtin_key<>''", err);
     }
     if (!hasColumn("perm_groups", "ports")) {
         if (!exec("ALTER TABLE perm_groups ADD COLUMN ports TEXT NOT NULL DEFAULT '*'", err)) return false;
@@ -478,9 +555,20 @@ static void fillUser(sqlite3_stmt* st, DbUser& u) {
     u.created_ms = sqlite3_column_int64(st, 4);
 }
 
+// 用户名用于日志与审计行：禁止控制字符，允许中间空格，禁止首尾空白，长度 1..64
+static bool validUserName(const std::string& s) {
+    if (s.empty() || s.size() > 64) return false;
+    if (s.front() == ' ' || s.back() == ' ') return false;
+    for (unsigned char c : s) {
+        if (c < 0x20 || c == 0x7f) return false;
+    }
+    return true;
+}
+
 bool AdminDb::createUser(const std::string& user, const std::string& pass,
                          const std::string& role, std::string& err, long long* out_id) {
-    if (user.empty() || pass.size() < 6) { err = "username empty or password < 8 chars"; return false; }
+    if (!validUserName(user)) { err = "用户名不合法（1-64 字符，不含控制字符，首尾不能是空格）"; return false; }
+    if (pass.size() < 8) { err = "password < 8 chars"; return false; }
     if (role != "admin" && role != "manager" && role != "operator" && role != "viewer") {
         err = "bad role";
         return false;
@@ -506,8 +594,30 @@ bool AdminDb::createUser(const std::string& user, const std::string& pass,
     if (rc != SQLITE_DONE) { err = (rc == SQLITE_CONSTRAINT) ? "username exists" : sqlite3_errmsg(db_); return false; }
     long long uid = sqlite3_last_insert_rowid(db_);
     if (out_id) *out_id = uid;
-    // 不自动入组：未分配权限组前按 role 预置组 + 归属设备回落，
-    // 管理员显式分配权限组后（perm_explicit=1）只认组。
+    // 角色只决定初始权限组：新账号直接进入对应的内置组，之后权限只由组求值
+    sqlite3_stmt* g = nullptr;
+    if (sqlite3_prepare_v2(db_,
+            "INSERT OR IGNORE INTO perm_group_members(group_id,subject_type,subject_id,added_ms)"
+            " SELECT id,'user',?,? FROM perm_groups WHERE builtin_key=?", -1, &g, nullptr) == SQLITE_OK) {
+        std::string sid = std::to_string(uid);
+        sqlite3_bind_text(g, 1, sid.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(g, 2, nowMs());
+        sqlite3_bind_text(g, 3, role.c_str(), -1, SQLITE_TRANSIENT);
+        int grc = sqlite3_step(g);
+        bool joined = grc == SQLITE_DONE && sqlite3_changes(db_) > 0;
+        if (!joined) {
+            // 角色组缺失时不留半成品账号：没有组的账号登录后什么都做不了
+            sqlite3_stmt* del = nullptr;
+            if (sqlite3_prepare_v2(db_, "DELETE FROM users WHERE id=?", -1, &del, nullptr) == SQLITE_OK) {
+                sqlite3_bind_int64(del, 1, uid);
+                sqlite3_step(del);
+            }
+            sqlite3_finalize(del);
+            err = "角色权限组不存在";
+            return false;
+        }
+    }
+    sqlite3_finalize(g);
     return true;
 }
 
@@ -555,7 +665,7 @@ bool AdminDb::listUsers(std::vector<DbUser>& out, const std::string& only_role) 
 }
 
 bool AdminDb::setPassword(long long id, const std::string& pass, std::string& err) {
-    if (pass.size() < 6) { err = "password < 8 chars"; return false; }
+    if (pass.size() < 8) { err = "password < 8 chars"; return false; }
     std::string hash = hashPassword(pass, err);
     if (hash.empty()) return false;
     std::lock_guard<std::mutex> lk(mu_);
@@ -583,14 +693,53 @@ bool AdminDb::setStatus(long long id, const std::string& status) {
 
 bool AdminDb::setRole(long long id, const std::string& role) {
     std::lock_guard<std::mutex> lk(mu_);
+    std::string e;
+    if (!exec("BEGIN", e)) return false;
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, "UPDATE users SET role=? WHERE id=?", -1, &st, nullptr) != SQLITE_OK) return false;
+    if (sqlite3_prepare_v2(db_, "UPDATE users SET role=? WHERE id=?", -1, &st, nullptr) != SQLITE_OK) {
+        exec("ROLLBACK", e);
+        return false;
+    }
     sqlite3_bind_text(st, 1, role.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int64(st, 2, id);
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);
-    if (rc != SQLITE_DONE) return false;
-    // 角色只决定未显式分配权限组时的回落基线；已入组的账号不受影响
+    if (rc != SQLITE_DONE) {
+        exec("ROLLBACK", e);
+        return false;
+    }
+    // 换角色 = 换内置组：自定义组保留，角色组替换成新角色的内置组
+    std::string sid = std::to_string(id);
+    if (sqlite3_prepare_v2(db_,
+            "DELETE FROM perm_group_members WHERE subject_type='user' AND subject_id=?"
+            " AND group_id IN (SELECT id FROM perm_groups WHERE builtin_key<>'')",
+            -1, &st, nullptr) != SQLITE_OK) {
+        exec("ROLLBACK", e);
+        return false;
+    }
+    sqlite3_bind_text(st, 1, sid.c_str(), -1, SQLITE_TRANSIENT);
+    rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    if (rc != SQLITE_DONE) {
+        exec("ROLLBACK", e);
+        return false;
+    }
+    if (sqlite3_prepare_v2(db_,
+            "INSERT OR IGNORE INTO perm_group_members(group_id,subject_type,subject_id,added_ms)"
+            " SELECT id,'user',?,? FROM perm_groups WHERE builtin_key=?", -1, &st, nullptr) != SQLITE_OK) {
+        exec("ROLLBACK", e);
+        return false;
+    }
+    sqlite3_bind_text(st, 1, sid.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 2, nowMs());
+    sqlite3_bind_text(st, 3, role.c_str(), -1, SQLITE_TRANSIENT);
+    rc = sqlite3_step(st);
+    sqlite3_finalize(st);
+    if (rc != SQLITE_DONE) {
+        exec("ROLLBACK", e);
+        return false;
+    }
+    exec("COMMIT", e);
     return true;
 }
 

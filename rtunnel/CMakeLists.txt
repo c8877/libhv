@@ -17,7 +17,7 @@ add_library(rtnp STATIC rtnp/codec.cpp)
 target_include_directories(rtnp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(rtnp PUBLIC ${HV_LIBRARIES})
 
-add_library(rtunnel_common STATIC common/tunnel_link.cpp common/shell_spawn.cpp
+add_library(rtunnel_common STATIC common/endpoint.cpp common/tunnel_link.cpp common/shell_spawn.cpp
                                  common/sha256.cpp common/token_util.cpp)
 target_link_libraries(rtunnel_common PUBLIC rtnp rtunnel_gzip)
 
@@ -29,6 +29,7 @@ target_compile_definitions(rtunnel_sqlite PRIVATE SQLITE_THREADSAFE=1 SQLITE_OMI
 set_target_properties(rtunnel_sqlite PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_log.cpp
+               common/endpoint.cpp
                common/sha256.cpp common/token_util.cpp
                relay/admin/backend/admin_server.cpp
                relay/admin/backend/admin_tls.cpp
@@ -47,6 +48,8 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
                relay/admin/backend/admin_db.cpp
                relay/admin/backend/admin_db_permission.cpp
                relay/admin/backend/admin_db_dict.cpp
+               relay/admin/backend/admin_db_relay.cpp
+               relay/admin/backend/api_relay.cpp
                relay/admin/backend/admin_db_accounts.cpp
                relay/admin/backend/admin_db_admin_tokens.cpp
                relay/admin/backend/api_accounts.cpp
@@ -64,6 +67,7 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
                relay/admin/backend/api_dist.cpp
                relay/admin/backend/hash_util.cpp
                relay/admin/backend/dist_scheduler.cpp
+               relay/admin/backend/relay_sync.cpp
                relay/admin/backend/terminal.cpp)
 
 # agent 两件套：rtunnel-agent 带本地设备详情页；rtunnel-agent-noweb 不含 Web 代码。

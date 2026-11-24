@@ -5,23 +5,10 @@
 // 子类实现 role/identity/logTag，并处理 READY 后的会话级帧与断线清理。
 
 #include "rtnp/codec.hpp"
+#include "common/endpoint.hpp"
 
 #include <string>
 #include <vector>
-
-struct TunnelEndpoint {
-    std::string host;
-    int         port = 8443;
-};
-
-// 解析 relay 地址列表（agent/client 的 --server 共用）：
-//   "h"               -> h:default_port
-//   "h:8443"          -> h:8443
-//   "[::1]:8443"      -> ::1:8443
-//   "h1,h2:9000"      -> 两个地址
-// 最多保留 8 个，多余的丢弃。格式错误返回 false 并填充 err。
-bool tunnel_parse_endpoints(const std::string& spec, int default_port,
-                            std::vector<TunnelEndpoint>& out, std::string& err);
 
 class TunnelLink {
 public:
@@ -56,6 +43,14 @@ public:
     size_t endpointIndex() const { return ep_index_; }
     const TunnelEndpoint& currentEndpoint() const { return endpoints[ep_index_]; }
 
+    // 用 relay 下发的列表替换端点（只在 loop 线程调用）。
+    // 当前地址不在新列表且 allow_leave=false 时返回 false，调用方应拒绝本次下发；
+    // switching=true 表示需要断开并重连到新列表的第 0 个地址（延迟 200ms 断开，
+    // 给调用方留出回 ACK 的时间）。
+    bool replaceEndpoints(const std::vector<TunnelEndpoint>& eps, bool allow_leave, bool& switching);
+    // 在列表末尾追加兜底地址（不改变当前下标，不触发切换），已存在的跳过
+    void appendEndpoints(const std::vector<TunnelEndpoint>& extra);
+
 protected:
     virtual uint8_t     role() const = 0;      // rtnp::ROLE_AGENT / ROLE_CLIENT
     virtual const char* identity() const = 0;  // AUTH 载荷：devid / user
@@ -88,6 +83,7 @@ private:
     int           relay_proto_ = 0;      // HELLO_ACK 上报的 relay 语义版本
     size_t        ep_index_ = 0;         // 当前 relay 下标
     std::vector<char> ep_auth_bad_;      // 各地址是否被凭证拒绝
+    bool          pin_next_ = false;     // 下次断开不 advanceEndpoint（按新列表迁移）
     uint32_t      jitter_seed_ = 0;
 
     // libhv C 回调的薄封装（对象经 hio_context / hevent_userdata 取回）
@@ -97,4 +93,5 @@ private:
     static void pingCb(htimer_t* t);
     static void reconnectCb(htimer_t* t);
     static void hsTimeoutCb(htimer_t* t);
+    static void switchCb(htimer_t* t);
 };

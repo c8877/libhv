@@ -444,6 +444,7 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
         }
         bool want_monitor = (f->flags & rtnp::OPEN_TTY_MONITOR) != 0;
         bool want_takeover = (f->flags & rtnp::OPEN_TTY_TAKEOVER) != 0;
+        bool want_readonly = (f->flags & rtnp::OPEN_TTY_RDONLY) != 0;
         if (want_monitor) {
             LocalStream* target = nullptr;
             for (LocalStream* it = streams; it; it = it->next) {
@@ -485,7 +486,7 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
                 it = nx;
             }
         }
-        int fd = open(path, O_RDWR | O_NOCTTY | O_NONBLOCK);
+        int fd = open(path, (want_readonly ? O_RDONLY : O_RDWR) | O_NOCTTY | O_NONBLOCK);
         if (fd < 0) {
             sendOpenFail(f->sid, rtnp::TARGET_REFUSED, "open tty failed");
             return;
@@ -553,6 +554,7 @@ void AgentApp::handleOpen(const rtnp::Frame* f) {
         s->local = io;
         s->connected = 1;
         s->tty_path = path;
+        s->tty_readonly = want_readonly ? 1 : 0;
         hio_set_context(io, s);
         hio_setcb_read(io, localReadCb);
         hio_setcb_close(io, localCloseCb);
@@ -796,6 +798,29 @@ void AgentApp::loadConfig() {
 #endif
         }
     }
+    if (j.contains("relay_servers") && j["relay_servers"].is_string()) {
+        // relay 下发的地址列表：优先于 --server，--server 里的地址补在末尾兜底。
+        // 兜底地址不落盘，方便现场只改 args 就能把设备救回来。
+        std::string spec = j["relay_servers"].get<std::string>();
+        std::vector<TunnelEndpoint> pushed;
+        std::string err;
+        if (!spec.empty() && tunnel_parse_endpoints(spec, port, pushed, err)) {
+            relay_servers_spec = tunnel_format_endpoints(pushed);
+            if (j.contains("relay_servers_rev") && j["relay_servers_rev"].is_number()) {
+                relay_servers_rev = j["relay_servers_rev"].get<unsigned int>();
+            }
+            std::vector<TunnelEndpoint> eps = pushed;
+            for (auto& b : bootstrap_endpoints) {
+                if (tunnel_endpoint_index(eps, b) == eps.size()) eps.push_back(b);
+            }
+            endpoints = eps;
+            host = endpoints[0].host.c_str();
+            logf_("[agent] relay list from config: %s (rev=%u, %zu endpoints)",
+                  relay_servers_spec.c_str(), relay_servers_rev, endpoints.size());
+        } else {
+            logf_("[agent] config relay_servers ignored: %s", spec.empty() ? "empty" : err.c_str());
+        }
+    }
     logf_("[agent] config loaded from %s (allow=%d shell=%d)", config_file.c_str(), allow_ports[0], allow_shell);
 }
 
@@ -861,6 +886,8 @@ bool AgentApp::saveConfig() {
             pos = comma + 1;
         }
     }
+    // relay 下发的地址列表：saveRelayList 单独维护，这里只保证不被能力配置覆盖。
+    // 以现有文件为底稿读写，本函数不认识该键时也会原样保留。
     std::string tmp = config_file + ".tmp";
     FILE* fp = fopen(tmp.c_str(), "w");
     if (!fp) return false;
@@ -874,6 +901,44 @@ bool AgentApp::saveConfig() {
     if (rename(tmp.c_str(), config_file.c_str()) != 0) return false;
     config_loaded = true;
     return true;
+}
+
+// 只写 relay 下发的地址列表。文件不存在时只创建这两个键，
+// 避免把命令行里的能力参数固化进配置文件。
+bool AgentApp::saveRelayList() {
+    if (config_file.empty()) return false;
+    std::string dir = config_file.substr(0, config_file.find_last_of('/'));
+    if (!dir.empty()) {
+        std::string cmd = "mkdir -p '" + dir + "'";
+        if (system(cmd.c_str()) != 0) { /* 目录可能已存在 */
+        }
+    }
+    nlohmann::json j = nlohmann::json::object();
+    {
+        FILE* fp = fopen(config_file.c_str(), "r");
+        if (fp) {
+            std::string js;
+            char buf[4096];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) js.append(buf, n);
+            fclose(fp);
+            auto old = nlohmann::json::parse(js, nullptr, false);
+            if (!old.is_discarded() && old.is_object()) j = old;
+        }
+    }
+    j["relay_servers"] = relay_servers_spec;
+    j["relay_servers_rev"] = relay_servers_rev;
+    std::string tmp = config_file + ".tmp";
+    FILE* fp = fopen(tmp.c_str(), "w");
+    if (!fp) return false;
+    std::string body = j.dump(2);
+    bool ok = fwrite(body.data(), 1, body.size(), fp) == body.size();
+    fclose(fp);
+    if (!ok) {
+        unlink(tmp.c_str());
+        return false;
+    }
+    return rename(tmp.c_str(), config_file.c_str()) == 0;
 }
 
 int AgentApp::applyFileConfig(const std::string& root, int rw, int max_mb, int enabled, std::string& err) {
@@ -898,6 +963,55 @@ int AgentApp::applyFileConfig(const std::string& root, int rw, int max_mb, int e
     file_max_mb = max_mb;
     file_enabled = 1;
     return 0;
+}
+
+// relay 下发地址列表：校验 -> 替换后续使用的列表 -> 落盘 -> 回 ACK。
+// 当前 relay 不在新列表且未允许离开时拒绝（防止 relay 把设备赶到连不上的地址）。
+void AgentApp::handleRelayList(const rtnp::Frame* f) {
+    nlohmann::json ack;
+    rtnp::Reader r(f->payload, f->len);
+    static char buf[8192];
+    r.str(buf, sizeof buf);
+    auto reply = [&](bool ok, const std::string& err) {
+        ack["ok"] = ok;
+        if (!err.empty()) ack["error"] = err;
+        sendJsonFrame(io, rtnp::RELAY_LIST_ACK, f->sid, ack);
+    };
+    if (r.err) { reply(false, "bad payload"); return; }
+
+    auto j = nlohmann::json::parse(buf, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) { reply(false, "bad json"); return; }
+    std::string servers = j.value("servers", "");
+    bool allow_leave = j.value("allow_leave", false);
+    unsigned int rev = 0;
+    if (j.contains("rev") && j["rev"].is_number()) rev = j["rev"].get<unsigned int>();
+    ack["rev"] = rev;
+
+    std::vector<TunnelEndpoint> eps;
+    std::string err;
+    if (!tunnel_parse_endpoints(servers, port, eps, err)) { reply(false, err); return; }
+
+    std::string from = tunnel_format_endpoints({currentEndpoint()});
+    bool switching = false;
+    if (!replaceEndpoints(eps, allow_leave, switching)) {
+        reply(false, "current relay " + from + " not in list");
+        return;
+    }
+    // 启动参数里的地址始终留在列表末尾：下发列表整体不可达时还能回到原地
+    appendEndpoints(bootstrap_endpoints);
+    relay_servers_spec = tunnel_format_endpoints(eps);
+    relay_servers_rev = rev;
+    bool persisted = saveRelayList();
+    ack["ok"] = true;
+    ack["rev"] = rev;
+    ack["count"] = (int)eps.size();
+    ack["current"] = from;
+    ack["switching"] = switching;
+    ack["persisted"] = persisted;
+    if (switching) ack["next"] = tunnel_format_endpoints({eps[0]});
+    sendJsonFrame(io, rtnp::RELAY_LIST_ACK, f->sid, ack);
+    logf_("[agent] relay list applied: %s (rev=%u switch=%d persisted=%d)",
+          relay_servers_spec.c_str(), relay_servers_rev, switching ? 1 : 0, persisted ? 1 : 0);
 }
 
 void AgentApp::handleConfigSet(const rtnp::Frame* f) {
@@ -2358,6 +2472,8 @@ nlohmann::json AgentApp::buildSysinfo() {
 #endif
         caps["config_file"] = config_file;
         caps["config_loaded"] = config_loaded;
+        caps["relay_list"] = relay_servers_spec;
+        caps["relay_list_rev"] = relay_servers_rev;
         caps["metrics"] = nlohmann::json::object();
         {
             nlohmann::json arr = nlohmann::json::array();
@@ -3472,6 +3588,7 @@ void AgentApp::onFrame(rtnp::Frame* f) {
         return;
     }
     case rtnp::CONFIG_SET: handleConfigSet(f); return;
+    case rtnp::RELAY_LIST: handleRelayList(f); return;
     case rtnp::FILE_BEGIN:
     case rtnp::FILE_DATA:
     case rtnp::FILE_END: handleFileFrame(f); return;
@@ -3684,6 +3801,15 @@ void AgentApp::onFrame(rtnp::Frame* f) {
             return;
         }
         if (s->local == NULL) return;
+        // 只读串口流不接受写方向：仍回窗口，避免对端窗口耗尽
+        if (s->tty_readonly) {
+            if (f->len > 0) {
+                rtnp::Writer w;
+                w.u32(f->len);
+                rtnp::send(io, rtnp::WINDOW, s->sid, w.data, (uint16_t)w.len);
+            }
+            return;
+        }
         if (f->len > 0) {
             hio_write(s->local, f->payload, f->len);
             s->unacked += f->len;
@@ -3939,6 +4065,7 @@ int AgentApp::run(int argc, char** argv) {
             return 1;
         }
         host = endpoints[0].host.c_str();
+        bootstrap_endpoints = endpoints;   // 配置文件损坏/列表被推错时的兜底
     }
 
     hloop_t* lp = hloop_new(0);

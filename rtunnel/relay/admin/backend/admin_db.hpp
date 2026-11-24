@@ -14,11 +14,19 @@ struct sqlite3_stmt;
 std::string dbColText(sqlite3_stmt* st, int col);
 long long   dbColInt(sqlite3_stmt* st, int col);
 
+// 端口范围包含判断：target 的每个端口都必须被 allowed 覆盖（"*" 覆盖全部）。
+bool adminPortsCovered(const std::string& allowed, const std::string& target);
+
+// 全局资源键（relay/dict/权限组/账号/令牌/证书/审计/设置/仓库）：
+// 不受设备范围约束，只有 all_devices 或 super 才能生效和授予。
+bool permIsGlobal(const std::string& key);
+
 struct DbGroupAclRule {
     std::string user;
     std::string devid;
     std::string ports;
-    std::string tty;
+    std::string tty;        // 可读的串口（* = 全部）
+    bool tty_write = false; // 是否允许写串口 / 强制接管
     bool shell = false;
     int  file = 0;      // 0 无 / 1 只读 / 2 读写
     bool svc = false;
@@ -29,12 +37,16 @@ struct DbGroupAclRule {
 struct DbPermScope {
     bool super = false;         // 超级组：全部资源、全部设备
     bool all_devices = false;   // 组勾了「全部设备」
+    bool global_scope = false;  // 组勾了「全局权限」：全局资源键（仓库/设置/审计等）生效
     bool has_groups = false;    // 是否加入过权限组
-    bool explicit_perm = false; // 是否被显式分配过（false 才按 role 回落）
     bool token_groups = false;   // 令牌自身是否配置了权限组（true 时取交集）
     std::set<std::string> resources;
     std::set<std::string> devices;
+    std::string ports;           // 组级端口范围（逗号分隔，空 = 无端口权限）
 };
+
+// a 的权限是否覆盖 b（资源/设备/端口都不小于 b）；用于判断变更是否收窄
+bool dbPermCovers(const DbPermScope& a, const DbPermScope& b);
 
 // Token 的可配置限额（创建与更新共用）
 struct DbTokenSpec {
@@ -131,20 +143,24 @@ public:
                             const std::string& desc, int enabled, std::string& err);
     bool permGroups(std::string& json_out);
     bool permGroupDetail(long long id, std::string& json_out, std::string& err);
+    // 组的授权面（不含成员），用于服务端校验「只能授予自己权限的子集」；
+    // 组不存在返回 false。
+    bool permGroupScope(long long id, DbPermScope& out);
+    // 角色对应内置组的授权面（角色只是内置组的别名）
+    bool permRoleScope(const std::string& role, DbPermScope& out);
+    // 组的 builtin_key（非内置组返回空），用于保护内置角色组
+    bool permGroupBuiltin(long long id, std::string& key);
     // resources/devices/all_devices/ports 任一为空表示不改；members 为空表示不改成员
-    bool permGroupSave(long long id, const std::string& name, const std::string& desc,
-                       const std::vector<std::string>& resources,
-                       const std::vector<std::string>& devices,
-                       int all_devices, const std::string& ports,
-                       long long& out_id, std::string& err);
     bool permGroupSaveAll(long long id, const std::string& name, const std::string& desc,
                           const std::vector<std::string>& resources,
                           const std::vector<std::string>& devices,
-                          int all_devices, const std::string& ports, bool set_members,
+                          int all_devices, int global_scope, const std::string& ports, bool set_members,
                           const std::vector<std::pair<std::string, std::string>>& members,
                           long long& out_id, std::string& err);
     bool permGroupDelete(long long id, std::string& err);
     bool permGroupMembers(long long id, std::string& json_out, std::string& err);
+    // 只列组内实际成员（type,id），用于管辖范围校验与撤权踢线
+    bool permGroupMemberList(long long id, std::vector<std::pair<std::string, std::string>>& out);
     bool permGroupSetMembers(long long id,
                              const std::vector<std::pair<std::string, std::string>>& members,
                              std::string& err);
@@ -156,15 +172,11 @@ public:
     bool permGroupsOfClient(long long account_id, std::vector<long long>& ids);
     bool permSetClientGroups(long long account_id, const std::vector<long long>& ids, std::string& err);
     bool clientPermsOf(long long account_id, std::set<std::string>& out, bool& super);
-    bool permSetUserGroups(long long user_id, const std::string& role,
-                           const std::vector<long long>& ids, std::string& err);
-    // 有效授权：账号（role 用于未显式分配时的回落）
-    bool permsOf(long long user_id, const std::string& role,
-                 std::set<std::string>& out, bool& super);
-    bool permScopeOfUser(long long user_id, const std::string& role, DbPermScope& out);
+    bool permSetUserGroups(long long user_id, const std::vector<long long>& ids, std::string& err);
+    // 有效授权：账号只由组成员关系求值，角色不参与
+    bool permScopeOfUser(long long user_id, DbPermScope& out);
     // 令牌：归属主体授权 ∩ 令牌组授权（令牌组只能收窄）
-    bool permScopeOfAdminToken(long long token_id, long long user_id, const std::string& role,
-                               DbPermScope& out);
+    bool permScopeOfAdminToken(long long token_id, long long user_id, DbPermScope& out);
     bool permScopeOfClientToken(long long token_id, long long account_id, DbPermScope& out);
     bool permScopeOfClient(long long account_id, DbPermScope& out);
     // 字典/授权对象页面用
@@ -238,6 +250,43 @@ public:
     bool dictDelete(const std::string& kind, long long id, std::string& err);
     bool dictBatchDelete(const std::string& kind, const std::vector<long long>& ids,
                          std::string& json_out);
+
+    // ---- relay 地址字典与下发列表 ----
+    bool relayDictPage(const std::string& q, int page, int page_size, std::string& json_out, int& total);
+    bool relayDictAdd(const std::string& host, int port, const std::string& name,
+                      const std::string& desc, long long& out_id, std::string& err);
+    bool relayDictUpdate(long long id, const std::string& host, int port, const std::string& name,
+                         const std::string& desc, int enabled, std::string& err);
+    bool relayDictDelete(long long id, std::string& err);   // 被下发列表引用时拒绝
+    // 有序下发列表：[{position,endpoint_id,host,port,name,enabled}]
+    bool relayListJson(std::string& json_out);
+    bool relayListSet(const std::vector<long long>& ids, const std::string& by, std::string& err);
+    // 同步任务（任务级 meta；逐设备行复用 distribution_tasks，kind='relay'）
+    bool relayTaskCreate(const std::string& batch, const std::string& name,
+                         const std::string& list_json, long long list_rev, int allow_leave,
+                         const std::string& mode, int wave_size, int wave_interval_s,
+                         int fail_threshold_pct, const std::vector<std::string>& devids,
+                         long long start_ms, long long deadline_ms, int max_retries,
+                         const std::string& actor, std::string& err);
+    bool relayTaskActive(std::string& json_out);   // scheduled/running 的任务
+    bool relayTaskList(const std::string& status, const std::string& q, int page, int page_size,
+                       const std::vector<std::string>& devids, bool scoped, std::string& json_out,
+                       int& total);
+    bool relayTaskGet(const std::string& batch, std::string& json_out, std::string& err);
+    bool relayTaskItems(const std::string& batch, std::string& json_out);
+    bool relayTaskDue(std::string& json_out);   // 待执行的逐设备行
+    bool relayTaskPayload(const std::string& batch, std::string& json_out, long long& rev);
+    bool relayTaskSetStatus(const std::string& batch, const std::string& status, long long finished_ms);
+    bool relayTaskPauseStale(long long rev, int& n);   // 列表已变更：暂停快照过期的任务
+    bool relayTaskSetWave(const std::string& batch, int wave, long long wave_done_ms);
+    bool relayTaskReleaseWave(const std::string& batch, int wave, long long now_ms, std::string& err);
+    bool relayTaskWaveStats(const std::string& batch, int wave, int& success, int& failed,
+                            int& timeout, int& pending, int& active, int& total);
+    bool relayTaskOverall(const std::string& batch, int& success, int& failed, int& timeout,
+                          int& pending, int& active, int& total);
+    bool relayTaskCancelPending(const std::string& batch, int& n);
+    bool relayTaskRetryFailed(const std::string& batch, int& n, int& min_wave);
+    bool relayItemMarkRunning(long long id, long long started_ms);
 
 
 

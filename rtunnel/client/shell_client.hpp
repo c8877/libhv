@@ -1,5 +1,5 @@
 #pragma once
-// A 端 CLI 免密 shell：rtunnel-client --server B --user U shell <devid>
+// A 端 CLI 免密 shell：rtunnel-client --token rtk-... --server B shell <devid>
 // 复用 TunnelLink 连 relay，OPEN_SHELL 后把设备 shell 桥到本地终端
 // （raw mode stdin/stdout + SIGWINCH → RESIZE 帧）。Ctrl-] 退出。
 
@@ -11,7 +11,7 @@ class ShellClient : public TunnelLink {
 public:
     int run(const char* devid);
 
-    char user[128] = {0};   // 登录 relay 的用户（identity() 用它）
+    char user[128] = {0};   // 登录 relay 的账号，AUTH_OK 回填（身份来自 rtk- 令牌）
 
 protected:
     uint8_t     role() const override { return rtnp::ROLE_CLIENT; }

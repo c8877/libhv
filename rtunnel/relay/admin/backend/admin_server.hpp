@@ -35,9 +35,9 @@ struct AdminConfig {
     std::string ca_key;      // 签发用 CA 私钥
     std::string cert_dir;    // 证书台账目录（index.txt/revoked.txt/audit.log）
     std::string file_dir;    // 文件管理目录（--admin-file-dir）
-    // Web 终端（direct 免密）：admin 作为 RTNP client 直连本机 relay 发 OPEN_SHELL
-    std::string shell_user = "devuser";  // direct 模式登录 relay 的用户（须被 ACL 授权）
-    std::string shell_token;             // 该用户连 relay 的凭证（--admin-shell-token）
+    // Web 终端 / 文件 / 服务代理：admin 作为 RTNP client 直连本机 relay。
+    // 身份由 relay 启动时生成的进程内密钥认证（auth_type=3），不落盘、不配置。
+    std::string proxy_secret;
     int         shell_relay_port = 8443; // direct 模式连接的 relay 端口（本机）
     std::string db_path = "rtunnel-admin.db"; // SQLite 账号库
     // 管理台 TLS：显式证书或自签；都为空时保持明文 HTTP
@@ -53,14 +53,17 @@ struct AdminActor {
     long long   id = 0;          // 0 = bootstrap token
     std::string username;
     std::string role;            // superadmin / admin / user / token-role
+    std::string ip;              // 请求来源地址，审计用
     long long   token_id = 0;    // >0 表示本次请求由 atk- Token 鉴权
     bool        super = false;   // 超级权限组：跳过资源校验
     std::set<std::string> perms; // 有效资源键（权限组并集）
     bool        is_client = false;   // 本次请求来自 rtk_ 接入账号 Token
     long long   client_id = 0;       // 接入账号 id（client_accounts.id）
     bool        all_devices = false; // 有效授权包含全部设备
+    bool        global_scope = false; // 有效授权包含全局权限（仓库/设置/审计等跨设备资源）
     bool        token_scoped = false;// 令牌自带权限组（设备范围需按令牌收窄）
     std::set<std::string> devices;   // 有效设备列表（all_devices 时为空）
+    std::string ports;               // 有效端口范围（组级并集，空 = 无端口）
 };
 
 // 一条待发告警：由采集线程入队，通知线程发送
@@ -106,11 +109,42 @@ private:
     bool        clientGroupDevids(std::vector<std::string>& out);
     bool        scopeRestricted();
     bool        tokenScoped();   // 仅当本次请求由绑定了权限组的 atk Token 发起
+    // 给予边界：返回空串表示允许，否则是拒绝原因。
+    // want 描述要授予的资源/设备/端口；一律要求是本操作者有效权限的子集。
+    std::string grantDenied(const DbPermScope& want) const;
+    // 一组权限组是否都能被当前操作者授予（组的 super 与授权面都要在自己范围内）
+    std::string grantGroupsDenied(const std::vector<long long>& ids);
+    // 能否操作这个主体：目标当前有效权限必须是自己权限的子集（防止横向降权/越权改组）
+    std::string manageDenied(const DbPermScope& target) const;
+    // 接入账号是否在自己可管理的范围内（不在返回原因，空串表示可以）
+    std::string accountDenied(long long account_id);
+    // 主体（user/atk/client/rtk）的当前有效范围；主体不存在返回 false
+    bool        subjectScope(const std::string& type, const std::string& id, DbPermScope& out);
+    // 主体换组后按类型断开已收窄的会话
+    void        kickSubjectShrunk(const std::string& type, const std::string& id,
+                                  const DbPermScope& before, const char* reason);
     // atk Token 授权范围内的设备；未绑定权限组时返回 false
     bool        tokenGroupDevids(std::vector<std::string>& out);
     // WebSocket 握手鉴权（浏览器自动带 Cookie）
     bool        wsAuthorize(const HttpRequestPtr& req, AdminActor& actor, std::string& role);
     void        audit(const std::string& role, const std::string& action, const std::string& detail);
+    // 后台线程没有请求上下文，用打开时抓取的主体串写审计
+    void        auditAs(const std::string& who, const std::string& action, const std::string& detail) {
+        audit_.write(who, action, detail);
+    }
+    std::string actorLabel() const;
+    // 撤权联动：关闭接入账号的在线会话（token_id>0 时只关该令牌）。
+    // 令牌吊销/轮换、账号停用/删除、权限组变更都会调用，避免旧会话继续用已撤销的权限。
+    int         kickClients(const std::vector<std::string>& users, long long token_id, const char* reason);
+    void        kickClientsById(long long account_id, const char* reason);
+    // 管理台 WS（终端/串口/文件/服务/设备代理）主体登记：撤权、停用、吊销后主动断开
+    void        registerConsoleWs(const WebSocketChannelPtr& ws, const AdminActor& a, const char* kind);
+    void        unregisterConsoleWs(const hv::WebSocketChannel* ws);
+    int         kickConsoleWsOfUser(long long user_id, const char* reason);
+    int         kickConsoleWsOfToken(long long token_id, const char* reason);
+    // 权限组变更前后对比：只断开有效权限变小的管理账号
+    std::map<long long, DbPermScope> snapshotUserScopes();
+    void        kickConsoleWsShrunk(const std::map<long long, DbPermScope>& before, const char* reason);
     void        refreshGroupAcl();
     void        refreshTokenCache();
     void        registerRoutes();
@@ -149,6 +183,23 @@ private:
     void handleDistVerify(const HttpContextPtr& ctx, const AdminActor& actor);
     void distLoop();
     void distTick();
+    // api_relay.cpp：中继地址字典、有序下发列表、同步任务
+    void handleRelayDictList(const HttpContextPtr& ctx);
+    void handleRelayDictAdd(const HttpContextPtr& ctx);
+    void handleRelayDictBatchAdd(const HttpContextPtr& ctx);
+    void handleRelayDictUpdate(const HttpContextPtr& ctx);
+    void handleRelayDictDelete(const HttpContextPtr& ctx);
+    void handleRelayListGet(const HttpContextPtr& ctx);
+    void handleRelayListSet(const HttpContextPtr& ctx);
+    void handleRelayListPush(const HttpContextPtr& ctx);
+    void handleRelaySyncCreate(const HttpContextPtr& ctx);
+    void createRelaySyncTask(const HttpContextPtr& ctx, const nlohmann::json& req);
+    void handleRelaySyncList(const HttpContextPtr& ctx);
+    void handleRelaySyncGet(const HttpContextPtr& ctx);
+    void handleRelaySyncAction(const HttpContextPtr& ctx, const std::string& action);
+    bool relayListSpec(std::string& servers);   // DB 有序列表 → "h:p,..."（启动与保存后应用）
+    void relaySyncLoop();
+    void relaySyncTick();
     // api_settings.cpp
     void loadSettings();
     int  settingInt(const std::string& key, int def);
@@ -204,9 +255,6 @@ private:
 
 
 
-    void handleAclGet(const HttpContextPtr& ctx);
-    void handleAclPut(const HttpContextPtr& ctx, const std::string& role);
-    void handleAclReload(const HttpContextPtr& ctx, const std::string& role);
     void handleAudit(const HttpContextPtr& ctx);
     // api_certs.cpp
     void handleCerts(const HttpContextPtr& ctx);
@@ -232,6 +280,7 @@ private:
     void handleClientAccountCreate(const HttpContextPtr& ctx, const std::string& role);
     void handleClientAccountUpdate(const HttpContextPtr& ctx, const std::string& role);
     void handleClientAccountDelete(const HttpContextPtr& ctx, const std::string& role);
+    void handleClientAccountKick(const HttpContextPtr& ctx, const std::string& role);
     void handleClientAccountEffective(const HttpContextPtr& ctx);
     void handleClientTokens(const HttpContextPtr& ctx);
     void handleClientTokenCreate(const HttpContextPtr& ctx, const std::string& role);
@@ -306,6 +355,17 @@ private:
     hv::WebSocketService ws_service_;
     std::map<hv::WebSocketChannel*, std::shared_ptr<TerminalSession>> terms_;
     std::mutex terms_mu_;          // 多个 HTTP worker 会并发进出 WS open/message/close
+    // 管理台 WS 主体（所有 WS 入口共用，key 为 channel 指针，value 里存 weak 避免续命）
+    struct ConsoleWsEntry {
+        std::weak_ptr<hv::WebSocketChannel> ws;
+        long long   user_id = 0;
+        long long   token_id = 0;
+        std::string username;
+        std::string kind;          // terminal / tty / fs / svc / proxy
+        long long   opened_ms = 0;
+    };
+    std::map<const hv::WebSocketChannel*, ConsoleWsEntry> console_ws_;
+    std::mutex console_ws_mu_;
     void onWsOpen(const WebSocketChannelPtr& channel, const HttpRequestPtr& req);
     void onWsMessage(const WebSocketChannelPtr& channel, const std::string& msg);
     void onWsClose(const WebSocketChannelPtr& channel);

@@ -16,18 +16,19 @@ export const NAV_GROUPS = [
     key: 'ops',
     label: '运维',
     items: [
-      { path: '/files', icon: 'FolderOpened', perm: 'file.read', roles: ['operator', 'manager', 'admin'] },
+      { path: '/files', icon: 'FolderOpened', perm: 'repo.read', roles: ['operator', 'manager', 'admin'] },
       { path: '/distribute', icon: 'Upload', label: '分发', perm: 'dist.write', roles: ['manager', 'admin'] },
       { path: '/tasks', icon: 'List', perm: 'dist.read', roles: ['manager', 'admin'] },
-      { path: '/ota', icon: 'Refresh', perm: ['dist.write', 'device.view'], roles: ['manager', 'admin'] },
+      { path: '/ota', icon: 'Refresh', perm: ['dist.write', 'device.view', 'repo.read'], roles: ['manager', 'admin'] },
+      { path: '/relay-list', icon: 'Connection', perm: 'relay.read', roles: ['manager', 'admin'] },
     ],
   },
   {
     key: 'perm',
     label: '权限',
     items: [
-      { path: '/groups', icon: 'UserFilled', label: '权限组', perm: 'dict.read', roles: ['manager', 'admin'] },
-      { path: '/subjects', icon: 'Avatar', label: '授权对象', perm: 'dict.read', roles: ['manager', 'admin'] },
+      { path: '/groups', icon: 'UserFilled', label: '权限组', perm: 'group.read', roles: ['manager', 'admin'] },
+      { path: '/subjects', icon: 'Avatar', label: '授权对象', perm: 'group.read', roles: ['manager', 'admin'] },
       { path: '/dicts', icon: 'Collection', label: '字典库', perm: 'dict.read', roles: ['operator', 'manager', 'admin'] },
       { path: '/access', icon: 'Key', perm: 'account.read', roles: ['operator', 'manager', 'admin'] },
       { path: '/clients', icon: 'Connection', label: '客户端', perm: 'device.view', roles: ['manager', 'admin'] },

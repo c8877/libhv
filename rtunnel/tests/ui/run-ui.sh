@@ -24,6 +24,8 @@ SUITES=(
   admin/services
   admin/forms
   admin/metrics
+  admin/relay-list
+  admin/terminal
   local/page
   local/metrics
 )
@@ -166,7 +168,6 @@ cat > "$T/agent2.json" <<JSON
 JSON
 
 "$BIN/rtunnel-relay" --host 127.0.0.1 --port "$RP" \
-  --acl devuser=* --acl dev=* \
   --admin "127.0.0.1:$AP" --admin-token t0k \
   --admin-db "$T/a.db" --admin-file-dir "$T/files" \
   --admin-docroot "$DIST" >"$T/relay.log" 2>&1 &

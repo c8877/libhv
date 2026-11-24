@@ -1,6 +1,7 @@
 #include "client_app.hpp"
 #include "common/logging.hpp"
 #include "common/shell_spawn.hpp"
+#include "common/token_util.hpp"
 
 #include <sys/ioctl.h>
 #include "shell_client.hpp"
@@ -610,8 +611,6 @@ int ClientApp::run(int argc, char** argv) {
             servers.push_back(argv[++i]);
         } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             port = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--user") == 0 && i + 1 < argc) {
-            snprintf(user, sizeof(user), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--tty") == 0 && i + 1 < argc) {
             snprintf(tty_spec, sizeof(tty_spec), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--socks5") == 0 && i + 1 < argc) {
@@ -671,11 +670,12 @@ int ClientApp::run(int argc, char** argv) {
             verbose = 1;
         } else {
             fprintf(stderr,
-                "Usage: %s --user U [--token T] [--server H[:P] ...] [--port P] [--socks5 HOST:PORT]\n"
+                "Usage: %s --token rtk-... [--server H[:P] ...] [--port P] [--socks5 HOST:PORT]\n"
                 "          [--forward 127.0.0.1:16022=devid:22 ...]\n"
                 "          [--allow-shell [--agent-path P] [--agent-idle S] [--agent-config F]] [--verbose]\n"
                 "          shell <devid>   # 直连设备免密 shell\n"
-                "       --server 可重复或逗号分隔，故障时按顺序自动切换（最多 8 个）\n",
+                "       --server 可重复或逗号分隔，故障时按顺序自动切换（最多 8 个）\n"
+                "       --token 是管理台「权限 → 接入账号」签发的接入令牌（rtk- 前缀）\n",
                 argv[0]);
             return 1;
         }
@@ -694,10 +694,9 @@ int ClientApp::run(int argc, char** argv) {
         }
         host = endpoints[0].host.c_str();
     }
-    // 账号 Token 自带身份，允许省略 --user（AUTH_OK 里回填）
-    bool token_identity = auth_token[0] != '\0' && strncmp(auth_token, "rtk_", 4) == 0;
-    if (user[0] == '\0' && !token_identity) {
-        fprintf(stderr, "--user is required\n");
+    // 接入令牌自带身份，不再接受用户名登录
+    if (!rtutil::isClientToken(auth_token)) {
+        fprintf(stderr, "--token 需要 rtk- 接入令牌（管理台「权限 → 接入账号」签发）\n");
         return 1;
     }
     if (!shell_devid && !socks_enabled && nfwd == 0 && !tty_spec[0]) {

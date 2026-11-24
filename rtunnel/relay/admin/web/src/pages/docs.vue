@@ -4,7 +4,7 @@
       <h2>接口文档</h2>
       <span class="muted">当前角色 {{ role }} · 可调用 {{ total }} 个接口</span>
       <span class="spacer" />
-      <el-button v-if="canManage()" @click="$router.push('/tokens')">
+      <el-button v-if="can('token.read')" @click="$router.push('/tokens')">
         API Token
       </el-button>
     </div>
@@ -20,7 +20,7 @@
 <script setup>
 import { computed } from 'vue'
 import ApiDocPanel from '@/components/ApiDocPanel.vue'
-import { canManage, roleOf } from '@/shared/store.js'
+import { can, roleOf } from '@/shared/store.js'
 import { docsForRole } from '@/shared/api-docs.js'
 
 const role = computed(() => roleOf())

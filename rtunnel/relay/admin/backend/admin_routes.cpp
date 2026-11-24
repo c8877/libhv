@@ -60,6 +60,58 @@ void AdminServer::registerRoutes() {
     // operator：详情/会话/文件读写/ACL 读
     access("device.view", "GET", "/api/v1/agents/:devid", &AdminServer::handleAgentDetail);
     access("settings.read", "GET", "/api/v1/settings", &AdminServer::handleSettingsGet);
+    // 运维 → 中继列表：地址字典 + 有序下发列表 + 同步任务
+    access("relay.read", "GET", "/api/v1/relay-dict", &AdminServer::handleRelayDictList);
+    access("relay.write", "POST", "/api/v1/relay-dict", &AdminServer::handleRelayDictAdd);
+    access("relay.write", "POST", "/api/v1/relay-dict/batch", &AdminServer::handleRelayDictBatchAdd);
+    access("relay.write", "PUT", "/api/v1/relay-dict/:id", &AdminServer::handleRelayDictUpdate);
+    access("relay.write", "DELETE", "/api/v1/relay-dict/:id", &AdminServer::handleRelayDictDelete);
+    access("relay.read", "GET", "/api/v1/relay-list", &AdminServer::handleRelayListGet);
+    service_.Handle("PUT", "/api/v1/relay-list", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "relay.write", role);
+        if (rc) return rc;
+        handleRelayListSet(ctx);
+        return (int)ctx->response->status_code;
+    });
+    service_.Handle("POST", "/api/v1/relay-list/push", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "relay.write", role);
+        if (rc) return rc;
+        handleRelayListPush(ctx);
+        return (int)ctx->response->status_code;
+    });
+    access("relay.read", "GET", "/api/v1/relay-sync/tasks", &AdminServer::handleRelaySyncList);
+    access("relay.write", "POST", "/api/v1/relay-sync/tasks", &AdminServer::handleRelaySyncCreate);
+    access("relay.read", "GET", "/api/v1/relay-sync/tasks/:batch", &AdminServer::handleRelaySyncGet);
+    service_.Handle("POST", "/api/v1/relay-sync/tasks/:batch/pause", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "relay.write", role);
+        if (rc) return rc;
+        handleRelaySyncAction(ctx, "pause");
+        return (int)ctx->response->status_code;
+    });
+    service_.Handle("POST", "/api/v1/relay-sync/tasks/:batch/resume", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "relay.write", role);
+        if (rc) return rc;
+        handleRelaySyncAction(ctx, "resume");
+        return (int)ctx->response->status_code;
+    });
+    service_.Handle("POST", "/api/v1/relay-sync/tasks/:batch/cancel", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "relay.write", role);
+        if (rc) return rc;
+        handleRelaySyncAction(ctx, "cancel");
+        return (int)ctx->response->status_code;
+    });
+    service_.Handle("POST", "/api/v1/relay-sync/tasks/:batch/retry", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "relay.write", role);
+        if (rc) return rc;
+        handleRelaySyncAction(ctx, "retry");
+        return (int)ctx->response->status_code;
+    });
     access("auth", "GET", "/api/v1/me/profile", &AdminServer::handleProfileGet);
     access("device.view", "GET", "/api/v1/agents/:devid/metrics/series/config", &AdminServer::handleMetricSeriesCfgGet);
     access("device.metrics.write", "PUT", "/api/v1/agents/:devid/metrics/series/config", &AdminServer::handleMetricSeriesCfgPut);
@@ -203,11 +255,10 @@ void AdminServer::registerRoutes() {
     });
     access("device.view", "GET", "/api/v1/clients", &AdminServer::handleClients);
     access("device.view", "GET", "/api/v1/streams", &AdminServer::handleStreams);
-    access("dict.read", "GET", "/api/v1/acl/file", &AdminServer::handleAclGet);
     access("device.view", "GET", "/metrics", &AdminServer::handleMetrics);
-    access("file.read", "GET", "/api/v1/files", &AdminServer::handleFiles);
-    access("file.read", "GET", "/api/v1/files/:name", &AdminServer::handleFileDownload);
-    access("file.write", "GET", "/api/v1/uploads/:name", &AdminServer::handleUploadStatus);
+    access("repo.read", "GET", "/api/v1/files", &AdminServer::handleFiles);
+    access("repo.read", "GET", "/api/v1/files/:name", &AdminServer::handleFileDownload);
+    access("repo.write", "GET", "/api/v1/uploads/:name", &AdminServer::handleUploadStatus);
     // manager：审计/证书列表
     access("audit.read", "GET", "/api/v1/audit", &AdminServer::handleAudit);
     access("cert.read", "GET", "/api/v1/certs", &AdminServer::handleCerts);
@@ -226,20 +277,6 @@ void AdminServer::registerRoutes() {
         handleKickAgent(ctx, role);
         return 200;
     });
-    service_.Handle("PUT", "/api/v1/acl/file", [this](const HttpContextPtr& ctx) {
-        std::string role;
-        int rc = requirePerm(ctx, "dict.write", role);
-        if (rc) return rc;
-        handleAclPut(ctx, role);
-        return 200;
-    });
-    service_.Handle("POST", "/api/v1/acl/reload", [this](const HttpContextPtr& ctx) {
-        std::string role;
-        int rc = requirePerm(ctx, "dict.write", role);
-        if (rc) return rc;
-        handleAclReload(ctx, role);
-        return 200;
-    });
     // 接入账号与 Token
     access("account.read", "GET", "/api/v1/client-accounts", &AdminServer::handleClientAccounts);
     access("account.read", "GET", "/api/v1/client-accounts/:id", &AdminServer::handleClientAccountGet);
@@ -254,6 +291,10 @@ void AdminServer::registerRoutes() {
     service_.Handle("DELETE", "/api/v1/client-accounts/:id", [this](const HttpContextPtr& ctx) {
         std::string role; int rc = requirePerm(ctx, "account.delete", role); if (rc) return rc;
         handleClientAccountDelete(ctx, role); return 200;
+    });
+    service_.Handle("POST", "/api/v1/client-accounts/:id/kick", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requirePerm(ctx, "account.write", role); if (rc) return rc;
+        handleClientAccountKick(ctx, role); return 200;
     });
     access("account.read", "GET", "/api/v1/client-accounts/:id/effective", &AdminServer::handleClientAccountEffective);
     access("account.read", "GET", "/api/v1/client-accounts/:id/tokens", &AdminServer::handleClientTokens);
@@ -299,17 +340,19 @@ void AdminServer::registerRoutes() {
         handleAdminTokenDelete(ctx, currentActor());
         return (int)ctx->response->status_code;
     });
-    // 资源字典与权限组
+    // 权限字典（资源/设备/端口/串口）与权限组
     access("dict.read", "GET", "/api/v1/permission/dicts", &AdminServer::handlePermissionDicts);
-    access("dict.read", "GET", "/api/v1/permission/resources", &AdminServer::handlePermResources);
-    access("dict.read", "GET", "/api/v1/permission/groups", &AdminServer::handlePermGroups);
-    access("dict.read", "GET", "/api/v1/permission/subjects", &AdminServer::handlePermSubjects);
-    access("dict.read", "GET", "/api/v1/permission/groups/:id", &AdminServer::handlePermGroupDetail);
-    access("dict.read", "GET", "/api/v1/permission/subjects/:type/:id/groups",
+    access("group.read", "GET", "/api/v1/permission/resources", &AdminServer::handlePermResources);
+    access("group.read", "GET", "/api/v1/permission/groups", &AdminServer::handlePermGroups);
+    access("group.read", "GET", "/api/v1/permission/subjects", &AdminServer::handlePermSubjects);
+    access("group.read", "GET", "/api/v1/permission/groups/:id", &AdminServer::handlePermGroupDetail);
+    access("group.read", "GET", "/api/v1/permission/subjects/:type/:id/groups",
            &AdminServer::handleSubjectGroups);
+    access("group.read", "GET", "/api/v1/permission/groups/:id/members", &AdminServer::handlePermGroupMembers);
+    // 给主体换组 = 改变授权面，单独用 group.member 控制
     service_.Handle("PUT", "/api/v1/permission/subjects/:type/:id/groups", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requirePerm(ctx, "dict.write", role);
+        int rc = requirePerm(ctx, "group.member", role);
         if (rc) return rc;
         handleSubjectGroupsSave(ctx, role);
         return (int)ctx->response->status_code;
@@ -321,7 +364,6 @@ void AdminServer::registerRoutes() {
         handleResDeviceUpdate(ctx, role);
         return (int)ctx->response->status_code;
     });
-    access("dict.read", "GET", "/api/v1/permission/groups/:id/members", &AdminServer::handlePermGroupMembers);
     service_.Handle("PUT", "/api/v1/permission/resources/:key", [this](const HttpContextPtr& ctx) {
         std::string role;
         int rc = requirePerm(ctx, "dict.write", role);
@@ -331,28 +373,28 @@ void AdminServer::registerRoutes() {
     });
     service_.Handle("POST", "/api/v1/permission/groups", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requirePerm(ctx, "dict.write", role);
+        int rc = requirePerm(ctx, "group.write", role);
         if (rc) return rc;
         handlePermGroupSave(ctx, role);
         return (int)ctx->response->status_code;
     });
     service_.Handle("PUT", "/api/v1/permission/groups/:id", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requirePerm(ctx, "dict.write", role);
+        int rc = requirePerm(ctx, "group.write", role);
         if (rc) return rc;
         handlePermGroupSave(ctx, role);
         return (int)ctx->response->status_code;
     });
     service_.Handle("DELETE", "/api/v1/permission/groups/:id", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requirePerm(ctx, "dict.write", role);
+        int rc = requirePerm(ctx, "group.write", role);
         if (rc) return rc;
         handlePermGroupDelete(ctx, role);
         return (int)ctx->response->status_code;
     });
     service_.Handle("PUT", "/api/v1/permission/groups/:id/members", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requirePerm(ctx, "dict.write", role);
+        int rc = requirePerm(ctx, "group.member", role);
         if (rc) return rc;
         handlePermGroupMembersSave(ctx, role);
         return (int)ctx->response->status_code;
@@ -360,7 +402,7 @@ void AdminServer::registerRoutes() {
     access("account.read", "GET", "/api/v1/client-accounts/:id/perm-groups", &AdminServer::handleClientPermGroups);
     service_.Handle("PUT", "/api/v1/client-accounts/:id/perm-groups", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requirePerm(ctx, "account.write", role);
+        int rc = requirePerm(ctx, "group.member", role);
         if (rc) return rc;
         handleClientPermGroupsSave(ctx, role);
         return (int)ctx->response->status_code;
@@ -368,7 +410,7 @@ void AdminServer::registerRoutes() {
     access("account.read", "GET", "/api/v1/users/:id/perm-groups", &AdminServer::handleUserPermGroups);
     service_.Handle("PUT", "/api/v1/users/:id/perm-groups", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requirePerm(ctx, "account.write", role);
+        int rc = requirePerm(ctx, "group.member", role);
         if (rc) return rc;
         handleUserPermGroupsSave(ctx, role);
         return (int)ctx->response->status_code;
@@ -440,7 +482,7 @@ void AdminServer::registerRoutes() {
     });
     service_.Handle("POST", "/api/v1/files/:name", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requirePerm(ctx, "file.write", role);
+        int rc = requirePerm(ctx, "repo.write", role);
         if (rc) return rc;
         std::string action = ctx->param("action");
         if (action == "mkdir") handleFileMkdir(ctx, role);
@@ -450,14 +492,14 @@ void AdminServer::registerRoutes() {
     });
     service_.Handle("DELETE", "/api/v1/files/:name", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requirePerm(ctx, "file.delete", role);
+        int rc = requirePerm(ctx, "repo.delete", role);
         if (rc) return rc;
         handleFileDelete(ctx, role);
         return 200;
     });
     service_.Handle("PUT", "/api/v1/files/:name", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requirePerm(ctx, "file.write", role);
+        int rc = requirePerm(ctx, "repo.write", role);
         if (rc) return rc;
         handleFilePut(ctx, role);
         return 200;

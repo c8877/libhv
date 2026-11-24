@@ -80,6 +80,8 @@ enum Type : uint8_t {
     STORAGE_INFO   = 0x3F,   // C→B：str json {ok,mount,total_kb,used_kb,...,error}；sid 回显
     STORAGE_DATA   = 0x40,   // C→B：原始字节，首字节 \\1=gzip / \\0=明文，顺序拼接；sid 回显
     STORAGE_END    = 0x41,   // C→B：str json {ok,size,error}；sid 回显
+    RELAY_LIST     = 0x42,   // B→C：str json {servers,rev,allow_leave}；连接级
+    RELAY_LIST_ACK = 0x43,   // C→B：str json {ok,rev,count,current,switching,error}
 };
 
 // 错误码

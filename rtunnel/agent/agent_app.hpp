@@ -51,6 +51,7 @@ struct LocalStream {
     int is_svc = 0;                  // OPEN_SVC：服务管理协议流
     rtvs::Session* svc_session = nullptr;
     std::string tty_path;    // TTY 流对应设备路径
+    int tty_readonly = 0;    // 只读串口流：丢弃写方向
     int is_monitor = 0;      // 只读监听流
     uint32_t monitor_of = 0; // 监听目标 sid
     int freed = 0;           // 防重复释放（close 回调与超时/断链并发）
@@ -72,6 +73,10 @@ public:
     char allow_tty[512] = {0};            // 逗号分隔的串口白名单
     std::string config_file = "/opt/data/etc/rtunnel-agent.json"; // --config-file 可覆盖
     bool config_loaded = false;                          // 本次启动是否成功读取配置文件
+    // relay 下发的地址列表（落盘到配置文件的 relay_servers）：roll 版本用于对齐
+    std::string relay_servers_spec;                      // 规范化的 "h:p,..."，空=未下发
+    unsigned int relay_servers_rev = 0;
+    std::vector<TunnelEndpoint> bootstrap_endpoints;     // 启动参数里的 --server，兜底用
     std::string file_dir = "/opt/data/files";
     double cpu_usage = 0;
     std::vector<double> cpu_cores;
@@ -243,8 +248,10 @@ private:
     void onReady() override;
     void loadConfig();
     bool saveConfig();
+    bool saveRelayList();   // 只写 relay_servers / relay_servers_rev
     int applyFileConfig(const std::string& root, int rw, int max_mb, int enabled, std::string& err);
     void handleConfigSet(const rtnp::Frame* f);
+    void handleRelayList(const rtnp::Frame* f);
     void handleFileFrame(const rtnp::Frame* f);
     void handleOtaApply(const rtnp::Frame* f);
     void handleNetReq(const rtnp::Frame* f);

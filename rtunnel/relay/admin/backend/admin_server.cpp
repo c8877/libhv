@@ -7,6 +7,7 @@
 using nlohmann::json;
 #include <thread>
 #include <chrono>
+#include <cctype>
 
 #include <chrono>
 #include <future>
@@ -21,9 +22,15 @@ using nlohmann::json;
 std::string AdminServer::callRelay(std::function<std::string()> fn) {
     if (relay_->loop == NULL) return "{\"error\":\"relay not running\"}";
 
+    // fn 可能按引用捕获调用方栈上的变量（含输出参数）。等待超时后调用方会返回，
+    // 此时若 relay 线程再执行 fn 就是悬空引用；用 abandoned 标记让回调跳过它。
+    // 回调与超时路径用同一把锁互斥：fn 已经开始执行时，超时方必须等它结束才能返回。
     struct Task {
         std::function<std::string()> fn;
         std::promise<std::string>    promise;
+        std::mutex                   mu;
+        bool                         abandoned = false;
+        bool                         done = false;
     };
     auto task = std::make_shared<Task>();
     task->fn = std::move(fn);
@@ -36,20 +43,36 @@ std::string AdminServer::callRelay(std::function<std::string()> fn) {
     ev.event_type = (hevent_type_e)(HEVENT_TYPE_CUSTOM + 1);
     ev.cb = [](hevent_t* e) {
         auto* holder = (std::shared_ptr<Task>*)e->userdata;
+        Task* t = holder->get();
         std::string result;
-        try {
-            result = (*holder)->fn();
-        } catch (...) {
-            result = "{\"error\":\"internal\"}";
+        {
+            std::lock_guard<std::mutex> lk(t->mu);
+            if (t->abandoned) {
+                result = "{\"error\":\"relay timeout\"}";
+            } else {
+                try {
+                    result = t->fn();
+                } catch (...) {
+                    result = "{\"error\":\"internal\"}";
+                }
+                t->done = true;
+            }
         }
-        (*holder)->promise.set_value(result);
+        t->promise.set_value(result);
         delete holder;
     };
     ev.userdata = holder;
     hloop_post_event(relay_->loop, &ev);
 
     if (fut.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
-        return "{\"error\":\"relay timeout\"}";
+        std::unique_lock<std::mutex> lk(task->mu);
+        if (!task->done) {
+            task->abandoned = true;
+            return "{\"error\":\"relay timeout\"}";
+        }
+        // 刚好在超时与取锁之间完成，返回真实结果
+        lk.unlock();
+        return fut.get();
     }
     return fut.get();
 }
@@ -80,6 +103,7 @@ static std::string cookieValue(const HttpContextPtr& ctx, const std::string& key
 
 std::string AdminServer::roleOf(const HttpContextPtr& ctx) {
     tl_actor = AdminActor{};
+    if (ctx->request) tl_actor.ip = ctx->request->client_addr.ip;
 
     // 1) 会话 Cookie
     std::string sid = cookieValue(ctx, "rt_sid");
@@ -164,34 +188,138 @@ static int roleWeight(const std::string& role) {
 void AdminServer::loadActorPerms() {
     tl_actor.perms.clear();
     tl_actor.devices.clear();
+    tl_actor.ports.clear();
     tl_actor.super = false;
     tl_actor.all_devices = false;
+    tl_actor.global_scope = false;
     tl_actor.token_scoped = false;
     DbPermScope sc;
-    if (!db_.ok()) {
-        tl_actor.super = tl_actor.role == "admin";
-        return;
-    }
+    if (!db_.ok()) return;   // 权限只在库里求值，库不可用就 fail closed
     if (tl_actor.is_client) {
         if (tl_actor.token_id > 0) db_.permScopeOfClientToken(tl_actor.token_id, tl_actor.client_id, sc);
         else db_.permScopeOfClient(tl_actor.client_id, sc);
     } else if (tl_actor.token_id > 0 && tl_actor.id > 0) {
-        db_.permScopeOfAdminToken(tl_actor.token_id, tl_actor.id, tl_actor.role, sc);
+        db_.permScopeOfAdminToken(tl_actor.token_id, tl_actor.id, sc);
     } else if (tl_actor.id > 0) {
-        db_.permScopeOfUser(tl_actor.id, tl_actor.role, sc);
+        db_.permScopeOfUser(tl_actor.id, sc);
     } else {
-        tl_actor.super = tl_actor.role == "admin";
-        return;
+        return;   // 只有 bootstrap 初始化令牌走这里，它的 super 在 roleOf 里显式设置
     }
     tl_actor.super = sc.super;
     tl_actor.all_devices = sc.all_devices;
+    // 全部设备本身就意味着能影响整个部署；显式 global_scope 用于受限设备的委派管理员
+    tl_actor.global_scope = sc.super || sc.all_devices || sc.global_scope;
     tl_actor.token_scoped = sc.token_groups;
     tl_actor.perms = sc.resources;
     tl_actor.devices = sc.devices;
+    tl_actor.ports = sc.ports;
+}
+
+std::string AdminServer::grantDenied(const DbPermScope& want) const {
+    if (tl_actor.super) return std::string();
+    if (want.super) return "只有超级管理员可以操作超级权限组";
+    for (const auto& r : want.resources) {
+        if (!tl_actor.perms.count(r)) return "不能授予自己没有的资源: " + r;
+        // 全局键会影响范围外设备/整机配置，需要自己拥有「全局权限」
+        if (permIsGlobal(r) && !tl_actor.global_scope)
+            return "不能授予全局资源（需要全局权限）: " + r;
+    }
+    if (want.global_scope && !tl_actor.global_scope) return "不能授予全局权限";
+    if (want.all_devices && !tl_actor.all_devices) return "不能授予全部设备";
+    if (!tl_actor.all_devices) {
+        for (const auto& d : want.devices) {
+            if (!tl_actor.devices.count(d)) return "不能授予自己无权访问的设备: " + d;
+        }
+    }
+    if (!adminPortsCovered(tl_actor.ports, want.ports)) return "不能授予超出自己范围的端口: " + want.ports;
+    return std::string();
+}
+
+std::string AdminServer::manageDenied(const DbPermScope& target) const {
+    if (tl_actor.super) return std::string();
+    if (target.super) return "只有超级管理员可以操作超级权限组";
+    for (const auto& r : target.resources) {
+        if (!tl_actor.perms.count(r))
+            return "目标当前权限高于你的权限，不能修改: " + r;
+        if (permIsGlobal(r) && !tl_actor.global_scope)
+            return "目标拥有全局权限，不能修改: " + r;
+    }
+    if (target.global_scope && !tl_actor.global_scope) return "目标拥有全局权限，不能修改";
+    if (target.all_devices && !tl_actor.all_devices) return "目标拥有全部设备权限，不能修改";
+    if (!tl_actor.all_devices) {
+        for (const auto& d : target.devices) {
+            if (!tl_actor.devices.count(d))
+                return "目标当前设备超出你的范围，不能修改: " + d;
+        }
+    }
+    if (!adminPortsCovered(tl_actor.ports, target.ports))
+        return "目标当前端口范围超出你的范围，不能修改: " + target.ports;
+    return std::string();
+}
+
+bool AdminServer::subjectScope(const std::string& type, const std::string& sid, DbPermScope& out) {
+    if (type == "user") {
+        DbUser u;
+        if (!db_.findUserById(atoll(sid.c_str()), u)) return false;
+        return db_.permScopeOfUser(u.id, out);
+    }
+    if (type == "client") return db_.permScopeOfClient(atoll(sid.c_str()), out);
+    if (type == "atk") {
+        DbTokenSpec spec;
+        long long uid = 0;
+        std::string uname, terr;
+        if (!db_.adminTokenSpec(atoll(sid.c_str()), spec, uid, uname, nullptr, terr)) return false;
+        DbUser u;
+        if (!db_.findUserById(uid, u)) return false;
+        return db_.permScopeOfAdminToken(atoll(sid.c_str()), uid, out);
+    }
+    if (type == "rtk") {
+        DbTokenSpec spec;
+        long long aid = 0;
+        std::string terr;
+        if (!db_.clientTokenSpec(atoll(sid.c_str()), spec, aid, nullptr, terr)) return false;
+        return db_.permScopeOfClientToken(atoll(sid.c_str()), aid, out);
+    }
+    return false;
+}
+
+std::string AdminServer::accountDenied(long long account_id) {
+    DbPermScope sc;
+    if (!db_.permScopeOfClient(account_id, sc)) return "接入账号不存在";
+    return manageDenied(sc);
+}
+
+void AdminServer::kickSubjectShrunk(const std::string& type, const std::string& sid,
+                                    const DbPermScope& before, const char* reason) {
+    DbPermScope after;
+    if (!subjectScope(type, sid, after)) return;
+    if (dbPermCovers(after, before)) return;   // 扩容/改名不打断
+    if (type == "client") {
+        kickClientsById(atoll(sid.c_str()), reason);
+    } else if (type == "rtk") {
+        kickClients({}, atoll(sid.c_str()), reason);
+    } else if (type == "atk") {
+        kickConsoleWsOfToken(atoll(sid.c_str()), reason);
+    }
+}
+
+std::string AdminServer::grantGroupsDenied(const std::vector<long long>& ids) {
+    for (long long id : ids) {
+        DbPermScope gs;
+        if (!db_.permGroupScope(id, gs)) return "权限组不存在: " + std::to_string(id);
+        std::string why = grantDenied(gs);
+        if (!why.empty()) return why;
+    }
+    return std::string();
 }
 
 bool AdminServer::hasPerm(const std::string& key) const {
-    return tl_actor.super || tl_actor.perms.count(key) > 0;
+    if (tl_actor.super) return true;
+    if (!tl_actor.perms.count(key)) return false;
+    // 全局资源需要组显式开启「全局权限」（全部设备与 super 自动视为开启），
+    // 避免受限设备的组通过 relay/dict 等全局键影响范围外的设备。
+    if (permIsGlobal(key) && !tl_actor.global_scope) return false;
+    return true;
 }
 
 int AdminServer::requirePerm(const HttpContextPtr& ctx, const std::string& need, std::string& role) {
@@ -202,7 +330,7 @@ int AdminServer::requirePerm(const HttpContextPtr& ctx, const std::string& need,
         ctx->response->body = "{\"error\":\"unauthorized\"}";
         return 401;
     }
-    if (need.empty() || need == "auth" || tl_actor.super || tl_actor.perms.count(need) > 0) return 0;
+    if (need.empty() || need == "auth" || hasPerm(need)) return 0;
     ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
     ctx->response->content_type = APPLICATION_JSON;
     ctx->response->body = "{\"error\":\"forbidden\",\"need\":\"" + need + "\"}";
@@ -230,10 +358,22 @@ int AdminServer::requireRole(const HttpContextPtr& ctx, int need, std::string& r
 bool AdminServer::wsAuthorize(const HttpRequestPtr& req, AdminActor& actor, std::string& role) {
     actor = AdminActor{};
     role.clear();
+    // 鉴权失败时不能沿用同一 worker 线程上一个请求的身份（hasPerm 读 tl_actor）
+    tl_actor = AdminActor{};
     std::string origin = req->GetHeader("Origin");
     if (!origin.empty()) {
+        // 只比较 scheme://authority 的 authority 部分，必须与 Host 完全一致；
+        // 子串匹配会把 evil-admin.example 当成 admin.example 的合法来源。
         std::string host = req->GetHeader("Host");
-        if (host.empty() || origin.find(host) == std::string::npos) {
+        size_t sp = origin.find("://");
+        std::string authority = (sp == std::string::npos) ? std::string() : origin.substr(sp + 3);
+        size_t slash = authority.find('/');
+        if (slash != std::string::npos) authority = authority.substr(0, slash);
+        auto lower = [](std::string v) {
+            for (char& c : v) c = (char)tolower((unsigned char)c);
+            return v;
+        };
+        if (host.empty() || sp == std::string::npos || lower(authority) != lower(host)) {
             logf_("[admin] ws origin mismatch: %s host=%s", origin.c_str(), host.c_str());
             return false;
         }
@@ -250,12 +390,11 @@ bool AdminServer::wsAuthorize(const HttpRequestPtr& req, AdminActor& actor, std:
             return true;
         }
     }
-    // API Token：浏览器 WebSocket 不能自定义头，脚本可用 ?atk= 或 Authorization
-    std::vector<std::string> cand;
-    std::string qtok = req->GetParam("atk");
-    if (!qtok.empty()) cand.push_back(qtok);
+    // 非浏览器客户端：只接受 Authorization 头。浏览器走上面的会话 Cookie，
+    // 不要再用 ?atk= 传令牌——查询串会进反向代理日志和访问记录。
     std::string auth = req->GetHeader("Authorization");
     const std::string prefix = "Bearer ";
+    std::vector<std::string> cand;
     if (auth.compare(0, prefix.size(), prefix) == 0) cand.push_back(auth.substr(prefix.size()));
     for (const auto& tok : cand) {
         if (rtutil::isAdminToken(tok) && db_.ok()) {
@@ -307,8 +446,136 @@ bool AdminServer::wsAuthorize(const HttpRequestPtr& req, AdminActor& actor, std:
     return false;
 }
 
+std::string AdminServer::actorLabel() const {
+    AdminActor a = currentActor();
+    if (a.username.empty()) return std::string();
+    std::string who = a.is_client ? "client:" + a.username : a.username;
+    if (a.id > 0) who += "#" + std::to_string(a.id);
+    if (a.token_id > 0) who += "/token" + std::to_string(a.token_id);
+    if (!a.role.empty()) who += "/" + a.role;
+    if (!a.ip.empty()) who += "/" + a.ip;
+    return who;
+}
+
 void AdminServer::audit(const std::string& role, const std::string& action, const std::string& detail) {
-    audit_.write(role, action, detail);
+    // 审计主体：优先用当前请求的真实账号（含 id / 令牌 / 来源），没有请求上下文时才退回角色
+    std::string who = actorLabel();
+    if (who.empty()) who = role.empty() ? "anonymous" : role;
+    audit_.write(who, action, detail);
+}
+
+int AdminServer::kickClients(const std::vector<std::string>& users, long long token_id, const char* reason) {
+    if (users.empty() && token_id <= 0) return 0;
+    std::string why = reason ? reason : "revoked";
+    std::string out = callRelay([this, users, token_id, why]() {
+        return std::to_string(relay_->kickClientSessions(users, token_id, why.c_str()));
+    });
+    int n = atoi(out.c_str());
+    if (n > 0) logf_("[admin] %s: closed %d client session(s)", why.c_str(), n);
+    return n;
+}
+
+void AdminServer::kickClientsById(long long account_id, const char* reason) {
+    std::string aj, err;
+    if (!db_.clientAccountGet(account_id, aj, err)) return;
+    auto a = nlohmann::json::parse(aj, nullptr, false);
+    if (a.is_discarded()) return;
+    std::string user = a.value("username", std::string());
+    if (!user.empty()) kickClients({user}, -1, reason);
+}
+
+// ---------------------------------------------------------------- 管理台 WS 会话
+// 管理台的终端/串口/文件/服务 WS 都跑在独立线程，登录态在握手时只查一次。
+// 这里登记每条的所属账号（和 atk 令牌），撤权/停用/吊销后主动断开，避免旧连接
+// 继续用已经撤销的权限操作设备。
+
+void AdminServer::registerConsoleWs(const WebSocketChannelPtr& ws, const AdminActor& a, const char* kind) {
+    if (!ws) return;
+    ConsoleWsEntry e;
+    e.ws = ws;
+    e.user_id = a.id;
+    e.token_id = a.token_id;
+    e.username = a.username;
+    e.kind = kind ? kind : "";
+    e.opened_ms = AdminDb::nowMs();
+    std::lock_guard<std::mutex> lk(console_ws_mu_);
+    console_ws_[ws.get()] = std::move(e);
+}
+
+void AdminServer::unregisterConsoleWs(const hv::WebSocketChannel* ws) {
+    if (!ws) return;
+    std::lock_guard<std::mutex> lk(console_ws_mu_);
+    console_ws_.erase(ws);
+}
+
+// 关闭匹配的会话。先在锁内摘出来再关：close() 会同步触发 onclose → unregister，
+// 持锁关会自锁。
+static int closeConsoleWs(std::vector<WebSocketChannelPtr>& victims, const char* reason) {
+    int n = 0;
+    for (auto& ws : victims) {
+        if (!ws) continue;
+        logf_("[admin] console ws closed: %s", reason ? reason : "revoked");
+        ++n;
+        if (ws->isConnected()) ws->close();
+    }
+    return n;
+}
+
+int AdminServer::kickConsoleWsOfUser(long long user_id, const char* reason) {
+    if (user_id <= 0) return 0;
+    std::vector<WebSocketChannelPtr> victims;
+    {
+        std::lock_guard<std::mutex> lk(console_ws_mu_);
+        for (auto it = console_ws_.begin(); it != console_ws_.end();) {
+            if (it->second.user_id != user_id) { ++it; continue; }
+            if (auto ws = it->second.ws.lock()) victims.push_back(std::move(ws));
+            it = console_ws_.erase(it);
+        }
+    }
+    return closeConsoleWs(victims, reason);
+}
+
+int AdminServer::kickConsoleWsOfToken(long long token_id, const char* reason) {
+    if (token_id <= 0) return 0;
+    std::vector<WebSocketChannelPtr> victims;
+    {
+        std::lock_guard<std::mutex> lk(console_ws_mu_);
+        for (auto it = console_ws_.begin(); it != console_ws_.end();) {
+            if (it->second.token_id != token_id) { ++it; continue; }
+            if (auto ws = it->second.ws.lock()) victims.push_back(std::move(ws));
+            it = console_ws_.erase(it);
+        }
+    }
+    return closeConsoleWs(victims, reason);
+}
+
+std::map<long long, DbPermScope> AdminServer::snapshotUserScopes() {
+    std::map<long long, DbPermScope> out;
+    std::vector<DbUser> us;
+    if (!db_.ok() || !db_.listUsers(us)) return out;
+    for (auto& u : us) {
+        DbPermScope sc;
+        db_.permScopeOfUser(u.id, sc);
+        out[u.id] = std::move(sc);
+    }
+    return out;
+}
+
+void AdminServer::kickConsoleWsShrunk(const std::map<long long, DbPermScope>& before, const char* reason) {
+    if (before.empty()) return;
+    int n = 0;
+    for (auto& kv : before) {
+        DbUser u;
+        if (!db_.findUserById(kv.first, u) || u.status != "active") {
+            n += kickConsoleWsOfUser(kv.first, reason);
+            continue;
+        }
+        DbPermScope after;
+        db_.permScopeOfUser(u.id, after);
+        // 新范围覆盖旧范围 = 没缩；否则断开
+        if (!dbPermCovers(after, kv.second)) n += kickConsoleWsOfUser(kv.first, reason);
+    }
+    if (n > 0) logf_("[admin] console ws: %d session(s) closed (%s)", n, reason ? reason : "revoked");
 }
 
 // ---------------------------------------------------------------- 前端
@@ -407,6 +674,15 @@ int AdminServer::start(const AdminConfig& cfg) {
             db_.permSeed();
             db_.distRecover();
             logf_("[admin] db: %s", cfg_.db_path.c_str());
+            // 启动时把下发表（relay_list）装进 relay（此时 loop 还没跑，仍在 relay 线程）
+            {
+                std::string spec;
+                if (!relayListSpec(spec)) spec.clear();
+                std::string rl_err;
+                if (!relay_->setRelayList(spec, settingInt("relay.allow_leave", 0) != 0, rl_err)) {
+                    logf_("[admin] relay list invalid: %s", rl_err.c_str());
+                }
+            }
         } else {
             logf_("[admin] db open failed: %s (%s)", cfg_.db_path.c_str(), db_err.c_str());
         }
@@ -432,6 +708,7 @@ int AdminServer::start(const AdminConfig& cfg) {
               cfg_.addr.c_str());
     }
     spawnWorker([this]() { distLoop(); });
+    spawnWorker([this]() { relaySyncLoop(); });
     // Token 用量：relay 只保留内存计数，这里按周期拉快照落库
     spawnWorker([this]() {
         while (!stopping_.load()) {

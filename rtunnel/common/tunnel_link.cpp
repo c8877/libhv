@@ -7,67 +7,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-// ---------------------------------------------------------------- 地址解析
-
-static bool parsePort(const std::string& s, int& port) {
-    if (s.empty()) return false;
-    char* end = NULL;
-    long v = strtol(s.c_str(), &end, 10);
-    if (!end || *end != '\0' || v <= 0 || v > 65535) return false;
-    port = (int)v;
-    return true;
-}
-
-bool tunnel_parse_endpoints(const std::string& spec, int default_port,
-                            std::vector<TunnelEndpoint>& out, std::string& err) {
-    out.clear();
-    err.clear();
-    size_t pos = 0;
-    while (pos <= spec.size()) {
-        size_t comma = spec.find(',', pos);
-        std::string item = spec.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
-        pos = (comma == std::string::npos) ? spec.size() + 1 : comma + 1;
-
-        size_t b = item.find_first_not_of(" \t");
-        if (b == std::string::npos) continue;
-        size_t e = item.find_last_not_of(" \t");
-        item = item.substr(b, e - b + 1);
-        if (item.empty()) continue;
-
-        TunnelEndpoint ep;
-        ep.port = default_port;
-        if (item[0] == '[') {
-            size_t rb = item.find(']');
-            if (rb == std::string::npos) { err = "invalid IPv6 endpoint: " + item; return false; }
-            ep.host = item.substr(1, rb - 1);
-            if (rb + 1 < item.size()) {
-                if (item[rb + 1] != ':' || !parsePort(item.substr(rb + 2), ep.port)) {
-                    err = "invalid port in endpoint: " + item;
-                    return false;
-                }
-            }
-        } else {
-            size_t c1 = item.find(':');
-            // 单个冒号才当 host:port；多个冒号视为裸 IPv6，用默认端口
-            if (c1 != std::string::npos && item.find(':', c1 + 1) == std::string::npos) {
-                ep.host = item.substr(0, c1);
-                if (!parsePort(item.substr(c1 + 1), ep.port)) {
-                    err = "invalid port in endpoint: " + item;
-                    return false;
-                }
-            } else {
-                ep.host = item;
-            }
-        }
-        if (ep.host.empty()) { err = "empty host in endpoint: " + item; return false; }
-        if (ep.port <= 0 || ep.port > 65535) { err = "invalid default port"; return false; }
-        if (out.size() >= 8) break;   // 超出上限的部分忽略
-        out.push_back(ep);
-    }
-    if (out.empty()) { err = "no endpoint in: " + spec; return false; }
-    return true;
-}
-
 // ---------------------------------------------------------------- 回调薄封装
 
 void TunnelLink::tunnelReadCb(hio_t* io, void* buf, int n) {
@@ -100,6 +39,11 @@ void TunnelLink::hsTimeoutCb(htimer_t* t) {
     if (self) self->onHsTimeout();
 }
 
+void TunnelLink::switchCb(htimer_t* t) {
+    auto* self = (TunnelLink*)hevent_userdata(t);
+    if (self && self->io) hio_close(self->io);
+}
+
 // ---------------------------------------------------------------- 帧处理
 
 void TunnelLink::handleFrame(rtnp::Frame* f) {
@@ -127,11 +71,10 @@ void TunnelLink::handleFrame(rtnp::Frame* f) {
         }
         rtnp::Writer w;
         w.str(identity());
-        // AUTH：identity + auth_type(0=none,1=静态 token,2=账号 token) + token
+        // AUTH：identity + auth_type(0=none,1=接入令牌 rtk-) + token
+        // client 的身份完全由令牌决定，identity 只对 agent（devid）有意义。
         bool has_token = auth_token[0] != '\0';
-        uint8_t auth_type = 0;
-        if (has_token) auth_type = rtutil::isClientToken(auth_token) ? 2 : 1;
-        w.u8(auth_type);
+        w.u8(has_token ? 1 : 0);
         w.str(has_token ? auth_token : "");
         rtnp::send(io, rtnp::AUTH, 0, w.data, (uint16_t)w.len);
         state = 1;
@@ -224,7 +167,12 @@ void TunnelLink::onTunnelClose() {
     }
     if (!autoReconnect()) return;
 
-    advanceEndpoint(was_ready ? "session lost" : "connect/auth failed");
+    if (pin_next_) {
+        // 按 relay 下发的新列表迁移：已经设好 ep_index_，不再顺移
+        pin_next_ = false;
+    } else {
+        advanceEndpoint(was_ready ? "session lost" : "connect/auth failed");
+    }
     logf_("[%s] tunnel closed, reconnect in %d ms", logTag(), backoff_ms);
     scheduleReconnect();
 }
@@ -340,6 +288,44 @@ void TunnelLink::advanceEndpoint(const char* why) {
     size_t from = ep_index_;
     ep_index_ = next;
     onEndpointChange(from, next);
+}
+
+bool TunnelLink::replaceEndpoints(const std::vector<TunnelEndpoint>& eps, bool allow_leave, bool& switching) {
+    switching = false;
+    if (eps.empty()) return false;
+    size_t cur = eps.size();
+    if (!endpoints.empty() && ep_index_ < endpoints.size()) {
+        cur = tunnel_endpoint_index(eps, endpoints[ep_index_]);
+    }
+    if (cur == eps.size() && !allow_leave) return false;
+
+    // 保留当前连接，只换后续故障切换用的列表；当前地址不在列表里才迁移。
+    endpoints = eps;
+    ep_index_ = (cur == eps.size()) ? 0 : cur;
+    ep_auth_bad_.assign(endpoints.size(), 0);
+    auth_fatal_ = 0;
+    if (cur == eps.size()) {
+        switching = true;
+        pin_next_ = true;
+        backoff_ms = 1000;
+        if (io != NULL) {
+            // 调用方还要回 RELAY_LIST_ACK，200ms 后再断，避免 ACK 被丢掉
+            htimer_t* t = htimer_add(loop, switchCb, 200, 1);
+            hevent_set_userdata(t, this);
+        } else {
+            pin_next_ = false;
+            onReconnect();
+        }
+    }
+    return true;
+}
+
+void TunnelLink::appendEndpoints(const std::vector<TunnelEndpoint>& extra) {
+    for (const auto& e : extra) {
+        if (tunnel_endpoint_index(endpoints, e) != endpoints.size()) continue;
+        endpoints.push_back(e);
+        ep_auth_bad_.push_back(0);
+    }
 }
 
 void TunnelLink::init(hloop_t* loop) {

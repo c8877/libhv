@@ -54,7 +54,8 @@
           <el-button size="small" text class="copy" @click="copy(wsSnippet)">复制</el-button>
         </div>
         <div class="muted">
-          atk 走查询参数 <code>?atk=</code>，与网页会话使用同一套帧协议。查询串可能进入反向代理日志，建议只在内网或 HTTPS 下使用。
+          浏览器用登录会话 Cookie 直接连接；脚本在握手时带
+          <code>Authorization: Bearer $ATK</code>，不要把令牌放进查询串。
         </div>
 
         <div class="sec-title">错误码</div>
@@ -202,7 +203,11 @@ const verifySnippet = `# 自签证书加 -k\ncurl -k -sS -H "Authorization: Bear
 
 const wsSnippet = computed(() => {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${location.host}/ws/fs/<devid>?atk=$ATK\n` +
+  return `# 浏览器：登录后直接连，不带令牌\n` +
+    `${proto}://${location.host}/ws/fs/<devid>\n` +
+    `# 脚本：握手带 Authorization 头（令牌不要放查询串）\n` +
+    `websocket.create_connection("${proto}://${location.host}/ws/fs/<devid>",\n` +
+    `    header=["Authorization: Bearer " + os.environ["ATK"]])\n` +
     `# 另：/ws/svc/<devid>、/ws/tty/<devid>/<alias>、/ws/proxy/<devid>/<port>`
 })
 

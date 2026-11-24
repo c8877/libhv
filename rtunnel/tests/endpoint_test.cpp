@@ -57,6 +57,24 @@ int main() {
     expect(!parse("h:abc", 8443, eps, err), "non-numeric port rejected");
     expect(!parse("[::1:8443", 8443, eps, err), "unterminated bracket rejected");
 
+    // 下发列表的规范化与查找：写盘用规范化字符串，切换判断用 host+port 精确匹配
+    expect(parse("a:1, [2001:db8::1]:2 ,c", 3, eps, err), "format source parses");
+    expect(tunnel_format_endpoints(eps) == "a:1,[2001:db8::1]:2,c:3", "format canonical");
+    {
+        std::vector<TunnelEndpoint> back;
+        expect(tunnel_parse_endpoints(tunnel_format_endpoints(eps), 8443, back, err), "format round trip parses");
+        expect(back.size() == eps.size() && back[1].host == "2001:db8::1" && back[1].port == 2,
+               "format round trip values");
+    }
+    {
+        TunnelEndpoint cur;
+        cur.host = "c"; cur.port = 3;
+        expect(tunnel_endpoint_index(eps, cur) == 2, "find existing endpoint");
+        cur.port = 4;
+        expect(tunnel_endpoint_index(eps, cur) == eps.size(), "missing endpoint");
+        expect(tunnel_endpoint_index(std::vector<TunnelEndpoint>(), cur) == 0, "empty list index");
+    }
+
     if (g_fail) {
         printf("%d check(s) failed\n", g_fail);
         return 1;

@@ -1,7 +1,8 @@
 #pragma once
 // A：开发者侧客户端。连 B，并在本地起 SOCKS5 入口；CONNECT devid:port -> OPEN。
 //
-// 用法：rtunnel-client --server HOST --port 8443 --user alice --socks5 127.0.0.1:1080 [--verbose]
+// 用法：rtunnel-client --token rtk-... --server HOST --port 8443 --socks5 127.0.0.1:1080 [--verbose]
+// 身份由接入令牌决定，无需用户名。
 // 长连接（HELLO/AUTH/心跳/重连/收帧）由 common/TunnelLink 承担。
 
 #include "common/tunnel_link.hpp"
@@ -40,7 +41,7 @@ class ClientApp : public TunnelLink {
 public:
     int run(int argc, char** argv);
 
-    char        user[128] = {0};
+    char        user[128] = {0};   // 令牌所属账号，AUTH_OK 回填（仅用于按需 agent 归属判断）
     char        socks_host[128] = "127.0.0.1";
     char        socks_uds[256] = {0};
     struct Forward {
