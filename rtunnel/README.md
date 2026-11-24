@@ -8,16 +8,16 @@
 
 | 程序 | 角色 |
 |---|---|
-| `rtunnel-relay` | B：接入、devid 注册表、ACL、c_sid 分配、帧转发 |
+| `rtunnel-relay` | B：接入、devid 注册表、权限组、c_sid 分配、帧转发 |
 | `rtunnel-agent` | C：连 B、上报 devid、执行 OPEN、透传字节 |
 | `rtunnel-client` | A：连 B、本地 SOCKS5 入口、把 `devid:port` 转成 OPEN |
 
 ## 文档
 
-- 设计文档：`docs/design/rtunnel.md`
+- 设计文档：`../docs/design/rtunnel.md`
 - 全部拓扑/流程/时序/状态图（Mermaid + ASCII）与协议/配置/状态/参数表：
-  `docs/design/rtunnel-diagrams.md`
-- 接入账号与 Token：`docs/design/account-token.md`；账号详情页：`docs/design/account-detail.md`
+  `../docs/design/rtunnel-diagrams.md`
+- 接入账号与 Token：`../docs/design/account-token.md`；账号详情页：`../docs/design/account-detail.md`
 - 部署（测试环境直推、验证、回滚）：`deploy/DEPLOY.md`
 
 ## 构建
@@ -32,14 +32,18 @@
 ## 运行（明文）
 
 ```bash
-# B（--client-users: 每行 user:token；--shell-users: 允许 OPEN_SHELL 的用户）
-build/bin/rtunnel-relay --host 0.0.0.0 --port 8443 --acl alice='*' \
-    --client-users /etc/rtunnel/clients.txt --shell-users alice
+# B：隧道 + 管理台（权限、账号、Token 全部在管理台维护）
+build/bin/rtunnel-relay --host 0.0.0.0 --port 8443 \
+    --admin 0.0.0.0:9443 --admin-token <首次初始化令牌> --admin-db /var/lib/rtunnel/admin.db
 # C（设备侧，只允许本地 22 端口）
 build/bin/rtunnel-agent --server B_IP --port 8443 --devid PILE-000123 --allow 22
-# A（开发机，--token 是 relay 下发的客户端凭证）
-build/bin/rtunnel-client --server B_IP --port 8443 --user alice --token <token> --socks5 127.0.0.1:1080
+# A（开发机）：只有 rtk- 令牌，不需要 --user
+build/bin/rtunnel-client --server B_IP --port 8443 --token rtk-... --socks5 127.0.0.1:1080
 ```
+
+第一次部署：浏览器打开 `http://B:9443/`，用 `--admin-token` 初始化管理员，然后在
+「权限 → 接入账号」建账号、签发 `rtk-` 令牌，并在「权限 → 权限组」里授权设备范围
+（未分组 = 无权限）。
 
 开发者 `~/.ssh/config`（SOCKS5 方式）：
 
@@ -69,11 +73,11 @@ Host pile
 ## 运行（TLS）
 
 ```bash
-build/bin/rtunnel-relay --port 8443 --acl alice='*' \
+build/bin/rtunnel-relay --port 8443 \
     --tls-cert server.crt --tls-key server.key
 build/bin/rtunnel-agent --server B_IP --port 8443 --devid PILE-000123 --allow 22 \
     --tls-ca server.crt --tls-sni localhost
-build/bin/rtunnel-client --server B_IP --port 8443 --user alice --socks5 127.0.0.1:1080 \
+build/bin/rtunnel-client --server B_IP --port 8443 --token rtk-... --socks5 127.0.0.1:1080 \
     --tls-ca server.crt --tls-sni localhost
 ```
 
@@ -85,7 +89,7 @@ A/C 都支持多个 relay 地址，按顺序尝试，连上后保持（sticky，
 # 重复 --server 或逗号分隔都行；host[:port] 用 --port 作默认端口
 build/bin/rtunnel-agent  --server r1.example.com:8443,r2.example.com:8443 --devid dev1 --allow 22
 build/bin/rtunnel-client --server r1.example.com --server r2.example.com --port 8443 \
-    --user alice --socks5 127.0.0.1:1080
+    --token rtk-... --socks5 127.0.0.1:1080
 # IPv6 用方括号：--server [2001:db8::1]:8443
 ```
 
@@ -95,6 +99,30 @@ build/bin/rtunnel-client --server r1.example.com --server r2.example.com --port 
   继续试下一个；全部地址都被拒才停止重连（改完配置重启进程即可）
 - client 的按需 agent 继承完整地址列表；client 切到新 relay 时会停掉旧 relay 上的随需 agent
 - `shell <devid>` 子命令在建立会话前也会依次尝试后续地址
+
+### 由 relay 下发地址列表
+
+设备上线后，relay 可以把最新的地址列表同步到 agent，agent 写入本地配置文件
+`rtunnel-agent.json`（`relay_servers` / `relay_servers_rev`），重启后继续使用。
+
+管理台入口在「运维 → 中继列表」，地址维护和下发是两件事：
+
+- **中继地址** tab 维护地址字典（host/port、名称、备注、启停），勾选后「加入下发列表」，
+  用 ↑/↓ 调整故障切换顺序（最多 8 个）。「保存列表」只更新期望状态
+- **设备** tab 勾选目标设备，按需设置开始时间、一次性/分批灰度、每批台数、批间隔、
+  失败阈值、截止时间和最大重试，创建同步任务
+- 任务逐台下发并等待 ACK：成功/失败/待上线分别记录；中间批次失败率超过阈值会暂停，
+  可继续、取消或重试（最后一批直接收敛成最终状态，不再走闸门）
+- 任务创建时快照列表和 rev，之后改列表不会改写已建任务；保存新列表会暂停快照过期的任务，
+  恢复时要求任务 rev 与当前列表一致，否则只能取消后重新创建
+- 没有失败但仍有设备待上线的任务记为「部分完成」，不会当成成功
+- 中继同步任务只在中继列表页展示，不进入「运维 → 任务」中心的文件/OTA 任务列表
+- 每次 agent 认证成功，relay 自动下发当前列表，新设备/重启设备自动对齐
+- `--server` 里的地址不会被删除：启动时放在下发列表末尾做兜底，列表写错也能救回设备
+- 新列表不含 agent 当前连接的 relay 时默认拒绝；确认要迁移再打开「允许迁移」
+- 接口：`/api/v1/relay-dict`（地址字典 CRUD/批量导入）、`/api/v1/relay-list`
+  （有序列表 + 各设备 ACK）、`/api/v1/relay-sync/tasks`（创建/详情/暂停/继续/取消/重试），
+  权限 `relay.read` / `relay.write`
 
 ### 管理边界：多 relay 只做链路冗余，不是管理高可用
 
@@ -147,7 +175,7 @@ rtunnel/tests/ui/run-ui.sh               # 管理台 + 设备本地页 UI 全量
 rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全部
 ```
 
-覆盖：CONNECT 建链、数据回环、离线设备、端口白名单、ACL、并发（两个 A 客户端同 sid 不串流）、
+覆盖：CONNECT 建链、数据回环、离线设备、端口白名单、权限组、并发（两个 A 客户端同 sid 不串流）、
 设备端关闭传播、OPEN 未决断开（CANCELLED）映射清理、256 KiB 大流量；另有 `build/bin/rtnp-codec-test` 校验帧编解码。
 
 ## mTLS 与 UDS
@@ -160,8 +188,8 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
 
 ## 运维
 
-- **ACL 热加载**：`--acl-file acl.txt`（每行 `user=devid[,devid|*]`，`#` 注释），改完
-  `kill -HUP <pid>` 生效；只影响新 OPEN，不动已建立会话。整文件解析失败保留旧表。
+- **权限即时生效**：账号/权限组/令牌的改动在管理台保存后立刻推给 relay，只影响新 OPEN，
+  不动已建立会话；接入账号一律按权限组鉴权，未分组等于无权限。
 - **优雅退出**：`SIGTERM`/`SIGINT` 停止 accept，等现有连接收尾（`--drain-timeout`，默认 10s）
   后退出；第二次信号立即强退。A/C 断线后按既有退避重连。
 - **流空闲回收**：每 5s 扫描一次已建流，`--stream-idle` 秒内没有任何帧就向两侧发
@@ -189,6 +217,19 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
 relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，独立 worker 线程）：
 
 - 能力：概览、设备/会话、踢会话/下线、权限（权限组 / 授权对象 / 资源与设备字典）、接入账号与 Token（时效 / 流量 / 频率 / 并发）、设备文件与服务管理、证书签发/吊销、文件仓库、分发与 OTA、审计、系统设置
+- 资源键与数据面能力一一对应：`device.view` 只读可见，`device.svc` 才能启停服务，
+  串口分 `device.tty.read`（只读流）与 `device.tty.write`（写入/接管）。令牌吊销、账号停用、
+  权限组变更会立即断开该主体的在线连接；管理台的终端/串口/文件/服务页面在权限变小、
+  账号停用或令牌失效时也会被断开（扩容不打断），需要刷新页面重新握手。
+  审计记录真实操作者（账号 + 令牌 + IP）。
+- 资源分「设备级」与「全局」两类：仓库 `repo.*`、中继 `relay.*`、字典/权限组/账号/令牌/证书/
+  审计/系统设置属于全局资源，需要权限组开启「全局权限」（勾了「全部设备」或 `super` 自动视为开启）。
+  这样受限设备的委派管理员也能管理用户/权限组/仓库，但不能借全局键影响范围外的设备。
+- 接入账号与令牌的写操作要求归属账号当前权限在自己范围内（令牌继承账号权限，轮换等于
+  重新签发）；启停设备资源要求设备在范围内。
+- 令牌第一次绑定权限组后即成「显式」：组被清空或所在组被删除等于无权限，不会回落到归属账号；
+  给主体换组、改组成员、组页面保存与删除组时，目标当前权限也必须在自己之下。密码至少 8 位，
+  用户名不允许控制字符，首尾不能是空格（中间允许）。
 - 侧栏按用途分 5 组，组可折叠（默认只展开当前页所在组，空白组按角色隐藏）：
   监控（概览/设备/会话）、运维（文件/分发/任务/Agent 升级）、
   权限（权限/接入账号/客户端/账号）、开放接口（API Token/接口文档）、
@@ -196,7 +237,7 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 - 接口文档：`#/docs` 按当前角色列出可调用接口，支持搜索与「只显示我可调用」，
   并给出 curl / WebSocket 示例；`cd relay/admin/web && npm run check:docs`
   会校验文档与 `admin_routes.cpp` 的路由是否对表
-- API 列表：见 `docs/design/rtunnel.md` §13.3；页面内 `#/docs` 会按角色列出可调用项
+- API 列表：见 `../docs/design/rtunnel.md` §13.3；页面内 `#/docs` 会按角色列出可调用项
 - 文件分发：文件页「分发」→ 选择设备/时间窗/重试 → 每设备一条任务；
   `POST /api/v1/distributions` 创建，`GET /api/v1/distributions` 查询，
   任务页支持状态过滤、重试、取消、超时延长
@@ -233,20 +274,23 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 - **之后登录**：用户名 + 密码，服务端会话（HttpOnly Cookie，默认 12h，可在设置中调整），不再用 token
 ### 资源权限与权限组
 
-管理台每个动作对应一个资源键（`perm_resources`，29 项），权限判断只认资源与设备：
+管理台每个动作对应一个资源键（`perm_resources`，40 项），权限判断按资源、设备与端口求值：
 
 - **功能资源**：`perm_resources`（代码登记）+ `perm_group_resources`（组勾选）
 - **设备资源**：`res_devices`（agent 上线自动登记）+ `perm_group_devices`（组授权）
-- 权限组 `perm_groups` 额外有 `all_devices`（全部设备，含以后新增）和 `ports`（组级 TCP 端口范围）
+- 权限组 `perm_groups` 额外有 `all_devices`（全部设备，含以后新增）、`global_scope`
+  （全局权限，见下）和 `ports`（组级 TCP 端口范围）
 - 组成员 `perm_group_members.subject_type` 有四种：`user`（管理台账号）、`atk`（管理台 Token）、
   `client`（接入账号）、`rtk`（接入 Token）
 - 账号 / 接入账号的有效权限 = 所属权限组的资源并集、设备并集
 - **令牌只能收窄**：atk / rtk 的有效权限 = 归属账号（或接入账号）∩ 令牌所属组；
   令牌没有组时完全继承归属；令牌永远不能超过归属账号
-- `users.perm_explicit` 标记账号是否被显式分配过权限组：从未分配过（历史数据）才按
-  `users.role` 落到同名预置组；显式分配后即使清空全部组也不回落，删组不会提权
+- **账号权限只来自权限组**：`users.role` 只是内置组的别名，新建账号时自动加入该角色对应的
+  内置组；之后组成员变化会把 `users.role` 同步成最高的内置组（没有内置组时归 viewer）。
+  不存在“未入组按角色回落”的路径，移出全部组就是零权限
 - 设备不接受直接绑定到账号：账号、atk、接入账号、rtk 只能通过权限组的设备授权获得设备范围
-- `users.role=admin` 始终保留超级权限（全部资源 + 全部设备），避免误操作锁死管理员
+- 超级权限来自「超级管理员」组（`super=1`），没有 `role=admin` 的硬编码；超级组至少保留
+  一个账号成员，内置角色组不能删除
 - 预置 4 组：超级管理员（`super=1`）、管理员、操作员、观察者；首次启动写入一次，
   后续勾选结果不会被重启覆盖
 - 资源分类：设备（查看/终端/端口转发/能力/OTA/串口/采样/断开/进程查看/进程控制）、文件（读/写/删除）、
@@ -278,14 +322,15 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 一句话：**atk 是“账号的管理台钥匙”，rtk 是“接入账号的设备钥匙”**；两者加入权限组都只能收窄，
 不能超过归属主体。
 
-`users.role` 仍保留，用于未显式分配时的回落（admin 唯一；manager/operator/viewer 可多个）：
+`users.role` 只决定新建账号进入哪个内置组，以及账号管理页的管理层级（不能操作比自己高的
+角色）；权限本身仍由组求值（admin 唯一；manager/operator/viewer 可多个）：
 
-| 角色 | 设备范围（未入组时） | 预置组资源 |
+| 角色 | 初始内置组 | 预置资源 |
 |---|---|---|
-| admin | 全部设备 | 全部资源（super） |
-| manager | 全部设备 | 除系统设置、关机、证书写、删账号外的全部资源 |
-| operator | 无（需权限组授权设备） | 设备查看/终端/端口转发/串口读、文件读+写、权限读、账号读、设置读 |
-| viewer | 无（需权限组授权设备） | 设备查看、串口读、设置读 |
+| admin | 超级管理员（super） | 全部资源 + 全部设备 |
+| manager | 管理员 | 除系统设置、关机、证书写、删账号外的全部资源（全局权限默认开启） |
+| operator | 操作员 | 设备查看/终端/端口转发/服务/串口读写、文件读写、分发读、仓库读写、权限读、账号读、设置读（全局权限默认开启） |
+| viewer | 观察者 | 设备查看、串口读、设置读（全局权限默认开启） |
 - **账号 API**：`GET/POST /api/v1/users`、`PUT /api/v1/users/{id}/password|status`、
   `DELETE /api/v1/users/{id}`；`POST /api/v1/login|logout`、`GET /api/v1/me`
 - 口令策略：默认最短 8 位、连续 5 次失败锁定 5 分钟（均可在「设置」调整）；改密/禁用会吊销全部会话
@@ -504,11 +549,12 @@ API：`POST /api/v1/distributions` 增加 `kind: "ota"` 与 `version`、`force` 
 经 WebSocket 接到浏览器 xterm.js。不 fork ssh、不经手密码。
 前端支持多 tab；切换页面只摘 DOM，不关闭 WebSocket 会话。
 
-- 身份固定为 `--admin-shell-user`（凭证 `--admin-shell-token`），**不接受浏览器指定用户**；
+- 身份固定为管理台内部代理（relay 启动时生成的进程内密钥，不落盘、不配置），
+  **不接受浏览器指定用户**；操作者权限与设备范围在管理台侧校验；
 - 设备列表：目标 devid = 设备 ID；客户端列表：目标 devid = `a:<user>`（按需拉起，见下节）；
-- 需要 relay 的 `--shell-users` 允许该身份，且目标 agent 开 `--allow-shell`；
+- 需要目标 agent 开 `--allow-shell`；
 - 终端尺寸经 `RESIZE`(0x17) 帧同步。
-A 端也可在本机执行 `rtunnel-client --server B --user U shell <devid>` 直连设备免密 shell。
+A 端也可在本机执行 `rtunnel-client --server B --token rtk-... shell <devid>` 直连设备免密 shell。
 
 ## A 侧按需 Shell（client 列表的 Shell 按钮）
 
@@ -524,7 +570,7 @@ client 侧只做「拉起/回收」，shell 逻辑完全复用 agent；relay 侧
 不需要在 A-B 连接上叠双角色。
 
 ```bash
-build/bin/rtunnel-client --server B --port 8443 --user alice --token <token> \
+build/bin/rtunnel-client --server B --port 8443 --token rtk-... \
     --socks5 127.0.0.1:1080 --allow-shell --agent-idle 60
 ```
 
@@ -554,16 +600,11 @@ http://B:9443/device/<devid>/<port>/<path>
 | 参数 | 说明 |
 |---|---|
 | `--host/--port` | 隧道监听地址，默认 `0.0.0.0:8443` |
-| `--acl user=dev1,dev2` / `--acl-file F` | 用户→设备 ACL；文件可 `SIGHUP` 热加载 |
-| `--allow-all` | 关闭 ACL（仅调试） |
-| `--client-users F` | 每行 `user:token`，强制 A 端凭证 |
-| `--client-token T` | 全局客户端 token（`--client-users` 的简化版） |
-| `--shell-users u1,u2` / `*` | 允许 `OPEN_SHELL` 的用户；默认空 = 全部拒绝 |
+| `--allow-all` | 跳过权限组鉴权（仅本地测试） |
 | `--tls-cert/--tls-key [--tls-ca]` | 服务端 TLS；给 `--tls-ca` 即要求客户端证书（mTLS） |
 | `--admin ADDR --admin-token T` | 管理台监听；token 仅用于首次初始化 |
 | `--admin-threads N` | 管理面 HTTP worker 数，默认 4，范围 1..32 |
 | `--admin-db PATH` | SQLite 账号库，默认 `rtunnel-admin.db`（需 OpenSSL 构建） |
-| `--admin-shell-user U --admin-shell-token T` | Web 终端连本机 relay 的身份与凭证 |
 | `--admin-ca-cert/--admin-ca-key/--admin-cert-dir` | 证书签发 CA 与台账目录 |
 | `--admin-tls-cert/--admin-tls-key` | 管理台 HTTPS：使用已有证书 |
 | `--admin-tls-selfsigned [--admin-tls-dir D] [--admin-tls-days N]` | 管理台 HTTPS：自签并自动续期 |
@@ -571,11 +612,14 @@ http://B:9443/device/<devid>/<port>/<path>
 | `--drain-timeout` | 优雅退出等待时长，默认 10000ms |
 | `--stream-idle SEC` | 流空闲回收：超过 SEC 秒没有任何帧就 RESET 并释放会话配额，默认 1800，0 关闭 |
 
+relay 每 5s 巡检一次 agent 控制连接：连续 60s 没有收到任何帧就断开并标记离线
+（agent 每 15s 发一次 PING）。设备断电/断网但 TCP 还挂着的「假在线」会在一分钟内收敛。
+
 **client（A）**
 
 | 参数 | 说明 |
 |---|---|
-| `--server/--port --user --token` | relay 地址与登录身份；`--server` 可重复或逗号分隔（最多 8 个，故障自动切换） |
+| `--server/--port --token` | relay 地址与 `rtk-` 令牌（身份由令牌决定）；`--server` 可重复或逗号分隔（最多 8 个，故障自动切换） |
 | `--socks5 HOST:PORT` / `unix:PATH` | 本地 SOCKS5 入口；**可省略**，省略时只做 `--forward` / `shell`，不会再默认占用 1080 |
 | `--forward 127.0.0.1:16022=devid:22` | 本地端口映射，可多次 |
 | `--allow-shell` | 允许 B 通知本机按需拉起 agent（默认关） |
@@ -610,7 +654,9 @@ http://B:9443/device/<devid>/<port>/<path>
 ```
 
 - `--local-web [ADDR:]PORT`：`8080` / `127.0.0.1:8080` 只监听本机；
-  `:8080` / `0.0.0.0:8080` 监听所有网卡（页面会暴露设备型号、IP、串口等只读信息）
+  `:8080` / `0.0.0.0:8080` 监听所有网卡。页面包含文件、服务等**可写**操作，
+  同源检查只防浏览器跨站，不能代替鉴权：对外监听时必须同时配置
+  `--file-token` / `--svc-token`，否则同网段客户端可以直接读写文件和控制系统服务
 - 页面与管理台设备详情是同一份 Vue 源码（`relay/admin/web/src/components/DeviceView.vue`），
   本地入口在 `src/local`，通过 API 适配直连 agent；`npm run build:local` 构建成
   单个 HTML 后写入 `agent/web/index.html`，由 CMake 内嵌，不加载外部页面资源
@@ -729,12 +775,12 @@ RSS 里约 5–6 MB 是可回收的文件页（二进制、libc/libstdc++/libcry
   解析失败给出提示；树形里点「源码」可切回编辑器，未保存内容一并带过去
 - 路径隔离：`--file-root` 为唯一根，拒绝 `..`、绝对路径和逃出根目录的符号链接
   （Linux 5.6+ 用 `openat2(RESOLVE_BENEATH)`，MP135 5.15 可用）
-- 管理台角色：`operator` 只读，`manager/admin` 读写；agent 侧还会再按 `--file-ro/--file-rw`
+- 管理台权限：`file.read` 只读，`file.write` 读写；agent 侧还会再按 `--file-ro/--file-rw`
   和 `--file-token` 校验一次
 - 管理台「能力配置」可启停文件服务并修改根目录、读写模式、单文件上限，
   热生效并写入 agent 配置文件（`--config-file`，默认 `/opt/data/etc/rtunnel-agent.json`）
-- relay-admin 通过本机 relay 打开管理流，需要配置 `--admin-shell-user/--admin-shell-token`
-  并确保该用户对目标设备有 ACL（与 Web 终端一致）
+- relay-admin 通过本机 relay 打开管理流，使用进程内密钥认证（不落盘、不配置），
+  操作者权限与设备范围在管理台侧校验（与 Web 终端一致）
 - 本地 Web 与 relay 两条路径都可单独使用：lite 包没有本地页面，但管理台仍能管理文件
 
 ```bash
@@ -810,7 +856,7 @@ RSS 里约 5–6 MB 是可回收的文件页（二进制、libc/libstdc++/libcry
   `--svc-token` 可给本地 Web 写操作加令牌，`--no-svc` 完全关闭（也不创建后台线程）。
   非 systemd 设备（无 `/run/systemd/system`）自动隐藏入口并上报 `caps.svc = false`
 - 管理台「能力配置」可启停服务管理、切换只读/可控制，热生效并写入 agent 配置文件
-- 管理台角色：`operator` 及以上可操作，`viewer` 不开放该通道；
+- 管理台权限：需要 `device.svc` 才能操作服务；
   实际能否写仍由 agent 的 `--svc-rw`（或配置 `svc_rw: true`）决定
 
 ```bash
@@ -823,19 +869,17 @@ RSS 里约 5–6 MB 是可回收的文件页（二进制、libc/libstdc++/libcry
 
 ```bash
 # B（192.168.1.133）：隧道 + 管理台
-printf 'dev:tok-dev\nops:tok-ops\n' > /tmp/rtunnel/clients.txt
 ./rtunnel-relay --host 0.0.0.0 --port 18443 \
-    --acl ops='*' --client-users /tmp/rtunnel/clients.txt --shell-users ops \
     --admin 0.0.0.0:9443 --admin-token <admin-token> \
     --admin-ca-cert ca.crt --admin-ca-key ca.key --admin-cert-dir certs \
-    --admin-file-dir files --admin-shell-user ops --admin-shell-token tok-ops
+    --admin-file-dir files
 
 # C（192.168.1.55，板子）
 ./rtunnel-agent --server 192.168.1.133 --port 18443 --devid board01 \
     --allow 22 --allow-shell
 
-# A（开发机）
-./rtunnel-client --server 192.168.1.133 --port 18443 --user dev --token tok-dev \
+# A（开发机）：rtk- 令牌来自管理台「接入账号」
+./rtunnel-client --server 192.168.1.133 --port 18443 --token rtk-... \
     --socks5 127.0.0.1:11080 --forward 127.0.0.1:16022=board01:22 \
     --allow-shell --agent-idle 120
 ```
@@ -850,20 +894,21 @@ ssh -p 16022 root@127.0.0.1                         # 到板子
 | 现象 | 原因 / 处理 |
 |---|---|
 | Web 终端显示「连接已关闭」 | 1.3.19 之前 `shell_relay_port` 不跟随 `--port`；升级 relay 或让 relay 监听 8443 |
-| 客户端列表 Shell 没反应 | client 未加 `--allow-shell`，或该用户不在 `--shell-users`，或 devid 不是 `a:<user>` |
-| A 端上线即断开 | relay 配了 `--client-users/--client-token`，client 缺 `--token` 或 token 不匹配 |
-| `OPEN_FAIL: shell not allowed` | relay 的 `--shell-users` 未包含该用户 |
+| 客户端列表 Shell 没反应 | client 未加 `--allow-shell`，或 devid 不是 `a:<user>` |
+| A 端上线即断开 | `--token` 缺失、不是 `rtk-` 令牌，或令牌停用/过期 |
+| `OPEN_FAIL: acl denied` | 接入账号未加入权限组，或组里没有该设备/端口 |
 | `OPEN_FAIL: shell disabled` | agent 未加 `--allow-shell` |
 | client 启动报 `bind: Address already in use` | 默认会监听 1080，换 `--socks5 127.0.0.1:<port>` |
 | 部署后 `undefined symbol: hv_version` | 用了共享库构建只拷了二进制；用 `--no-shared` 静态构建或一并部署 `libhv.so` |
 
 ## 实现说明
 
-- **客户端认证**：relay 配了 `--client-users`（user:token）或 `--client-token` 后，
-  A 端必须带 `--token` 才能上线；未配置时启动日志会打印 warning（开发模式）。
-- **Shell 授权**：`OPEN_SHELL` 需要 relay 的 `--shell-users` 且设备 agent 开 `--allow-shell`，
-  两者缺一即 `OPEN_FAIL`。管理台的 Web 终端固定用 `--admin-shell-user` 身份
-  （`--admin-shell-token` 提供该身份连 relay 的凭证），不再接受浏览器指定用户。
+- **客户端认证**：只接受管理台签发的 `rtk-` 令牌，身份由令牌决定，`--user` 已移除；
+  `atk-` 是管理台 API Token，不能用于数据面。令牌停用/过期/账号停用都会拒绝上线。
+- **设备授权**：一律按权限组（资源 + 设备 + 端口）判断，未分组等于无权限；
+  `--allow-all` 只用于本地测试。
+- **Shell 授权**：`OPEN_SHELL` 需要权限组里的 `device.terminal` 且设备 agent 开 `--allow-shell`，
+  两者缺一即 `OPEN_FAIL`。管理台 Web 终端固定使用内部代理身份。
 - **不改动 libhv**：所有能力都在 `rtunnel/` 内实现。
 - **目录结构（C++ 对象化）**：`rtnp/` 协议库（Frame/Decoder/Writer/Reader）、`common/` 共享组件
   （`TunnelLink`：agent/client 长连接的 HELLO/AUTH 状态机、心跳判死、超时、退避重连）、

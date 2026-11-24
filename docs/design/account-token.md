@@ -11,14 +11,7 @@
 
 # 2. 背景与现状
 
-当前 A 端认证只有两种方式：
-
-```
---client-users F     每行 user:token，启动时读入内存
---client-token T     全局 token
-```
-
-问题：
+早期 A 端只有静态凭据（`--client-users` / `--client-token`，启动时读入内存），问题：
 
 ```
 账号与凭据绑死      换 token 要改文件、重启或 SIGHUP
@@ -27,7 +20,8 @@
 无法审计到具体凭据  日志只有 user，没有 token 身份
 ```
 
-权限侧已经按用户名建模（`client_group_members.username`），因此账号可以直接复用现有 ACL 求值路径，不需要改权限模型。
+静态凭据已删除：现在 A 端只能拿管理台签发的 `rtk-` 令牌接入，身份完全由令牌决定。
+权限按账号建模（`perm_group_members.subject_type='client'`），Token 继承账号权限并可再收窄。
 
 # 3. 身份模型
 
@@ -71,7 +65,7 @@
 
 | 项 | 要求 |
 |---|---|
-| 格式 | `rtk_` + 32 字节随机数的 base64url，共 47 字符 |
+| 格式 | `rtk-` + 32 字节随机数的 base64url，共 47 字符（与管理台 `atk-` 同风格） |
 | 存储 | 只存 SHA-256 十六进制；明文仅在创建/轮换响应中出现一次 |
 | 数量 | 单账号默认最多 20 个（可配置） |
 | 名称 | 用户可读标签，≤64，便于区分用途 |
@@ -87,18 +81,18 @@
 
 ```
 1. 客户端 HELLO
-2. AUTH 携带 auth_type=2 + token，用户名可空
+2. AUTH 携带 `auth_type=1` + `rtk-` 令牌；`identity` 字段保留但不参与认证
 3. relay 对 token 做 SHA-256，查运行时缓存
 4. 校验 token 状态、有效期、账号状态、周期配额
-5. 通过后 c->user = 账号用户名，后续 ACL 完全复用现有逻辑
+5. 通过后 c->user = 账号用户名，后续鉴权按权限组求值
 ```
 
-兼容要求：
+边界：
 
 ```
-旧客户端（auth_type=0/1）行为不变
-旧 --client-users / --client-token 继续可用
-未启用管理台时，退化为纯静态凭据，Token 功能不可用
+客户端缺令牌 / 前缀不是 rtk- / 用 atk-  启动即报错，不发连接
+令牌未签发、停用、过期、账号停用        AUTH_FAIL，不重试其它地址
+未启用管理台                           没有令牌来源，客户端无法上线
 ```
 
 ## 4.4 限额语义
@@ -227,7 +221,7 @@ CREATE TABLE IF NOT EXISTS client_tokens(
   account_id      INTEGER NOT NULL,
   name            TEXT NOT NULL DEFAULT '',
   token_hash      TEXT NOT NULL UNIQUE,           -- sha256(明文)，64 hex
-  token_prefix    TEXT NOT NULL,                  -- rtk_9f2c8a1b，仅展示
+  token_prefix    TEXT NOT NULL,                  -- rtk-9f2c8a1b，仅展示
   status          TEXT NOT NULL DEFAULT 'active', -- active|disabled|revoked
   expires_at_ms   INTEGER NOT NULL DEFAULT 0,     -- 0 = 永久
   quota_bytes     INTEGER NOT NULL DEFAULT 0,     -- 0 = 不限
@@ -269,8 +263,8 @@ client_accounts 1 ────────── n client_tokens
 ```
 随机源   CSPRNG 32 字节（RAND_bytes，无 OpenSSL 时用 getrandom/urandom）
 编码     base64url 无填充，43 字符
-明文     rtk_<43>
-展示前缀 rtk_ + 明文前 8 字符 + "…"
+明文     rtk-<43>
+展示前缀 rtk- + 明文前 8 字符 + "…"
 哈希     SHA-256(明文 UTF-8) → 64 hex，唯一索引
 比对     relay 计算哈希后 O(1) 查表；不做明文比较
 ```
@@ -278,7 +272,7 @@ client_accounts 1 ────────── n client_tokens
 落盘与回显：
 
 ```
-创建/轮换响应   { "token": "rtk_...", "id": 12, ... }   仅此一次
+创建/轮换响应   { "token": "rtk-...", "id": 12, ... }   仅此一次
 列表响应        只有 token_prefix，没有明文和哈希
 数据库          只有 token_hash 与 token_prefix
 ```
@@ -290,18 +284,17 @@ client_accounts 1 ────────── n client_tokens
 AUTH 载荷：
 
 ```
-str  identity          // auth_type=2 时可为空，由 token 解析
-u8   auth_type         // 0=none 1=静态 token 2=账号 token
+str  identity          // 保留字段，不参与认证
+u8   auth_type         // 0=none（agent） 1=rtk- 接入令牌 3=管理台内部代理
 str  token
 ```
 
 处理规则：
 
 ```
-auth_type=2
-  identity 为空      按 token 解析账号
-  identity 非空      必须与 token 所属账号一致，否则拒绝
-  账号不存在/停用    AUTH_FAIL(TOKEN_DISABLED)
+auth_type=1
+  identity           忽略，账号只从 token 解析
+  账号停用/不存在    AUTH_FAIL(TOKEN_DISABLED)
   token 停用/吊销    AUTH_FAIL(TOKEN_DISABLED)
   token 过期         AUTH_FAIL(TOKEN_EXPIRED)
   周期配额已用完     AUTH_FAIL(QUOTA_EXCEEDED)
@@ -347,7 +340,7 @@ client A                 relay B                        admin
    │ HELLO                  │                             │
    │───────────────────────►│                             │
    │ AUTH user="" type=2    │                             │
-   │ token=rtk_xxx          │                             │
+   │ token=rtk-xxx          │                             │
    │───────────────────────►│                             │
    │                        │ sha256(token)               │
    │                        │ cache[hash] → policy        │
@@ -590,8 +583,8 @@ relay 在 hloop_run 返回后、admin stop 前刷一次
 {
   "id": 12,
   "name": "构建机",
-  "token": "rtk_5Jd9...",
-  "token_prefix": "rtk_5Jd9xQ2m...",
+  "token": "rtk-5Jd9...",
+  "token_prefix": "rtk-5Jd9xQ2m...",
   "expires_at_ms": 1790000000000,
   "quota_bytes": 53687091200,
   "quota_period": "monthly",
@@ -629,8 +622,8 @@ relay 在 hloop_run 返回后、admin stop 前刷一次
 │ ▾ alice     启用     2      2 分钟前   [有效权限] [删除]    │
 │   ┌───────────────────────────────────────────────────────┐ │
 │   │ 名称      前缀         状态   到期      流量          │ │
-│   │ 构建机    rtk_5Jd9xQ2m… 启用  30 天    12 / 50 GB      │ │
-│   │ 巡检      rtk_71ab…   停用   已过期   0 / 不限        │ │
+│   │ 构建机    rtk-5Jd9xQ2m… 启用  30 天    12 / 50 GB      │ │
+│   │ 巡检      rtk-71ab…   停用   已过期   0 / 不限        │ │
 │   │                                     [+ 新建 Token]    │ │
 │   └───────────────────────────────────────────────────────┘ │
 │ ▸ bob       停用     1      3 天前     [有效权限] [删除]    │
@@ -667,7 +660,7 @@ relay 在 hloop_run 返回后、admin stop 前刷一次
 │ 只显示这一次，关闭后无法再次查看。             │
 │                                               │
 │ ┌───────────────────────────────────────────┐ │
-│ │ rtk_5Jd9xQ2m...                           │ │
+│ │ rtk-5Jd9xQ2m...                           │ │
 │ └───────────────────────────────────────────┘ │
 │                                               │
 │ [ 复制 ]                                      │
@@ -688,28 +681,21 @@ rtk 令牌权限   同一页按令牌再绑定权限组（subject_type=rtk），
 
 账号未加入任何权限组时无权限；令牌组只能收窄，不能放大账号权限。
 
-# 6. 兼容与迁移
+令牌的全局权限同样只能收窄：归属账号没有 `global_scope` 时，令牌组即使勾了全局权限也不生效。
+令牌第一次被绑定权限组时记录 `groups_explicit=1`：此后组为空表示**无权限**，
+不会因为「没有组」回落到账号权限。把令牌移出全部组、清空令牌的组或删除所在组，
+都是撤销而不是恢复继承；修改令牌的组同样要求目标有效范围在操作者权限之内。
 
-## 6.1 运行模式
+# 6. 运行模式
 
 | 场景 | 行为 |
 |---|---|
-| 启用管理台 | DB Token + 静态凭据都接受 |
-| 未启用管理台 | 仅静态凭据，Token 页面不存在 |
-| 两者同名账号 | 账号状态以 DB 为准；静态 token 仍可认证 |
-| 账号被停用 | 静态 token 同样被拒绝 |
+| 启用管理台 | 只接受 DB 里签发的 `rtk-` 令牌 |
+| 未启用管理台 | 没有令牌来源，客户端无法上线（启动日志告警） |
+| 账号被停用 | 该账号的所有令牌立即失效，在线连接被踢 |
 
-## 6.2 导入旧凭据
-
-```
-入口    接入账号页 →「导入旧凭据」
-输入    user:token 每行一条，或读取 --client-users 文件内容
-结果    每个 user 建账号（已存在则复用），每个 token 建一条记录
-        名称标记 legacy，状态 active，永久有效，限额不限
-提示    导入后建议为旧 Token 设置有效期并逐步轮换
-```
-
-导入不删除 `--client-users`，运维确认全部切换后再移除。
+静态凭据（`--client-users` / `--client-token`）和 `--user` 已删除，不提供迁移层：
+部署时在管理台重建账号、签发令牌，把令牌换到客户端启动参数即可。
 
 ## 6.3 配置项
 
@@ -737,10 +723,10 @@ mTLS             Token 认证仍受 SAN 校验约束；SAN 必须是账号用户
 # 8. 分期
 
 ```
-P1  数据模型 + 账号/Token CRUD + SHA-256 + AUTH type=2 + 缓存推送
+P1  数据模型 + 账号/Token CRUD + SHA-256 + AUTH type=1 + 缓存推送
 P2  令牌桶、并发限制、流量计量、周期重置、用量落库
 P3  管理台页面、一次性明文、用量进度、有效权限入口
-P4  旧凭据导入、审计完善、文档与运维说明
+P4  审计完善、文档与运维说明（旧凭据导入不做）
 ```
 
 # 9. 验收用例
@@ -763,14 +749,13 @@ P4  旧凭据导入、审计完善、文档与运维说明
   daily/monthly 周期到点自动重置
   停用后重新启用，用量保留
 
-兼容
-  旧 --client-users 客户端不受影响
-  未启用管理台时行为与现在一致
+边界
+  未启用管理台时没有令牌来源，客户端无法上线
   旧客户端忽略 AUTH_OK 尾部字段
 
 协议版本
-  rtnp::VERSION 不递增，auth_type=2 与 AUTH_OK 尾部均为向后兼容扩展
-  新客户端连接旧 relay 时会因 auth_type=2 被拒，回退到静态 token 即可
+  rtnp::VERSION 不递增，AUTH_OK 尾部为向后兼容扩展
+  `rtk-` 前缀是唯一的客户端令牌格式
 ```
 
 # 10. 实现说明
@@ -785,21 +770,18 @@ rtunnel/relay/admin/backend/api_accounts.cpp        管理 API
 rtunnel/relay/admin/web/src/pages/accounts.vue         接入账号页
 ```
 
-协议扩展在 `rtnp/frame.hpp`（`TOKEN_*` 错误码）与 `common/tunnel_link.cpp`（auth_type=2、
+协议扩展在 `rtnp/frame.hpp`（`TOKEN_*` 错误码）与 `common/tunnel_link.cpp`（auth_type=1、
 AUTH_OK 尾部、致命认证错误不再重连）。
 
 ## 10.2 客户端用法
 
 ```bash
-# 只带 Token，用户名由 relay 从 Token 解析后回填
-rtunnel-client --token rtk_xxx --socks5 127.0.0.1:1080
-
-# 也可以两者都给，但必须一致，否则 AUTH_FAIL
-rtunnel-client --user alice --token rtk_xxx --socks5 127.0.0.1:1080
+# 只需要令牌，账号由 relay 从令牌解析
+rtunnel-client --token rtk-xxx --socks5 127.0.0.1:1080
 ```
 
-识别规则：`rtk_` 前缀走 `auth_type=2`，其他按静态凭据（`auth_type=1`）。
-静态凭据仍然可用，但同名账号被停用后同样会被拒绝。
+识别规则：只接受 `rtk-` 前缀；`atk-` 是管理台 HTTP 接口令牌，启动时直接报错，
+不会发起连接。
 
 ## 10.3 生效与落库
 
@@ -829,9 +811,8 @@ relay.log 搜 "token auth rejected" / "client auth rejected"
 
 ```
 旧凭据导入
-  旧 --client-users 的 token 是任意字符串，客户端会按 auth_type=1 发送；
-  若导入后仍要可用，需要让 relay 对 type=1 也查 Token 哈希，等于让两套凭据语义混在一起。
-  当前选择：静态凭据与账号 Token 并行存在，新部署直接用 Token，旧凭据保留到迁移完成。
+  静态凭据已整体删除（参数、校验、管理接口），不提供导入或回退。
+  部署时在管理台重建账号并签发 rtk- 令牌，替换客户端的 --token 即可。
 
 Token 级设备白名单
   v1 按设计不做；需要多租户共用账号时再加 token_devices 表。

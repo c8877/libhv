@@ -323,7 +323,7 @@ sequenceDiagram
 |---|---|---|---|
 | `0x01` | `HELLO` | 双向 | `u8 role`(1=C,2=A) + `u8 ver` + `str agent_ver` + `u32 capabilities` |
 | `0x02` | `HELLO_ACK` | B→对端 | `u16 max_payload` + `u8 auth_methods`(bit0 mTLS,1 token) + `u32 keepalive_ms` + `u32 capabilities` |
-| `0x03` | `AUTH` | 双向 | C：`str devid`；A：`str user` + `u8 auth_type`(0=none,1=token) + `str token` |
+| `0x03` | `AUTH` | 双向 | C：`str devid`；A：`str identity`（保留）+ `u8 auth_type`(0=none,1=`rtk-` 令牌,3=管理台内部代理) + `str token` |
 | `0x04` | `AUTH_OK` | B→对端 | `str devid`（规范化）+ `u32 keepalive_ms` |
 | `0x05` | `AUTH_FAIL` | B→对端 | `u16 code + str msg` |
 | `0x06` | `PING` | 双向 | `u64 时间戳ms` |
@@ -357,12 +357,14 @@ sequenceDiagram
 | `0x3F` | `STORAGE_INFO` | C→B | `str json {ok,mount,total_kb,used_kb,free_kb,reserved_kb,dirs,files,scan_ms,truncated,skipped,error}` |
 | `0x40` | `STORAGE_DATA` | C→B | 原始字节：首字节 `\1` + gzip(整份响应 JSON)，按 32KiB 顺序分块；`\0` 表示未压缩明文 |
 | `0x41` | `STORAGE_END` | C→B | `str json {ok,size,error}`，sid 回显 |
+| `0x42` | `RELAY_LIST` | B→C | `str json {servers,rev,allow_leave}`：下发给 agent 的 relay 地址列表 |
+| `0x43` | `RELAY_LIST_ACK` | C→B | `str json {ok,rev,count,current,switching,persisted,error}` |
 
 **会话级（stream_id > 0）**
 
 | type | 名称 | 方向 | payload |
 |---|---|---|---|
-| `0x10` | `OPEN` | A→B / B→C | A→B：`str devid + u16 port`；B→C：`u16 port`（C 固定连 `127.0.0.1`）；`flags & 0x0001 = OPEN_SHELL` |
+| `0x10` | `OPEN` | A→B / B→C | A→B：`str devid + u16 port`；B→C：`u16 port`（C 固定连 `127.0.0.1`）；`flags & 0x0001 = OPEN_SHELL`，`0x0002 = OPEN_TTY`（payload `str devid + str tty_path + u32 baud + u8 db/par/stop`，`0x0004` 只读监听 / `0x0008` 接管 / `0x0040` 只读打开），`0x0010 = OPEN_FS`，`0x0020 = OPEN_SVC` |
 | `0x11` | `OPEN_OK` | C→B→A | `str bound_host + u16 bound_port` |
 | `0x12` | `OPEN_FAIL` | C/B→A | `u16 code + str msg` |
 | `0x13` | `DATA` | 双向 | 原始字节 |
@@ -487,8 +489,55 @@ StreamMeta { a_conn_id, a_sid, c_conn_id, c_sid, state, opened_at }
 
 - **信任模型**：B 是可信中继，TLS 在 B 终结；SSH 仍是 A↔C 端到端加密，B 只见密文与元数据。
 - **设备身份**：mTLS，devid 取自证书 SAN；`AUTH.devid` 只是断言，与 SAN 不符即 `AUTH_FAIL`。
-- **开发者身份**：mTLS 或 SSO token（v1 落地 mTLS：user 取自客户端证书 SAN，
-  AUTH.user 仅为断言，与 SAN 不符即 `AUTH_FAIL`，同 §5.1 设备侧）；B 侧 ACL 决定可访问的 devid，默认拒绝。
+- **开发者身份**：A 只能用管理台签发的 `rtk-` 接入令牌，身份由令牌决定（`identity` 字段
+  不参与认证）；mTLS 开启时再叠加证书 SAN 校验。`atk-` 只用于管理台 HTTP 接口。
+- **设备授权**：按权限组（资源键 + 设备范围 + 端口范围）判断，未分组等于无权限；
+  管理台内部代理使用进程内随机密钥（`auth_type=3`）连本机 relay，不落盘、不可配置。
+- **授予边界**：权限管理本身也受权限约束，不能靠改权限提权。
+  - 资源分为 `group.read`（查看组/成员/授权对象）、`group.write`（改组定义：资源、设备、端口）、
+    `group.member`（改成员、给主体换组）；三者内置管理员组都有，受限账号要靠权限组显式授予。
+  - 任何新建/修改组、给主体换组、删除组的请求，服务端都要求目标组的资源、设备、端口是
+    操作者**有效权限的子集**；`super` 组只有 `super` 能改。前端只是隐藏按钮，判定在服务端。
+  - 组的端口范围用区间覆盖判断（`*` 覆盖全部），令牌自带权限组时账号与令牌的端口取交集。
+  - 账号没有角色回落：`permScopeOfUser` 只读 `perm_group_members`。`users.role` 只决定新建
+    账号加入哪个内置组、以及账号管理页的层级；改角色会替换内置组成员（自定义组保留），
+    组成员变化也会把 role 同步成最高的内置组，没有内置组时归 viewer。
+    老库升级时 `perm_explicit=0` 的账号按角色补进内置组，然后删除该列；无组的 admin 也会
+    补进超级组。超级组必须至少保留一个账号成员，内置角色组不能删除。
+  - 令牌（atk / rtk）第一次绑定权限组就记为「显式」：此后组为空表示**无权限**，不再回落到
+    归属账号；清空自己的组不会恢复账号权限，修改令牌组同样校验目标有效范围。换组接口、
+    组页面保存、删除组三个入口都会维持这个标记，撤销不会变成提权。
+  - 资源分「设备级」与「全局」两类：`repo.*`、`relay.*`、`dict.*`、`group.*`、`account.*`、
+    `token.*`、`cert.*`、`audit.read`、`settings.*`、`system.shutdown` 是全局键。全局键需要
+    权限组开启 `global_scope`（勾了「全部设备」或 `super` 自动视为开启）；受限组即使持有这些键
+    也不生效，避免通过全局键影响范围外的设备。`global_scope` 是授予边界的一部分：没有全局权限
+    的账号不能授予全局键，也不能修改带全局权限的组或主体；组里含全局键但未开启全局权限会被拒绝，
+    不会静默失效。内置角色组默认开启，保留传统角色语义。
+    仓库与设备文件拆开：`repo.read/write/delete` 管 relay 本机仓库，`file.read/write` 管设备文件；
+    「部署到设备」同时需要 `repo.read` 和 `file.write`。
+  - 给主体换组、改组成员、组页面保存与删除组时，目标**当前**有效权限也必须是操作者权限的
+    子集，避免委托管理员通过清空同级账号的组来停用对方，或把更高权限的令牌“关进”窄组。
+  - 接入账号的管理接口（改/删/踢账号，签发/改/轮换/删令牌）同样校验**归属账号**当前权限在
+    操作者范围内：令牌继承账号权限，能轮换就等于能拿到该账号的明文令牌，不能只看 `account.write`。
+  - 启停设备资源（`PUT /permission/devices/:devid`）要求该设备在操作者范围内：停用会让所有
+    非 super 组失去这台设备。改账号时未显式传 `status` 保持原状态，不会把停用账号放回来。
+    被移出组、组被删除的成员按主体逐个断开（atk 断管理台 WS、rtk 断数据面连接）。
+    内置角色组可以编辑资源与设备范围（同样受这条授予边界约束），但不能删除。
+  - `/device/:devid/:port/*` 等价于一次端口转发：要求 `device.port` 且端口在自己的范围内，
+    不再借用 `device.terminal`。
+  - 管理台用户名限制为 1–64 字符、不含控制字符、首尾不能是空格（中间允许）；密码至少 8 位。
+  - 管理台 WebSocket 的 `Origin` 按 `scheme://authority` 与 `Host` 精确比对，不再做子串匹配。
+  - 资源键到数据面能力只有一处映射（`capsForScope`）：`device.port` → TCP 端口范围，
+    `device.terminal` → shell，`device.tty.read` → 只读串口，`device.tty.write` → 写串口/接管，
+    `file.read/write` → 文件只读/读写，`device.svc` → 服务管理。`device.view` 只控制可见性，
+    不再隐含服务启停；串口只读用户打开的是 `O_RDONLY` 流，写方向在 agent 侧丢弃。
+- **撤权即时性**：令牌吊销/轮换、账号停用/删除、权限组变更都会让 relay 关闭该主体的
+  已建立连接（含其下所有流），客户端必须重新认证；新流在 `OPEN` 时按当前规则重新判定。
+  管理台自己的 WebSocket（终端/串口/文件/服务/设备代理）同样登记了所属账号与 atk 令牌：
+  账号停用/删除、改密、角色变更、令牌停用/轮换/吊销立即断开；权限组或授权对象变更时
+  只断开**有效权限变小**的账号（扩容、改名不打断），页面需重新握手。
+- **审计**：管理动作记录真实操作者（用户名`#id`、atk/rtk 令牌 id、角色、来源 IP），
+  不再只记录角色；页面「系统 → 审计」按 `actor` 展示。
 - **目标限制**：C 只连 `127.0.0.1`，端口白名单默认仅 22。
 - **入口暴露**：A 的 SOCKS5 默认走 UDS（0600）；用 TCP 时仅绑回环。
 
@@ -498,7 +547,7 @@ StreamMeta { a_conn_id, a_sid, c_conn_id, c_sid, state, opened_at }
 
 开发者机器的 shell 不常驻：
 
-1. admin 以 `shell_user` 身份对 `a:<user>` 发 `OPEN_SHELL`；
+1. admin 以内部代理身份对 `a:<user>` 发 `OPEN_SHELL`；
 2. B 未命中注册表且 devid 形如 `a:<user>`、该 user 的 client 在线 → 下发 `SPAWN_AGENT`，
    挂起 OPEN（10s 超时，超时回 `OPEN_FAIL(TIMEOUT)`）；
 3. A 校验 `devid == "a:" + 自身 user` 且开了 `--allow-shell`，在本机 fork/exec
@@ -507,7 +556,7 @@ StreamMeta { a_conn_id, a_sid, c_conn_id, c_sid, state, opened_at }
 
 **为什么不在 A-B 连接上叠双角色**：一条连接只有单一 role/identity/stream 命名空间，
 双角色需要两套身份、两张流表、两套 sid，且 A 的连接会变成 relay 随时可执行命令的入口；
-拆成独立 agent 进程后，身份（user 与 a:user）、授权（`--shell-users`）、生命周期（按需起停）、
+拆成独立 agent 进程后，身份（user 与 a:user）、授权（`device.terminal`）、生命周期（按需起停）、
 故障域都彼此独立，shell 逻辑与设备 agent 完全复用。
 
 ## 13. 管理台与运维面
@@ -524,12 +573,12 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 | `--admin-docroot D` | 前端静态目录，指向 `web/dist`；未指定时管理台页面不可用 |
 | `--admin-ca-cert/--admin-ca-key/--admin-cert-dir` | 签发 CA 与台账目录 |
 | `--admin-file-dir D` | 文件管理根目录 |
-| `--admin-shell-user/--admin-shell-token` | Web 终端连本机 relay 的身份与凭证 |
 | `--admin-db PATH` | SQLite 库：管理台账号、会话、设备、权限分组、接入账号/Token、API Token；需 OpenSSL 构建（PBKDF2） |
 
 账号体系：首次用 `--admin-token` 初始化 admin，之后用户名+密码登录（HttpOnly Cookie 会话）。
-角色：admin（唯一，全部）/ manager（绑定设备、建 operator/viewer、设备与文件全部操作）/
-operator（Shell、Web、文件上传下载）/ viewer（概览、设备列表、接口文档，设备按归属过滤）。
+角色只是内置权限组的别名：新建账号自动加入 admin/manager/operator/viewer 对应的内置组，
+之后权限只按组求值；改角色会替换内置组成员。角色还决定账号管理页的层级（不能操作比自己高的
+角色）。
 口令 PBKDF2-HMAC-SHA256；失败锁定与会话时长可配置（默认 5 次/5 分钟、12h）；改密/禁用吊销会话。
 
 ### 13.2 系统信息与能力配置
@@ -568,7 +617,6 @@ operator（Shell、Web、文件上传下载）/ viewer（概览、设备列表�
 | GET/POST/PUT/DELETE | `/api/v1/client-accounts[/{id}]` | 接入账号；含 `/effective`、`/{id}/tokens` |
 | PUT/POST/DELETE | `/api/v1/client-tokens/{id}`、`/rotate` | Token 限额、启停、轮换、吊销 |
 | GET/POST/PUT/DELETE | `/api/v1/admin-tokens[/{id}]`、`/{id}/rotate` | 管理台 API Token；manager 管自己的，admin 管全部，Token 不能管理 Token |
-| GET/PUT | `/api/v1/acl/file`、`POST /api/v1/acl/reload` | ACL 文件读写与热加载（兜底授权） |
 | GET/POST/PUT/DELETE | `/api/v1/users[/{id}]` | 管理台账号、角色、状态、密码、权限组 |
 | GET/PUT | `/api/v1/settings` | 运行参数（上传上限、会话、锁定时长等） |
 | GET/POST | `/api/v1/distributions[/{id}]` | 文件分发任务与重试/取消/延长/校验 |
@@ -578,15 +626,15 @@ operator（Shell、Web、文件上传下载）/ viewer（概览、设备列表�
 | GET | `/api/v1/uploads/{name}` | 分片上传状态与续传 |
 | GET/POST | `/api/v1/alerts/status`、`/api/v1/alerts/test` | 告警发送结果与测试 |
 | GET | `/metrics` | Prometheus 文本指标 |
-| WS | `/ws/shell?devid=..&token=..`、`/ws/tty/{devid}/{alias}` | 浏览器终端、串口调试 |
-| WS | `/ws/fs/{devid}`、`/ws/svc/{devid}` | 设备文件/服务通道；atk 用 `?atk=`，Cookie 会话直接连 |
+| WS | `/ws/shell?devid=..`、`/ws/tty/{devid}/{alias}` | 浏览器终端、串口调试（会话 Cookie） |
+| WS | `/ws/fs/{devid}`、`/ws/svc/{devid}` | 设备文件/服务通道；浏览器用会话 Cookie，脚本用 `Authorization: Bearer` |
 | POST | `/api/v1/shutdown` | 优雅退出 |
 
 ### 13.4 Web 终端
 
-- 身份固定为 `--admin-shell-user`，浏览器**不能**指定用户（防冒充）；
+- 身份固定为管理台内部代理（进程内密钥，`auth_type=3`），浏览器**不能**指定用户（防冒充）；
 - 设备列表 → `devid`；客户端列表 → `a:<user>`（触发 §12.1 按需 agent）；
-- 需要 relay `--shell-users` 包含该身份，且目标 agent 开 `--allow-shell`；
+- 操作者需有 `device.terminal` 且设备在其范围内；目标 agent 需开 `--allow-shell`；
 - 输入/输出走 `DATA`，尺寸走 `RESIZE`；
 - 管理台是 **HTTP 明文**：非回环部署建议加 TLS 反代或只绑回环。
 
@@ -594,7 +642,7 @@ operator（Shell、Web、文件上传下载）/ viewer（概览、设备列表�
 
 `/device/<devid>/<port>/<path>`：admin 用会话身份做一次 `OPEN(devid, port)`，把 HTTP/WS 双向转发。
 
-- 鉴权：Cookie 会话 + 设备归属；普通账号仅限自己设备
+- 鉴权：Cookie 会话 + `device.port` 资源 + 设备归属 + 端口在自己的范围内（等价一次端口转发）
 - HTTP：响应头到达即 `EndHeaders(chunked)`，DATA 帧边收边写；上游 chunked 增量解码
 - WS：向设备做二次握手（不协商压缩扩展），浏览器帧 ↔ RTNP DATA 双向封装
 - Cookie：`d_<devid>_<port>_` 前缀隔离，避免与管理台及其他设备串味
@@ -660,8 +708,8 @@ queued/scheduled → canceled
   上传写 `.rtunnel-upload/<id>.part` 后 `fsync + rename`；路径限制在 `--file-root` 内
 - 服务协议：JSON `hello/list/logs/action`；所有 systemctl/journalctl 在 agent 工作线程执行，
   列表缓存 10 秒；默认只读，`--svc-rw` 才允许控制
-- 管理台走本机 relay 打开通道，需要 `--admin-shell-user/--admin-shell-token`
-  且该用户对目标设备有 ACL
+- 管理台走本机 relay 打开通道，使用进程内代理密钥认证（不落盘、不配置）；
+  操作者权限（`file.read/write`、`device.terminal`）与设备范围在管理台侧校验
 
 ### 13.8 管理台前端
 
@@ -683,6 +731,40 @@ relay/admin/web/src
   `npm run check:docs` 与 `admin_routes.cpp` 对表
 - 构建：`cd relay/admin/web && npm install && npm run build`
   （先构建 CodeMirror 编辑器 bundle，再构建页面并预压缩）
+
+### 13.9 中继地址列表与同步任务
+
+relay 在 agent `AUTH_OK` 之后、以及同步任务下发时发送 `RELAY_LIST`：
+
+```json
+{"servers":"r1.example.com:8443,r2.example.com:8443","rev":2957691368,"allow_leave":false}
+```
+
+- `servers` 与 `--server` 同语法（逗号分隔，最多 8 个，可省端口用 agent 默认端口）
+- `rev` 是 `servers` 与 `allow_leave` 的 32 位内容哈希，只用于对齐，agent 不比较大小
+- 新列表不含 agent 当前连接的 relay 时，只有 `allow_leave=true` 才切换，否则回
+  `{ok:false,error:"current relay ... not in list"}` 并保留原列表
+- 接受后写入 agent 配置（`relay_servers` / `relay_servers_rev`），重启仍生效；
+  `--server` 在启动时补在列表末尾兜底，不落盘
+- `switching=true` 表示 agent 会延迟 200ms（先发 ACK）断开并按新列表第 0 个地址重连
+- agent < 1.4.98 不识别该帧；同步任务把这类设备直接判失败，不会一直等 ACK
+- relay 每 5s 巡检 agent 控制连接，连续 60s 无帧即断开并标记离线；agent 每 15s 发 PING，
+  整机失联不会长期停留在「在线」，断线同时清掉该设备的 ACK
+
+管理台数据模型：
+
+- `relay_dict` 地址字典（host/port + 名称/备注/启停），`relay_list` 存有序引用，
+  `position` 即故障切换顺序；保存列表只更新期望状态，不主动推送
+- 主动下发走同步任务：任务快照当前列表（`list_json` + `list_rev` + `allow_leave`），
+  逐设备行复用 `distribution_tasks`（`kind='relay'`），支持定时开始、分批灰度、
+  失败率闸门、暂停/继续/取消/重试
+- 逐设备以 ACK 的 `rev` 对齐：`rev` 相同且 `ok=true` 记成功；离线设备保持 `pending`。
+  `AUTH_OK` 下发的是**当前**列表，因此只有当前 rev 仍等于任务快照时该行才收敛；
+  保存新列表会自动暂停快照过期的任务，恢复时校验 rev，不一致只能取消重建
+- 收尾时 `pending` 不算成功：无失败但仍有待上线设备记为 `partial`；截止时间到时
+  未完成的行统一取消，任务记 `failed`
+- 取消会把已发出的 `running` 行一并置为 `cancelled`；暂停期间不释放、不补发，
+  恢复后继续当前批次，下一批由调度器按批间隔释放
 
 ## 14. 备选方案与取舍
 
@@ -711,6 +793,6 @@ relay/admin/web/src
 8. 流级未知 type → `RESET`；连接级未知 → 关闭连接。
 9. devid 必须字母开头；A 只接受 `ATYP=domain`。
 10. 单连接单写者；控制帧优先于数据帧。
-11. 配了 `--client-users/--client-token` 就必须校验 A 的 token；未配时启动日志必须告警。
-12. `OPEN_SHELL` 需要 relay 的 `--shell-users` 与 agent 的 `--allow-shell` 双开关。
+11. A 必须用 `rtk-` 令牌认证，身份只取自令牌；`atk-` 不得用于数据面。
+12. `OPEN_SHELL` 需要权限组里的 `device.terminal` 与 agent 的 `--allow-shell` 双开关。
 13. A 侧 agent 只接受 `a:<自身 user>`；client 的 `--allow-shell` 默认关。

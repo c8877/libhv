@@ -83,7 +83,7 @@ flowchart TB
         API[AdminServer<br/>会话/角色/审计]
         PROXY[设备 Web 代理<br/>HTTP 流式 + WS]
         TERM[Web 终端<br/>xterm + WS]
-        REL[RelayServer<br/>连接注册/路由/ACL/流控]
+        REL[RelayServer<br/>连接注册/路由/权限组/流控]
         CACHE[(sysinfo / caps<br/>内存缓存)]
         DB[(SQLite)]
         UI --> API
@@ -401,10 +401,7 @@ stateDiagram-v2
 |---|---|---|
 | `--port` | 8443 | 隧道监听端口 |
 | `--host` | 0.0.0.0 | 监听地址 |
-| `--acl` / `--acl-file` | — | `user=devid` 规则 |
-| `--client-users` | — | A 端 `user:token` 清单 |
-| `--client-token` | — | A 端全局 token（与 users 二选一） |
-| `--shell-users` | — | 允许 `OPEN_SHELL` 的用户 |
+| `--allow-all` | 关 | 跳过权限组鉴权（仅本地测试） |
 | `--tls-cert/--tls-key/--tls-ca` | — | 隧道 TLS/mTLS |
 | `--admin` | 关闭 | 管理台监听地址 |
 | `--admin-token` | — | 仅初始化 admin 用 |
@@ -438,7 +435,7 @@ stateDiagram-v2
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `--server/--port` | — | 指向 B relay |
-| `--user/--token` | — | A 端身份 |
+| `--token` | — | `rtk-` 接入令牌（身份由令牌决定） |
 | `--socks5` | — | 本地 SOCKS5 监听 |
 | `--forward` | — | `本地端口=devid:远端端口` |
 | `--allow-shell` | 关 | 允许管理台按需拉起本机 agent |
