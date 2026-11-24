@@ -51,8 +51,7 @@ RTUNNEL_CONF_DIR="$T/etc" sh "$PKGROOT/install.sh" \
 
 echo "== relay $RP / admin $AP"
 "$RELAY" --host 127.0.0.1 --port "$RP" --admin 127.0.0.1:"$AP" \
-    --admin-token admintok --admin-db "$T/admin.db" --admin-file-dir "$T/repo" \
-    --admin-shell-user admin --shell-users admin >"$T/relay.log" 2>&1 &
+    --admin-token admintok --admin-db "$T/admin.db" --admin-file-dir "$T/repo" >"$T/relay.log" 2>&1 &
 RELAY_PID=$!
 sleep 0.6
 

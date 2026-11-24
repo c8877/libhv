@@ -10,6 +10,8 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 BIN = os.environ.get("RTUNNEL_BIN", os.path.join(ROOT, "build", "bin"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import e2e  # noqa: E402
 
 HELLO, HELLO_ACK, AUTH, AUTH_OK = 0x01, 0x02, 0x03, 0x04
 OPEN, OPEN_OK, OPEN_FAIL = 0x10, 0x11, 0x12
@@ -115,16 +117,23 @@ class Peer:
 
 def main():
     relay_port = free_port()
+    admin_port = free_port()
+    db = "/tmp/rtunnel-stream-idle-%d.db" % int(time.time())
+    try: os.remove(db)
+    except OSError: pass
     log_path = "/tmp/rtunnel-stream-idle.log"
     log = open(log_path, "w")
     relay = subprocess.Popen(
         [os.path.join(BIN, "rtunnel-relay"), "--host", "127.0.0.1", "--port", str(relay_port),
-         "--allow-all", "--client-token", "tok1", "--stream-idle", "2", "--verbose"],
+         "--allow-all", "--stream-idle", "2",
+         "--admin", "127.0.0.1:%d" % admin_port, "--admin-token", "admintok",
+         "--admin-db", db, "--verbose"],
         stdout=log, stderr=subprocess.STDOUT)
     try:
         time.sleep(0.6)
+        token = e2e.create_client_token("http://127.0.0.1:%d" % admin_port, "idle-user")
         agent = Peer(relay_port, 1, "idle-dev")
-        client = Peer(relay_port, 2, "idle-user", "tok1")
+        client = Peer(relay_port, 2, "", token)
 
         # 1. 建流后不发数据，应在 idle(2s) + 扫描周期(5s) 内被 RESET
         client.open(41, "idle-dev", 1234)

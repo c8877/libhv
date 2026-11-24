@@ -12,7 +12,7 @@
           <div v-if="d.desc" class="muted">{{ d.desc }}<span v-if="d.min || d.max"> · 范围 {{ d.min }}–{{ d.max }}</span></div>
         </el-descriptions-item>
       </el-descriptions>
-      <div v-if="g.name === '告警' && isAdmin" class="alert-bar">
+      <div v-if="g.name === '告警' && canSettingsWrite" class="alert-bar">
         <span class="muted">{{ alertText }}</span>
         <span class="spacer" />
         <el-button size="small" :loading="testing" @click="sendTest">发送测试</el-button>
@@ -43,11 +43,11 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Api } from '@/shared/api.js'
-import { auth, roleOf } from '@/shared/store.js'
+import { auth, can } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 
 const { isPhone } = useBreakpoint()
-const isAdmin = computed(() => roleOf() === 'admin')
+const canSettingsWrite = computed(() => can('settings.write'))
 const st = ref(auth.settings || {})
 const schema = computed(() => st.value._schema || [])
 const groups = computed(() => {
@@ -80,6 +80,7 @@ const alertText = computed(() => {
   return t
 })
 
+
 function isText(d) {
   return Number(d.min) === 0 && Number(d.max) === 0
 }
@@ -110,7 +111,7 @@ async function save() {
     ElMessage.success('已保存，立即生效')
     dlg.value = false
     loadAlertStatus()
-  } catch (e) {
+    } catch (e) {
     ElMessage.error('保存失败：' + e.message)
   } finally {
     saving.value = false

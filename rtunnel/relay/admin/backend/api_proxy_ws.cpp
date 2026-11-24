@@ -194,6 +194,7 @@ void AdminServer::handleDeviceWsOpen(const WebSocketChannelPtr& channel, const H
         std::lock_guard<std::mutex> lk(g_ws_mu);
         g_ws[channel.get()] = s;
     }
+    registerConsoleWs(channel, actor, "proxy");
 }
 
 bool AdminServer::handleDeviceWsMessage(const WebSocketChannelPtr& channel, const std::string& msg) {

@@ -33,6 +33,14 @@ struct TtyWsSession {
 std::mutex g_tty_mu;
 std::map<hv::WebSocketChannel*, std::shared_ptr<TtyWsSession>> g_tty_ws;
 
+// 与写日志时一致：非 [A-Za-z0-9_-.\\] 一律替换为 '_'
+std::string ttySafePart(const std::string& s) {
+    std::string out = s;
+    for (char& c : out)
+        if (!(isalnum((unsigned char)c) || c == '_' || c == '-' || c == '.')) c = '_';
+    return out;
+}
+
 void capWrite(TtyWsSession* s, const char* dir, const unsigned char* p, size_t n) {
     if (!s->cap) return;
     std::lock_guard<std::mutex> lk(s->cap_mu);
@@ -55,7 +63,7 @@ bool AdminServer::handleTtyWsOpen(const WebSocketChannelPtr& channel, const Http
     if (q != std::string::npos) alias = alias.substr(0, q);
     AdminActor actor;
     std::string role;
-    if (!wsAuthorize(req, actor, role) ||
+    if (!wsAuthorize(req, actor, role) || !ownsDevid(devid) ||
         !(hasPerm("device.tty.read") || hasPerm("device.tty.write"))) {
         channel->close();
         return true;
@@ -70,14 +78,25 @@ bool AdminServer::handleTtyWsOpen(const WebSocketChannelPtr& channel, const Http
     }
     bool monitor = req->GetParam("monitor") == "1";
     bool takeover = req->GetParam("takeover") == "1";
-    if (takeover && !hasPerm("device.tty.write")) {
+    bool can_write = hasPerm("device.tty.write");
+    if (monitor && takeover) {
+        channel->send("{\"op\":\"error\",\"msg\":\"monitor 与 takeover 不能同时使用\"}");
+        channel->close();
+        return true;
+    }
+    if (takeover && !can_write) {
         channel->send("{\"op\":\"error\",\"msg\":\"takeover requires tty write\"}");
         channel->close();
         return true;
     }
-    uint16_t flags = 0x0002;
-    if (monitor) flags |= 0x0004;
-    if (takeover) flags |= 0x0008;
+    uint16_t flags = rtnp::OPEN_TTY;
+    if (monitor) {
+        flags |= rtnp::OPEN_TTY_MONITOR;
+    } else if (!can_write) {
+        // 只有 tty.read：打开只读串口，agent 侧丢弃写方向
+        flags |= rtnp::OPEN_TTY_RDONLY;
+    }
+    if (takeover) flags |= rtnp::OPEN_TTY_TAKEOVER;
     std::string err;
     int fd = openTtyStream(cfg_, devid, path, baud, db, parity.empty() ? 'N' : parity[0], stop, flags, err);
     if (fd < 0) {
@@ -88,24 +107,25 @@ bool AdminServer::handleTtyWsOpen(const WebSocketChannelPtr& channel, const Http
     auto s = std::make_shared<TtyWsSession>();
     s->ws = channel;
     s->fd = fd;
-    s->readonly = monitor;
+    s->readonly = monitor || !can_write;
     if (!cfg_.file_dir.empty()) {
         mkdir(cfg_.file_dir.c_str(), 0755);
         std::string dir = cfg_.file_dir + "/ttylogs";
         mkdir(dir.c_str(), 0755);
         char ts[32];
         snprintf(ts, sizeof(ts), "%lld", (long long)time(NULL));
-        std::string safe = devid + "-" + alias;
-        for (char& c : safe) if (!(isalnum((unsigned char)c) || c == '_' || c == '-' || c == '.')) c = '_';
+        std::string safe = ttySafePart(devid) + "-" + ttySafePart(alias);
         std::string fn = "tty-" + safe + "-" + ts + ".jsonl";
         s->cap = fopen((dir + "/" + fn).c_str(), "w");
         if (s->cap) s->file = fn;
     }
-    channel->send("{\"op\":\"open_ok\",\"file\":\"" + s->file + "\"}");
+    channel->send("{\"op\":\"open_ok\",\"readonly\":" + std::string(s->readonly ? "true" : "false") +
+                  ",\"file\":\"" + s->file + "\"}");
     {
         std::lock_guard<std::mutex> lk(g_tty_mu);
         g_tty_ws[channel.get()] = s;
     }
+    registerConsoleWs(channel, actor, "tty");
     audit(actor.username, takeover ? "tty.takeover" : monitor ? "tty.monitor" : "tty.debug_open",
           devid + " " + path);
     s->th = std::thread([s, channel, devid, path]() {
@@ -171,6 +191,19 @@ void AdminServer::handleTtyLogDownload(const HttpContextPtr& ctx) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
         ctx->send("{\"error\":\"bad name\"}");
         return;
+    }
+    // 文件名是 tty-<devid>-<alias>-<ts>.jsonl：受限账号只能下载自己设备的日志
+    if (scopeRestricted()) {
+        bool ok = false;
+        for (const auto& d : myDevids()) {
+            std::string prefix = "tty-" + ttySafePart(d) + "-";
+            if (name.compare(0, prefix.size(), prefix) == 0) { ok = true; break; }
+        }
+        if (!ok) {
+            ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+            ctx->send("{\"error\":\"设备不在授权范围内\"}");
+            return;
+        }
     }
     std::string path = cfg_.file_dir + "/ttylogs/" + name;
     FILE* f = fopen(path.c_str(), "rb");

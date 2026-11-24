@@ -7,7 +7,7 @@
       <el-input v-model="q" placeholder="搜索用户名 / 展示名" clearable class="search" @input="onSearch">
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
-      <el-button v-if="canManage()" type="primary" @click="openCreate">+ 新建账号</el-button>
+      <el-button v-if="canCreate" type="primary" @click="openCreate">+ 新建账号</el-button>
     </div>
 
     <el-table :data="list" v-loading="loading" row-class-name="row-click" @row-click="openDetail">
@@ -65,15 +65,18 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Api } from '@/shared/api.js'
-import { canManage } from '@/shared/store.js'
+import { can, isSuper } from '@/shared/store.js'
 import { time } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
 
 const { isPhone } = useBreakpoint()
+
+// 新建账号与“账号写”权限一致；超管始终可见
+const canCreate = computed(() => isSuper() || can('account.write'))
 
 const router = useRouter()
 const list = ref([])

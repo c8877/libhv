@@ -15,7 +15,7 @@
           <template #default="{ row }">
             <code>{{ row.action }}</code>
             <div class="detail">{{ row.detail }}</div>
-            <div class="muted">{{ row.at }} · {{ row.role }}</div>
+            <div class="muted">{{ row.at }} · {{ row.actor }}</div>
           </template>
         </el-table-column>
       </template>
@@ -23,7 +23,7 @@
         <el-table-column label="时间" width="170" prop="at" sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }"><span class="muted">{{ row.at }}</span></template>
         </el-table-column>
-        <el-table-column prop="role" label="角色" width="100" sortable :sort-orders="TEXT_ORDERS" />
+        <el-table-column prop="actor" label="操作者" min-width="180" sortable :sort-orders="TEXT_ORDERS" />
         <el-table-column label="操作" min-width="180" prop="action" sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }"><code>{{ row.action }}</code></template>
         </el-table-column>
@@ -58,11 +58,11 @@ const filtered = computed(() => {
 })
 
 function parse(line) {
-  const m = /^\[([^\]]+)\] role=(\S+) action=(\S+) detail=(.*)$/.exec(line)
-  if (!m) return { at: '', role: '', action: '', detail: line }
+  const m = /^\[([^\]]+)\] actor=(.*?) action=(\S+) detail=(.*)$/.exec(line)
+  if (!m) return { at: '', actor: '', action: '', detail: line }
   return {
     at: m[1].replace('T', ' ').replace('Z', ''),
-    role: m[2], action: m[3], detail: m[4],
+    actor: m[2], action: m[3], detail: m[4],
   }
 }
 

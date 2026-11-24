@@ -119,7 +119,7 @@ def main():
     tmp = tempfile.mkdtemp(prefix="rtunnel-compat.")
     port = free_port()
     relay = subprocess.Popen(
-        [RELAY, "--host", "127.0.0.1", "--port", str(port), "--acl", "compat=*",
+        [RELAY, "--host", "127.0.0.1", "--port", str(port),
          "--admin", "127.0.0.1:%d" % free_port(),
          "--admin-token", "t0k", "--admin-db", os.path.join(tmp, "a.db"),
          "--admin-file-dir", tmp],

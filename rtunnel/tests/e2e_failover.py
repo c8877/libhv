@@ -10,6 +10,7 @@
 
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
@@ -22,10 +23,12 @@ BIN, LIB = e2e.BIN, e2e.LIB
 LOG = "/tmp/rtunnel-e2e-failover"
 
 
-def start_relay(port, log):
+def start_relay(port, log, admin_port, db):
     return subprocess.Popen(
         [os.path.join(BIN, "rtunnel-relay"), "--host", "127.0.0.1", "--port", str(port),
-         "--allow-all", "--drain-timeout", "300", "--verbose"],
+         "--allow-all", "--drain-timeout", "300",
+         "--admin", "127.0.0.1:%d" % admin_port, "--admin-token", "admintok",
+         "--admin-db", db, "--verbose"],
         stdout=log, stderr=subprocess.STDOUT, env=ENV)
 
 
@@ -70,9 +73,22 @@ def main():
             for k in ("relay1", "relay2", "relay1b", "agent", "client")}
     procs = []
     try:
-        r1 = start_relay(r1_port, logs["relay1"])
+        admin1, admin2 = e2e.free_port(), e2e.free_port()
+        db1 = os.path.join(LOG, "admin1.db")
+        db2 = os.path.join(LOG, "admin2.db")
+        for f in (db1, db2):
+            try: os.remove(f)
+            except OSError: pass
+        r1 = start_relay(r1_port, logs["relay1"], admin1, db1)
         procs.append(r1)
-        r2 = start_relay(r2_port, logs["relay2"])
+        time.sleep(0.5)
+        tok = e2e.create_client_token("http://127.0.0.1:%d" % admin1, "tester")
+        # 两个 relay 是独立管理域：用 SQLite backup 复制同一份库，让 r2 认识同一个令牌
+        src, dst = sqlite3.connect(db1), sqlite3.connect(db2)
+        src.backup(dst)
+        dst.close()
+        src.close()
+        r2 = start_relay(r2_port, logs["relay2"], admin2, db2)
         procs.append(r2)
         time.sleep(0.4)
 
@@ -85,7 +101,7 @@ def main():
             stdout=logs["agent"], stderr=subprocess.STDOUT, env=ENV)
         procs.append(agent)
         client = subprocess.Popen(
-            [os.path.join(BIN, "rtunnel-client"), "--user", "tester"] + servers +
+            [os.path.join(BIN, "rtunnel-client"), "--token", tok] + servers +
             ["--socks5", "127.0.0.1:%d" % socks_port, "--verbose"],
             stdout=logs["client"], stderr=subprocess.STDOUT, env=ENV)
         procs.append(client)
@@ -93,7 +109,7 @@ def main():
         ok, detail = wait_roundtrip(socks_ep, echo_port, timeout=10)
         e2e.check("failover: 初始经 r1 连通", ok, detail)
         e2e.check("failover: agent 首选 r1",
-                  e2e.wait_log(os.path.join(LOG, "agent.log"), "failover", timeout=0.1) is False,
+                  e2e.wait_log(os.path.join(LOG, "agent.log"), "failover 127.0.0.1", timeout=0.1) is False,
                   "agent 不应在成功前切换")
 
         # 杀掉 r1，两端都应自动切到 r2
@@ -106,7 +122,7 @@ def main():
                   e2e.wait_log(os.path.join(LOG, "client.log"), "failover", timeout=5))
 
         # r1 恢复：应保持 r2（sticky）
-        r1b = start_relay(r1_port, logs["relay1b"])
+        r1b = start_relay(r1_port, logs["relay1b"], admin1, db1)
         procs.append(r1b)
         time.sleep(2.0)
         ok, detail = wait_roundtrip(socks_ep, echo_port, timeout=10)

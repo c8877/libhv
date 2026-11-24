@@ -145,7 +145,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Api } from '@/shared/api.js'
-import { auth, roleOf, ROLE_NAMES, can } from '@/shared/store.js'
+import { auth, isSuper, roleOf, ROLE_NAMES, can } from '@/shared/store.js'
 import { time } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
@@ -163,7 +163,7 @@ const filtered = computed(() => {
 })
 
 const roleChoices = computed(() => {
-  const roles = roleOf() === 'admin' ? ['viewer', 'operator', 'manager'] : ['viewer', 'operator']
+  const roles = isSuper() ? ['viewer', 'operator', 'manager'] : ['viewer', 'operator']
   return roles.map((value) => ({ value, label: ROLE_NAMES[value] }))
 })
 
@@ -175,10 +175,11 @@ function roleType(r) {
 }
 
 function canManageTarget(u) {
-  if (!u || u.role === 'admin' || u.username === me.value.username) return false
-  if (roleOf() === 'admin') return true
-  if (roleOf() === 'manager') return u.role === 'operator' || u.role === 'viewer'
-  return false
+  // 能管理谁由「账号写」权限 + 管理层级共同决定，角色本身不授予权限
+  if (!can('account.write') || !u) return false
+  if (u.role === 'admin' || u.username === me.value.username) return false
+  if (isSuper()) return true
+  return u.role === 'operator' || u.role === 'viewer'
 }
 function canEdit(u) {
   return canManageTarget(u) || (u && u.username === me.value.username)
@@ -243,7 +244,7 @@ async function load() {
 function openCreate() {
   createForm.username = ''
   createForm.password = ''
-  createForm.role = roleOf() === 'admin' ? 'viewer' : 'operator'
+  createForm.role = isSuper() ? 'viewer' : 'operator'
   createDlg.value = true
 }
 

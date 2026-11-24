@@ -23,8 +23,7 @@ const LOCAL_PERMS = [
   'device.tty.read',
   'file.read',
   'file.write',
-  'svc.read',
-  'svc.write',
+  'device.svc',
 ]
 
 function applySystemTheme() {

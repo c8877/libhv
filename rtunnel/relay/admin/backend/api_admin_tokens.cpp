@@ -49,15 +49,17 @@ void AdminServer::handleAdminTokenCreate(const HttpContextPtr& ctx, const AdminA
 
     long long target = req.value("user_id", 0LL);
     if (target <= 0) target = actor.id;
-    if (actor.role != "admin" && target != actor.id) {
-        apiError(ctx, HTTP_STATUS_FORBIDDEN, "只能为自己的账号创建 Token");
-        return;
-    }
     DbUser u;
     if (!db_.findUserById(target, u)) { apiNotFound(ctx, "账号不存在"); return; }
-    if (actor.role != "admin" && u.role == "admin") {
-        apiError(ctx, HTTP_STATUS_FORBIDDEN, "不能为管理员账号创建 Token");
-        return;
+    // Token 继承归属账号权限：替别人签发要求目标当前权限在自己范围内
+    if (target != actor.id) {
+        DbPermScope ts;
+        db_.permScopeOfUser(target, ts);
+        std::string why = manageDenied(ts);
+        if (!why.empty()) {
+            apiError(ctx, HTTP_STATUS_FORBIDDEN, "不能为权限高于你的账号创建 Token");
+            return;
+        }
     }
 
     DbTokenSpec spec;
@@ -96,6 +98,8 @@ void AdminServer::handleAdminTokenUpdate(const HttpContextPtr& ctx, const AdminA
         status = s;
     }
     if (!db_.adminTokenUpdate(id, spec, status, err)) { apiNotFound(ctx, err); return; }
+    // 停用的令牌不能再维持已经打开的管理台 WS
+    if (status != "active") kickConsoleWsOfToken(id, "token disabled");
     audit(actor.username, "admin_token.update", "user=" + uname + " id=" + std::to_string(id) +
           " status=" + status);
     ctx->send("{\"ok\":true}");
@@ -112,6 +116,7 @@ void AdminServer::handleAdminTokenRotate(const HttpContextPtr& ctx, const AdminA
 
     std::string plain, out;
     if (!db_.adminTokenRotate(id, plain, out, err)) { apiNotFound(ctx, err); return; }
+    kickConsoleWsOfToken(id, "token rotated");   // 旧明文已失效
     json j = json::parse(out, nullptr, false);
     if (j.is_discarded()) j = json::object();
     audit(actor.username, "admin_token.rotate",
@@ -128,6 +133,7 @@ void AdminServer::handleAdminTokenDelete(const HttpContextPtr& ctx, const AdminA
     if (!db_.adminTokenSpec(id, spec, owner, uname, &status, err)) { apiNotFound(ctx, err); return; }
     if (!canTouch(actor, owner)) { apiError(ctx, HTTP_STATUS_FORBIDDEN, "无权管理该 Token"); return; }
     if (!db_.adminTokenDelete(id, err)) { apiNotFound(ctx, err); return; }
+    kickConsoleWsOfToken(id, "token revoked");
     audit(actor.username, "admin_token.revoke", "user=" + uname + " id=" + std::to_string(id));
     ctx->send("{\"ok\":true}");
 }

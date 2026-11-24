@@ -158,9 +158,10 @@ int openStream(const AdminConfig& cfg, const std::string& devid, int port, std::
     uint8_t t; uint32_t sid; std::string p;
     if (!recvFrame(fd, t, sid, p) || t != 0x02) { err = "no HELLO_ACK"; close(fd); return -1; }
 
-    std::string auth = rtnpStr(cfg.shell_user);
-    auth.push_back(cfg.shell_token.empty() ? 0 : 1);
-    auth += rtnpStr(cfg.shell_token);
+    // 管理台内部代理：auth_type=3 + 进程内密钥，relay 校验后按 console 身份放行
+    std::string auth = rtnpStr("console");
+    auth.push_back(cfg.proxy_secret.empty() ? 0 : 3);
+    auth += rtnpStr(cfg.proxy_secret);
     sendFrame(fd, 0x03, 0, auth);
     if (!recvFrame(fd, t, sid, p) || t != 0x04) { err = "auth failed"; close(fd); return -1; }
 
@@ -193,9 +194,10 @@ int openTtyStream(const AdminConfig& cfg, const std::string& devid, const std::s
     sendFrame(fd, 0x01, 0, hello);
     uint8_t t; uint32_t sid; std::string p;
     if (!recvFrame(fd, t, sid, p) || t != 0x02) { err = "no HELLO_ACK"; close(fd); return -1; }
-    std::string auth = rtnpStr(cfg.shell_user);
-    auth.push_back(cfg.shell_token.empty() ? 0 : 1);
-    auth += rtnpStr(cfg.shell_token);
+    // 管理台内部代理：auth_type=3 + 进程内密钥，relay 校验后按 console 身份放行
+    std::string auth = rtnpStr("console");
+    auth.push_back(cfg.proxy_secret.empty() ? 0 : 3);
+    auth += rtnpStr(cfg.proxy_secret);
     sendFrame(fd, 0x03, 0, auth);
     if (!recvFrame(fd, t, sid, p) || t != 0x04) { err = "auth failed"; close(fd); return -1; }
 
@@ -227,9 +229,10 @@ static int openBuiltinStream(const AdminConfig& cfg, const std::string& devid, u
     sendFrame(fd, 0x01, 0, hello);
     uint8_t t; uint32_t sid; std::string p;
     if (!recvFrame(fd, t, sid, p) || t != 0x02) { err = "no HELLO_ACK"; close(fd); return -1; }
-    std::string auth = rtnpStr(cfg.shell_user);
-    auth.push_back(cfg.shell_token.empty() ? 0 : 1);
-    auth += rtnpStr(cfg.shell_token);
+    // 管理台内部代理：auth_type=3 + 进程内密钥，relay 校验后按 console 身份放行
+    std::string auth = rtnpStr("console");
+    auth.push_back(cfg.proxy_secret.empty() ? 0 : 3);
+    auth += rtnpStr(cfg.proxy_secret);
     sendFrame(fd, 0x03, 0, auth);
     if (!recvFrame(fd, t, sid, p) || t != 0x04) { err = "auth failed"; close(fd); return -1; }
 

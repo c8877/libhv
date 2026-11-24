@@ -60,7 +60,7 @@ import { downloadBlob } from '@/shared/utils.js'
 const route = useRoute()
 const devid = decodeURIComponent(route.params.devid || '')
 const alias = decodeURIComponent(route.params.alias || '')
-const monitor = route.query.monitor === '1'
+const monitor = ref(route.query.monitor === '1')
 const takeover = route.query.takeover === '1'
 
 const MAX_LINES = 2000
@@ -141,7 +141,7 @@ function connect() {
   let url = proto + '//' + location.host + '/ws/tty/' +
     encodeURIComponent(devid) + '/' + encodeURIComponent(alias)
   const q = []
-  if (monitor) q.push('monitor=1')
+  if (monitor.value) q.push('monitor=1')
   if (takeover) q.push('takeover=1')
   if (q.length) url += '?' + q.join('&')
   state.value = 'connecting'
@@ -157,6 +157,8 @@ function connect() {
         const j = JSON.parse(ev.data)
         if (j.op === 'error') addEntry('sys', j.msg || 'error')
         if (j.op === 'open_ok' && j.file) captureFile.value = j.file
+        // 服务端按权限判定只读（tty.read 用户不能写串口）
+        if (j.op === 'open_ok' && typeof j.readonly === 'boolean') monitor.value = j.readonly
       } catch (e) { /* 非 JSON 文本 */ }
       return
     }

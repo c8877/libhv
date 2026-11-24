@@ -17,7 +17,6 @@ struct TerminalSession {
     rtnp::Decoder        in;
     uint32_t             sid = 0;
     std::string          devid;
-    std::string          user;                // RTNP AUTH 用户（空则用默认 shell_user）
     std::string          actor;               // 管理台账号（用于并发限制）
     bool                 closed = false;
     rtnp::Buffer         pending_input;       // OPEN_OK 前的输入先缓冲
@@ -64,13 +63,11 @@ static void directFrame(TerminalSession* s, rtnp::Frame* f) {
     switch (f->type) {
     case rtnp::HELLO_ACK: {
         rtnp::Writer w;
-        // 身份固定为配置的 shell_user：不再接受浏览器传 user，
-        // 否则 operator 可以冒用任意用户身份开 shell。
-        const std::string& auth_user = s->admin->config().shell_user;
-        const std::string& auth_token = s->admin->config().shell_token;
-        w.str(auth_user.c_str());
-        w.u8(auth_token.empty() ? 0 : 1);
-        w.str(auth_token.c_str());
+        // 身份固定为管理台内部代理：浏览器传的 user 一律忽略
+        const std::string& secret = s->admin->config().proxy_secret;
+        w.str("console");
+        w.u8(secret.empty() ? 0 : 3);
+        w.str(secret.c_str());
         rtnp::send(s->link_io, rtnp::AUTH, 0, w.data, (uint16_t)w.len);
         return;
     }
@@ -170,16 +167,18 @@ void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequest
         handleSvcWsOpen(channel, req);
         return;
     }
-    // 权限：query 里的 token（浏览器 WebSocket 无法自定义 Authorization 头）
-    std::string token, devid, user;
+    // WebSocket 用会话 Cookie 鉴权；devid 由 query 指定，身份固定为管理台内部代理
+    std::string devid;
     for (const auto& kv : req->query_params) {
-        if (kv.first == "token") token = kv.second;
-        else if (kv.first == "devid") devid = kv.second;
-        else if (kv.first == "user") user = kv.second;
+        if (kv.first == "devid") devid = kv.second;
     }
     std::string role;
     AdminActor actor;
-    if (!wsAuthorize(req, actor, role)) role.clear();
+    if (!wsAuthorize(req, actor, role)) {
+        logf_("[terminal] reject: unauthorized (devid=%s)", devid.c_str());
+        channel->close();
+        return;
+    }
     {
         int maxs = settingInt("term.max_sessions", 4);
         int cur = 0;
@@ -191,28 +190,28 @@ void AdminServer::onWsOpen(const WebSocketChannelPtr& channel, const HttpRequest
             return;
         }
     }
-    if (!hasPerm("device.terminal")) {
+    if (!hasPerm("device.terminal") || !ownsDevid(devid)) {
         logf_("[terminal] reject: unauthorized (devid=%s)", devid.c_str());
         channel->close();
         return;
     }
-    audit(role, "terminal.open", devid);
     if (devid.empty()) {
         logf_("[terminal] reject: bad devid");
         channel->close();
         return;
     }
+    audit(role, "terminal.open", devid);
 
     auto s = std::make_shared<TerminalSession>();
     s->actor = actor.username;
     s->admin = this;
     s->ws = channel;
     s->devid = devid;
-    s->user = user;
     {
         std::lock_guard<std::mutex> lk(terms_mu_);
         terms_[channel.get()] = s;
     }
+    registerConsoleWs(channel, actor, "terminal");
 
     directOpen(this, s.get());
 }
@@ -254,6 +253,7 @@ void AdminServer::onWsMessage(const WebSocketChannelPtr& channel, const std::str
 }
 
 void AdminServer::onWsClose(const WebSocketChannelPtr& channel) {
+    unregisterConsoleWs(channel.get());
     if (handleTtyWsClose(channel)) return;
     if (handleAgentWsClose(channel)) return;
     if (handleDeviceWsClose(channel)) return;

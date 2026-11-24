@@ -34,6 +34,7 @@ struct DevWsSession {
     std::mutex ws_mu;   // 桥接线程和部署线程都会往同一个 WS 写
     std::string devid;
     std::string role;
+    std::string actor_label;   // 打开时抓取，部署线程写审计用
     std::string tag;    // fs / svc，用于审计
     std::thread th;
     std::atomic<bool> closed{false};
@@ -248,8 +249,8 @@ bool AdminServer::handleAgentWsOpen(const WebSocketChannelPtr& channel, const Ht
     AdminActor actor;
     bool svc_stream = (flags & rtnp::OPEN_SVC) != 0;
     if (!wsAuthorize(req, actor, role) || !ownsDevid(devid) ||
-        (svc_stream ? !(hasPerm("device.view") || hasPerm("device.terminal"))
-                : !(hasPerm("file.read") || hasPerm("file.write")))) {
+        (svc_stream ? !hasPerm("device.svc")
+                    : !(hasPerm("file.read") || hasPerm("file.write")))) {
         channel->close();
         return true;
     }
@@ -275,11 +276,13 @@ bool AdminServer::handleAgentWsOpen(const WebSocketChannelPtr& channel, const Ht
     s->fd = fd;
     s->devid = devid;
     s->role = role;
+    s->actor_label = actorLabel();
     s->tag = tag;
     {
         std::lock_guard<std::mutex> lk(g_dev_mu);
         g_dev_ws[channel.get()] = s;
     }
+    registerConsoleWs(channel, actor, tag);
     s->th = std::thread([s, channel]() {
         uint8_t t;
         uint32_t sid;
@@ -350,7 +353,8 @@ bool AdminServer::handleAgentWsMessage(const WebSocketChannelPtr& channel, const
                     std::lock_guard<std::mutex> lk(s->ws_mu);
                     if (s->ws && s->ws->isConnected()) s->ws->send(r.dump());
                 };
-                if (s->role != "admin" && s->role != "manager") { err("没有部署权限", false); return true; }
+                // 仓库是全局资源，推送到设备属于设备写操作：两者都要有
+                if (!hasPerm("repo.read") || !hasPerm("file.write")) { err("没有部署权限", false); return true; }
                 if (repo.empty() || !adminValidRepoPath(repo)) { err("非法仓库文件路径", false); return true; }
                 if (target.size() < 2 || target[0] != '/' || target.size() > 1024 ||
                     target.find("..") != std::string::npos || target.back() == '/') {
@@ -369,8 +373,9 @@ bool AdminServer::handleAgentWsMessage(const WebSocketChannelPtr& channel, const
                         std::lock_guard<std::mutex> lk(ss->ws_mu);
                         if (ss->ws && ss->ws->isConnected()) ss->ws->send(t);
                     };
-                    auto auditFn = [this](const std::string& r, const std::string& a, const std::string& d) {
-                        audit(r, a, d);
+                    std::string who = ss->actor_label;
+                    auto auditFn = [this, who](const std::string& r, const std::string& a, const std::string& d) {
+                        auditAs(who.empty() ? r : who, a, d);
                     };
                     runRepoPush(cfg_, devid, role, repoName, dest, overwrite, req_id, job, wsSend, auditFn);
                 }).detach();

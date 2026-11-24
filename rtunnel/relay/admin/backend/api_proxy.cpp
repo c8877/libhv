@@ -258,7 +258,13 @@ int AdminServer::handleDeviceProxy(const HttpContextPtr& ctx) {
     }
 
     std::string role;
-    if (requirePerm(ctx, "device.terminal", role)) return (int)ctx->response->status_code;
+    // 等价于一次端口转发：需要 device.port，且端口在自己的范围里
+    if (requirePerm(ctx, "device.port", role)) return (int)ctx->response->status_code;
+    if (!adminPortsCovered(currentActor().ports, std::to_string(port))) {
+        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+        ctx->send("{\"error\":\"port not allowed\"}");
+        return (int)ctx->response->status_code;
+    }
     if (g_proxy_active.load() >= settingInt("proxy.max_concurrent", 32)) {
         ctx->response->status_code = HTTP_STATUS_SERVICE_UNAVAILABLE;
         ctx->send("{\"error\":\"too many concurrent proxy requests\"}");

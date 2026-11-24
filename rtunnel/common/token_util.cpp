@@ -77,7 +77,7 @@ int64_t tokenPeriodNextFrom(TokenPeriod p, int64_t period_start_ms) {
 }
 
 bool isClientToken(const std::string& s) {
-    return s.size() > 4 && s.compare(0, 4, "rtk_") == 0;
+    return s.size() > 4 && s.compare(0, 4, "rtk-") == 0;
 }
 
 std::string newClientToken() {
@@ -89,7 +89,7 @@ std::string newClientToken() {
         if (c == '+') c = '-';
         else if (c == '/') c = '_';
     }
-    return "rtk_" + b64;
+    return "rtk-" + b64;
 }
 
 std::string tokenPrefix(const std::string& token) {

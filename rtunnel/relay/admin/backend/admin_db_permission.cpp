@@ -161,6 +161,57 @@ std::vector<PortRange> disabledPortRanges(sqlite3* db) {
     return out;
 }
 
+// 令牌是否曾显式绑定过权限组：显式但组为空 = 无权限，不再回落归属账号
+bool tokenGroupsExplicitLocked(sqlite3* db, const char* table, long long id) {
+    std::string sql = std::string("SELECT groups_explicit FROM ") + table + " WHERE id=?";
+    sqlite3_stmt* st = nullptr;
+    bool on = false;
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, id);
+        if (sqlite3_step(st) == SQLITE_ROW) on = sqlite3_column_int(st, 0) != 0;
+        sqlite3_finalize(st);
+    }
+    return on;
+}
+
+// 组内已有令牌记为「显式分配过」：被移出组或删组后保持零权限，不回落归属账号。
+// 账号没有回落路径，移出组即零权限，不需要额外标记。
+void markGroupMembersExplicit(sqlite3* db, long long group_id) {
+    const char* sqls[] = {
+        "UPDATE admin_tokens SET groups_explicit=1 WHERE id IN (SELECT CAST(subject_id AS INTEGER)"
+        " FROM perm_group_members WHERE group_id=? AND subject_type='atk')",
+        "UPDATE client_tokens SET groups_explicit=1 WHERE id IN (SELECT CAST(subject_id AS INTEGER)"
+        " FROM perm_group_members WHERE group_id=? AND subject_type='rtk')",
+    };
+    for (const char* sql : sqls) {
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db, sql, -1, &st, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int64(st, 1, group_id);
+            sqlite3_step(st);
+        }
+        sqlite3_finalize(st);
+    }
+}
+
+// 与设备范围无关的资源：只有拿到全部设备（或 super）才生效，避免受限组
+// 通过 relay/dict/权限组等全局键影响范围外的设备或整机配置。
+bool permIsGlobalKey(const std::string& key) {
+    static const char* kGlobal[] = {
+        "relay.read", "relay.write",
+        "dict.read", "dict.write",
+        "group.read", "group.write", "group.member",
+        "account.read", "account.write", "account.delete",
+        "token.read", "token.write",
+        "cert.read", "cert.write",
+        "audit.read",
+        "settings.read", "settings.write", "system.shutdown",
+        "repo.read", "repo.write", "repo.delete",
+    };
+    for (const char* k : kGlobal)
+        if (key == k) return true;
+    return false;
+}
+
 std::set<std::string> disabledTtyPatterns(sqlite3* db) {
     std::set<std::string> out;
     sqlite3_stmt* st = nullptr;
@@ -169,6 +220,33 @@ std::set<std::string> disabledTtyPatterns(sqlite3* db) {
     }
     sqlite3_finalize(st);
     return out;
+}
+
+// 资源键 -> 数据面能力的唯一映射。数据面规则与「有效权限」预览都走这里，
+// 避免两处各写一套导致 device.view 隐含 svc、串口只读可写之类的不一致。
+struct ClientCaps {
+    bool view = false;
+    std::string ports;
+    std::string tty;
+    bool tty_write = false;
+    bool shell = false;
+    int  file = 0;
+    bool svc = false;
+};
+
+ClientCaps capsForScope(const DbPermScope& sc, const std::string& portsIn,
+                        const std::vector<PortRange>& disabledPorts,
+                        const std::set<std::string>& disabledTtys) {
+    auto has = [&](const char* k) { return sc.super || sc.resources.count(k) > 0; };
+    ClientCaps c;
+    c.view = has("device.view");
+    if (has("device.port")) c.ports = intersectPorts(portsIn, "*", disabledPorts);
+    if (has("device.tty.read") || has("device.tty.write")) c.tty = intersectTty("*", "*", disabledTtys);
+    c.tty_write = has("device.tty.write");
+    c.shell = has("device.terminal");
+    c.file = has("file.write") ? 2 : has("file.read") ? 1 : 0;
+    c.svc = has("device.svc");
+    return c;
 }
 
 } // namespace
@@ -210,24 +288,16 @@ bool AdminDb::permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::st
 
         auto emitFor = [&](const DbPermScope& sc, const std::string& portsIn, long long token_id) {
             if (!sc.has_groups) return;
-            std::string ports;
-            if (sc.super || sc.resources.count("device.port")) ports = portsIn;
-            ports = intersectPorts(ports, "*", disabledPorts);
-
-            std::string tty;
-            if (sc.super || sc.resources.count("device.tty.read") || sc.resources.count("device.tty.write"))
-                tty = "*";
-            tty = intersectTty(tty, "*", disabledTtys);
-
+            ClientCaps caps = capsForScope(sc, portsIn, disabledPorts, disabledTtys);
             DbGroupAclRule base;
             base.user = acc.second;
             base.token_id = token_id;
-            base.ports = ports;
-            base.tty = tty;
-            base.shell = sc.super || sc.resources.count("device.terminal") > 0;
-            base.file =
-                sc.super ? 2 : sc.resources.count("file.write") ? 2 : sc.resources.count("file.read") ? 1 : 0;
-            base.svc = sc.super || sc.resources.count("device.view") || sc.resources.count("device.terminal");
+            base.ports = caps.ports;
+            base.tty = caps.tty;
+            base.tty_write = caps.tty_write;
+            base.shell = caps.shell;
+            base.file = caps.file;
+            base.svc = caps.svc;
             auto emit = [&](const std::string& devid) {
                 DbGroupAclRule r = base;
                 r.devid = devid;
@@ -258,8 +328,18 @@ bool AdminDb::permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::st
         for (long long tid : token_ids) {
             DbPermScope tokScope;
             scopeFromGroupsLocked(db_, "rtk", std::to_string(tid), tokScope);
-            if (!tokScope.has_groups) continue;
+            bool explicit_groups = tokenGroupsExplicitLocked(db_, "client_tokens", tid);
+            if (!tokScope.has_groups && !explicit_groups) continue;
             scoped_tokens.insert(tid);
+            if (!tokScope.has_groups) {
+                // 显式绑定过组但当前为空：下发一条全空规则，明确拒绝该令牌
+                DbGroupAclRule deny;
+                deny.user = acc.second;
+                deny.token_id = tid;
+                deny.devid = "*";
+                out.push_back(deny);
+                continue;
+            }
             DbPermScope eff = scopeIntersect(accScope, tokScope);
             std::string tokPorts =
                 intersectPorts(accPorts, subjectPortsLocked(db_, "rtk", std::to_string(tid)), disabledPorts);
@@ -330,14 +410,17 @@ bool AdminDb::permEffectiveClient(const std::string& user, std::string& json_out
     }
 
     json caps = json::object();
-    caps["tcp_ports"] = has("device.port") ? intersectPorts(ports, "*", disabledPorts) : "";
-    caps["shell"] = has("device.terminal") ? "1" : "0";
-    caps["tty"] = (has("device.tty.read") || has("device.tty.write")) ? intersectTty("*", "*", disabledTtys) : "";
-    caps["file"] = has("file.write") ? "rw" : (has("file.read") ? "ro" : "none");
-    caps["sysinfo"] = has("device.view") ? "1" : "0";
-    caps["metrics"] = has("device.view") ? "1" : "0";
+    ClientCaps cp = capsForScope(sc, ports, disabledPorts, disabledTtys);
+    caps["tcp_ports"] = cp.ports;
+    caps["shell"] = cp.shell ? "1" : "0";
+    caps["tty"] = cp.tty;
+    caps["tty_write"] = cp.tty_write ? "1" : "0";
+    caps["file"] = cp.file == 2 ? "rw" : cp.file == 1 ? "ro" : "none";
+    caps["svc"] = cp.svc ? "1" : "0";
+    caps["sysinfo"] = cp.view ? "1" : "0";
+    caps["metrics"] = cp.view ? "1" : "0";
     caps["config"] = has("device.caps.write") ? "1" : "0";
-    caps["web"] = has("device.view") ? "1" : "0";
+    caps["web"] = cp.view ? "1" : "0";
 
     json out;
     out["client"] = user;
@@ -366,7 +449,8 @@ struct PermResDef {
 // 所有可授权的动作都在这里登记；新增接口时先加资源再加路由。
 const PermResDef kPermRes[] = {
     {"device.view", "设备", "查看设备", "设备列表、详情、概览、指标曲线与会话"},
-    {"device.terminal", "设备", "打开终端", "建立 Shell / 串口调试会话"},
+    {"device.terminal", "设备", "打开终端", "建立 Shell 会话"},
+    {"device.svc", "设备", "服务管理", "查看与启停服务、修改 unit 文件"},
     {"device.port", "设备", "端口转发", "按权限组的端口范围建立 TCP 转发"},
     {"device.caps.write", "设备", "修改能力配置", "转发端口、Shell、文件与服务能力"},
     {"device.ota.write", "设备", "OTA 升级开关", "允许/禁止设备接收升级包"},
@@ -383,11 +467,22 @@ const PermResDef kPermRes[] = {
     {"file.write", "文件", "写入文件", "上传、新建、编辑、移动"},
     {"file.delete", "文件", "删除文件", "删除文件或目录、打包下载"},
 
+    {"repo.read", "文件", "查看仓库", "relay 本机文件仓库列表与下载（全局）"},
+    {"repo.write", "文件", "写入仓库", "向仓库上传、编辑、移动，直推设备（全局）"},
+    {"repo.delete", "文件", "删除仓库", "删除仓库文件或目录（全局）"},
+
     {"dist.read", "分发", "查看任务", "分发与 OTA 任务列表、详情"},
     {"dist.write", "分发", "创建与调度", "创建、重试、取消、延长分发任务"},
 
-    {"dict.read", "权限", "查看字典", "资源/设备/端口/串口字典与授权对象"},
+    {"relay.read", "中继", "查看中继列表", "中继地址字典、下发列表与同步任务"},
+    {"relay.write", "中继", "维护中继列表", "地址增删改、调整下发顺序、创建与调度同步任务"},
+
+    {"dict.read", "权限", "查看字典", "资源/设备/端口/串口字典"},
     {"dict.write", "权限", "维护字典", "字典增删改、设备资源启停与改名"},
+
+    {"group.read", "权限", "查看权限组", "权限组列表、详情、成员与授权对象"},
+    {"group.write", "权限", "维护权限组", "创建、修改、删除权限组及其资源与设备范围"},
+    {"group.member", "权限", "调整组成员", "添加或移除权限组成员、修改授权对象所属组"},
 
     {"account.read", "账号", "查看账号", "管理台账号与接入账号"},
     {"account.write", "账号", "修改账号", "新建、改角色/状态/密码、调整权限组"},
@@ -433,8 +528,10 @@ std::vector<std::string> presetResources(const std::string& builtin) {
                     k != "account.delete";
         } else if (builtin == "operator") {
             allow = k == "device.view" || k == "device.terminal" || k == "device.port" ||
-                    k == "device.tty.read" || k == "device.proc.read" || k == "device.proc.signal" ||
-                    k == "file.read" || k == "file.write" ||
+                    k == "device.svc" || k == "device.tty.read" || k == "device.tty.write" ||
+                    k == "device.proc.read" || k == "device.proc.signal" ||
+                    k == "file.read" || k == "file.write" || k == "dist.read" ||
+                    k == "repo.read" || k == "repo.write" ||
                     k == "dict.read" || k == "account.read" || k == "settings.read";
         } else if (builtin == "viewer") {
             allow = k == "device.view" || k == "device.tty.read" || k == "device.proc.read" ||
@@ -443,6 +540,56 @@ std::vector<std::string> presetResources(const std::string& builtin) {
         if (allow) out.push_back(k);
     }
     return out;
+}
+
+// 超级组必须至少保留一个账号成员：移除唯一成员会让所有人都进不了权限管理
+bool superMembersExistLocked(sqlite3* db) {
+    sqlite3_stmt* st = nullptr;
+    bool ok = false;
+    if (sqlite3_prepare_v2(db,
+            "SELECT COUNT(*) FROM perm_group_members m JOIN perm_groups g ON g.id=m.group_id"
+            " WHERE g.super=1 AND m.subject_type='user'", -1, &st, nullptr) == SQLITE_OK) {
+        if (sqlite3_step(st) == SQLITE_ROW) ok = sqlite3_column_int64(st, 0) > 0;
+    }
+    sqlite3_finalize(st);
+    return ok;
+}
+
+// 角色跟着内置组走：组成员变化后把 users.role 同步为最高的内置组
+void syncUserRoleLocked(sqlite3* db, const std::string& sid) {
+    std::string cur, best;
+    int best_rank = 0;
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db, "SELECT role FROM users WHERE id=?", -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, sid.c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(st) == SQLITE_ROW) cur = dbColText(st, 0);
+    }
+    sqlite3_finalize(st);
+    st = nullptr;
+    if (sqlite3_prepare_v2(db,
+            "SELECT g.builtin_key FROM perm_group_members m JOIN perm_groups g ON g.id=m.group_id"
+            " WHERE m.subject_type='user' AND m.subject_id=? AND g.builtin_key<>''",
+            -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, sid.c_str(), -1, SQLITE_TRANSIENT);
+        while (sqlite3_step(st) == SQLITE_ROW) {
+            std::string k = dbColText(st, 0);
+            int r = k == "admin" ? 4 : k == "manager" ? 3 : k == "operator" ? 2 : k == "viewer" ? 1 : 0;
+            if (r > best_rank) {
+                best_rank = r;
+                best = k;
+            }
+        }
+    }
+    sqlite3_finalize(st);
+    // 没有任何内置组时退回最低角色：角色只是内置组的别名，不再保留历史角色
+    if (best_rank == 0) best = "viewer";
+    if (best == cur) return;
+    if (sqlite3_prepare_v2(db, "UPDATE users SET role=? WHERE id=?", -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, best.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(st, 2, sid.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_step(st);
+    }
+    sqlite3_finalize(st);
 }
 
 } // namespace
@@ -537,8 +684,8 @@ bool AdminDb::permSeed() {
     for (const auto& g : kPermGroups) {
         sqlite3_stmt* st = nullptr;
         if (sqlite3_prepare_v2(db_,
-                "INSERT OR IGNORE INTO perm_groups(name,description,builtin_key,super,created_ms,updated_ms)"
-                " VALUES(?,?,?,?,?,?)",
+                "INSERT OR IGNORE INTO perm_groups(name,description,builtin_key,super,global_scope,"
+                "created_ms,updated_ms) VALUES(?,?,?,?,?,?,?)",
                 -1, &st, nullptr) != SQLITE_OK) {
             exec("ROLLBACK", e);
             return false;
@@ -547,8 +694,10 @@ bool AdminDb::permSeed() {
         sqlite3_bind_text(st, 2, g.desc, -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(st, 3, g.key, -1, SQLITE_TRANSIENT);
         sqlite3_bind_int(st, 4, g.super);
-        sqlite3_bind_int64(st, 5, nowMs());
+        // 内置角色组保留传统语义：全局资源（仓库/设置/审计等）不因设备范围为空而失效
+        sqlite3_bind_int(st, 5, 1);
         sqlite3_bind_int64(st, 6, nowMs());
+        sqlite3_bind_int64(st, 7, nowMs());
         bool ok = sqlite3_step(st) == SQLITE_DONE;
         sqlite3_finalize(st);
         if (!ok) {
@@ -565,8 +714,9 @@ bool AdminDb::permSeed() {
         sqlite3_finalize(st);
         if (!gid) {
             // 同名组被手工建过：认领为内置组
-            if (sqlite3_prepare_v2(db_, "UPDATE perm_groups SET builtin_key=?,super=? WHERE name=?", -1, &st,
-                                   nullptr) == SQLITE_OK) {
+            if (sqlite3_prepare_v2(db_,
+                    "UPDATE perm_groups SET builtin_key=?,super=?,global_scope=1 WHERE name=?", -1, &st,
+                    nullptr) == SQLITE_OK) {
                 sqlite3_bind_text(st, 1, g.key, -1, SQLITE_TRANSIENT);
                 sqlite3_bind_int(st, 2, g.super);
                 sqlite3_bind_text(st, 3, g.name, -1, SQLITE_TRANSIENT);
@@ -622,13 +772,7 @@ bool AdminDb::permSeed() {
         sqlite3_finalize(st);
     }
 
-    // 4) 已有组成员关系的老账号视为显式分配，避免删组后回落到角色基线；
-    //    未入组账号不落库，由 permsOf 按 role 动态回落（只回落资源，不含设备）
-
-    exec("UPDATE users SET perm_explicit=1 WHERE perm_explicit=0 AND EXISTS("
-         "SELECT 1 FROM perm_group_members m WHERE m.subject_type='user'"
-         " AND m.subject_id=CAST(users.id AS TEXT))",
-         e);
+    // 4) 账号权限只来自组成员关系；老库的角色组补齐在 open() 的迁移里完成
 
     exec("COMMIT", e);
     return true;
@@ -687,7 +831,7 @@ bool AdminDb::permGroups(std::string& json_out) {
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_,
-            "SELECT id,name,description,builtin_key,super,all_devices,ports,created_ms,updated_ms"
+            "SELECT id,name,description,builtin_key,super,all_devices,global_scope,ports,created_ms,updated_ms"
             " FROM perm_groups ORDER BY super DESC, id",
             -1, &st, nullptr) != SQLITE_OK)
         return false;
@@ -701,9 +845,10 @@ bool AdminDb::permGroups(std::string& json_out) {
         j["builtin_key"] = dbColText(st, 3);
         j["super"] = sqlite3_column_int(st, 4) != 0;
         j["all_devices"] = sqlite3_column_int(st, 5) != 0 || j["super"].get<bool>();
-        j["ports"] = dbColText(st, 6);
-        j["created_ms"] = (long long)sqlite3_column_int64(st, 7);
-        j["updated_ms"] = (long long)sqlite3_column_int64(st, 8);
+        j["global_scope"] = sqlite3_column_int(st, 6) != 0 || j["super"].get<bool>();
+        j["ports"] = dbColText(st, 7);
+        j["created_ms"] = (long long)sqlite3_column_int64(st, 8);
+        j["updated_ms"] = (long long)sqlite3_column_int64(st, 9);
         {
             sqlite3_stmt* m = nullptr;
             int n = 0;
@@ -750,7 +895,7 @@ bool AdminDb::permGroupDetail(long long id, std::string& json_out, std::string& 
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_,
-            "SELECT name,description,builtin_key,super,all_devices,ports,created_ms,updated_ms"
+            "SELECT name,description,builtin_key,super,all_devices,global_scope,ports,created_ms,updated_ms"
             " FROM perm_groups WHERE id=?",
             -1, &st, nullptr) != SQLITE_OK) {
         err = sqlite3_errmsg(db_);
@@ -769,9 +914,10 @@ bool AdminDb::permGroupDetail(long long id, std::string& json_out, std::string& 
     g["builtin_key"] = dbColText(st, 2);
     g["super"] = sqlite3_column_int(st, 3) != 0;
     g["all_devices"] = sqlite3_column_int(st, 4) != 0;
-    g["ports"] = dbColText(st, 5);
-    g["created_ms"] = (long long)sqlite3_column_int64(st, 6);
-    g["updated_ms"] = (long long)sqlite3_column_int64(st, 7);
+    g["global_scope"] = sqlite3_column_int(st, 5) != 0;
+    g["ports"] = dbColText(st, 6);
+    g["created_ms"] = (long long)sqlite3_column_int64(st, 7);
+    g["updated_ms"] = (long long)sqlite3_column_int64(st, 8);
     sqlite3_finalize(st);
 
     json resources = json::array();
@@ -818,18 +964,10 @@ bool AdminDb::permGroupDetail(long long id, std::string& json_out, std::string& 
     return true;
 }
 
-bool AdminDb::permGroupSave(long long id, const std::string& name, const std::string& desc,
-                            const std::vector<std::string>& resources,
-                            const std::vector<std::string>& devices,
-                            int all_devices, const std::string& ports,
-                            long long& out_id, std::string& err) {
-    return permGroupSaveAll(id, name, desc, resources, devices, all_devices, ports, false, {}, out_id, err);
-}
-
 bool AdminDb::permGroupSaveAll(long long id, const std::string& name, const std::string& desc,
                                const std::vector<std::string>& resources,
                                const std::vector<std::string>& devices,
-                               int all_devices, const std::string& ports, bool set_members,
+                               int all_devices, int global_scope, const std::string& ports, bool set_members,
                                const std::vector<std::pair<std::string, std::string>>& members,
                                long long& out_id, std::string& err) {
     if (name.empty() || name.size() > 64) {
@@ -849,7 +987,8 @@ bool AdminDb::permGroupSaveAll(long long id, const std::string& name, const std:
     sqlite3_stmt* st = nullptr;
     if (id > 0) {
         if (sqlite3_prepare_v2(db_,
-                "UPDATE perm_groups SET name=?,description=?,all_devices=?,ports=?,updated_ms=? WHERE id=?",
+                "UPDATE perm_groups SET name=?,description=?,all_devices=?,global_scope=?,ports=?,"
+                "updated_ms=? WHERE id=?",
                 -1, &st, nullptr) != SQLITE_OK) {
             exec("ROLLBACK", e);
             err = sqlite3_errmsg(db_);
@@ -858,9 +997,10 @@ bool AdminDb::permGroupSaveAll(long long id, const std::string& name, const std:
         sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(st, 2, desc.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int(st, 3, all_devices ? 1 : 0);
-        sqlite3_bind_text(st, 4, ports.empty() ? "*" : ports.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(st, 5, nowMs());
-        sqlite3_bind_int64(st, 6, id);
+        sqlite3_bind_int(st, 4, global_scope ? 1 : 0);
+        sqlite3_bind_text(st, 5, ports.empty() ? "*" : ports.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(st, 6, nowMs());
+        sqlite3_bind_int64(st, 7, id);
         int rc = sqlite3_step(st);
         sqlite3_finalize(st);
         if (rc != SQLITE_DONE) {
@@ -870,8 +1010,8 @@ bool AdminDb::permGroupSaveAll(long long id, const std::string& name, const std:
         }
     } else {
         if (sqlite3_prepare_v2(db_,
-                "INSERT INTO perm_groups(name,description,builtin_key,super,seeded,all_devices,ports,"
-                "created_ms,updated_ms) VALUES(?,?,'',0,1,?,?,?,?)",
+                "INSERT INTO perm_groups(name,description,builtin_key,super,seeded,all_devices,"
+                "global_scope,ports,created_ms,updated_ms) VALUES(?,?,'',0,1,?,?,?,?,?)",
                 -1, &st, nullptr) != SQLITE_OK) {
             exec("ROLLBACK", e);
             err = sqlite3_errmsg(db_);
@@ -880,9 +1020,10 @@ bool AdminDb::permGroupSaveAll(long long id, const std::string& name, const std:
         sqlite3_bind_text(st, 1, name.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(st, 2, desc.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int(st, 3, all_devices ? 1 : 0);
-        sqlite3_bind_text(st, 4, ports.empty() ? "*" : ports.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int64(st, 5, nowMs());
+        sqlite3_bind_int(st, 4, global_scope ? 1 : 0);
+        sqlite3_bind_text(st, 5, ports.empty() ? "*" : ports.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int64(st, 6, nowMs());
+        sqlite3_bind_int64(st, 7, nowMs());
         int rc = sqlite3_step(st);
         sqlite3_finalize(st);
         if (rc != SQLITE_DONE) {
@@ -968,7 +1109,20 @@ bool AdminDb::permGroupSaveAll(long long id, const std::string& name, const std:
     }
 
     // 成员：调用方显式要求时才覆盖（空数组 = 清空）
+    std::vector<std::string> role_users;
     if (set_members) {
+        {
+            sqlite3_stmt* q = nullptr;
+            if (sqlite3_prepare_v2(db_,
+                    "SELECT subject_id FROM perm_group_members WHERE group_id=? AND subject_type='user'",
+                    -1, &q, nullptr) == SQLITE_OK) {
+                sqlite3_bind_int64(q, 1, id);
+                while (sqlite3_step(q) == SQLITE_ROW) role_users.push_back(dbColText(q, 0));
+            }
+            sqlite3_finalize(q);
+        }
+        // 先标记现有成员：被移出组后不能回落到角色/归属账号的权限
+        markGroupMembersExplicit(db_, id);
         if (sqlite3_prepare_v2(db_, "DELETE FROM perm_group_members WHERE group_id=?", -1, &st, nullptr) !=
             SQLITE_OK) {
             exec("ROLLBACK", e);
@@ -981,6 +1135,9 @@ bool AdminDb::permGroupSaveAll(long long id, const std::string& name, const std:
         for (const auto& m : members) {
             if (m.first != "user" && m.first != "atk" && m.first != "client" && m.first != "rtk") continue;
             if (m.second.empty() || m.second.size() > 64) continue;
+            if (m.first == "user" &&
+                std::find(role_users.begin(), role_users.end(), m.second) == role_users.end())
+                role_users.push_back(m.second);
             if (sqlite3_prepare_v2(db_,
                     "INSERT OR IGNORE INTO perm_group_members(group_id,subject_type,subject_id,added_ms)"
                     " VALUES(?,?,?,?)",
@@ -1000,25 +1157,26 @@ bool AdminDb::permGroupSaveAll(long long id, const std::string& name, const std:
                 err = "写入成员失败";
                 return false;
             }
-            // 账号被显式分配过：之后不再按 role 回落
-            if (m.first == "user") {
+            // 令牌一进组就记为显式：被移出后保持零权限，不继承归属账号
+            if (m.first == "atk" || m.first == "rtk") {
+                const char* table = m.first == "atk" ? "admin_tokens" : "client_tokens";
+                std::string sql = std::string("UPDATE ") + table + " SET groups_explicit=1 WHERE id=?";
                 sqlite3_stmt* u = nullptr;
-                if (sqlite3_prepare_v2(db_, "UPDATE users SET perm_explicit=1 WHERE id=?", -1, &u, nullptr) ==
-                    SQLITE_OK) {
+                if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &u, nullptr) == SQLITE_OK) {
                     sqlite3_bind_int64(u, 1, atoll(m.second.c_str()));
                     sqlite3_step(u);
-                    sqlite3_finalize(u);
                 }
+                sqlite3_finalize(u);
             }
         }
-        if (sqlite3_prepare_v2(db_, "UPDATE users SET perm_explicit=1 WHERE perm_explicit=0 AND EXISTS("
-                                   "SELECT 1 FROM perm_group_members mm WHERE mm.subject_type='user'"
-                                   " AND mm.subject_id=CAST(users.id AS TEXT))", -1, &st, nullptr) == SQLITE_OK) {
-            sqlite3_step(st);
-            sqlite3_finalize(st);
-        }
+        for (const auto& sid : role_users) syncUserRoleLocked(db_, sid);
     }
 
+    if (!superMembersExistLocked(db_)) {
+        exec("ROLLBACK", e);
+        err = "超级管理员组至少保留一个成员";
+        return false;
+    }
     exec("COMMIT", e);
     return true;
 }
@@ -1047,6 +1205,8 @@ bool AdminDb::permGroupDelete(long long id, std::string& err) {
         err = e;
         return false;
     }
+    // 删组前标记现有成员：之后保持零权限，不回落角色/归属账号
+    markGroupMembersExplicit(db_, id);
     exec(("DELETE FROM perm_group_resources WHERE group_id=" + std::to_string(id)).c_str(), e);
     exec(("DELETE FROM perm_group_devices WHERE group_id=" + std::to_string(id)).c_str(), e);
     exec(("DELETE FROM perm_group_members WHERE group_id=" + std::to_string(id)).c_str(), e);
@@ -1075,6 +1235,21 @@ bool AdminDb::permGroupMembers(long long id, std::string& json_out, std::string&
     out["name"] = name;
     out["members"] = json::parse(permMembersOfGroupLocked(id), nullptr, false);
     json_out = out.dump();
+    return true;
+}
+
+bool AdminDb::permGroupMemberList(long long id, std::vector<std::pair<std::string, std::string>>& out) {
+    out.clear();
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_,
+            "SELECT subject_type,subject_id FROM perm_group_members WHERE group_id=?"
+            " ORDER BY subject_type,subject_id",
+            -1, &st, nullptr) != SQLITE_OK)
+        return false;
+    sqlite3_bind_int64(st, 1, id);
+    while (sqlite3_step(st) == SQLITE_ROW) out.emplace_back(dbColText(st, 0), dbColText(st, 1));
+    sqlite3_finalize(st);
     return true;
 }
 
@@ -1189,6 +1364,34 @@ bool AdminDb::permGroupSetMembers(long long id,
         err = e;
         return false;
     }
+    // 先把现有令牌标记为显式：移出组后保持零权限，不回落归属账号
+    {
+        const char* marks[] = {
+            "UPDATE admin_tokens SET groups_explicit=1 WHERE id IN (SELECT CAST(subject_id AS INTEGER)"
+            " FROM perm_group_members WHERE group_id=? AND subject_type='atk')",
+            "UPDATE client_tokens SET groups_explicit=1 WHERE id IN (SELECT CAST(subject_id AS INTEGER)"
+            " FROM perm_group_members WHERE group_id=? AND subject_type='rtk')",
+        };
+        for (const char* sql : marks) {
+            sqlite3_stmt* mk = nullptr;
+            if (sqlite3_prepare_v2(db_, sql, -1, &mk, nullptr) == SQLITE_OK) {
+                sqlite3_bind_int64(mk, 1, id);
+                sqlite3_step(mk);
+            }
+            sqlite3_finalize(mk);
+        }
+    }
+    std::vector<std::string> role_users;
+    {
+        sqlite3_stmt* q = nullptr;
+        if (sqlite3_prepare_v2(db_,
+                "SELECT subject_id FROM perm_group_members WHERE group_id=? AND subject_type='user'",
+                -1, &q, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int64(q, 1, id);
+            while (sqlite3_step(q) == SQLITE_ROW) role_users.push_back(dbColText(q, 0));
+        }
+        sqlite3_finalize(q);
+    }
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, "DELETE FROM perm_group_members WHERE group_id=?", -1, &st, nullptr) !=
         SQLITE_OK) {
@@ -1201,6 +1404,9 @@ bool AdminDb::permGroupSetMembers(long long id,
     sqlite3_finalize(st);
     for (const auto& m : members) {
         if (m.first != "user" && m.first != "atk" && m.first != "client" && m.first != "rtk") continue;
+        if (m.first == "user" &&
+            std::find(role_users.begin(), role_users.end(), m.second) == role_users.end())
+            role_users.push_back(m.second);
         if (m.second.empty() || m.second.size() > 64) continue;
         if (sqlite3_prepare_v2(db_,
                 "INSERT OR IGNORE INTO perm_group_members(group_id,subject_type,subject_id,added_ms)"
@@ -1221,11 +1427,23 @@ bool AdminDb::permGroupSetMembers(long long id,
             err = "写入成员失败";
             return false;
         }
+        // 令牌一进组就记为显式，之后被移出时保持「无权限」而不是继承账号
+        if (m.first == "atk" || m.first == "rtk") {
+            const char* table = m.first == "atk" ? "admin_tokens" : "client_tokens";
+            std::string sql = std::string("UPDATE ") + table + " SET groups_explicit=1 WHERE id=?";
+            if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) == SQLITE_OK) {
+                sqlite3_bind_int64(st, 1, atoll(m.second.c_str()));
+                sqlite3_step(st);
+            }
+            sqlite3_finalize(st);
+        }
     }
-    exec("UPDATE users SET perm_explicit=1 WHERE perm_explicit=0 AND EXISTS("
-         "SELECT 1 FROM perm_group_members mm WHERE mm.subject_type='user'"
-         " AND mm.subject_id=CAST(users.id AS TEXT))",
-         e);
+    if (!superMembersExistLocked(db_)) {
+        exec("ROLLBACK", e);
+        err = "超级管理员组至少保留一个成员";
+        return false;
+    }
+    for (const auto& sid : role_users) syncUserRoleLocked(db_, sid);
     exec("COMMIT", e);
     return true;
 }
@@ -1244,8 +1462,7 @@ bool AdminDb::permGroupsOfUser(long long user_id, std::vector<long long>& ids) {
     return true;
 }
 
-bool AdminDb::permSetUserGroups(long long user_id, const std::string& role, const std::vector<long long>& ids,
-                                std::string& err) {
+bool AdminDb::permSetUserGroups(long long user_id, const std::vector<long long>& ids, std::string& err) {
     std::lock_guard<std::mutex> lk(mu_);
     std::string e;
     if (!exec("BEGIN", e)) {
@@ -1254,13 +1471,6 @@ bool AdminDb::permSetUserGroups(long long user_id, const std::string& role, cons
     }
     std::string sid = std::to_string(user_id);
     sqlite3_stmt* st = nullptr;
-    // 显式分配过权限组后，不再按 role 回落预置组（即使清空全部组）
-    if (sqlite3_prepare_v2(db_, "UPDATE users SET perm_explicit=1 WHERE id=?", -1, &st, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int64(st, 1, user_id);
-        sqlite3_step(st);
-    }
-    sqlite3_finalize(st);
-    st = nullptr;
     if (sqlite3_prepare_v2(db_, "DELETE FROM perm_group_members WHERE subject_type='user' AND subject_id=?", -1, &st,
                            nullptr) != SQLITE_OK) {
         exec("ROLLBACK", e);
@@ -1271,8 +1481,6 @@ bool AdminDb::permSetUserGroups(long long user_id, const std::string& role, cons
     sqlite3_step(st);
     sqlite3_finalize(st);
 
-    int rank = 0;
-    std::string new_role = role;
     for (long long gid : ids) {
         if (sqlite3_prepare_v2(db_, "INSERT OR IGNORE INTO perm_group_members(group_id,subject_type,subject_id,added_ms)"
                                    " VALUES(?, 'user', ?, ?)",
@@ -1291,36 +1499,14 @@ bool AdminDb::permSetUserGroups(long long user_id, const std::string& role, cons
             err = "写入权限组失败";
             return false;
         }
-        std::string bk;
-        if (sqlite3_prepare_v2(db_, "SELECT builtin_key FROM perm_groups WHERE id=?", -1, &st, nullptr) ==
-            SQLITE_OK) {
-            sqlite3_bind_int64(st, 1, gid);
-            if (sqlite3_step(st) == SQLITE_ROW) bk = dbColText(st, 0);
-        }
-        sqlite3_finalize(st);
-        int r = bk == "admin" ? 4 : bk == "manager" ? 3 : bk == "operator" ? 2 : bk == "viewer" ? 1 : 0;
-        if (r > rank) {
-            rank = r;
-            new_role = bk;
-        }
     }
-    if (rank > 0 && new_role != role) {
-        if (sqlite3_prepare_v2(db_, "UPDATE users SET role=? WHERE id=?", -1, &st, nullptr) == SQLITE_OK) {
-            sqlite3_bind_text(st, 1, new_role.c_str(), -1, SQLITE_TRANSIENT);
-            sqlite3_bind_int64(st, 2, user_id);
-            sqlite3_step(st);
-        }
-        sqlite3_finalize(st);
+    syncUserRoleLocked(db_, sid);
+    if (!superMembersExistLocked(db_)) {
+        exec("ROLLBACK", e);
+        err = "超级管理员组至少保留一个成员";
+        return false;
     }
     exec("COMMIT", e);
-    return true;
-}
-
-bool AdminDb::permsOf(long long user_id, const std::string& role, std::set<std::string>& out, bool& super) {
-    DbPermScope sc;
-    permScopeOfUser(user_id, role, sc);
-    out = sc.resources;
-    super = sc.super;
     return true;
 }
 
@@ -1474,12 +1660,12 @@ bool AdminDb::clientPermsOf(long long account_id, std::set<std::string>& out, bo
 
 namespace {
 
-DbPermScope scopeIntersect(const DbPermScope& a, const DbPermScope& b) {
-    if (a.super) return b;
+DbPermScope scopeIntersect(const DbPermScope& a, const DbPermScope& b) {    if (a.super) return b;
     if (b.super) return a;
     DbPermScope r;
     r.has_groups = a.has_groups || b.has_groups;
     r.all_devices = a.all_devices && b.all_devices;
+    r.global_scope = a.global_scope && b.global_scope;
     for (const auto& k : a.resources)
         if (b.resources.count(k)) r.resources.insert(k);
     if (r.all_devices) {
@@ -1492,6 +1678,19 @@ DbPermScope scopeIntersect(const DbPermScope& a, const DbPermScope& b) {
         for (const auto& d : a.devices)
             if (b.devices.count(d)) r.devices.insert(d);
     }
+    // 端口范围取交集：令牌分组只能收窄，不能超出归属账号
+    std::vector<PortRange> pr;
+    for (auto& x : parsePorts(a.ports))
+        for (auto& y : parsePorts(b.ports)) {
+            int lo = std::max(x.lo, y.lo), hi = std::min(x.hi, y.hi);
+            if (lo <= hi) {
+                PortRange r2;
+                r2.lo = lo;
+                r2.hi = hi;
+                pr.push_back(r2);
+            }
+        }
+    r.ports = joinRanges(pr);
     return r;
 }
 
@@ -1499,7 +1698,7 @@ DbPermScope scopeIntersect(const DbPermScope& a, const DbPermScope& b) {
 void scopeFromGroupsLocked(sqlite3* db, const char* type, const std::string& id, DbPermScope& out) {
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db,
-            "SELECT g.id,g.super,g.all_devices FROM perm_group_members m"
+            "SELECT g.id,g.super,g.all_devices,g.global_scope FROM perm_group_members m"
             " JOIN perm_groups g ON g.id=m.group_id"
             " WHERE m.subject_type=? AND m.subject_id=?",
             -1, &st, nullptr) != SQLITE_OK)
@@ -1510,6 +1709,7 @@ void scopeFromGroupsLocked(sqlite3* db, const char* type, const std::string& id,
         out.has_groups = true;
         if (sqlite3_column_int(st, 1) != 0) out.super = true;
         if (sqlite3_column_int(st, 2) != 0) out.all_devices = true;
+        if (sqlite3_column_int(st, 3) != 0) out.global_scope = true;
     }
     sqlite3_finalize(st);
     if (!out.has_groups) return;
@@ -1544,6 +1744,8 @@ void scopeFromGroupsLocked(sqlite3* db, const char* type, const std::string& id,
         while (sqlite3_step(st) == SQLITE_ROW) out.devices.insert(dbColText(st, 0));
     }
     sqlite3_finalize(st);
+
+    out.ports = subjectPortsLocked(db, type, id);
 }
 
 // 主体所有权限组 ports 的并集（组级端口范围）
@@ -1564,72 +1766,136 @@ std::string subjectPortsLocked(sqlite3* db, const char* type, const std::string&
     return joinRanges(rs);
 }
 
-// 未显式分配权限组时按 users.role 回落预置组；设备只由权限组授权
-void fallbackRoleLocked(sqlite3* db, const std::string& role, DbPermScope& out) {
-    sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db,
-            "SELECT g.id,g.super,g.all_devices FROM perm_groups g WHERE g.builtin_key=?", -1, &st,
-            nullptr) == SQLITE_OK) {
-        sqlite3_bind_text(st, 1, role.c_str(), -1, SQLITE_TRANSIENT);
-        while (sqlite3_step(st) == SQLITE_ROW) {
-            if (sqlite3_column_int(st, 1) != 0) out.super = true;
-            if (sqlite3_column_int(st, 2) != 0) out.all_devices = true;
-        }
-        sqlite3_finalize(st);
-        st = nullptr;
-        if (sqlite3_prepare_v2(db,
-                "SELECT DISTINCT r.resource_key FROM perm_groups g"
-                " JOIN perm_group_resources r ON r.group_id=g.id AND r.allowed=1"
-                " JOIN perm_resources p ON p.key=r.resource_key AND p.enabled=1"
-                " WHERE g.builtin_key=?",
-                -1, &st, nullptr) == SQLITE_OK) {
-            sqlite3_bind_text(st, 1, role.c_str(), -1, SQLITE_TRANSIENT);
-            while (sqlite3_step(st) == SQLITE_ROW) {
-                std::string k = dbColText(st, 0);
-                if (!k.empty()) out.resources.insert(k);
-            }
-        }
-        sqlite3_finalize(st);
-    }
-}
-
 } // namespace
 
-bool AdminDb::permScopeOfUser(long long user_id, const std::string& role, DbPermScope& out) {
-    out = DbPermScope();
-    // role=admin 永远保留超级权限，避免误把管理员加入受限组后失去管理能力
-    if (role == "admin") {
-        out.super = true;
-        out.all_devices = true;
-        out.explicit_perm = true;
-        return true;
+// 端口范围包含：target 的每个端口都要被 allowed 覆盖（先归一化 allowed，避免重复计数）
+// 全局资源键：不受设备范围约束，只有 all_devices / super 才能生效
+bool permIsGlobal(const std::string& key) { return permIsGlobalKey(key); }
+
+bool adminPortsCovered(const std::string& allowed, const std::string& target) {    std::vector<PortRange> want = parsePorts(target);
+    if (want.empty()) return true;   // 不授予任何端口
+    std::vector<PortRange> have = parsePorts(joinRanges(parsePorts(allowed)));
+    if (have.empty()) return false;
+    for (auto& w : want) {
+        int need = w.hi - w.lo + 1, got = 0;
+        for (auto& h : have) {
+            int lo = std::max(w.lo, h.lo), hi = std::min(w.hi, h.hi);
+            if (lo <= hi) got += hi - lo + 1;
+        }
+        if (got < need) return false;
     }
-    std::lock_guard<std::mutex> lk(mu_);
-    sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, "SELECT perm_explicit FROM users WHERE id=?", -1, &st, nullptr) == SQLITE_OK) {
-        sqlite3_bind_int64(st, 1, user_id);
-        if (sqlite3_step(st) == SQLITE_ROW) out.explicit_perm = sqlite3_column_int(st, 0) != 0;
-    }
-    sqlite3_finalize(st);
-    scopeFromGroupsLocked(db_, "user", std::to_string(user_id), out);
-    if (out.has_groups || out.explicit_perm) return true;
-    fallbackRoleLocked(db_, role, out);
     return true;
 }
 
-bool AdminDb::permScopeOfAdminToken(long long token_id, long long user_id, const std::string& role,
-                                    DbPermScope& out) {
+bool dbPermCovers(const DbPermScope& a, const DbPermScope& b) {
+    if (a.super) return true;
+    if (b.super) return false;
+    if (b.global_scope && !a.global_scope) return false;
+    for (const auto& k : b.resources)
+        if (!a.resources.count(k)) return false;
+    if (b.all_devices) {
+        if (!a.all_devices) return false;
+    } else if (!a.all_devices) {
+        for (const auto& d : b.devices)
+            if (!a.devices.count(d)) return false;
+    }
+    return adminPortsCovered(a.ports, b.ports);
+}
+
+bool AdminDb::permGroupBuiltin(long long id, std::string& key) {
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    key.clear();
+    if (sqlite3_prepare_v2(db_, "SELECT builtin_key FROM perm_groups WHERE id=?", -1, &st, nullptr) !=
+        SQLITE_OK)
+        return false;
+    sqlite3_bind_int64(st, 1, id);
+    bool found = sqlite3_step(st) == SQLITE_ROW;
+    if (found) key = dbColText(st, 0);
+    sqlite3_finalize(st);
+    return found;
+}
+
+bool AdminDb::permRoleScope(const std::string& role, DbPermScope& out) {
+    long long gid = 0;
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        sqlite3_stmt* st = nullptr;
+        if (sqlite3_prepare_v2(db_, "SELECT id FROM perm_groups WHERE builtin_key=?", -1, &st, nullptr) ==
+            SQLITE_OK) {
+            sqlite3_bind_text(st, 1, role.c_str(), -1, SQLITE_TRANSIENT);
+            if (sqlite3_step(st) == SQLITE_ROW) gid = sqlite3_column_int64(st, 0);
+        }
+        sqlite3_finalize(st);
+    }
+    if (gid <= 0) {
+        out = DbPermScope();
+        return false;
+    }
+    return permGroupScope(gid, out);
+}
+
+bool AdminDb::permGroupScope(long long id, DbPermScope& out) {
+    out = DbPermScope();
+    std::lock_guard<std::mutex> lk(mu_);
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, "SELECT super,all_devices,global_scope,ports FROM perm_groups WHERE id=?",
+                           -1, &st, nullptr) != SQLITE_OK) {
+        return false;
+    }
+    sqlite3_bind_int64(st, 1, id);
+    if (sqlite3_step(st) != SQLITE_ROW) {
+        sqlite3_finalize(st);
+        return false;
+    }
+    out.super = sqlite3_column_int(st, 0) != 0;
+    out.all_devices = sqlite3_column_int(st, 1) != 0;
+    out.global_scope = sqlite3_column_int(st, 2) != 0;
+    out.ports = dbColText(st, 3);
+    out.has_groups = true;
+    sqlite3_finalize(st);
+
+    st = nullptr;
+    if (sqlite3_prepare_v2(db_, "SELECT resource_key FROM perm_group_resources WHERE group_id=? AND allowed=1",
+                           -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, id);
+        while (sqlite3_step(st) == SQLITE_ROW) out.resources.insert(dbColText(st, 0));
+    }
+    sqlite3_finalize(st);
+
+    st = nullptr;
+    if (sqlite3_prepare_v2(db_, "SELECT devid FROM perm_group_devices WHERE group_id=?", -1, &st, nullptr) ==
+        SQLITE_OK) {
+        sqlite3_bind_int64(st, 1, id);
+        while (sqlite3_step(st) == SQLITE_ROW) out.devices.insert(dbColText(st, 0));
+    }
+    sqlite3_finalize(st);
+    // 没有端口转发能力时，ports 不参与授予范围比较，避免误报“端口越界”
+    if (!out.super && !out.resources.count("device.port")) out.ports.clear();
+    return true;
+}
+
+bool AdminDb::permScopeOfUser(long long user_id, DbPermScope& out) {
+    out = DbPermScope();
+    std::lock_guard<std::mutex> lk(mu_);
+    scopeFromGroupsLocked(db_, "user", std::to_string(user_id), out);
+    return true;
+}
+
+bool AdminDb::permScopeOfAdminToken(long long token_id, long long user_id, DbPermScope& out) {
     DbPermScope owner;
-    permScopeOfUser(user_id, role, owner);
+    permScopeOfUser(user_id, owner);
     DbPermScope tok;
+    bool explicit_groups = false;
     {
         std::lock_guard<std::mutex> lk(mu_);
         scopeFromGroupsLocked(db_, "atk", std::to_string(token_id), tok);
+        explicit_groups = tokenGroupsExplicitLocked(db_, "admin_tokens", token_id);
     }
-    // 令牌未分组 = 完全继承；分组后只能收窄，不能超过归属账号
-    out = tok.has_groups ? scopeIntersect(owner, tok) : owner;
-    out.explicit_perm = owner.explicit_perm;
-    out.token_groups = tok.has_groups;
+    // 从未分组 = 继承归属账号；绑定过组（含清空）= 只能收窄，空组等于无权限
+    bool scoped = tok.has_groups || explicit_groups;
+    out = scoped ? scopeIntersect(owner, tok) : owner;
+    out.token_groups = scoped;
     return true;
 }
 
@@ -1637,7 +1903,6 @@ bool AdminDb::permScopeOfClient(long long account_id, DbPermScope& out) {
     out = DbPermScope();
     std::lock_guard<std::mutex> lk(mu_);
     scopeFromGroupsLocked(db_, "client", std::to_string(account_id), out);
-    out.explicit_perm = true;
     return true;
 }
 
@@ -1645,12 +1910,15 @@ bool AdminDb::permScopeOfClientToken(long long token_id, long long account_id, D
     DbPermScope owner;
     permScopeOfClient(account_id, owner);
     DbPermScope tok;
+    bool explicit_groups = false;
     {
         std::lock_guard<std::mutex> lk(mu_);
         scopeFromGroupsLocked(db_, "rtk", std::to_string(token_id), tok);
+        explicit_groups = tokenGroupsExplicitLocked(db_, "client_tokens", token_id);
     }
-    out = tok.has_groups ? scopeIntersect(owner, tok) : owner;
-    out.token_groups = tok.has_groups;
+    bool scoped = tok.has_groups || explicit_groups;
+    out = scoped ? scopeIntersect(owner, tok) : owner;
+    out.token_groups = scoped;
     return true;
 }
 
@@ -1817,7 +2085,7 @@ bool AdminDb::permSubjects(std::string& json_out) {
         }
         for (auto& u : list) {
             DbPermScope sc;
-            permScopeOfUser(std::get<0>(u), std::get<2>(u), sc);
+            permScopeOfUser(std::get<0>(u), sc);
             arr.push_back(base("user", std::to_string(std::get<0>(u)), std::get<1>(u), "角色 " + std::get<2>(u),
                                std::get<3>(u), sc));
         }
@@ -1853,7 +2121,7 @@ bool AdminDb::permSubjects(std::string& json_out) {
                 sqlite3_finalize(st);
             }
             DbPermScope sc;
-            permScopeOfAdminToken(std::get<0>(x), std::get<1>(x), role, sc);
+            permScopeOfAdminToken(std::get<0>(x), std::get<1>(x), sc);
             std::string nm = std::get<2>(x).empty() ? std::get<3>(x) : std::get<2>(x);
             json j = base("atk", std::to_string(std::get<0>(x)), nm, "归属 " + uname, std::get<5>(x), sc);
             // 令牌可选组限定在归属账号已有的组，避免界面出现「选了也没用」的选项
@@ -1978,13 +2246,21 @@ bool AdminDb::permSetSubjectGroups(const std::string& type, const std::string& i
             return false;
         }
     }
-    if (type == "user") {
-        if (sqlite3_prepare_v2(db_, "UPDATE users SET perm_explicit=1 WHERE id=?", -1, &st, nullptr) ==
-            SQLITE_OK) {
+    if (type == "user") syncUserRoleLocked(db_, id);
+    if (type == "atk" || type == "rtk") {
+        // 显式换组（包括清空）：之后组为空即无权限，不再继承归属账号
+        const char* table = type == "atk" ? "admin_tokens" : "client_tokens";
+        std::string sql = std::string("UPDATE ") + table + " SET groups_explicit=1 WHERE id=?";
+        if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) == SQLITE_OK) {
             sqlite3_bind_int64(st, 1, atoll(id.c_str()));
             sqlite3_step(st);
         }
         sqlite3_finalize(st);
+    }
+    if (!superMembersExistLocked(db_)) {
+        exec("ROLLBACK", e);
+        err = "超级管理员组至少保留一个成员";
+        return false;
     }
     exec("COMMIT", e);
     return true;

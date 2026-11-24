@@ -1,4 +1,5 @@
 #include "agent_web.hpp"
+#include "common/logging.hpp"
 #include "cpputil/hstring.h"
 #include "agent_app.hpp"
 #include "agent_web_html.hpp"
@@ -244,6 +245,11 @@ int agentWebStart(AgentApp* app, const std::string& listen, std::string& err) {
     std::string host;
     int port = 0;
     if (!parseListen(listen, host, port, err)) return -1;
+    if (host != "127.0.0.1" && host != "localhost" && host != "::1") {
+        logf_("[agent] WARNING: local web on %s:%d; file/service WebSocket access control is "
+              "same-origin only unless --file-token/--svc-token is configured",
+              host.c_str(), port);
+    }
 
     // 异步 handler 跑在 hv::async 线程池。默认 min=1 会常驻一个线程、
     // max=CPU 核数会让多标签页各占一个；这里按需创建、上限 4、空闲 15s 退出。

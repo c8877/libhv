@@ -54,6 +54,7 @@ struct RelayStream {
     int          a_closed = 0;
     int          c_closed = 0;
     int          opened = 0;             // OPEN_OK 经过 relay 时置位
+    int          a_readonly = 0;         // 只读串口流：丢弃 client 方向的 DATA（兼容旧 agent）
     uint64_t     opened_at_ms = 0;       // 建流时间（管理台展示）
     uint64_t     last_active_ms = 0;     // 最近一次转发帧，空闲回收用
     RelayStream* next_a = nullptr;   // a->streams
@@ -66,6 +67,7 @@ struct RelayConn {
     int          role = 0;           // rtnp::ROLE_*
     int          authed = 0;
     int          internal = 0;   // 管理台内部链路（终端/代理），不在客户端列表展示
+    int          admin_proxy = 0; // 通过进程内代理密钥认证，跳过分组鉴权
     char         devid[128] = {0};
     char         user[128] = {0};
     rtnp::Decoder in;
@@ -141,17 +143,12 @@ struct RelayCounters {
     uint64_t streams_idle_reset_total = 0;
 };
 
-struct AclEntry {
-    char      user[128] = {0};
-    char      pattern[128] = {0};
-    AclEntry* next = nullptr;
-};
-
 struct GroupAclRule {
     std::string user;
     std::string devid;
     std::string ports;
-    std::string tty;
+    std::string tty;         // 可读的串口（* = 全部）
+    bool        tty_write = false; // 是否允许写串口 / 强制接管
     bool        shell = false;
     int         file = 0;    // 0 无 / 1 只读 / 2 读写
     bool        svc = false;
@@ -169,6 +166,15 @@ public:
     void setAuthPolicies(const std::string& json);
     // 用量快照（relay 线程），JSON 数组
     std::string tokenUsageSnapshot();
+
+    // 更新下发给 agent 的地址列表（relay 线程）。servers 为空表示停用下发。
+    // 内容变化时更新 rev 并清空旧 ACK；只改期望状态，设备上线在 AUTH_OK 后自动对齐。
+    bool setRelayList(const std::string& servers, bool allow_leave, std::string& err);
+    std::string relayListStatus();    // JSON：配置 + 在线 agent 的采纳情况
+    // 按任务快照下行（同步任务用，内容可与当前运行时列表不同）
+    bool sendRelayListJson(const char* devid, const std::string& json);
+    std::string relayListAcksJson();                 // JSON 对象：devid -> 最近 ACK
+    std::string onlineAgentDevids();                 // JSON 数组，relay 线程
 
     hloop_t*    loop = nullptr;
     void*       admin = nullptr;      // AdminServer*（--admin 启用时创建）
@@ -190,6 +196,7 @@ public:
     std::unordered_map<std::string, std::string> caps_local_web;  // devid -> 本地页监听地址
     std::unordered_map<std::string, int> caps_net;                 // devid -> 支持 NET_REQ
     std::unordered_map<std::string, int> caps_proc;                // devid -> 支持 PROC_REQ
+    std::string admin_proxy_secret;   // 进程内生成的随机密钥，仅供 AdminServer 代理连接 relay
     std::unordered_map<std::string, std::string> agent_versions;
     std::unordered_map<std::string, uint64_t> agent_boot_ms;   // devid -> 系统开机时间（epoch ms）
     std::unordered_map<uint32_t, FilePush> pushes;
@@ -224,15 +231,9 @@ public:
     std::unordered_map<std::string, std::string> metric_status;
     uint32_t metric_query_seq = 0;
     uint32_t tty_list_seq = 0;
-    struct ClientCred { std::string user, token; };
-    std::vector<ClientCred> client_creds;   // --client-users（user:token）
-    std::string client_token;               // --client-token（全局 token）
-    std::vector<std::string> shell_users;   // --shell-users（允许 OPEN_SHELL 的用户）
-    int         allow_all = 0;
+    int         allow_all = 0;   // --allow-all 测试开关：跳过分组鉴权
     int         require_mtls = 0;
     int         verbose = 0;
-    AclEntry*   acl_cli = nullptr;    // --acl 命令行条目（固定）
-    AclEntry*   acl_file = nullptr;   // --acl-file 文件条目（SIGHUP 热加载）
     std::vector<GroupAclRule> acl_groups;       // 管理台分组授权（relay 线程只读）
     std::set<std::string>     acl_grouped_users;
     std::set<long long>       acl_scoped_tokens; // 配了 rtk 权限组的令牌：只认令牌级规则
@@ -240,8 +241,14 @@ public:
     std::unordered_map<std::string, int> account_active;       // username -> 1/0
     std::unordered_map<long long, TokenUsage>    token_usage;  // token id -> usage
     std::set<long long> pending_token_cuts;       // 流量到顶待断开（帧处理内不能直接 close）
-    char        acl_file_path[256] = {0};
     PendingOpen* pending = nullptr;   // 等待 A 侧 agent 上线的 OPEN_SHELL
+    // relay 下发的地址列表（只在 relay 线程读写）
+    std::string relay_list_json;      // 空 = 不下发
+    std::string relay_list_servers;   // 规范化后的 "h:p,..."
+    bool        relay_list_allow_leave = false;
+    uint32_t    relay_list_rev = 0;
+    struct RelayListAck { std::string json; uint64_t ts = 0; };
+    std::unordered_map<std::string, RelayListAck> relay_list_acks;  // devid -> 最近一次 ACK
     hio_t*      listenio = nullptr;
     int         draining = 0;
     uint64_t    drain_deadline = 0;
@@ -249,22 +256,18 @@ public:
     uint32_t    stream_idle_timeout_ms = 1800000;  // 流空闲回收（0 = 关闭）
 
 private:
-    int          aclCheck(const char* user, const char* devid);
     bool         groupAclDevice(const char* user, long long token_id, const char* devid);
     bool         groupAclCheck(const char* user, long long token_id, const char* devid, uint16_t port,
-                               int is_shell, const char* tty_path, int is_fs, int fs_rw, int is_svc);
+                               int is_shell, const char* tty_path, int tty_write, int is_fs, int fs_rw,
+                               int is_svc);
     bool         groupAclApplies(const GroupAclRule& r, const char* user, long long token_id) const;
-    bool         clientAuthEnabled() const { return !client_creds.empty() || !client_token.empty(); }
-    bool         shellAllowed(const char* user) const;
     RelayConn*   findClientByUser(const char* user);
     void         addPending(RelayConn* a, uint32_t a_sid, const char* devid, uint16_t port, uint16_t flags);
     void         completePending(const char* devid);
     void         sweepPending();
     void         sweepStreams();          // 回收长时间无数据的已建流
+    void         sweepIdleAgents();       // 回收长时间没有帧的 agent 控制连接
     void         dropPendingFor(RelayConn* a);
-    void         aclAddTo(AclEntry** head, const char* user, const char* patterns);
-    void         aclFree(AclEntry** head);
-    int          aclFileLoad();
     RelayConn*   findAgent(const char* devid);
     RelayStream* findStreamByA(RelayConn* a, uint32_t sid, RelayStream** prev);
     RelayStream* findStreamByC(RelayConn* c, uint32_t sid, RelayStream** prev);
@@ -277,10 +280,15 @@ private:
     // 管理台写操作（均在 relay 线程内调用）
     bool         kickStream(uint32_t a_sid);          // 双侧 RESET + 回收映射
     bool         kickAgent(const char* devid);        // 强制下线（agent 会退避重连）
+    // 撤权联动：关闭接入账号的活跃会话（含控制连接）。
+    // token_id>0 时只关该令牌建立的连接；返回关闭的连接数。
+    int          kickClientSessions(const std::vector<std::string>& users, long long token_id,
+                                    const char* reason);
     bool         isRevoked(const std::string& san) const;
     bool         revokeSan(const std::string& san);   // 写黑名单 + 踢在线连接
     void         loadRevoked();                       // 启动时读 revoked.txt
     bool         sendSysinfoReq(const char* devid, int mode = 0);   // 要求 agent 立即上报
+    bool         sendRelayList(RelayConn* c);                       // 给单条 agent 连接下发
     std::string  sysinfoOf(const char* devid, uint64_t* ts);
     std::string  sysinfoLastOf(const char* devid, bool* full, uint64_t* ts);
     bool         sendConfig(const char* devid, uint32_t sid, const std::string& json);
@@ -338,7 +346,6 @@ private:
     void         onRead(RelayConn* c, void* buf, int readbytes);
     void         onClose(RelayConn* c);
     void         onAccept(hio_t* io);
-    void         onSighup();
     void         onStats();
     void         onDrain(htimer_t* timer);
     void         onShutdown(int signo);
@@ -361,6 +368,5 @@ private:
     static void tokenCb(htimer_t* t);
     static void tokenCutCb(htimer_t* t);
     static void drainCb(htimer_t* t);
-    static void sighupCb(hsignal_t* sig);
     static void shutdownCb(hsignal_t* sig);
 };

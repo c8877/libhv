@@ -21,7 +21,7 @@ int64_t tokenPeriodNext(TokenPeriod p, int64_t period_start_ms);
 // 从「用量所在周期起点」推算下一个起点，period_start=0 时按 now 对齐
 int64_t tokenPeriodNextFrom(TokenPeriod p, int64_t period_start_ms);
 
-// 生成 rtk_<43 字符 base64url>；随机源不可用时返回空串
+// 生成 rtk-<43 字符 base64url>；随机源不可用时返回空串
 std::string newClientToken();
 bool isClientToken(const std::string& s);
 

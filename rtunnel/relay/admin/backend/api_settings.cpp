@@ -47,6 +47,7 @@ const Def kDefs[] = {
 // 字符串类配置的最大长度（默认 64）
 int maxLenOf(const std::string& key) {
     if (key == "alert.webhook_url") return 512;
+    if (key == "alert.webhook_url") return 512;
     if (key == "alert.webhook_secret") return 256;
     return 64;
 }
@@ -109,6 +110,11 @@ void AdminServer::loadSettings() {
     for (auto& d : kDefs) {
         auto it = dbv.find(d.key);
         settings_[d.key] = (it != dbv.end()) ? it->second : d.val;
+    }
+    // 内部键：由「运维 → 中继列表」写入，不在设置页展示，但要随进程重启恢复
+    {
+        auto it = dbv.find("relay.allow_leave");
+        settings_["relay.allow_leave"] = (it != dbv.end()) ? it->second : "0";
     }
 }
 

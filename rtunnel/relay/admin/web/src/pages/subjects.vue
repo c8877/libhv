@@ -105,7 +105,7 @@ import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
 
 const { isPhone } = useBreakpoint()
-const canWrite = computed(() => can('dict.write'))
+const canWrite = computed(() => can('group.member'))
 
 const TABS = [
   { key: 'user', label: '账号' },

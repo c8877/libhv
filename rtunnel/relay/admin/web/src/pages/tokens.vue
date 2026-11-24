@@ -21,10 +21,10 @@
         <template #default="{ row }">
           <b>{{ row.name || '未命名' }}</b>
           <div class="mono muted">{{ row.token_prefix }}</div>
-          <div v-if="isPhone && isAdmin" class="muted">{{ row.username }}</div>
+          <div v-if="isPhone && canListUsers" class="muted">{{ row.username }}</div>
         </template>
       </el-table-column>
-      <el-table-column v-if="isAdmin && !isPhone" label="所属账号" min-width="120" prop="username"
+      <el-table-column v-if="canListUsers && !isPhone" label="所属账号" min-width="120" prop="username"
                        sortable :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">{{ row.username }}</template>
       </el-table-column>
@@ -93,7 +93,7 @@
   <!-- 新建 / 编辑 -->
   <el-dialog v-model="dlg" :title="mode === 'create' ? '新建 API Token' : '编辑 API Token'" width="480px">
     <el-form ref="formRef" :model="form" :rules="rules" label-width="88px">
-      <el-form-item v-if="mode === 'create' && isAdmin" label="所属账号">
+      <el-form-item v-if="mode === 'create' && canListUsers" label="所属账号">
         <el-select v-model="form.user_id" filterable style="width: 100%">
           <el-option v-for="u in users" :key="u.id" :label="u.username + ' · ' + (ROLE_NAMES[u.role] || u.role)"
                      :value="u.id" />
@@ -127,17 +127,17 @@
       Token 的有效权限 = 归属账号 ∩ 所选的组；不选则完全继承归属账号，永远不会超过归属账号。
     </div>
     <div v-if="!groups.length" class="muted">还没有权限组，先到「权限组」页创建。</div>
-    <el-checkbox-group v-else v-model="groupSel" class="scope" :disabled="!isAdmin">
+    <el-checkbox-group v-else v-model="groupSel" class="scope" :disabled="!canBindGroups">
       <el-checkbox v-for="g in groups" :key="g.id" :value="g.id" class="scope-item">
         <b>{{ g.name }}</b>
         <span class="muted"> · {{ g.super ? '全部资源' : g.resources.length + ' 项资源' }}</span>
         <span class="muted"> · {{ g.super || g.all_devices ? '全部设备' : g.device_count + ' 台' }}</span>
       </el-checkbox>
     </el-checkbox-group>
-    <div v-if="!isAdmin" class="muted mt8">只有管理员可以修改分组绑定。</div>
+    <div v-if="!canBindGroups" class="muted mt8">只有管理员可以修改分组绑定。</div>
     <template #footer>
-      <el-button @click="grpDlg = false">{{ isAdmin ? '取消' : '关闭' }}</el-button>
-      <el-button v-if="isAdmin" type="primary" :loading="saving" @click="saveGroups">保存</el-button>
+      <el-button @click="grpDlg = false">{{ canBindGroups ? '取消' : '关闭' }}</el-button>
+      <el-button v-if="canBindGroups" type="primary" :loading="saving" @click="saveGroups">保存</el-button>
     </template>
   </el-dialog>
 
@@ -163,14 +163,15 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Api } from '@/shared/api.js'
-import { auth, roleOf, ROLE_NAMES } from '@/shared/store.js'
+import { auth, can, ROLE_NAMES } from '@/shared/store.js'
 import { copyText, time } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import ApiDocPanel from '@/components/ApiDocPanel.vue'
 import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
 
 const { isPhone } = useBreakpoint()
-const isAdmin = computed(() => roleOf() === 'admin')
+const canListUsers = computed(() => can('account.read'))
+const canBindGroups = computed(() => can('group.member'))
 
 const list = ref([])
 const users = ref([])
@@ -240,7 +241,7 @@ function onSearch() {
 }
 
 async function loadUsers() {
-  if (!isAdmin.value) return
+  if (!canListUsers.value) return
   try {
     users.value = await Api.get('/api/v1/users')
   } catch (e) {
@@ -277,7 +278,7 @@ async function save() {
         name: form.name.trim(),
         expires_in_days: Number(form.expires_in_days) || 0,
       }
-      if (isAdmin.value && form.user_id) body.user_id = form.user_id
+      if (canListUsers.value && form.user_id) body.user_id = form.user_id
       const r = await Api.post('/api/v1/admin-tokens', body)
       dlg.value = false
       showSecret('API Token 已创建', r.token, r)

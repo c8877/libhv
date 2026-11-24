@@ -150,7 +150,8 @@ bool AdminDb::distList(const std::string& status, const std::string& q, const st
                        const std::string& sort, int dir,
                        int page, int per_page, std::string& json_out, int& total) {
     std::lock_guard<std::mutex> lk(mu_);
-    std::string where = " WHERE 1=1";
+    // 中继同步任务的逐设备行也放在这张表里，但由中继列表页单独展示和操作
+    std::string where = " WHERE kind != 'relay'";
     std::vector<std::string> args;
     if (!kind.empty()) {
         where += " AND kind=?";
@@ -234,7 +235,7 @@ bool AdminDb::distDue(std::string& json_out) {
     const char* sql = "SELECT id,batch_id,devid,file_name,file_size,sub_dir,target_path,status,"
         "start_at_ms,deadline_at_ms,retry_count,max_retries,next_retry_ms,extend_count,sent,error,"
         "relay_tid,actor,created_ms,started_ms,finished_ms,file_sha,kind,target_version FROM distribution_tasks"
-        " WHERE status IN ('scheduled','queued','running','verifying','installing','confirming') ORDER BY id";
+        " WHERE kind != 'relay' AND status IN ('scheduled','queued','running','verifying','installing','confirming') ORDER BY id";
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
     nlohmann::json arr = nlohmann::json::array();
     while (sqlite3_step(st) == SQLITE_ROW) {
@@ -250,10 +251,9 @@ bool AdminDb::distDue(std::string& json_out) {
 bool AdminDb::distSummary(const std::vector<std::string>& devids, std::string& json_out) {
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
-    std::string where;
+    std::string where = " WHERE kind != 'relay'";
     std::vector<std::string> args;
     appendDevidFilter(where, args, devids);
-    if (!where.empty()) where = " WHERE 1=1" + where;
     std::string sql = "SELECT status,COUNT(*) FROM distribution_tasks" + where + " GROUP BY status";
     if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return false;
     for (size_t i = 0; i < args.size(); ++i)
@@ -374,7 +374,8 @@ bool AdminDb::distRecover() {
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
     const char* sql = "UPDATE distribution_tasks SET status='queued', relay_tid=0, next_retry_ms=0,"
-        " error='relay restarted' WHERE status IN ('running','verifying','installing')";
+        " error=CASE WHEN kind='relay' THEN 'relay sync restarted' ELSE 'relay restarted' END"
+        " WHERE status IN ('running','verifying','installing')";
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
     int rc = sqlite3_step(st);
     sqlite3_finalize(st);

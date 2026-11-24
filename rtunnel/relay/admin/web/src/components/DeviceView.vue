@@ -205,12 +205,12 @@
           <el-skeleton v-else :rows="3" animated />
         </el-tab-pane>
         <el-tab-pane label="文件" name="file" lazy>
-          <FileManagerCard embedded :devid="devid" :sys="sys" :can-edit="canEdit"
+          <FileManagerCard embedded :devid="devid" :sys="sys" :can-edit="canFileEdit"
                            :editor-url="isLocal ? 'assets/cm-editor.js' : ''"
                            :ws-url="isLocal ? localWs('fs') : ''" />
         </el-tab-pane>
-        <el-tab-pane label="服务" name="service" lazy>
-          <SvcManagerCard embedded :devid="devid" :sys="sys" :can-edit="canEdit"
+        <el-tab-pane v-if="can('device.svc')" label="服务" name="service" lazy>
+          <SvcManagerCard embedded :devid="devid" :sys="sys" :can-edit="canSvcEdit"
                            :ws-url="isLocal ? localWs('svc') : ''" />
         </el-tab-pane>
         <el-tab-pane v-if="can('device.proc.read')" label="进程" name="proc" lazy>
@@ -1314,7 +1314,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, MoreFilled, Refresh } from '@element-plus/icons-vue'
 import { ElMessageBox } from 'element-plus'
 import { Api } from '@/shared/api.js'
-import { can, canManage } from '@/shared/store.js'
+import { can } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
 import { ago, bytes, copyText, downloadJson, duration, kbPair, time } from '@/shared/utils.js'
@@ -1342,7 +1342,8 @@ function localWs(kind) {
   const proto = location.protocol === 'https:' ? 'wss://' : 'ws://'
   return proto + location.host + base + 'ws/' + kind
 }
-const canEdit = computed(() => canManage())
+const canFileEdit = computed(() => can('file.write'))
+const canSvcEdit = computed(() => can('device.svc'))
 const canCaps = computed(() => can('device.caps.write'))
 const canOta = computed(() => can('device.ota.write'))
 const canTty = computed(() => can('device.tty.write'))

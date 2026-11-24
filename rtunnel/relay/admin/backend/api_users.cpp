@@ -151,6 +151,20 @@ void AdminServer::handleLogin(const HttpContextPtr& ctx) {
     std::string ip = ctx->request->client_addr.ip;
     {
         std::lock_guard<std::mutex> lk(g_login_mu);
+        // 失败表只用于短期锁定：定期清掉过期项，避免被随机用户名撑大
+        if (g_login_fail.size() > 4096 || g_ip_fail.size() > 4096) {
+            time_t now = time(NULL);
+            for (auto i = g_login_fail.begin(); i != g_login_fail.end();) {
+                if (i->second.second <= now) i = g_login_fail.erase(i);
+                else ++i;
+            }
+            for (auto i = g_ip_fail.begin(); i != g_ip_fail.end();) {
+                if (i->second.second <= now) i = g_ip_fail.erase(i);
+                else ++i;
+            }
+            if (g_login_fail.size() > 8192) g_login_fail.clear();
+            if (g_ip_fail.size() > 8192) g_ip_fail.clear();
+        }
         auto it = g_login_fail.find(user);
         if (it != g_login_fail.end() && it->second.second > time(NULL)) {
             ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
@@ -225,9 +239,15 @@ void AdminServer::handleMe(const HttpContextPtr& ctx) {
     j["username"] = tl_actor.username;
     j["role"] = tl_actor.role.empty() ? role : tl_actor.role;
     j["super"] = tl_actor.super;
+    j["all_devices"] = tl_actor.all_devices;
+    j["global_scope"] = tl_actor.global_scope;
     {
+        // 只回传真正生效的资源：全局资源需要「全局权限」，否则前端会显示点不动的入口
         nlohmann::json ps = nlohmann::json::array();
-        for (const auto& k : tl_actor.perms) ps.push_back(k);
+        for (const auto& k : tl_actor.perms) {
+            if (!tl_actor.super && permIsGlobal(k) && !tl_actor.global_scope) continue;
+            ps.push_back(k);
+        }
         j["perms"] = ps;
     }
     {
@@ -274,6 +294,16 @@ void AdminServer::handleUserCreate(const HttpContextPtr& ctx, const AdminActor& 
         ctx->send("{\"error\":\"cannot create this role\"}");
         return;
     }
+    // 建账号 = 把该角色的内置组授予对方：组的授权面必须在自己范围内
+    DbPermScope rs;
+    if (db_.permRoleScope(role, rs)) {
+        std::string why = grantDenied(rs);
+        if (!why.empty()) {
+            ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+            ctx->send("{\"error\":\"" + why + "\"}");
+            return;
+        }
+    }
     std::string err;
     if (!db_.createUser(user, pass, role, err)) {
         logf_("[admin] create user '%s' failed: %s", user.c_str(), err.c_str());
@@ -309,12 +339,15 @@ void AdminServer::handleUserPassword(const HttpContextPtr& ctx, const AdminActor
             ctx->send("{\"error\":\"old password wrong\"}");
             return;
         }
-    } else if (hasPerm("account.write") && (tl_actor.super || target.role != "admin")) {
-        // 有账号写权限即可重置非超级管理员密码
     } else {
-        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
-        ctx->send("{\"error\":\"forbidden\"}");
-        return;
+        DbPermScope ts;
+        db_.permScopeOfUser(id, ts);
+        // 重置他人密码等同于接管账号：目标当前权限必须在自己的范围内
+        if (!hasPerm("account.write") || !manageDenied(ts).empty()) {
+            ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+            ctx->send("{\"error\":\"forbidden\"}");
+            return;
+        }
     }
     std::string err;
     if (!db_.setPassword(id, newp, err)) {
@@ -323,6 +356,7 @@ void AdminServer::handleUserPassword(const HttpContextPtr& ctx, const AdminActor
         return;
     }
     db_.dropUserSessions(id);
+    kickConsoleWsOfUser(id, "password changed");
     audit(actor.username, "account.password", target.username);
     ctx->send("{\"ok\":true}");
 }
@@ -342,14 +376,19 @@ void AdminServer::handleUserStatus(const HttpContextPtr& ctx, const AdminActor& 
         ctx->send("{\"error\":\"no such user\"}");
         return;
     }
-    bool allowed = canManage(actor, target);
+    DbPermScope ts;
+    db_.permScopeOfUser(id, ts);
+    bool allowed = canManage(actor, target) && manageDenied(ts).empty();
     if (!allowed || id == actor.id) {
         ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
         ctx->send("{\"error\":\"forbidden\"}");
         return;
     }
     db_.setStatus(id, status);
-    if (status == "disabled") db_.dropUserSessions(id);
+    if (status == "disabled") {
+        db_.dropUserSessions(id);
+        kickConsoleWsOfUser(id, "account disabled");
+    }
     audit(actor.username, "account.status", target.username + " " + status);
     ctx->send("{\"ok\":true}");
 }
@@ -362,13 +401,16 @@ void AdminServer::handleUserDelete(const HttpContextPtr& ctx, const AdminActor& 
         ctx->send("{\"error\":\"no such user\"}");
         return;
     }
-    bool allowed = canManage(actor, target);
+    DbPermScope ts;
+    db_.permScopeOfUser(id, ts);
+    bool allowed = canManage(actor, target) && manageDenied(ts).empty();
     if (!allowed || id == actor.id) {
         ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
         ctx->send("{\"error\":\"forbidden\"}");
         return;
     }
     db_.removeUser(id);
+    kickConsoleWsOfUser(id, "account deleted");
     audit(actor.username, "account.delete", target.username);
     ctx->send("{\"ok\":true}");
 }
@@ -388,9 +430,15 @@ void AdminServer::handleUserRole(const HttpContextPtr& ctx, const AdminActor& ac
         ctx->send("{\"error\":\"no such user\"}");
         return;
     }
-    if (!canManage(actor, target) || id == actor.id || !canCreateRole(actor, role)) {
+    DbPermScope before;
+    db_.permScopeOfUser(id, before);
+    DbPermScope rs;
+    bool have_role_scope = db_.permRoleScope(role, rs);
+    std::string why = manageDenied(before);
+    if (why.empty() && have_role_scope) why = grantDenied(rs);
+    if (!canManage(actor, target) || id == actor.id || !canCreateRole(actor, role) || !why.empty()) {
         ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
-        ctx->send("{\"error\":\"forbidden\"}");
+        ctx->send("{\"error\":\"" + (why.empty() ? std::string("forbidden") : why) + "\"}");
         return;
     }
     if (!db_.setRole(id, role)) {
@@ -399,6 +447,8 @@ void AdminServer::handleUserRole(const HttpContextPtr& ctx, const AdminActor& ac
         return;
     }
     audit(actor.username, "account.role", target.username + " -> " + role);
+    // 角色决定未分组时的回落权限，改完让该账号的 WS 重新握手
+    kickConsoleWsOfUser(id, "role changed");
     ctx->send("{\"ok\":true}");
 }
 

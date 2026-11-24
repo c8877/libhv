@@ -58,7 +58,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Api } from '@/shared/api.js'
-import { auth, canManage, canOperate } from '@/shared/store.js'
+import { auth, can, isSuper } from '@/shared/store.js'
 import { bytes } from '@/shared/utils.js'
 import { createRepoBackend } from '@/shared/repo-backend.js'
 import editorUrl from '../../../../../shared/web/cm-editor.bundle.js?url'
@@ -76,7 +76,7 @@ const total = ref(0)
 let fm = null
 let agents = []
 
-const writable = computed(() => canOperate())
+const writable = computed(() => isSuper() || can('repo.write'))
 const maxUploadMb = computed(() => parseInt(auth.settings['file.max_upload_mb'] || '32', 10) || 32)
 const maxEditMb = computed(() => parseInt(auth.settings['file.max_edit_mb'] || '4', 10) || 4)
 
@@ -147,7 +147,7 @@ async function refreshCap() {
 }
 
 function openDeploy(name, row, repoPath) {
-  if (!canManage()) return
+  if (!(isSuper() || can('repo.write'))) return
   deploy.repoFile = repoPath || name
   deploy.name = name
   deploy.total = Number(row && row.size) || 0
@@ -289,11 +289,11 @@ function runDeploy() {
 // --------------------------------------------------------------- 挂载
 
 function menuExtras(type) {
-  if (type !== 'file' || !canManage()) return []
-  return [
-    { op: 'deploy', label: '部署到设备…' },
-    { op: 'distribute', label: '分发到多台设备…' },
-  ]
+  if (type !== 'file') return []
+  const out = []
+  if (isSuper() || can('repo.write')) out.push({ op: 'deploy', label: '部署到设备…' })
+  if (isSuper() || can('dist.write')) out.push({ op: 'distribute', label: '分发到多台设备…' })
+  return out
 }
 
 function onMenuAction(op, name, type, path) {
@@ -333,8 +333,8 @@ function mount() {
       writable: writable.value,
       maxUploadMb: maxUploadMb.value,
       maxEditMb: maxEditMb.value,
-      canDelete: canManage(),
-      canEdit: canManage(),
+      canDelete: isSuper() || can('repo.delete'),
+      canEdit: isSuper() || can('repo.write'),
     }),
     menuExtras,
     onMenuAction,

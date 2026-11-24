@@ -87,11 +87,11 @@
            @contextmenu.prevent @mousedown.stop>
         <div class="ctx-head">{{ ctx.row && ctx.row.devid }}</div>
         <button class="ctx-item" @click="ctxAction('detail')">详情</button>
-        <button v-if="canOperate() && ctx.row && ctx.row.caps_shell !== 0" class="ctx-item"
+        <button v-if="can('device.terminal') && ctx.row && ctx.row.caps_shell !== 0" class="ctx-item"
                 @click="ctxAction('shell')">打开 Shell</button>
-        <button v-if="canOperate()" class="ctx-item" @click="ctxAction('web')">打开 Web</button>
-        <div v-if="canManage()" class="ctx-sep" />
-        <button v-if="canManage()" class="ctx-item danger" @click="ctxAction('kick')">强制下线</button>
+        <button v-if="can('device.port')" class="ctx-item" @click="ctxAction('web')">打开 Web</button>
+        <div v-if="can('device.kick')" class="ctx-sep" />
+        <button v-if="can('device.kick')" class="ctx-item danger" @click="ctxAction('kick')">强制下线</button>
       </div>
       <!-- ui-allow-end -->
     </teleport>
@@ -103,7 +103,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import RowActions from '@/components/RowActions.vue'
 import { Api } from '@/shared/api.js'
-import { can, canManage, canOperate } from '@/shared/store.js'
+import { can } from '@/shared/store.js'
 import { ago, bytes, duration } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
@@ -125,9 +125,9 @@ const actionWidth = computed(() => {
 
 function actionsOf(row) {
   const out = []
-  if (canOperate() && row.caps_shell !== 0) out.push({ key: 'shell', label: 'Shell' })
-  if (canOperate()) out.push({ key: 'web', label: 'Web' })
-  if (canManage()) out.push({ key: 'kick', label: '下线', danger: true })
+  if (can('device.terminal') && row.caps_shell !== 0) out.push({ key: 'shell', label: 'Shell' })
+  if (can('device.port')) out.push({ key: 'web', label: 'Web' })
+  if (can('device.kick')) out.push({ key: 'kick', label: '下线', danger: true })
   return out
 }
 

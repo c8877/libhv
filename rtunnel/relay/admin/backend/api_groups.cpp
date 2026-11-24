@@ -17,6 +17,7 @@ void AdminServer::refreshGroupAcl() {
         g.devid = r.devid;
         g.ports = r.ports;
         g.tty = r.tty;
+        g.tty_write = r.tty_write;
         g.shell = r.shell;
         g.file = r.file;
         g.svc = r.svc;

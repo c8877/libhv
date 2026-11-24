@@ -41,21 +41,6 @@ export function canAny(...keys) {
   return keys.some((k) => can(k))
 }
 
-// 权限组生效后以资源为准；未拿到 perms（老接口/登录中）才退回角色
-export function canOperate() {
-  if (auth.me && Array.isArray(auth.me.perms)) {
-    return isSuper() || canAny('device.terminal', 'file.write', 'file.read', 'device.tty.read')
-  }
-  return ['admin', 'manager', 'operator'].includes(roleOf())
-}
-
-export function canManage() {
-  if (auth.me && Array.isArray(auth.me.perms)) {
-    return isSuper() || canAny('device.caps.write', 'dist.write', 'dict.write', 'account.write', 'file.write', 'device.tty.write')
-  }
-  return ['admin', 'manager'].includes(roleOf())
-}
-
 export function siteTitle() {
   return auth.settings['ui.site_title'] || 'rtunnel 管理台'
 }

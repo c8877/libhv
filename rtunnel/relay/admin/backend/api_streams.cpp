@@ -52,8 +52,8 @@ void AdminServer::handleStreams(const HttpContextPtr& ctx) {
 }
 
 void AdminServer::handleOverview(const HttpContextPtr& ctx) {
-    // 只有“绑定分组的 Token”才收窄；普通账号仍看全局概览，保持原有观感
-    bool scoped = tokenScoped();
+    // 受限账号（未获全部设备）只看自己范围内的设备与会话
+    bool scoped = scopeRestricted();
     std::vector<std::string> mine = scoped ? myDevids() : std::vector<std::string>();
     std::string body = callRelay([this, scoped, mine]() {
         json j;
@@ -89,7 +89,7 @@ void AdminServer::handleOverview(const HttpContextPtr& ctx) {
 
 // Prometheus 文本指标（text/plain）
 void AdminServer::handleMetrics(const HttpContextPtr& ctx) {
-    bool scoped = tokenScoped();
+    bool scoped = scopeRestricted();
     std::vector<std::string> mine = scoped ? myDevids() : std::vector<std::string>();
     std::string body = callRelay([this, scoped, mine]() {
         int nagent = 0, nclient = 0, nstream = 0;

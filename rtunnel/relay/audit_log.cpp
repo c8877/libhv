@@ -18,7 +18,7 @@ void AuditLog::write(const std::string& role, const std::string& action, const s
     strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", &tm_utc);
 
     char line[1024];
-    snprintf(line, sizeof(line), "[%s] role=%s action=%s detail=%s",
+    snprintf(line, sizeof(line), "[%s] actor=%s action=%s detail=%s",
              ts, role.c_str(), action.c_str(), detail.c_str());
 
     if (!path_.empty()) {

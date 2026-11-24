@@ -955,11 +955,22 @@ int AdminServer::handleAgentProcSignal(const HttpContextPtr& ctx) {
 
 void AdminServer::handleClients(const HttpContextPtr& ctx) {
     auto actor = currentActor();
-    std::string body = callRelay([this, actor]() {
+    bool scoped = scopeRestricted();
+    std::vector<std::string> mine = scoped ? myDevids() : std::vector<std::string>();
+    std::string body = callRelay([this, actor, scoped, mine]() {
         json arr = json::array();
         for (RelayConn* c = relay_->conns; c; c = c->next_all) {
             if (c->role != rtnp::ROLE_CLIENT || !c->authed || c->internal) continue;
             if ((actor.role == "operator" || actor.role == "viewer") && actor.username != c->user) continue;
+            if (scoped && actor.username != c->user) {
+                // 受限账号只看到与自己设备有活动会话的客户端，避免暴露全局接入账号
+                bool relevant = false;
+                for (RelayStream* s = c->streams; s && !relevant; s = s->next_c) {
+                    if (s->a && std::find(mine.begin(), mine.end(), s->a->devid) != mine.end())
+                        relevant = true;
+                }
+                if (!relevant) continue;
+            }
             json j;
             j["user"] = c->user;
             fillConnCommon(c, j);

@@ -3,6 +3,8 @@
 #include "api_reply.hpp"
 #include "cpputil/json.hpp"
 
+#include <algorithm>
+
 using nlohmann::json;
 
 void AdminServer::handleDictPorts(const HttpContextPtr& ctx) {
@@ -138,6 +140,8 @@ void AdminServer::handlePermGroupSave(const HttpContextPtr& ctx, const std::stri
     long long id = atoll(ctx->param("id").c_str());
     json req = json::parse(ctx->body(), nullptr, false);
     if (req.is_discarded() || !req.is_object()) { apiBad(ctx, "bad json"); return; }
+    // 变更前的管理账号有效范围：保存后只断开权限变小的账号
+    auto scope_before = snapshotUserScopes();
     std::vector<std::string> resources, devices;
     if (req.contains("resources") && req["resources"].is_array()) {
         for (auto& v : req["resources"])
@@ -161,11 +165,75 @@ void AdminServer::handlePermGroupSave(const HttpContextPtr& ctx, const std::stri
         }
     }
     int all_devices = req.value("all_devices", false) ? 1 : 0;
+    int global_scope = req.value("global_scope", false) ? 1 : 0;
     std::string ports = req.value("ports", std::string("*"));
+    // 授予边界：只能授予自己有效权限的子集，super 组只有 super 能改
+    DbPermScope want;
+    want.resources.insert(resources.begin(), resources.end());
+    want.all_devices = all_devices != 0;
+    want.global_scope = global_scope != 0;
+    if (!want.all_devices) want.devices.insert(devices.begin(), devices.end());
+    want.ports = ports;
+    DbPermScope old;
+    if (id) {
+        if (!db_.permGroupScope(id, old)) { apiNotFound(ctx, "权限组不存在"); return; }
+        // 不能改比自己权限更高的组（改名、降级也不行）；内置组同样按这条边界判断
+        std::string why = grantDenied(old);
+        if (!why.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, why); return; }
+        want.super = old.super;
+    }
+    // 组里带全局键却没开全局权限 = 静默无效，直接拒绝并提示
+    if (!want.global_scope && !want.all_devices && !want.super) {
+        for (const auto& r : want.resources) {
+            if (permIsGlobal(r)) {
+                apiError(ctx, HTTP_STATUS_BAD_REQUEST,
+                         "资源 " + r + " 是全局资源，需要同时开启「全局权限」");
+                return;
+            }
+        }
+    }
+    std::string denied = grantDenied(want);
+    if (!denied.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, denied); return; }
+    if (set_members && !hasPerm("group.member")) {
+        apiError(ctx, HTTP_STATUS_FORBIDDEN, "需要 group.member 才能调整组成员");
+        return;
+    }
     long long out_id = id;
+    // 组成员：保存前抓旧成员（校验管辖范围、保存后按收窄/移除逐个踢线）
+    std::vector<std::pair<std::pair<std::string, std::string>, DbPermScope>> old_members;
+    if (set_members && id > 0) {
+        std::vector<std::pair<std::string, std::string>> old_list;
+        if (db_.permGroupMemberList(id, old_list)) {
+            for (auto& m : old_list) {
+                DbPermScope ms;
+                if (!subjectScope(m.first, m.second, ms)) continue;
+                std::string why = manageDenied(ms);
+                if (!why.empty()) {
+                    apiError(ctx, HTTP_STATUS_FORBIDDEN, "不能修改权限高于你的成员: " + m.first + ":" + m.second);
+                    return;
+                }
+                old_members.push_back({m, ms});
+            }
+        }
+    }
+    // 新加入的成员当前权限也不能高于自己：否则可以把高权令牌“关进”窄组
+    if (set_members) {
+        std::set<std::string> in_old;
+        for (auto& om : old_members) in_old.insert(om.first.first + ":" + om.first.second);
+        for (auto& m : members) {
+            if (in_old.count(m.first + ":" + m.second)) continue;
+            DbPermScope ms;
+            if (!subjectScope(m.first, m.second, ms)) continue;
+            std::string why = manageDenied(ms);
+            if (!why.empty()) {
+                apiError(ctx, HTTP_STATUS_FORBIDDEN, "不能操作权限高于你的成员: " + m.first + ":" + m.second);
+                return;
+            }
+        }
+    }
     std::string err;
     if (!db_.permGroupSaveAll(id, req.value("name", ""), req.value("description", ""), resources, devices,
-                              all_devices, ports, set_members, members, out_id, err)) {
+                              all_devices, global_scope, ports, set_members, members, out_id, err)) {
         apiBad(ctx, err);
         return;
     }
@@ -174,6 +242,10 @@ void AdminServer::handlePermGroupSave(const HttpContextPtr& ctx, const std::stri
               " dev=" + std::to_string(all_devices ? -1 : (long long)devices.size()) +
               " member=" + std::to_string(members.size()));
     refreshGroupAcl();
+    // 逐个成员判断：被移出组或组权限收窄才断开，扩容/改名不打断在线用户
+    for (auto& om : old_members)
+        kickSubjectShrunk(om.first.first, om.first.second, om.second, "group changed");
+    kickConsoleWsShrunk(scope_before, "group changed");
     json out;
     out["ok"] = true;
     out["id"] = out_id;
@@ -189,10 +261,40 @@ void AdminServer::handlePermGroupDetail(const HttpContextPtr& ctx) {
 
 void AdminServer::handlePermGroupDelete(const HttpContextPtr& ctx, const std::string& role) {
     long long id = atoll(ctx->param("id").c_str());
+    std::string builtin;
+    if (db_.permGroupBuiltin(id, builtin) && !builtin.empty()) {
+        apiError(ctx, HTTP_STATUS_FORBIDDEN, "内置角色组不能删除，可以修改其资源与设备范围");
+        return;
+    }
+    DbPermScope gs;
+    if (!db_.permGroupScope(id, gs)) { apiNotFound(ctx, "权限组不存在"); return; }
+    std::string denied = grantDenied(gs);
+    if (!denied.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, denied); return; }
+    auto scope_before = snapshotUserScopes();
+    // 删组前先抓成员：删完就查不到了；成员当前权限也不能高于自己
+    std::vector<std::pair<std::pair<std::string, std::string>, DbPermScope>> members;
+    {
+        std::vector<std::pair<std::string, std::string>> list;
+        if (db_.permGroupMemberList(id, list)) {
+            for (auto& m : list) {
+                DbPermScope ms;
+                if (!subjectScope(m.first, m.second, ms)) continue;
+                std::string why = manageDenied(ms);
+                if (!why.empty()) {
+                    apiError(ctx, HTTP_STATUS_FORBIDDEN, "不能删除包含更高权限成员的组: " + m.first + ":" + m.second);
+                    return;
+                }
+                members.push_back({m, ms});
+            }
+        }
+    }
     std::string err;
     if (!db_.permGroupDelete(id, err)) { apiBad(ctx, err); return; }
     audit(role, "permission.group.delete", std::to_string(id));
     refreshGroupAcl();
+    // 删组等于所有成员失去该组权限：按主体逐个断开（扩容不涉及的场景）
+    for (auto& m : members) kickSubjectShrunk(m.first.first, m.first.second, m.second, "group deleted");
+    kickConsoleWsShrunk(scope_before, "group deleted");
     ctx->send("{\"ok\":true}");
 }
 
@@ -219,9 +321,58 @@ void AdminServer::handlePermGroupMembersSave(const HttpContextPtr& ctx, const st
         }
     }
     std::string err;
+    // 组成员变更会直接改变成员的授权面：组的 scope 必须在自己范围内
+    DbPermScope gs;
+    if (!db_.permGroupScope(id, gs)) { apiNotFound(ctx, "权限组不存在"); return; }
+    std::string denied = grantDenied(gs);
+    if (!denied.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, denied); return; }
+    // 现有成员的权限也不能高于自己：否则可以借“移出组”停用同级账号
+    std::vector<std::pair<std::pair<std::string, std::string>, DbPermScope>> old_scopes;
+    {
+        std::vector<std::pair<std::string, std::string>> old_list;
+        if (db_.permGroupMemberList(id, old_list)) {
+            for (auto& m : old_list) {
+                DbPermScope ms;
+                if (!subjectScope(m.first, m.second, ms)) continue;
+                std::string why = manageDenied(ms);
+                if (!why.empty()) {
+                    apiError(ctx, HTTP_STATUS_FORBIDDEN, "不能修改权限高于你的成员: " + m.first + ":" + m.second);
+                    return;
+                }
+                old_scopes.push_back({m, ms});
+            }
+        }
+    }
+    // 新加入的成员同样不能高于自己：否则可以把高权账号/令牌“关进”窄组
+    for (auto& m : members) {
+        bool is_old = false;
+        for (auto& os : old_scopes)
+            if (os.first == m) { is_old = true; break; }
+        if (is_old) continue;
+        DbPermScope ms;
+        if (!subjectScope(m.first, m.second, ms)) continue;
+        std::string why = manageDenied(ms);
+        if (!why.empty()) {
+            apiError(ctx, HTTP_STATUS_FORBIDDEN, "不能操作权限高于你的成员: " + m.first + ":" + m.second);
+            return;
+        }
+    }
+    auto scope_before = snapshotUserScopes();
     if (!db_.permGroupSetMembers(id, members, err)) { apiBad(ctx, err); return; }
     audit(role, "permission.group.members", std::to_string(id) + " n=" + std::to_string(members.size()));
     refreshGroupAcl();
+    // 只处理被移出组的 atk/rtk：仍在组里的令牌按组内规则继续使用
+    auto inNew = [&](const std::string& ty, const std::string& sid) {
+        for (auto& m : members)
+            if (m.first == ty && m.second == sid) return true;
+        return false;
+    };
+    for (auto& os : old_scopes) {
+        if (inNew(os.first.first, os.first.second)) continue;
+        if (os.first.first == "atk" || os.first.first == "rtk" || os.first.first == "client")
+            kickSubjectShrunk(os.first.first, os.first.second, os.second, "group members changed");
+    }
+    kickConsoleWsShrunk(scope_before, "group members changed");
     ctx->send("{\"ok\":true}");
 }
 
@@ -241,6 +392,11 @@ void AdminServer::handleUserPermGroups(const HttpContextPtr& ctx) {
 
 void AdminServer::handleUserPermGroupsSave(const HttpContextPtr& ctx, const std::string& role) {
     long long id = atoll(ctx->param("id").c_str());
+    // 不允许改自己的组：一次误操作就能把自己（含唯一的超级管理员）锁在门外
+    if (id == currentActor().id) {
+        apiError(ctx, HTTP_STATUS_FORBIDDEN, "不能修改自己的权限组");
+        return;
+    }
     DbUser u;
     if (!db_.findUserById(id, u)) { apiNotFound(ctx, "账号不存在"); return; }
     json req = json::parse(ctx->body(), nullptr, false);
@@ -251,10 +407,24 @@ void AdminServer::handleUserPermGroupsSave(const HttpContextPtr& ctx, const std:
     std::vector<long long> ids;
     for (auto& v : req["ids"])
         if (v.is_number_integer()) ids.push_back(v.get<long long>());
+    std::vector<long long> cur;
+    db_.permGroupsOfUser(id, cur);
+    // 目标当前有效权限必须在自己范围内：不能停用权限比自己高的账号
+    DbPermScope before;
+    if (!db_.permScopeOfUser(id, before)) { apiNotFound(ctx, "账号不存在"); return; }
+    std::string manage = manageDenied(before);
+    if (!manage.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, manage); return; }
+    std::vector<long long> check = cur;
+    for (long long g : ids)
+        if (std::find(check.begin(), check.end(), g) == check.end()) check.push_back(g);
+    std::string denied = grantGroupsDenied(check);
+    if (!denied.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, denied); return; }
+    auto scope_before = snapshotUserScopes();
     std::string err;
-    if (!db_.permSetUserGroups(id, u.role, ids, err)) { apiBad(ctx, err); return; }
+    if (!db_.permSetUserGroups(id, ids, err)) { apiBad(ctx, err); return; }
     audit(role, "permission.user.groups", u.username + " n=" + std::to_string(ids.size()));
     refreshGroupAcl();
+    kickConsoleWsShrunk(scope_before, "user groups narrowed");
     ctx->send("{\"ok\":true}");
 }
 
@@ -268,6 +438,11 @@ void AdminServer::handleResDeviceUpdate(const HttpContextPtr& ctx, const std::st
     std::string devid = ctx->param("devid");
     json req = json::parse(ctx->body(), nullptr, false);
     if (req.is_discarded() || !req.is_object()) { apiBad(ctx, "bad json"); return; }
+    // 停用设备资源会把它从所有非 super 组的授权面里去掉，必须限定在自己范围内
+    if (!ownsDevid(devid)) {
+        apiError(ctx, HTTP_STATUS_FORBIDDEN, "设备不在授权范围内");
+        return;
+    }
     std::string err;
     if (!db_.resDeviceUpdate(devid, req.value("name", std::string()), req.value("enabled", true) ? 1 : 0, err)) {
         apiBad(ctx, err);
@@ -304,9 +479,22 @@ void AdminServer::handleClientPermGroupsSave(const HttpContextPtr& ctx, const st
     std::vector<long long> ids;
     for (auto& v : req["ids"])
         if (v.is_number_integer()) ids.push_back(v.get<long long>());
+    // 现有组 + 目标组都要在自己范围内：既不能授予更多，也不能摘掉比自己高的组
+    std::vector<long long> cur;
+    db_.permGroupsOfClient(id, cur);
+    DbPermScope before;
+    db_.permScopeOfClient(id, before);
+    std::vector<long long> check = cur;
+    for (long long g : ids)
+        if (std::find(check.begin(), check.end(), g) == check.end()) check.push_back(g);
+    std::string denied = grantGroupsDenied(check);
+    if (!denied.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, denied); return; }
     if (!db_.permSetClientGroups(id, ids, err)) { apiBad(ctx, err); return; }
     audit(role, "permission.client.groups", std::to_string(id) + " n=" + std::to_string(ids.size()));
     refreshGroupAcl();
+    DbPermScope after;
+    db_.permScopeOfClient(id, after);
+    if (!dbPermCovers(after, before)) kickClientsById(id, "account groups narrowed");
     ctx->send("{\"ok\":true}");
 }
 
@@ -326,17 +514,41 @@ void AdminServer::handleSubjectGroups(const HttpContextPtr& ctx) {
 void AdminServer::handleSubjectGroupsSave(const HttpContextPtr& ctx, const std::string& role) {
     std::string type = ctx->param("type");
     std::string id = ctx->param("id");
+    // 不允许改自己的组：避免误操作把自己（尤其是唯一的超级管理员）锁在门外
+    if (type == "user" && atoll(id.c_str()) == currentActor().id) {
+        apiError(ctx, HTTP_STATUS_FORBIDDEN, "不能修改自己的权限组");
+        return;
+    }
     json req = json::parse(ctx->body(), nullptr, false);
     if (req.is_discarded() || !req.is_object() || !req.contains("ids") || !req["ids"].is_array()) {
         apiBad(ctx, "bad json");
         return;
     }
+    if (type != "user" && type != "atk" && type != "client" && type != "rtk") {
+        apiBad(ctx, "bad subject type");
+        return;
+    }
     std::vector<long long> ids;
     for (auto& v : req["ids"])
         if (v.is_number_integer()) ids.push_back(v.get<long long>());
+    std::vector<long long> cur;
+    db_.permGroupsOfSubject(type, id, cur);
+    // 目标当前有效权限必须在自己范围内：防止横向降权（清空同事的组）和越权改组
+    DbPermScope before;
+    if (!subjectScope(type, id, before)) { apiNotFound(ctx, "授权对象不存在"); return; }
+    std::string manage = manageDenied(before);
+    if (!manage.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, manage); return; }
+    std::vector<long long> check = cur;
+    for (long long g : ids)
+        if (std::find(check.begin(), check.end(), g) == check.end()) check.push_back(g);
+    std::string denied = grantGroupsDenied(check);
+    if (!denied.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, denied); return; }
+    auto scope_before = (type == "user") ? snapshotUserScopes() : std::map<long long, DbPermScope>();
     std::string err;
     if (!db_.permSetSubjectGroups(type, id, ids, err)) { apiBad(ctx, err); return; }
     audit(role, "permission.subject.groups", type + ":" + id + " n=" + std::to_string(ids.size()));
     refreshGroupAcl();
+    if (type == "user") kickConsoleWsShrunk(scope_before, "subject groups narrowed");
+    else kickSubjectShrunk(type, id, before, "subject groups narrowed");
     ctx->send("{\"ok\":true}");
 }

@@ -2,6 +2,7 @@
 """rtunnel 端到端验收：echo 服务 + B/C/A 三进程 + SOCKS5 客户端。"""
 
 import os
+import json
 import signal
 import socket
 import struct
@@ -10,6 +11,8 @@ import subprocess
 import sys
 import threading
 import http.cookiejar
+import urllib.request
+import urllib.error
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,6 +28,84 @@ def free_port():
     p = s.getsockname()[1]
     s.close()
     return p
+
+
+def admin_client(base, token="admintok"):
+    """管理台 HTTP 会话：完成 setup/login，返回 (opener, call)。"""
+    jar = http.cookiejar.CookieJar()
+    op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+    def call(method, path, body=None):
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(base + path, data=data, method=method)
+        if data:
+            req.add_header("Content-Type", "application/json")
+        with op.open(req, timeout=5) as r:
+            return json.loads(r.read().decode() or "{}")
+
+    for path, body in (
+            ("/api/v1/setup", {"token": token, "username": "root", "password": "rootpass1"}),
+            ("/api/v1/login", {"username": "root", "password": "rootpass1"})):
+        req = urllib.request.Request(base + path, data=json.dumps(body).encode(), method="POST")
+        req.add_header("Content-Type", "application/json")
+        try:
+            op.open(req, timeout=5).read()
+        except urllib.error.HTTPError as e:
+            if path.endswith("/setup") and e.code in (403, 400):
+                pass   # 库已初始化（历史测试残留）
+            else:
+                raise
+    return op, call
+
+
+E2E_CLIENTS = {}
+E2E_RES = ["device.view", "device.port", "device.terminal",
+           "device.tty.read", "device.tty.write", "file.read", "file.write"]
+
+
+def create_client_token(base, username, grant_all=True, **kw):
+    """建接入账号并签发 rtk- 令牌；grant_all=True 时同时授权全部设备。"""
+    _, call = admin_client(base, **kw)
+    try:
+        acc = call("POST", "/api/v1/client-accounts",
+                   {"username": username, "display_name": username})
+    except urllib.error.HTTPError as e:
+        if e.code != 400:
+            raise
+        # 账号已存在：复用
+        lst = call("GET", "/api/v1/client-accounts")
+        acc = next(a for a in lst.get("items", lst) if a.get("username") == username)
+    E2E_CLIENTS[username] = {"base": base, "id": acc["id"], "groups": []}
+    if grant_all:
+        grant_devices(base, username)
+    t = call("POST", "/api/v1/client-accounts/%d/tokens" % acc["id"], {"name": "e2e"})
+    return t["token"]
+
+
+def grant_devices(base, username, devices=None):
+    """给接入账号授权：devices=None 表示全部设备，否则只给列出的设备。"""
+    _, call = admin_client(base)
+    st = E2E_CLIENTS[username]
+    name = "e2e-%s-%d" % (username, int(time.time() * 1000) % 1000000)
+    g = call("POST", "/api/v1/permission/groups", {
+        "name": name,
+        "description": "e2e",
+        "resources": E2E_RES,
+        "all_devices": devices is None,
+        "devices": [] if devices is None else list(devices),
+        "ports": "*",
+        "members": [{"type": "client", "id": str(st["id"])}],
+    })
+    st["groups"].append(g["id"])
+    return g["id"]
+
+
+def revoke_devices(base, username):
+    """删掉该账号在本次测试里建的所有授权组。"""
+    _, call = admin_client(base)
+    st = E2E_CLIENTS[username]
+    while st["groups"]:
+        call("DELETE", "/api/v1/permission/groups/%d" % st["groups"].pop())
 
 
 class EchoServer(threading.Thread):
@@ -236,6 +317,12 @@ def main():
 
     logdir = "/tmp/rtunnel-e2e"
     os.makedirs(logdir, exist_ok=True)
+    # 管理库每次从空开始，避免上一轮的账号/令牌/权限组影响用例
+    for name in ("admin.db", "admin.db-wal", "admin.db-shm", "admin2.db", "admin2.db-wal", "admin2.db-shm"):
+        try:
+            os.remove(os.path.join(logdir, name))
+        except OSError:
+            pass
     logs = {k: open(os.path.join(logdir, k + ".log"), "w") for k in ("relay", "agent", "client", "client2")}
 
     tls = os.environ.get("RTUNNEL_TLS") == "1"
@@ -302,19 +389,13 @@ def main():
     agentcfg = os.path.join(logdir, "agent-config.json")
     try: os.remove(agentcfg)
     except OSError: pass
-    aclfile = os.path.join(logdir, "acl.txt")
-    with open(aclfile, "w") as f:
-        f.write("# initial: no file-based acl\n")
-    clientusers = os.path.join(logdir, "client_users.txt")
-    with open(clientusers, "w") as f:
-        f.write("# user:token\ntester:tok-tester\nbob:tok-bob\nadmin:tok-admin\n")
+    admin_base = "http://127.0.0.1:%d" % admin_port
     try:
         webdist = os.path.join(ROOT, "rtunnel", "relay", "admin", "web", "dist")
         docroot_args = ["--admin-docroot", webdist] if os.path.isdir(webdist) else []
         relay = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-relay"), "--host", "127.0.0.1", "--port", str(relay_port),
-             "--acl", "tester=*", "--acl", "admin=a:*", "--acl-file", aclfile, "--drain-timeout", "500",
-             "--client-users", clientusers, "--shell-users", "admin,tester",
+             "--drain-timeout", "500",
              "--admin", "127.0.0.1:%d" % admin_port,
              "--admin-token", "admintok",
              "--admin-db", os.path.join(logdir, "admin.db"),
@@ -323,6 +404,10 @@ def main():
             stdout=logs["relay"], stderr=subprocess.STDOUT, env=env)
         procs.append(relay)
         time.sleep(0.3)
+
+        tok_tester = create_client_token(admin_base, "tester")
+        tok_bob = create_client_token(admin_base, "bob", grant_all=False)
+        tok_admin = create_client_token(admin_base, "admin")
 
         agent = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-agent"), "--server", "127.0.0.1", "--port", str(relay_port),
@@ -333,7 +418,7 @@ def main():
 
         client = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-client"), "--server", "127.0.0.1", "--port", str(relay_port),
-             "--user", "tester", "--token", "tok-tester", "--allow-shell",
+             "--token", tok_tester, "--allow-shell",
              "--agent-idle", "5", "--agent-config", agentcfg,
              "--socks5", socks1_arg] + tls_tester + ["--verbose"],
             stdout=logs["client"], stderr=subprocess.STDOUT, env=env)
@@ -341,7 +426,7 @@ def main():
 
         client2 = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-client"), "--server", "127.0.0.1", "--port", str(relay_port),
-             "--user", "bob", "--token", "tok-bob", "--socks5", socks2_arg] + tls_bob + ["--verbose"],
+             "--token", tok_bob, "--socks5", socks2_arg] + tls_bob + ["--verbose"],
             stdout=logs["client2"], stderr=subprocess.STDOUT, env=env)
         procs.append(client2)
 
@@ -352,16 +437,16 @@ def main():
         if not ok:
             return finish()
 
-        # 0. 认证负向：relay 配了 --client-users，无 token 的 client 不能上线
+        # 0. 认证负向：无效 rtk- 令牌不能上线
         bad_port = free_port()
         bad = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-client"), "--server", "127.0.0.1", "--port", str(relay_port),
-             "--user", "tester", "--socks5", "127.0.0.1:%d" % bad_port] + tls_tester + ["--verbose"],
+             "--token", "rtk-invalid-token-for-e2e", "--socks5", "127.0.0.1:%d" % bad_port] + tls_tester + ["--verbose"],
             stdout=open(os.path.join(logdir, "client_bad.log"), "w"), stderr=subprocess.STDOUT, env=env)
         procs.append(bad)
         time.sleep(0.8)
         _, rep = socks5_open(("tcp", "127.0.0.1", bad_port), "dev1", echo_port)
-        check("client 无 token 被拒（REP=0x01）", rep == 0x01, "rep=0x%02x" % rep)
+        check("client 无效令牌被拒（REP=0x01）", rep == 0x01, "rep=0x%02x" % rep)
 
         # 1. 基本回环
         s, rep = socks5_open(socks1, "dev1", echo_port)
@@ -388,7 +473,7 @@ def main():
         # 4. ACL（bob 无权）
         wait_log(os.path.join(logdir, "client2.log"), "authenticated", 5)
         _, rep = socks5_open(socks2, "dev1", echo_port)
-        check("ACL 拒绝 REP=0x02", rep == 0x02, "rep=0x%02x" % rep)
+        check("未授权账号被拒 REP=0x02", rep == 0x02, "rep=0x%02x" % rep)
 
         # 5. 并发 + 两个 A 客户端同 sid
         errs = []
@@ -441,7 +526,7 @@ def main():
         try:
             r = subprocess.run(
                 [os.path.join(BIN, "rtunnel-client"), "--server", "127.0.0.1", "--port", str(relay_port),
-                 "--user", "tester", "--token", "tok-tester", "shell", "dev1"] + tls_tester,
+                 "--token", tok_tester, "shell", "dev1"] + tls_tester,
                 input=b"echo CLI-SHELL-$((6*7)); exit\n", capture_output=True, timeout=10)
             out = (r.stdout + r.stderr).decode(errors="ignore")
             check("CLI 免密 shell 正常退出", r.returncode == 0 and "CLI-SHELL-42" in out, out[-120:])
@@ -461,7 +546,7 @@ def main():
                 q = ctx.wrap_socket(q, server_hostname="localhost")
             q.sendall(rtnp_hdr(0x01, 0, bytes([2, 1]) + rtnp_str("e2e") + struct.pack("!I", 0)))
             t, _ = rtnp_recv(q)
-            q.sendall(rtnp_hdr(0x03, 0, rtnp_str("admin") + b"\x01" + rtnp_str("tok-admin")))
+            q.sendall(rtnp_hdr(0x03, 0, rtnp_str("admin") + b"\x01" + rtnp_str(tok_admin)))
             t, _ = rtnp_recv(q)      # AUTH_OK
             q.sendall(rtnp_hdr(0x10, 9, rtnp_str("a:tester") + struct.pack("!H", 0), flags=1))
             ok = False
@@ -543,7 +628,7 @@ def main():
             t, _ = rtnp_recv(q)          # HELLO_ACK
             if t != 0x02:
                 raise RuntimeError("no HELLO_ACK: 0x%02x" % t)
-            q.sendall(rtnp_hdr(0x03, 0, rtnp_str("tester") + b"\x01" + rtnp_str("tok-tester")))
+            q.sendall(rtnp_hdr(0x03, 0, rtnp_str("tester") + b"\x01" + rtnp_str(tok_tester)))
             t, _ = rtnp_recv(q)          # AUTH_OK
             if t != 0x04:
                 raise RuntimeError("no AUTH_OK: 0x%02x" % t)
@@ -562,26 +647,20 @@ def main():
         finally:
             q.close()
 
-        # 9. SIGHUP 热加载 ACL：bob 从拒绝→放行→再拒绝
-        with open(aclfile, "w") as f:
-            f.write("bob=dev1\n")
-        os.kill(relay.pid, signal.SIGHUP)
-        time.sleep(0.2)
+        # 9. 权限组授权：bob 从拒绝→放行→再拒绝（立即生效，无需重启 relay）
+        grant_devices(admin_base, "bob", ["dev1"])
         s, rep = socks5_open(socks2, "dev1", echo_port)
-        check("SIGHUP 热加载后 bob 放行", rep == 0x00, "rep=0x%02x" % rep)
+        check("授权后 bob 放行", rep == 0x00, "rep=0x%02x" % rep)
         if s:
             s.close()
-        with open(aclfile, "w") as f:
-            f.write("# revoked\n")
-        os.kill(relay.pid, signal.SIGHUP)
-        time.sleep(0.2)
+        revoke_devices(admin_base, "bob")
+        time.sleep(1.8)   # 撤权会断开在线连接，等客户端重新认证
         _, rep = socks5_open(socks2, "dev1", echo_port)
-        check("SIGHUP 撤销后 bob 再拒", rep == 0x02, "rep=0x%02x" % rep)
+        check("撤权后 bob 再拒", rep == 0x02, "rep=0x%02x" % rep)
 
         # 10. admin 管理台只读 API 与前端
         import json as json_mod
         import urllib.request
-        admin_base = "http://127.0.0.1:%d" % admin_port
 
         def make_admin(base, token="admintok"):
             jar = http.cookiejar.CookieJar()
@@ -663,12 +742,15 @@ def main():
         st = admin_get("/api/v1/streams")
         check("踢后 streams 为空", len(st) == 0, str(st))
 
-        admin_req("PUT", "/api/v1/acl/file", {"content": "bob=dev1\n"})
+        grant_devices(admin_base, "bob", ["dev1"])
+        s, rep = socks5_open(socks2, "dev1", echo_port)
+        check("重新授权后 bob 放行", rep == 0x00, "rep=0x%02x" % rep)
+        if s:
+            s.close()
+        revoke_devices(admin_base, "bob")
+        time.sleep(1.8)   # 撤权会断开在线连接，等客户端重新认证
         _, rep = socks5_open(socks2, "dev1", echo_port)
-        check("ACL PUT 后 bob 放行", rep == 0x00, "rep=0x%02x" % rep)
-        admin_req("PUT", "/api/v1/acl/file", {"content": "# empty\n"})
-        _, rep = socks5_open(socks2, "dev1", echo_port)
-        check("ACL PUT 撤销后 bob 再拒", rep == 0x02, "rep=0x%02x" % rep)
+        check("再次撤权后 bob 再拒", rep == 0x02, "rep=0x%02x" % rep)
 
         admin_req("POST", "/api/v1/agents/dev1/kick")
         # 等设备重新注册上线（kick 后 agent 退避重连，轮询最多 8s）
@@ -795,7 +877,7 @@ def main():
             rogue_c_log = open(os.path.join(logdir, "rogue_client.log"), "w")
             rogue_c = subprocess.Popen(
                 [os.path.join(BIN, "rtunnel-client"), "--server", "127.0.0.1", "--port", str(relay_port),
-                 "--user", "tester", "--token", "tok-tester", "--socks5", "127.0.0.1:%d" % free_port()] + tls_bob + ["--verbose"],
+                 "--token", tok_tester, "--socks5", "127.0.0.1:%d" % free_port()] + tls_bob + ["--verbose"],
                 stdout=rogue_c_log, stderr=subprocess.STDOUT, env=env)
             procs.append(rogue_c)
             ok = wait_log(os.path.join(logdir, "relay.log"), "client cert SAN mismatch", 8)
@@ -809,7 +891,7 @@ def main():
         r2log = open(os.path.join(logdir, "relay2.log"), "w")
         relay2 = subprocess.Popen(
             [os.path.join(BIN, "rtunnel-relay"), "--host", "127.0.0.1", "--port", str(r2_port),
-             "--acl", "tester=*", "--drain-timeout", "200",
+             "--drain-timeout", "200",
              "--admin", "127.0.0.1:%d" % a2_port, "--admin-token", "admintok",
              "--admin-db", os.path.join(logdir, "admin2.db")],
             stdout=r2log, stderr=subprocess.STDOUT, env=env)

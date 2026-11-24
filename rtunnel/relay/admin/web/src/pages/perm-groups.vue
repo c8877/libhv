@@ -4,7 +4,7 @@
       <h2>权限组</h2>
       <span class="muted">功能资源 + 设备资源按组授予；账号、atk、接入账号、rtk 通过加入权限组获得访问权限</span>
       <span class="spacer" />
-      <el-button v-if="canWrite" size="small" type="primary" @click="createGroup">+ 新建权限组</el-button>
+      <el-button v-if="writable" size="small" type="primary" @click="createGroup">+ 新建权限组</el-button>
     </div>
 
     <div v-if="isPhone" class="pg-mobile-pick">
@@ -12,7 +12,7 @@
                  class="pg-pick" @change="onMobilePick">
         <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.id" />
       </el-select>
-      <el-button v-if="canWrite" size="small" type="primary" @click="createGroup">新建</el-button>
+      <el-button v-if="writable" size="small" type="primary" @click="createGroup">新建</el-button>
     </div>
 
     <div class="pg-layout">
@@ -26,7 +26,7 @@
               <el-tag v-else-if="g.builtin_key" size="small" effect="plain">预置</el-tag>
             </span>
             <span class="pg-meta">
-              {{ g.super ? '全部资源' : g.resources.length + ' 资源' }} · {{ g.super || g.all_devices ? '全部' : g.device_count }} 设备 · {{ g.member_count }} 成员
+              {{ g.super ? '全部资源' : g.resources.length + ' 资源' }} · {{ g.super || g.all_devices ? '全部' : g.device_count }} 设备<template v-if="g.global_scope && !g.all_devices"> · 全局</template> · {{ g.member_count }} 成员
             </span>
           </el-menu-item>
           <div v-if="!filteredGroups.length" class="muted pg-empty">没有匹配的权限组</div>
@@ -40,32 +40,41 @@
             <el-tag v-if="form.super" size="small" type="danger" effect="plain">超级权限：全部功能资源与设备</el-tag>
           </div>
           <div class="pg-actions">
-            <el-button v-if="form.id && canWrite && !form.builtin_key" size="small" type="danger" plain
+            <el-button v-if="form.id && writable && !form.builtin_key" size="small" type="danger" plain
                        @click="removeGroup">删除</el-button>
             <el-button size="small" @click="reload">取消</el-button>
-            <el-button v-if="canWrite" size="small" type="primary" :loading="saving" @click="save">保存</el-button>
+            <el-button v-if="writable" size="small" type="primary" :loading="saving" @click="save">保存</el-button>
           </div>
         </div>
 
-        <el-form ref="pgFormRef" :model="form" :rules="pgRules" label-width="62px"
+        <el-form ref="pgFormRef" :model="form" :rules="pgRules" label-width="74px"
                  class="pg-meta-form" @submit.prevent>
           <el-form-item label="名称" prop="name">
-            <el-input v-model="form.name" size="small" maxlength="64" :disabled="!canWrite" placeholder="例如：产线运维" />
+            <el-input v-model="form.name" size="small" maxlength="64" :disabled="!writable" placeholder="例如：产线运维" />
           </el-form-item>
           <el-form-item label="允许端口">
-            <el-input v-model="form.ports" size="small" :disabled="!canWrite || form.super"
+            <el-input v-model="form.ports" size="small" :disabled="!writable || form.super"
                       placeholder="* 或 22,80-90" />
           </el-form-item>
           <el-form-item label="说明" class="wide">
-            <el-input v-model="form.description" size="small" :disabled="!canWrite" placeholder="这个组负责什么" />
+            <el-input v-model="form.description" size="small" :disabled="!writable" placeholder="这个组负责什么" />
           </el-form-item>
         </el-form>
 
         <div class="pg-flags">
-          <el-checkbox v-model="form.all_devices" :disabled="!canWrite || form.super">
+          <el-checkbox v-model="form.all_devices" :disabled="!writable || form.super">
             全部设备（含以后新增的设备）
           </el-checkbox>
           <span class="muted">不勾选时，只有下面「设备资源」里选中的设备对该组可见</span>
+        </div>
+        <div class="pg-flags">
+          <el-checkbox v-model="form.global_scope" :disabled="!writable || form.super">
+            全局权限
+          </el-checkbox>
+          <span class="muted">
+            允许跨设备的资源（仓库、设置、审计、权限组、令牌、证书、中继列表等）；
+            不勾选时只能管理组内设备，勾选后这些全局键才会生效
+          </span>
         </div>
 
         <el-tabs v-model="tab" class="pg-tabs">
@@ -74,7 +83,7 @@
               账号 / 接入账号是权限主体；atk 是管理台 API Token，rtk 是接入 Token（同时作用于 relay 数据面）。
               令牌只能在其归属账号的权限内收窄。
             </div>
-            <div v-if="!canWrite" class="muted pad">没有修改权限的权限（需要 dict.write）</div>
+            <div v-if="!canMember" class="muted pad">没有调整成员的权限（需要 group.member）</div>
             <div v-else-if="isPhone" class="m-transfer">
               <div class="m-pane">
                 <div class="m-head">已加入 <span class="muted">{{ form.members.length }}</span></div>
@@ -135,8 +144,8 @@
               <span class="muted">已选 {{ form.resources.length }} / {{ resources.length }}</span>
               <span class="spacer" />
               <el-input v-model="resQ" size="small" placeholder="搜索资源名或键" clearable class="res-search" />
-              <el-button size="small" :disabled="!canWrite" @click="checkAllResources">全选</el-button>
-              <el-button size="small" :disabled="!canWrite" @click="clearResources">清空</el-button>
+              <el-button size="small" :disabled="!writable" @click="checkAllResources">全选</el-button>
+              <el-button size="small" :disabled="!writable" @click="clearResources">清空</el-button>
             </div>
             <div class="res-cats">
               <div v-for="cat in resourceCats" :key="cat.name" class="res-cat">
@@ -144,7 +153,7 @@
                   <b>{{ cat.name }}</b>
                   <span class="muted">{{ cat.checked }} / {{ cat.items.length }}</span>
                   <span class="spacer" />
-                  <el-button v-if="canWrite" link size="small" @click="toggleCat(cat)">
+                  <el-button v-if="writable" link size="small" @click="toggleCat(cat)">
                     {{ cat.checked === cat.items.length ? '取消全选' : '全选' }}
                   </el-button>
                 </div>
@@ -152,7 +161,7 @@
                   <el-checkbox v-for="r in cat.items" :key="r.key" class="res-item"
                                :class="{ on: form.resources.includes(r.key), off: !r.enabled }"
                                :model-value="form.resources.includes(r.key)"
-                               :disabled="!canWrite || !r.enabled"
+                               :disabled="!writable || !r.enabled"
                                @change="(v) => toggleResource(r.key, v)">
                     <span class="res-text">
                       <b>{{ r.name }}</b>
@@ -188,8 +197,8 @@
                 <div class="tr-foot">{{ devCandidates.length }} 台可选 · 已选 {{ form.devices.length }}</div>
               </div>
               <div class="tr-ops">
-                <el-button size="small" :disabled="!devLeftChecked.length || !canWrite" @click="addDevices">→</el-button>
-                <el-button size="small" :disabled="!devRightChecked.length || !canWrite" @click="removeDevices">←</el-button>
+                <el-button size="small" :disabled="!devLeftChecked.length || !writable" @click="addDevices">→</el-button>
+                <el-button size="small" :disabled="!devRightChecked.length || !writable" @click="removeDevices">←</el-button>
               </div>
               <div class="tr-pane">
                 <div class="tr-head"><span>已授权</span><span class="muted">{{ form.devices.length }}</span></div>
@@ -248,7 +257,8 @@ import { can } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 
 const { isPhone } = useBreakpoint()
-const canWrite = computed(() => can('dict.write'))
+const writable = computed(() => can('group.write'))
+const canMember = computed(() => can('group.member'))
 
 const groups = ref([])
 const resources = ref([])
@@ -266,6 +276,7 @@ const form = reactive({
   super: false,
   builtin_key: '',
   all_devices: false,
+  global_scope: false,
   ports: '*',
   resources: [],
   devices: [],
@@ -354,7 +365,7 @@ const resourceCats = computed(() => {
 function resetForm() {
   Object.assign(form, {
     id: 0, name: '', description: '', super: false, builtin_key: '',
-    all_devices: false, ports: '*', resources: [], devices: [], members: [],
+    all_devices: false, global_scope: false, ports: '*', resources: [], devices: [], members: [],
   })
   leftChecked.value = []
   rightChecked.value = []
@@ -396,6 +407,7 @@ async function selectGroup(g) {
     super: !!d.super,
     builtin_key: d.builtin_key || '',
     all_devices: !!d.all_devices,
+    global_scope: !!d.global_scope,
     ports: d.ports || '*',
     resources: d.resources || [],
     devices: d.devices || [],
@@ -432,13 +444,17 @@ async function save() {
       name: form.name.trim(),
       description: form.description.trim(),
       all_devices: !!form.all_devices,
+      global_scope: !!form.global_scope,
       ports: form.ports.trim() || '*',
       resources: form.resources.slice(),
       devices: form.all_devices ? [] : form.devices.slice(),
-      members: form.members.map((k) => {
+    }
+    // 没有 group.member 时完全不提交成员，服务端保留原成员
+    if (canMember.value) {
+      body.members = form.members.map((k) => {
         const i = k.indexOf(':')
         return { type: k.slice(0, i), id: k.slice(i + 1) }
-      }),
+      })
     }
     const r = form.id
       ? await Api.put('/api/v1/permission/groups/' + form.id, body)
@@ -456,7 +472,7 @@ async function save() {
 
 async function removeGroup() {
   try {
-    await ElMessageBox.confirm('删除权限组「' + form.name + '」？成员会立即失去该组资源。', '删除权限组', {
+    await ElMessageBox.confirm('删除权限组「' + form.name + '」？成员会立即失去该组资源，且不会回落到角色预置权限。', '删除权限组', {
       type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消',
     })
   } catch (e) {
@@ -550,7 +566,7 @@ onMounted(reload)
 .pg-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .pg-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .pg-actions { margin-left: auto; display: flex; gap: 6px; }
-.pg-meta-form { display: grid; grid-template-columns: 1fr 160px; gap: 8px 18px; margin-bottom: 6px; }
+.pg-meta-form { display: grid; grid-template-columns: 1fr 180px; gap: 8px 18px; margin-bottom: 6px; }
 .pg-meta-form :deep(.el-form-item) { margin-bottom: 0; min-width: 0; }
 .pg-meta-form .wide { grid-column: 1 / -1; }
 .pg-flags { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 2px 0 6px; font-size: 12px; }

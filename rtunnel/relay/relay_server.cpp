@@ -1,5 +1,6 @@
 #include "relay_server.hpp"
 #include "cpputil/json.hpp"
+#include "common/endpoint.hpp"
 #include "common/logging.hpp"
 #include "common/sha256.hpp"
 #include "common/token_util.hpp"
@@ -92,11 +93,6 @@ void RelayServer::drainCb(htimer_t* t) {
     if (self) self->onDrain(t);
 }
 
-void RelayServer::sighupCb(hsignal_t* sig) {
-    auto* self = (RelayServer*)hevent_userdata(sig);
-    if (self) self->onSighup();
-}
-
 void RelayServer::shutdownCb(hsignal_t* sig) {
     auto* self = (RelayServer*)hevent_userdata(sig);
     if (self) self->onShutdown((int)hevent_id(sig));
@@ -110,13 +106,6 @@ static int pattern_match(const char* pat, const char* s) {
         return strncmp(pat, s, n - 1) == 0;
     }
     return strcmp(pat, s) == 0;
-}
-
-bool RelayServer::shellAllowed(const char* user) const {
-    for (const auto& u : shell_users) {
-        if (u == "*" || u == user) return true;
-    }
-    return false;
 }
 
 RelayConn* RelayServer::findClientByUser(const char* user) {
@@ -175,6 +164,26 @@ void RelayServer::sweepPending() {
         }
         logf_("[relay] OPEN_SHELL %s: spawn timeout", p->devid);
         delete p;
+    }
+}
+
+void RelayServer::sweepIdleAgents() {
+    // agent 每 15s 发一次 PING，60s 没有任何帧就认为整机失联。
+    // 没有这一步时 TCP 会一直挂着重传，管理台会把已经断电的设备显示成在线。
+    static const uint64_t kIdleMs = 60000;
+    uint64_t now = hloop_now_ms(loop);
+    // hio_close 会同步触发 onClose 并 delete 连接，先收集再关闭
+    std::vector<hio_t*> dead;
+    std::vector<std::string> devids;
+    for (RelayConn* c = conns; c; c = c->next_all) {
+        if (c->role != rtnp::ROLE_AGENT || !c->authed || c->io == NULL) continue;
+        if (now < c->last_seen_ms || now - c->last_seen_ms < kIdleMs) continue;
+        dead.push_back(c->io);
+        devids.push_back(c->devid);
+    }
+    for (size_t i = 0; i < dead.size(); ++i) {
+        logf_("[relay] agent idle timeout (60s), close: %s", devids[i].c_str());
+        hio_close(dead[i]);
     }
 }
 
@@ -488,6 +497,7 @@ static bool aclTtyAllowed(const std::string& ttys, const char* path) {
 }
 
 bool RelayServer::groupAclDevice(const char* user, long long token_id, const char* devid) {
+    if (allow_all) return true;
     for (auto& r : acl_groups) {
         if (!groupAclApplies(r, user, token_id)) continue;
         if (pattern_match(r.devid.c_str(), devid)) return true;
@@ -496,14 +506,17 @@ bool RelayServer::groupAclDevice(const char* user, long long token_id, const cha
 }
 
 bool RelayServer::groupAclCheck(const char* user, long long token_id, const char* devid, uint16_t port,
-                                int is_shell, const char* tty_path, int is_fs, int fs_rw, int is_svc) {
+                                int is_shell, const char* tty_path, int tty_write, int is_fs, int fs_rw,
+                                int is_svc) {
+    if (allow_all) return true;
     for (auto& r : acl_groups) {
         if (!groupAclApplies(r, user, token_id)) continue;
         if (!pattern_match(r.devid.c_str(), devid)) continue;
         if (is_shell) {
             if (r.shell) return true;
         } else if (tty_path && tty_path[0]) {
-            if (aclTtyAllowed(r.tty, tty_path)) return true;
+            // 只读监听只需 tty.read；普通打开 / 强制接管要求 tty.write
+            if (aclTtyAllowed(r.tty, tty_path) && (tty_write == 0 || r.tty_write)) return true;
         } else if (is_fs) {
             if (r.file >= (fs_rw ? 2 : 1)) return true;
         } else if (is_svc) {
@@ -513,81 +526,6 @@ bool RelayServer::groupAclCheck(const char* user, long long token_id, const char
         }
     }
     return false;
-}
-
-int RelayServer::aclCheck(const char* user, const char* devid) {
-    if (allow_all) return 1;
-    if (user[0] == '\0') return 0;
-    for (int i = 0; i < 2; ++i) {
-        AclEntry* head = i == 0 ? acl_cli : acl_file;
-        for (AclEntry* e = head; e; e = e->next) {
-            if (strcmp(e->user, user) != 0) continue;
-            if (pattern_match(e->pattern, devid)) return 1;
-        }
-    }
-    return 0;
-}
-
-void RelayServer::aclAddTo(AclEntry** head, const char* user, const char* patterns) {
-    char buf[512];
-    snprintf(buf, sizeof(buf), "%s", patterns);
-    char* save = NULL;
-    for (char* p = strtok_r(buf, ",", &save); p; p = strtok_r(NULL, ",", &save)) {
-        auto* e = new AclEntry{};
-        snprintf(e->user, sizeof(e->user), "%s", user);
-        snprintf(e->pattern, sizeof(e->pattern), "%s", p);
-        e->next = *head;
-        *head = e;
-    }
-}
-
-void RelayServer::aclFree(AclEntry** head) {
-    AclEntry* e = *head;
-    while (e) {
-        AclEntry* next = e->next;
-        delete e;
-        e = next;
-    }
-    *head = NULL;
-}
-
-// 加载 ACL 文件：每行 user=devid[,devid|*]，# 注释、空行跳过。
-// 只有整文件解析成功才替换旧表；任何错误保留旧授权（fail-closed 由默认拒绝保证）。
-int RelayServer::aclFileLoad() {
-    if (acl_file_path[0] == '\0') return -1;
-    FILE* fp = fopen(acl_file_path, "r");
-    if (fp == NULL) {
-        logf_("[relay] acl reload: cannot open %s, keep old acl", acl_file_path);
-        return -1;
-    }
-    AclEntry* newlist = NULL;
-    char line[512];
-    int lineno = 0;
-    while (fgets(line, sizeof(line), fp)) {
-        lineno++;
-        char* p = line;
-        while (*p == ' ' || *p == '\t') p++;
-        if (*p == '#' || *p == '\n' || *p == '\r' || *p == '\0') continue;
-        char* eq = strchr(p, '=');
-        if (eq == NULL) {
-            logf_("[relay] acl reload: %s:%d bad line, keep old acl", acl_file_path, lineno);
-            fclose(fp);
-            aclFree(&newlist);
-            return -1;
-        }
-        *eq = '\0';
-        char* pats = eq + 1;
-        char* end = pats + strlen(pats);
-        while (end > pats && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == ' ' || end[-1] == '\t')) *--end = '\0';
-        aclAddTo(&newlist, p, pats);
-    }
-    fclose(fp);
-    aclFree(&acl_file);
-    acl_file = newlist;
-    int n = 0;
-    for (AclEntry* e = acl_file; e; e = e->next) n++;
-    logf_("[relay] acl reloaded: %d entries from %s", n, acl_file_path);
-    return 0;
 }
 
 // ---------------------------------------------------------------- 注册表与流
@@ -733,6 +671,33 @@ bool RelayServer::kickAgent(const char* devid) {
     hio_close(c->io);
     logf_("[relay] agent kicked: %s", devid);
     return true;
+}
+
+int RelayServer::kickClientSessions(const std::vector<std::string>& users, long long token_id,
+                                    const char* reason) {
+    if (users.empty() && token_id <= 0) return 0;
+    // hio_close 会同步触发 onClose 并 delete 连接，先收集再关
+    std::vector<RelayConn*> dead;
+    for (RelayConn* c = conns; c; c = c->next_all) {
+        if (c->role != rtnp::ROLE_CLIENT || c->admin_proxy) continue;
+        if (token_id > 0) {
+            if (c->token_id != token_id) continue;
+        } else {
+            bool hit = false;
+            for (const auto& u : users)
+                if (u == c->user) { hit = true; break; }
+            if (!hit) continue;
+        }
+        dead.push_back(c);
+    }
+    for (RelayConn* c : dead) {
+        if (!c->io || hio_is_closed(c->io)) continue;
+        logf_("[relay] client session revoked: user=%s token=%lld (%s)", c->user, (long long)c->token_id,
+              reason ? reason : "");
+        connCloseAllStreams(c, rtnp::CANCELLED);
+        hio_close(c->io);
+    }
+    return (int)dead.size();
 }
 
 bool RelayServer::isRevoked(const std::string& san) const {
@@ -1286,6 +1251,115 @@ std::string RelayServer::configAck(const char* devid, uint32_t sid, uint64_t* ts
     return it->second.json;
 }
 
+// ---------------------------------------------------------------- relay 地址列表下发
+
+// 内容哈希当版本号：relay 重启后同一份列表的 rev 不变，agent 侧无需比较大小。
+static uint32_t relayListHash(const std::string& servers, bool allow_leave) {
+    uint32_t h = 2166136261u;
+    for (unsigned char c : servers) { h ^= c; h *= 16777619u; }
+    h ^= allow_leave ? 1u : 0u;
+    h *= 16777619u;
+    return h;
+}
+
+bool RelayServer::sendRelayList(RelayConn* c) {
+    if (c == NULL || c->io == NULL || c->role != rtnp::ROLE_AGENT) return false;
+    if (relay_list_json.empty()) return false;
+    rtnp::Writer w;
+    w.str(relay_list_json.c_str());
+    return rtnp::send(c->io, rtnp::RELAY_LIST, 0, w.data, (uint16_t)w.len) == 0;
+}
+
+bool RelayServer::setRelayList(const std::string& servers, bool allow_leave, std::string& err) {
+    err.clear();
+    std::vector<TunnelEndpoint> eps;
+    std::string trimmed = servers;
+    size_t b = trimmed.find_first_not_of(" \t");
+    if (b == std::string::npos) trimmed.clear();
+    else trimmed = trimmed.substr(b, trimmed.find_last_not_of(" \t") - b + 1);
+
+    if (!trimmed.empty() && !tunnel_parse_endpoints(trimmed, 8443, eps, err)) return false;
+    std::string canon = tunnel_format_endpoints(eps);
+
+    bool changed = (canon != relay_list_servers) || (allow_leave != relay_list_allow_leave);
+    if (changed) {
+        relay_list_servers = canon;
+        relay_list_allow_leave = allow_leave;
+        relay_list_acks.clear();
+        if (canon.empty()) {
+            relay_list_json.clear();
+            relay_list_rev = 0;
+            logf_("[relay] relay list disabled");
+        } else {
+            relay_list_rev = relayListHash(canon, allow_leave);
+            nlohmann::json j;
+            j["servers"] = canon;
+            j["rev"] = relay_list_rev;
+            j["allow_leave"] = allow_leave;
+            relay_list_json = j.dump();
+            logf_("[relay] relay list set: %s (rev=%u leave=%d)", canon.c_str(), relay_list_rev,
+                  allow_leave ? 1 : 0);
+        }
+    }
+    // 列表变更只更新期望状态；主动下发由同步任务触发，设备上线时 AUTH_OK 自动对齐
+    return true;
+}
+
+std::string RelayServer::relayListStatus() {
+    nlohmann::json j;
+    j["servers"] = relay_list_servers;
+    j["allow_leave"] = relay_list_allow_leave;
+    j["rev"] = relay_list_rev;
+    j["configured"] = !relay_list_json.empty();
+    nlohmann::json arr = nlohmann::json::array();
+    for (RelayConn* c = agents; c != NULL; c = c->reg_next) {
+        nlohmann::json a = nlohmann::json::object();
+        a["devid"] = c->devid;
+        auto it = relay_list_acks.find(c->devid);
+        if (it == relay_list_acks.end()) {
+            a["pending"] = true;
+        } else {
+            auto aj = nlohmann::json::parse(it->second.json, nullptr, false);
+            if (!aj.is_discarded() && aj.is_object()) {
+                a = aj;
+                a["devid"] = c->devid;
+            } else {
+                a["raw"] = it->second.json;
+            }
+            a["ts"] = it->second.ts;
+        }
+        arr.push_back(a);
+    }
+    j["agents"] = arr;
+    return j.dump();
+}
+
+bool RelayServer::sendRelayListJson(const char* devid, const std::string& json) {
+    RelayConn* c = findAgent(devid);
+    if (c == NULL || c->io == NULL) return false;
+    if (json.empty()) return false;
+    rtnp::Writer w;
+    w.str(json.c_str());
+    return rtnp::send(c->io, rtnp::RELAY_LIST, 0, w.data, (uint16_t)w.len) == 0;
+}
+
+std::string RelayServer::relayListAcksJson() {
+    nlohmann::json out = nlohmann::json::object();
+    for (auto& kv : relay_list_acks) {
+        auto j = nlohmann::json::parse(kv.second.json, nullptr, false);
+        if (j.is_discarded() || !j.is_object()) continue;
+        j["ts"] = kv.second.ts;
+        out[kv.first] = j;
+    }
+    return out.dump();
+}
+
+std::string RelayServer::onlineAgentDevids() {
+    nlohmann::json arr = nlohmann::json::array();
+    for (RelayConn* c = agents; c != NULL; c = c->reg_next) arr.push_back(c->devid);
+    return arr.dump();
+}
+
 bool RelayServer::sendSysinfoReq(const char* devid, int mode) {
     RelayConn* a = findAgent(devid);
     if (!a || !a->io) return false;
@@ -1484,6 +1558,19 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         if (!rr.err) check_results[f->sid] = std::string(buf);
         return;
     }
+    case rtnp::RELAY_LIST_ACK: {
+        if (c->role != rtnp::ROLE_AGENT) return;
+        rtnp::Reader r(f->payload, f->len);
+        static char buf[4096];
+        r.str(buf, sizeof(buf));
+        if (r.err) return;
+        RelayListAck a;
+        a.json = std::string(buf);
+        a.ts = hloop_now_ms(loop);
+        relay_list_acks[c->devid] = a;
+        if (verbose) logf_("[relay] relay list ack from %s: %s", c->devid, a.json.c_str());
+        return;
+    }
     case rtnp::CONFIG_ACK: {
         if (c->role != rtnp::ROLE_AGENT) return;
         rtnp::Reader r(f->payload, f->len);
@@ -1649,82 +1736,83 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             w.u32(15000);
             rtnp::send(c->io, rtnp::AUTH_OK, 0, w.data, (uint16_t)w.len);
             logf_("[relay] agent online: %s (fd=%d)", c->devid, hio_fd(c->io));
+            // 连上就对齐一次地址列表；未配置时不下发，agent 保留本地已有列表
+            sendRelayList(c);
             completePending(c->devid);
         } else {
+            // identity 字段仍保留在协议里（mTLS 下用于比对证书），但 client 不再用它登录
             r.str(c->user, sizeof(c->user));
-            // 凭证：u8 auth_type(0=none,1=静态 token,2=账号 token) + str token
+            // 凭证：u8 auth_type(0=none,1=接入令牌 rtk-,3=管理台内部代理) + str token
             uint8_t auth_type = r.err ? 0 : r.u8();
             char tok[256] = {0};
-            if (!r.err && (auth_type == 1 || auth_type == 2)) r.str(tok, sizeof(tok));
+            if (!r.err && (auth_type == 1 || auth_type == 3)) r.str(tok, sizeof(tok));
+
+            if (!r.err && auth_type == 3) {
+                // AdminServer 与本对象同进程：启动时生成的随机密钥不落盘、不配置，
+                // 管理台侧已按账号/设备范围鉴权，这里只校验密钥后放行。
+                if (admin_proxy_secret.empty() || tok != admin_proxy_secret) {
+                    sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::UNAUTHORIZED, "bad proxy secret");
+                    hio_close(c->io);
+                    return;
+                }
+                c->admin_proxy = 1;
+                c->internal = 1;
+                c->authed = 1;
+                c->token_id = 0;
+                snprintf(c->user, sizeof(c->user), "console");
+                snprintf(c->token_prefix, sizeof(c->token_prefix), "proxy");
+                if (c->hs_timer) { htimer_del(c->hs_timer); c->hs_timer = NULL; }
+                rtnp::Writer w;
+                w.str(c->user);
+                w.u32(15000);
+                rtnp::send(c->io, rtnp::AUTH_OK, 0, w.data, (uint16_t)w.len);
+                return;
+            }
+
+            if (r.err || auth_type != 1 || !rtutil::isClientToken(tok)) {
+                sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::UNAUTHORIZED, "rtk- token required");
+                hio_close(c->io);
+                return;
+            }
 
             const TokenPolicy* pol = NULL;
             TokenUsage* usage = NULL;
             uint64_t now = (uint64_t)time(NULL) * 1000;
 
-            if (auth_type == 2) {
-                std::string hash = rtutil::sha256Hex(std::string(tok));
-                auto it = token_cache.find(hash);
-                if (it == token_cache.end()) {
-                    logf_("[relay] token auth rejected: unknown token prefix=%.12s", tok);
-                    sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::TOKEN_DISABLED, "invalid token");
-                    hio_close(c->io);
-                    return;
-                }
-                pol = &it->second;
-                if (pol->status != 0 || !pol->account_active) {
-                    sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::TOKEN_DISABLED, "token disabled");
-                    hio_close(c->io);
-                    return;
-                }
-                if (pol->expires_at_ms > 0 && (int64_t)now >= pol->expires_at_ms) {
-                    sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::TOKEN_EXPIRED, "token expired");
-                    hio_close(c->io);
-                    return;
-                }
-                if (c->user[0] == '\0') {
-                    snprintf(c->user, sizeof(c->user), "%s", pol->username.c_str());
-                } else if (c->user != pol->username) {
-                    sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::UNAUTHORIZED, "user mismatch");
-                    hio_close(c->io);
-                    return;
-                }
-                usage = &token_usage[pol->id];
-                if (pol->quota_bytes > 0 && usage->used_bytes >= pol->quota_bytes) {
-                    sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::QUOTA_EXCEEDED, "token quota exceeded");
-                    hio_close(c->io);
-                    return;
-                }
-                c->token_id = pol->id;
-                snprintf(c->token_prefix, sizeof(c->token_prefix), "%s", pol->prefix.c_str());
-                usage->last_used_ms = now;
-                snprintf(usage->last_ip, sizeof(usage->last_ip), "%s", c->remote_addr);
+            std::string hash = rtutil::sha256Hex(std::string(tok));
+            auto it = token_cache.find(hash);
+            if (it == token_cache.end()) {
+                logf_("[relay] token auth rejected: unknown token prefix=%.12s", tok);
+                sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::TOKEN_DISABLED, "invalid token");
+                hio_close(c->io);
+                return;
             }
-            // 静态凭据：auth_type=2 之外（含未带凭证的 0）都必须通过静态校验
-            if (auth_type != 2 && clientAuthEnabled()) {
-                std::string expect;
-                for (const auto& cc : client_creds) {
-                    if (cc.user == c->user) { expect = cc.token; break; }
-                }
-                if (expect.empty()) expect = client_token;
-                if (expect.empty() || tok != expect) {
-                    logf_("[relay] client auth rejected: user=%s", c->user);
-                    sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::UNAUTHORIZED, "bad token");
-                    hio_close(c->io);
-                    return;
-                }
+            pol = &it->second;
+            if (pol->status != 0 || !pol->account_active) {
+                sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::TOKEN_DISABLED, "token disabled");
+                hio_close(c->io);
+                return;
             }
-            // 静态凭据也要服从账号状态：账号停用后旧 token 一并失效
-            if (auth_type == 1 && c->user[0] != '\0') {
-                auto ait = account_active.find(c->user);
-                if (ait != account_active.end() && ait->second == 0) {
-                    sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::TOKEN_DISABLED, "account disabled");
-                    hio_close(c->io);
-                    return;
-                }
+            if (pol->expires_at_ms > 0 && (int64_t)now >= pol->expires_at_ms) {
+                sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::TOKEN_EXPIRED, "token expired");
+                hio_close(c->io);
+                return;
             }
+            // 令牌就是身份：用户名只从 TokenPolicy 取，客户端自报的 identity 不参与认证
+            snprintf(c->user, sizeof(c->user), "%s", pol->username.c_str());
+            usage = &token_usage[pol->id];
+            if (pol->quota_bytes > 0 && usage->used_bytes >= pol->quota_bytes) {
+                sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::QUOTA_EXCEEDED, "token quota exceeded");
+                hio_close(c->io);
+                return;
+            }
+            c->token_id = pol->id;
+            snprintf(c->token_prefix, sizeof(c->token_prefix), "%s", pol->prefix.c_str());
+            usage->last_used_ms = now;
+            snprintf(usage->last_ip, sizeof(usage->last_ip), "%s", c->remote_addr);
 
             if (r.err || c->user[0] == '\0') {
-                sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::UNAUTHORIZED, "bad user");
+                sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::UNAUTHORIZED, "bad token owner");
                 hio_close(c->io);
                 return;
             }
@@ -1763,8 +1851,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         int online = 0;
         uint32_t active = 0;
         bool allowed = c->authed && c->role == rtnp::ROLE_CLIENT &&
-            (acl_grouped_users.count(c->user) ? groupAclDevice(c->user, c->token_id, devid)
-                                              : aclCheck(c->user, devid));
+                       (c->admin_proxy || groupAclDevice(c->user, c->token_id, devid));
         // 查询限速：超限按离线处理，不返回 ERROR（客户端会把 ERROR 当作认证失败断链）
         if (!r.err && allowed && !tokenRateAllow(c, NULL)) allowed = false;
         if (!r.err && allowed) {
@@ -1808,13 +1895,12 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
                 if (is_fs) fs_rw = r.u8();
                 r.u8();   // trusted：客户端值忽略，relay 转发时重写
             } else if (!is_tty) {
-                // OPEN_TTY 的 payload 是 devid + tty_devid + tty_path + termios，没有端口
+                // OPEN_TTY 的 payload 是 devid + tty_path + termios，没有端口
                 port = r.u16();
             }
             char tty_path[256] = {0};
             if (is_tty && !r.err) {
-                char tdev[128] = {0};
-                r.str(tdev, sizeof(tdev));
+                // 负载布局：[devid/目标 devid][tty path][baud:u32][db][parity][stop]
                 r.str(tty_path, sizeof(tty_path));
             }
             if (r.err || devid[0] == '\0' || (!is_shell && !is_tty && !is_fs && !is_svc && port == 0)) {
@@ -1846,17 +1932,14 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
                     }
                 }
             }
-            bool grouped = acl_grouped_users.count(c->user) != 0;
-            bool acl_ok = grouped
-                ? groupAclCheck(c->user, c->token_id, devid, port, is_shell ? 1 : 0, tty_path,
-                                is_fs ? 1 : 0, (int)fs_rw, is_svc ? 1 : 0)
-                : aclCheck(c->user, devid);
+            // 接入账号一律按权限组鉴权（未分组 = 无权限）
+            // 串口写权限：monitor 是只读监听、OPEN_TTY_RDONLY 是只读打开，其余要求 tty.write
+            int tty_write = is_tty && (f->flags & (rtnp::OPEN_TTY_MONITOR | rtnp::OPEN_TTY_RDONLY)) == 0 ? 1 : 0;
+            bool acl_ok = c->admin_proxy ||
+                          groupAclCheck(c->user, c->token_id, devid, port, is_shell ? 1 : 0, tty_path,
+                                        tty_write, is_fs ? 1 : 0, (int)fs_rw, is_svc ? 1 : 0);
             if (!acl_ok) {
                 sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::ACL_DENIED, "acl denied");
-                return;
-            }
-            if (is_shell && !shellAllowed(c->user)) {
-                sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::ACL_DENIED, "shell not allowed");
                 return;
             }
             RelayConn* agent = findAgent(devid);
@@ -1880,6 +1963,9 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             s->a = c; s->a_sid = f->sid;
             s->c = agent; s->c_sid = ++agent->next_c_sid;
             s->opened_at_ms = s->last_active_ms = hloop_now_ms(loop);
+            // 只读串口在 relay 侧也拦写方向：老 agent 不认识只读标志，不能只依赖它
+            s->a_readonly = is_tty &&
+                (f->flags & (rtnp::OPEN_TTY_MONITOR | rtnp::OPEN_TTY_RDONLY)) != 0;
             s->next_a = c->streams; c->streams = s;
             s->next_c = agent->streams; agent->streams = s;
             tokenSessionAdd(c);
@@ -1911,6 +1997,15 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             RelayStream* s = findStreamByA(c, f->sid, NULL);
             if (s == NULL || s->c == NULL) {
                 sendErr(c->io, rtnp::RESET, f->sid, rtnp::PROTOCOL_ERROR, "unknown sid");
+                return;
+            }
+            // 只读串口：丢弃写方向数据，回窗口避免对端窗口耗尽
+            if (s->a_readonly && f->type == rtnp::DATA) {
+                if (f->len > 0) {
+                    rtnp::Writer w;
+                    w.u32(f->len);
+                    rtnp::send(c->io, rtnp::WINDOW, f->sid, w.data, (uint16_t)w.len);
+                }
                 return;
             }
             forward(s->c, f->type, s->c_sid, f->payload, f->len, f->flags);
@@ -2010,7 +2105,12 @@ void RelayServer::onClose(RelayConn* c) {
             }
         }
         registryRemove(c);
-        if (c->devid[0]) logf_("[relay] agent offline: %s", c->devid);
+        if (c->devid[0]) {
+            // 断线后旧的 RELAY_LIST ACK 不再可信：设备可能重装/换机，
+            // 重连时 AUTH_OK 会重新下发并重新 ACK。
+            relay_list_acks.erase(c->devid);
+            logf_("[relay] agent offline: %s", c->devid);
+        }
     } else if (c->role == rtnp::ROLE_CLIENT && c->user[0]) {
         logf_("[relay] client offline: %s", c->user);
     }
@@ -2048,15 +2148,6 @@ void RelayServer::onAccept(hio_t* io) {
 }
 
 // ---------------------------------------------------------------- 运维面
-
-// SIGHUP：热加载 --acl-file；命令行 --acl 条目不受影响
-void RelayServer::onSighup() {
-    if (acl_file_path[0]) {
-        aclFileLoad();
-    } else {
-        logf_("[relay] SIGHUP ignored: no --acl-file configured");
-    }
-}
 
 // 周期统计：连接数 / 活跃流（按 agent 侧计，避免双算）/ 累计字节
 void RelayServer::onStats() {
@@ -2123,8 +2214,6 @@ int RelayServer::run(int argc, char** argv) {
     const char* admin_ca_key = NULL;
     const char* admin_cert_dir = NULL;
     const char* admin_file_dir = NULL;
-    const char* admin_shell_user = "devuser";
-    const char* admin_shell_token = NULL;
     const char* admin_db = NULL;
     const char* admin_tls_cert = NULL;
     const char* admin_tls_key = NULL;
@@ -2132,9 +2221,6 @@ int RelayServer::run(int argc, char** argv) {
     int         admin_tls_selfsigned = 0;
     int         admin_tls_days = 3650;
     int         admin_threads = 4;
-    const char* client_users_file = NULL;
-    const char* client_token_arg = NULL;
-    const char* shell_users_arg = NULL;
 
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
@@ -2149,14 +2235,6 @@ int RelayServer::run(int argc, char** argv) {
             tls_ca = argv[++i];
         } else if (strcmp(argv[i], "--allow-all") == 0) {
             allow_all = 1;
-        } else if (strcmp(argv[i], "--client-users") == 0 && i + 1 < argc) {
-            client_users_file = argv[++i];
-        } else if (strcmp(argv[i], "--client-token") == 0 && i + 1 < argc) {
-            client_token_arg = argv[++i];
-        } else if (strcmp(argv[i], "--shell-users") == 0 && i + 1 < argc) {
-            shell_users_arg = argv[++i];
-        } else if (strcmp(argv[i], "--admin-shell-token") == 0 && i + 1 < argc) {
-            admin_shell_token = argv[++i];
         } else if (strcmp(argv[i], "--admin-db") == 0 && i + 1 < argc) {
             admin_db = argv[++i];
         } else if (strcmp(argv[i], "--admin-tls-cert") == 0 && i + 1 < argc) {
@@ -2176,16 +2254,6 @@ int RelayServer::run(int argc, char** argv) {
             if (admin_threads > 32) admin_threads = 32;
         } else if (strcmp(argv[i], "--verbose") == 0) {
             verbose = 1;
-        } else if (strcmp(argv[i], "--acl") == 0 && i + 1 < argc) {
-            char buf[512];
-            snprintf(buf, sizeof(buf), "%s", argv[++i]);
-            char* eq = strchr(buf, '=');
-            if (eq) {
-                *eq = '\0';
-                aclAddTo(&acl_cli, buf, eq + 1);
-            }
-        } else if (strcmp(argv[i], "--acl-file") == 0 && i + 1 < argc) {
-            snprintf(acl_file_path, sizeof(acl_file_path), "%s", argv[++i]);
         } else if (strcmp(argv[i], "--drain-timeout") == 0 && i + 1 < argc) {
             drain_timeout_ms = (uint32_t)atoi(argv[++i]);
         } else if (strcmp(argv[i], "--stream-idle") == 0 && i + 1 < argc) {
@@ -2204,14 +2272,11 @@ int RelayServer::run(int argc, char** argv) {
             admin_cert_dir = argv[++i];
         } else if (strcmp(argv[i], "--admin-file-dir") == 0 && i + 1 < argc) {
             admin_file_dir = argv[++i];
-        } else if (strcmp(argv[i], "--admin-shell-user") == 0 && i + 1 < argc) {
-            admin_shell_user = argv[++i];
         } else {
             fprintf(stderr,
-                "Usage: %s [--host H] [--port P] [--acl user=devid[,devid|*]] [--allow-all]\n"
-                "          [--acl-file PATH] [--drain-timeout MS] [--stream-idle SEC]\n"
+                "Usage: %s [--host H] [--port P] [--allow-all]\n"
+                "          [--drain-timeout MS] [--stream-idle SEC]\n"
                 "          [--tls-cert crt --tls-key key [--tls-ca ca]] [--verbose]\n"
-                "          [--client-users F] [--client-token T] [--shell-users u1,u2]\n"
                 "          [--admin 127.0.0.1:9443 [--admin-token T] [--admin-db PATH]\n"
                 "            [--admin-docroot DIR]\n"
                 "            [--admin-ca-cert C --admin-ca-key K --admin-cert-dir D]\n"
@@ -2252,40 +2317,8 @@ int RelayServer::run(int argc, char** argv) {
         fprintf(stderr, "listen %s:%d failed\n", host, port);
         return 2;
     }
-    if (acl_file_path[0]) aclFileLoad();
-    if (client_users_file) {
-        FILE* fp = fopen(client_users_file, "r");
-        if (fp == NULL) {
-            fprintf(stderr, "open %s failed\n", client_users_file);
-            return 5;
-        }
-        char line[512];
-        while (fgets(line, sizeof(line), fp)) {
-            char* p = line;
-            while (*p == ' ' || *p == '\t') ++p;
-            if (*p == '#' || *p == '\n' || *p == '\0') continue;
-            char* nl = strpbrk(p, "\r\n");
-            if (nl) *nl = '\0';
-            char* colon = strchr(p, ':');
-            if (colon == NULL) continue;
-            *colon = '\0';
-            client_creds.push_back({std::string(p), std::string(colon + 1)});
-        }
-        fclose(fp);
-    }
-    if (client_token_arg) this->client_token = client_token_arg;
-    if (shell_users_arg) {
-        std::string all = shell_users_arg;
-        size_t pos = 0;
-        while (pos <= all.size()) {
-            size_t comma = all.find(',', pos);
-            std::string u = all.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
-            if (!u.empty()) shell_users.push_back(u);
-            if (comma == std::string::npos) break;
-            pos = comma + 1;
-        }
-    }
     started_at_ms = hloop_now_ms(loop);
+    admin_proxy_secret = rtutil::newAdminToken();   // 每次启动重新生成，不落盘
     if (admin_addr) {
         auto* adm = new AdminServer(this);
         admin = adm;
@@ -2298,8 +2331,7 @@ int RelayServer::run(int argc, char** argv) {
         cfg.ca_key = admin_ca_key ? admin_ca_key : "";
         cfg.cert_dir = admin_cert_dir ? admin_cert_dir : "";
         cfg.file_dir = admin_file_dir ? admin_file_dir : "";
-        cfg.shell_user = admin_shell_user;
-        cfg.shell_token = admin_shell_token ? admin_shell_token : "";
+        cfg.proxy_secret = admin_proxy_secret;
         if (admin_db) cfg.db_path = admin_db;
         cfg.tls_cert = admin_tls_cert ? admin_tls_cert : "";
         cfg.tls_key = admin_tls_key ? admin_tls_key : "";
@@ -2314,34 +2346,29 @@ int RelayServer::run(int argc, char** argv) {
         }
     }
     logf_("[relay] listening on %s:%d (%s, acl=%s)", host, port,
-          (tls_cert && tls_key) ? "tls" : "tcp",
-          allow_all ? "allow-all" : ((acl_cli || acl_file) ? "on" : "deny-all"));
+          (tls_cert && tls_key) ? "tls" : "tcp", allow_all ? "allow-all" : "permission-groups");
     if (!require_mtls) {
         logf_("[relay] WARNING: no peer identity verification (--tls-ca off); "
               "peers can claim any devid/user");
     }
-    if (clientAuthEnabled()) {
-        logf_("[relay] client auth: on (%zu users, global token %s)",
-              client_creds.size(), client_token.empty() ? "off" : "on");
-    } else if (admin != NULL) {
-        logf_("[relay] client auth: 仅接受管理台签发的账号 Token");
+    if (admin != NULL) {
+        logf_("[relay] client auth: rtk- token only (签发自管理台接入账号)");
     } else {
-        logf_("[relay] WARNING: client auth disabled (--client-users/--client-token off); "
-              "anyone who can reach this port can claim any user");
+        logf_("[relay] WARNING: admin disabled; clients cannot authenticate (rtk- token required)");
     }
-    logf_("[relay] shell users: %s", shell_users.empty() ? "none (OPEN_SHELL denied)" : "configured");
     hsignal_t* sig;
     sig = hsignal_add(loop, shutdownCb, SIGTERM);
     hevent_set_userdata(sig, this);
     sig = hsignal_add(loop, shutdownCb, SIGINT);
-    hevent_set_userdata(sig, this);
-    sig = hsignal_add(loop, sighupCb, SIGHUP);
     hevent_set_userdata(sig, this);
     htimer_t* sweeper = htimer_add(loop, [](htimer_t* t) { ((RelayServer*)hevent_userdata(t))->sweepPending(); }, 1000, INFINITE);
     hevent_set_userdata(sweeper, this);
     // 已建流的空闲回收：客户端异常挂住时不至于白占 token 会话配额
     htimer_t* ssweeper = htimer_add(loop, [](htimer_t* t) { ((RelayServer*)hevent_userdata(t))->sweepStreams(); }, 5000, INFINITE);
     hevent_set_userdata(ssweeper, this);
+    // agent 控制连接空闲巡检：整机失联时不能一直显示在线
+    htimer_t* asweeper = htimer_add(loop, [](htimer_t* t) { ((RelayServer*)hevent_userdata(t))->sweepIdleAgents(); }, 5000, INFINITE);
+    hevent_set_userdata(asweeper, this);
     htimer_t* t = htimer_add(loop, statsCb, 60000, INFINITE);
     hevent_set_userdata(t, this);
     // 过期 / 配额的兜底扫描（限流与计量本身在收发路径上实时完成）

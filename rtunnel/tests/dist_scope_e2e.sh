@@ -41,8 +41,7 @@ RTUNNEL_CONF_DIR="$T/etc" sh "$PKGROOT/install.sh" \
     --pkg-dir "$PKGROOT" --variant lite --version "$VER" --prefix "$T/agent" --no-units >/dev/null
 
 "$RELAY" --host 127.0.0.1 --port "$RP" --admin 127.0.0.1:"$AP" \
-    --admin-token admintok --admin-db "$T/admin.db" --admin-file-dir "$T/repo" \
-    --admin-shell-user admin --shell-users admin >"$T/relay.log" 2>&1 &
+    --admin-token admintok --admin-db "$T/admin.db" --admin-file-dir "$T/repo" >"$T/relay.log" 2>&1 &
 RELAY_PID=$!
 sleep 0.6
 RTUNNEL_AGENT_PREFIX="$T/agent" "$T/agent/bin/rtunnel-agent" \

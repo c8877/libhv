@@ -21,10 +21,11 @@
         </el-tag>
         <span class="spacer" />
         <div class="head-actions">
-          <el-button v-if="acc && canManage()" @click="openAccountEdit">编辑资料</el-button>
-          <el-button v-if="acc && canManage()" :type="acc.status === 'active' ? 'warning' : 'success'" plain
+          <el-button v-if="acc && can('account.write')" @click="openAccountEdit">编辑资料</el-button>
+          <el-button v-if="acc && can('account.write')" :type="acc.status === 'active' ? 'warning' : 'success'" plain
                      @click="toggleAccount">{{ acc.status === 'active' ? '停用' : '启用' }}</el-button>
-          <el-button v-if="acc && isAdmin" type="danger" plain @click="deleteAccount">删除账号</el-button>
+          <el-button v-if="acc && can('account.write')" plain @click="kickSessions">断开连接</el-button>
+          <el-button v-if="acc && can('account.delete')" type="danger" plain @click="deleteAccount">删除账号</el-button>
         </div>
       </div>
 
@@ -68,7 +69,7 @@
         <h2>Token</h2>
         <span class="muted">共 {{ tokens.length }} 个</span>
         <span class="spacer" />
-        <el-button v-if="canManage()" type="primary" @click="openTokenCreate">+ 新建 Token</el-button>
+        <el-button v-if="can('account.write')" type="primary" @click="openTokenCreate">+ 新建 Token</el-button>
       </div>
 
       <el-tabs v-model="filter" class="tok-tabs">
@@ -128,7 +129,7 @@
             <template v-if="row.status === 'revoked'">
               <span class="muted">—</span>
             </template>
-            <el-dropdown v-else-if="isPhone && canManage()" trigger="click"
+            <el-dropdown v-else-if="isPhone && can('account.write')" trigger="click"
                          @command="(c) => onTokenAction(c, row)">
               <el-button size="small">更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
               <template #dropdown>
@@ -140,7 +141,7 @@
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
-            <template v-else-if="canManage()">
+            <template v-else-if="can('account.write')">
               <el-button size="small" @click="openTokenEdit(row)">编辑</el-button>
               <el-button size="small" @click="toggleToken(row)">{{ row.status === 'active' ? '停用' : '启用' }}</el-button>
               <el-button size="small" @click="rotateToken(row)">轮换</el-button>
@@ -236,7 +237,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Api } from '@/shared/api.js'
-import { can, canManage, roleOf } from '@/shared/store.js'
+import { can } from '@/shared/store.js'
 import { bytes, copyText, time } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
@@ -245,7 +246,6 @@ const route = useRoute()
 const router = useRouter()
 const { isPhone, isTablet } = useBreakpoint()
 const descCols = computed(() => (isPhone.value ? 1 : isTablet.value ? 2 : 3))
-const isAdmin = computed(() => roleOf() === 'admin')
 
 const id = computed(() => Number(route.params.id))
 const acc = ref(null)
@@ -384,6 +384,19 @@ async function saveAccountEdit() {
     ElMessage.error('保存失败：' + e.message)
   } finally {
     saving.value = false
+  }
+}
+
+async function kickSessions() {
+  try {
+    await ElMessageBox.confirm('该账号的所有在线隧道会被关闭，客户端需要重新认证。', '断开连接',
+      { type: 'warning', confirmButtonText: '断开', cancelButtonText: '取消' })
+  } catch (e) { return }
+  try {
+    const r = await Api.post('/api/v1/client-accounts/' + id.value + '/kick', {})
+    ElMessage.success('已断开 ' + (r.closed || 0) + ' 个连接')
+  } catch (e) {
+    ElMessage.error('操作失败：' + e.message)
   }
 }
 
