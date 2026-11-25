@@ -277,6 +277,19 @@ void AdminServer::registerRoutes() {
         std::string role; int rc = requirePerm(ctx, "billing.write", role); if (rc) return rc;
         handleBillingPriceSet(ctx, role); return 200;
     });
+    access("billing.read", "GET", "/api/v1/billing/statements", &AdminServer::handleBillingStatements);
+    // 具体路径先于 :id 注册，避免被通配吃掉
+    access("billing.read", "GET", "/api/v1/billing/statements/:id/csv",
+           &AdminServer::handleBillingStatementCsv);
+    service_.Handle("POST", "/api/v1/billing/statements", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requirePerm(ctx, "billing.write", role); if (rc) return rc;
+        handleBillingStatementGenerate(ctx, role); return 200;
+    });
+    access("billing.read", "GET", "/api/v1/billing/statements/:id", &AdminServer::handleBillingStatementGet);
+    service_.Handle("PUT", "/api/v1/billing/statements/:id", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requirePerm(ctx, "billing.write", role); if (rc) return rc;
+        handleBillingStatementStatus(ctx, role); return 200;
+    });
     access("cert.read", "GET", "/api/v1/certs", &AdminServer::handleCerts);
 
     service_.Handle("DELETE", "/api/v1/streams/:a_sid", [this](const HttpContextPtr& ctx) {

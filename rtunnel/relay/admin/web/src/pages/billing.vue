@@ -4,7 +4,7 @@
       <h2>费用</h2>
       <span class="muted">用量 × 单价试算 · 合计 {{ money(totalMicro) }}</span>
       <span class="spacer" />
-      <el-select v-if="can('tenant.read')" v-model="tenantId" style="width: 150px" @change="load">
+      <el-select v-if="can('tenant.read')" v-model="tenantId" style="width: 150px" @change="reloadAll">
         <el-option label="全部租户" :value="0" />
         <el-option v-for="t in tenants" :key="t.id" :label="t.name" :value="t.id" />
       </el-select>
@@ -66,6 +66,80 @@
     </el-table>
   </div>
 
+  <div class="panel">
+    <div class="panel-head">
+      <h2>结算单</h2>
+      <span class="muted">按账期冻结费用快照，出账后不再随用量变化</span>
+      <span class="spacer" />
+      <el-date-picker v-model="stmtPeriod" type="month" value-format="YYYY-MM" placeholder="账期"
+                      style="width: 130px" @change="loadStatements" />
+      <el-select v-model="stmtStatus" style="width: 120px" @change="loadStatements">
+        <el-option label="全部状态" value="" />
+        <el-option label="草稿" value="draft" />
+        <el-option label="已出账" value="issued" />
+        <el-option label="已收款" value="paid" />
+        <el-option label="已作废" value="void" />
+      </el-select>
+      <el-button v-if="can('billing.write')" type="primary" :loading="genLoading"
+                 @click="generateStatements">生成 / 重算</el-button>
+      <el-button :loading="stmtLoading" @click="loadStatements">刷新</el-button>
+    </div>
+
+    <el-table :data="statements" v-loading="stmtLoading" size="small">
+      <el-table-column type="expand">
+        <template #default="{ row }">
+          <div class="lines">
+            <el-table :data="row.lines" size="small" border>
+              <el-table-column label="指标" width="140">
+                <template #default="s">{{ metricLabel(s.row.metric) }}</template>
+              </el-table-column>
+              <el-table-column label="用量" width="140" align="right">
+                <template #default="s">{{ fmtQty(s.row.qty, s.row.metric) }}</template>
+              </el-table-column>
+              <el-table-column label="计价单位" width="140">
+                <template #default="s">{{ unitText(s.row) }}</template>
+              </el-table-column>
+              <el-table-column label="单价" width="120" align="right">
+                <template #default="s">{{ priceText(s.row) }}</template>
+              </el-table-column>
+              <el-table-column label="金额" width="120" align="right">
+                <template #default="s">{{ money(s.row.amount_micro) }}</template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column prop="tenant_name" label="租户" min-width="120" />
+      <el-table-column prop="period" label="账期" width="90" />
+      <el-table-column label="金额" width="120" align="right">
+        <template #default="{ row }">{{ money(row.total_micro) }}</template>
+      </el-table-column>
+      <el-table-column label="状态" width="90">
+        <template #default="{ row }">
+          <el-tag :type="statusTag(row.status)" size="small">{{ statusText(row.status) }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="note" label="备注" min-width="120" show-overflow-tooltip />
+      <el-table-column label="操作" width="210">
+        <template #default="{ row }">
+          <el-button v-if="can('billing.write') && row.status === 'draft'" link type="primary"
+                     @click="setStatus(row, 'issued')">出账</el-button>
+          <el-button v-if="can('billing.write') && row.status === 'issued'" link type="success"
+                     @click="setStatus(row, 'paid')">已收款</el-button>
+          <el-button v-if="can('billing.write') && (row.status === 'draft' || row.status === 'issued')"
+                     link type="danger" @click="setStatus(row, 'void')">作废</el-button>
+          <el-button link @click="exportCsv(row)">导出</el-button>
+        </template>
+      </el-table-column>
+      <template #empty><el-empty description="该账期还没有结算单" :image-size="60" /></template>
+    </el-table>
+
+    <div class="hint muted">
+      生成只处理草稿：已有草稿按最新用量重算，已出账的记录跳过（需要调整先作废）。
+      出账即冻结明细，之后价目或用量变化不影响这张单。
+    </div>
+  </div>
+
   <el-dialog v-model="dlg" :title="'调整单价 · ' + metricLabel(form.metric)" width="440px">
     <el-form :model="form" label-width="96px">
       <el-form-item label="计价单位">
@@ -117,6 +191,25 @@ const range = ref(defaultRange())
 const dlg = ref(false)
 const saving = ref(false)
 const form = reactive({ metric: '', unit_size: 1, price_yuan: 0, currency: 'CNY' })
+
+const statements = ref([])
+const stmtLoading = ref(false)
+const genLoading = ref(false)
+const stmtStatus = ref('')
+const stmtPeriod = ref(defaultPeriod())
+
+function defaultPeriod() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+function statusText(s) {
+  return { draft: '草稿', issued: '已出账', paid: '已收款', void: '已作废' }[s] || s
+}
+
+function statusTag(s) {
+  return { draft: 'info', issued: 'warning', paid: 'success', void: 'danger' }[s] || 'info'
+}
 
 function defaultRange() {
   const end = new Date()
@@ -216,6 +309,66 @@ async function loadTenants() {
   tenants.value = (res && res.items) || []
 }
 
+async function loadStatements() {
+  stmtLoading.value = true
+  try {
+    const q = new URLSearchParams()
+    if (stmtPeriod.value) q.set('period', stmtPeriod.value)
+    if (stmtStatus.value) q.set('status', stmtStatus.value)
+    if (tenantId.value > 0) q.set('tenant_id', String(tenantId.value))
+    const res = await Api.get('/api/v1/billing/statements?' + q.toString())
+    statements.value = (res && res.items) || []
+  } catch (e) {
+    ElMessage.error('结算单加载失败：' + e.message)
+  } finally {
+    stmtLoading.value = false
+  }
+}
+
+async function generateStatements() {
+  genLoading.value = true
+  try {
+    const res = await Api.post('/api/v1/billing/statements', {
+      period: stmtPeriod.value || defaultPeriod(),
+      tenant_id: tenantId.value || 0,
+    })
+    const n = (a) => (a || []).length
+    ElMessage.success(`新建 ${n(res.created)}、重算 ${n(res.updated)}、跳过 ${n(res.skipped)}`)
+    await loadStatements()
+  } catch (e) {
+    ElMessage.error('生成失败：' + e.message)
+  } finally {
+    genLoading.value = false
+  }
+}
+
+async function setStatus(row, status) {
+  if (status === 'void') {
+    try {
+      await ElMessageBox.confirm('作废后不能恢复，已作废的账期可以重新生成草稿。', '作废结算单',
+                                 { type: 'warning' })
+    } catch {
+      return
+    }
+  }
+  try {
+    await Api.put('/api/v1/billing/statements/' + row.id, { status })
+    ElMessage.success('已更新')
+    await loadStatements()
+  } catch (e) {
+    ElMessage.error('更新失败：' + e.message)
+  }
+}
+
+function reloadAll() {
+  load()
+  loadStatements()
+}
+
+function exportCsv(row) {
+  window.open('/api/v1/billing/statements/' + row.id + '/csv', '_blank')
+}
+
 function openPrice(row) {
   form.metric = row.metric
   form.unit_size = Number(row.unit_size) || 1
@@ -246,12 +399,14 @@ onMounted(() => {
   loadTenants()
   loadPrices()
   load()
+  loadStatements()
 })
 </script>
 
 <style scoped>
 .unit { margin-left: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
 .hint { margin-top: 10px; font-size: 12.5px; line-height: 1.7; }
+.lines { padding: 4px 16px 8px; }
 @media (max-width: 599px) {
   .panel-head { flex-wrap: wrap; row-gap: 6px; }
 }

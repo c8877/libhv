@@ -92,7 +92,7 @@ def main():
 
         # 等管理面把用量落库
         time.sleep(6.5)
-        _, call = e2e.admin_client(base)
+        admin_op, call = e2e.admin_client(base)
 
         body = {"unit_size": 1, "price_yuan": 0.01}
         call("PUT", "/api/v1/billing/prices/sessions", body)
@@ -138,6 +138,63 @@ def main():
             e2e.check("billing: 租户合计与明细一致", tenants[0].get("total_micro") == total,
                       "%s vs %s" % (tenants[0].get("total_micro"), total))
 
+        # ---- 结算单：账期快照 + 状态机 ----
+        period = time.strftime("%Y-%m")
+        tid1 = tenants[0]["tenant_id"] if tenants else 1
+        total1 = tenants[0]["total_micro"] if tenants else 0
+        gen = call("POST", "/api/v1/billing/statements", {"period": period})
+        e2e.check("stat: 生成结算单", len(gen.get("created", [])) >= 1,
+                  str(gen)[:200])
+        stmts = call("GET", "/api/v1/billing/statements?period=%s" % period).get("items", [])
+        mine = [s for s in stmts if s.get("tenant_id") == tid1]
+        e2e.check("stat: 列表可见且为草稿", len(mine) == 1 and mine[0].get("status") == "draft",
+                  str(mine)[:200])
+        sid = mine[0]["id"] if mine else 0
+        e2e.check("stat: 金额等于试算合计", mine and mine[0].get("total_micro") == total1,
+                  "stmt=%s total=%s" % (mine[0].get("total_micro") if mine else None, total1))
+        e2e.check("stat: 明细已快照", mine and len(mine[0].get("lines", [])) >= 1,
+                  str(mine[0].get("lines") if mine else None)[:160])
+
+        # 草稿可重算，金额不重复累加
+        gen2 = call("POST", "/api/v1/billing/statements", {"period": period})
+        e2e.check("stat: 草稿重算走更新", len(gen2.get("updated", [])) >= 1, str(gen2)[:160])
+        again = call("GET", "/api/v1/billing/statements/%d" % sid)
+        e2e.check("stat: 重算不翻倍", again.get("total_micro") == total1,
+                  "%s vs %s" % (again.get("total_micro"), total1))
+
+        # 草稿不能直接标记已收款
+        code = 0
+        try:
+            call("PUT", "/api/v1/billing/statements/%d" % sid, {"status": "paid"})
+        except urllib.error.HTTPError as e:
+            code = e.code
+        e2e.check("stat: 草稿不能直接收款", code == 400, "status=%d" % code)
+
+        issued = call("PUT", "/api/v1/billing/statements/%d" % sid,
+                      {"status": "issued", "note": "2026-11 账期"})
+        e2e.check("stat: 出账", issued.get("status") == "issued" and issued.get("issued_ms", 0) > 0,
+                  str(issued)[:160])
+        e2e.check("stat: 备注落库", issued.get("note") == "2026-11 账期", issued.get("note"))
+
+        # 已出账不能再重算，也不会被新用量改写
+        gen3 = call("POST", "/api/v1/billing/statements", {"period": period})
+        sk = [x for x in gen3.get("skipped", []) if x.get("tenant_id") == tid1]
+        e2e.check("stat: 已出账不重算", len(sk) == 1 and "已出账" in sk[0].get("reason", ""),
+                  str(gen3.get("skipped"))[:160])
+
+        # CSV：带 BOM、表头与明细行
+        creq = urllib.request.Request(base + "/api/v1/billing/statements/%d/csv" % sid)
+        with admin_op.open(creq, timeout=5) as r:
+            csv_body = r.read().decode("utf-8-sig")
+            ctype = r.headers.get("Content-Type", "")
+        e2e.check("stat: CSV 可导出",
+                  "text/csv" in ctype and "tenant_id,tenant_name,period" in csv_body and
+                  period in csv_body, ctype + " / " + csv_body[:80])
+
+        paid = call("PUT", "/api/v1/billing/statements/%d" % sid, {"status": "paid"})
+        e2e.check("stat: 标记已收款", paid.get("status") == "paid" and paid.get("paid_ms", 0) > 0,
+                  str(paid)[:160])
+
         # 接入令牌只能看本租户：租户 2 没有用量，汇总为空
         t2 = call("POST", "/api/v1/tenants", {"name": "计费租户二"})
         acc2 = call("POST", "/api/v1/client-accounts",
@@ -170,6 +227,32 @@ def main():
         except urllib.error.HTTPError as e:
             code = e.code
         e2e.check("billing: 接入令牌不能改全局价目", code == 403, "status=%d" % code)
+
+        # 结算单同样受租户与权限约束
+        def bearer_status(path, token, method="GET", body=None):
+            data = _json.dumps(body).encode() if body is not None else None
+            rq = urllib.request.Request(base + path, data=data, method=method)
+            if data is not None:
+                rq.add_header("Content-Type", "application/json")
+            rq.add_header("Authorization", "Bearer " + token)
+            try:
+                with urllib.request.urlopen(rq, timeout=5) as r:
+                    return r.status, _json.loads(r.read().decode() or "{}")
+            except urllib.error.HTTPError as e:
+                return e.code, {}
+
+        code, _ = bearer_status("/api/v1/billing/statements", tok2, "POST", {"period": period})
+        e2e.check("stat: 接入令牌不能生成结算单", code == 403, "status=%d" % code)
+        code, body = bearer_status("/api/v1/billing/statements?period=%s" % period, tok2)
+        e2e.check("stat: 令牌只看本租户结算单",
+                  code == 200 and all(s.get("tenant_id") == t2["id"] for s in body.get("items", [])),
+                  "status=%d items=%s" % (code, body.get("items")))
+        code, _ = bearer_status("/api/v1/billing/statements/%d" % sid, tok2)
+        e2e.check("stat: 不能读别家结算单", code == 403, "status=%d" % code)
+        code, _ = bearer_status("/api/v1/billing/statements/%d/csv" % sid, tok2)
+        e2e.check("stat: 不能导出别家结算单", code == 403, "status=%d" % code)
+        code, _ = bearer_status("/api/v1/billing/statements/%d" % sid, tok2, "PUT", {"status": "void"})
+        e2e.check("stat: 不能改别家结算单状态", code == 403, "status=%d" % code)
     finally:
         for p in procs:
             if p.poll() is None:

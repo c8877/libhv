@@ -636,6 +636,7 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 | GET | `/api/v1/usage` | 用量报表（日聚合）：流量/会话/设备在线，可按 `tenant_id` 过滤，见 §13.10 |
 | GET/POST/PUT | `/api/v1/tenants[/{id}]` | 租户列表/新建/改名启停，见 §13.11 |
 | GET/PUT | `/api/v1/billing/prices[/{metric}]`、`/billing/summary` | 价目与费用试算，见 §13.12 |
+| GET/POST/PUT | `/api/v1/billing/statements[/{id}]`、`/{id}/csv` | 账期结算单与导出，见 §13.12 |
 | GET/POST | `/api/v1/certs`、`/api/v1/certs/issue`、`/sign`、`/revoke` | 证书台账/签发/CSR 签名/吊销（admin） |
 | GET/POST/DELETE/PUT | `/api/v1/files[/{name}]` | 文件列表/上传/下载/删除/原子编辑（编辑需 manager+，上限可配置，默认 32 MiB；文件名白名单） |
 | GET | `/api/v1/uploads/{name}` | 分片上传状态与续传 |
@@ -940,8 +941,26 @@ GET /api/v1/billing/summary?from&to&tenant_id
 - 价目是全局的：接入令牌（`rtk-`）即使被授了 `billing.write` 也不生效，只能看本租户费用
 - 管理台「监控 → 费用」：按租户×指标列出用量与金额，底部价目表可调单价
 
-**还没做**：账期锁定、阶梯价/包年包月、税额、账单与支付、对账导出。计算逻辑集中在
-`billingSummary` 一处，接账单时只需加“账期快照 + 状态机”，不需要改采集与价目结构。
+**结算单**
+
+`billing_statements` 按 `(tenant_id, period)` 唯一，把某个账期的金额与明细冻结下来：
+
+| 字段 | 说明 |
+|---|---|
+| `period / from_day / to_day` | 账期 `YYYY-MM` 与起止日（`to_day` 用 `-31`，按字符串比较对所有月份成立） |
+| `lines_json` | 生成时的指标明细快照（qty/unit_size/price_micro/amount_micro） |
+| `status` | `draft → issued → paid`；`draft/issued` 可 `void`，`paid/void` 为终态 |
+| `total_micro / currency` | 与明细合计一致的金额 |
+| `issued_ms / paid_ms` | 出账/收款时间 |
+
+- 生成只处理草稿：已有草稿按最新用量重算（不会重复累加），已出账的记到 `skipped`
+- 出账后价目与用量的变化不影响这张单；要调整先作废再重算
+- `GET /billing/statements/:id/csv` 导出明细（UTF-8 BOM，Excel 直接打开）
+- 接入令牌只能看/导出本租户结算单，跨租户 403；生成与改状态需要 `billing.write`（对 rtk 不生效）
+
+**还没做**：阶梯价/包年包月、税额、在线支付、对账文件（银行/支付渠道格式）、账期自动生成。
+计算与快照集中在 `billingSummary` + `billingStatementGenerate` 两处，接支付时只需加状态回调，
+不改采集与价目结构。
 
 ## 14. 备选方案与取舍
 

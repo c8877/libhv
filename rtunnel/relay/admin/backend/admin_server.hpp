@@ -269,6 +269,13 @@ private:
     void handleBillingPrices(const HttpContextPtr& ctx);
     void handleBillingPriceSet(const HttpContextPtr& ctx, const std::string& role);
     void handleBillingSummary(const HttpContextPtr& ctx);
+    void handleBillingStatementGenerate(const HttpContextPtr& ctx, const std::string& role);
+    void handleBillingStatements(const HttpContextPtr& ctx);
+    void handleBillingStatementGet(const HttpContextPtr& ctx);
+    void handleBillingStatementStatus(const HttpContextPtr& ctx, const std::string& role);
+    void handleBillingStatementCsv(const HttpContextPtr& ctx);
+    // 结算单存在且在当前身份可见（接入令牌限本租户）
+    bool billingStatementVisible(long long id, const HttpContextPtr& ctx);
     // api_certs.cpp
     void handleCerts(const HttpContextPtr& ctx);
     void handleCertIssue(const HttpContextPtr& ctx, const std::string& role);

@@ -238,6 +238,17 @@ public:
     bool billingSummary(const std::string& from, const std::string& to, long long tenant_id,
                         std::string& json_out, std::string& err);
 
+    // 结算单：按账期冻结费用快照（draft → issued → paid，可作废）
+    bool billingStatementGenerate(const std::string& period, long long tenant_id,
+                                  const std::string& by, std::string& json_out, std::string& err);
+    bool billingStatementList(const std::string& period, long long tenant_id,
+                              const std::string& status, std::string& json_out);
+    bool billingStatementGet(long long id, std::string& json_out, std::string& err);
+    bool billingStatementSetStatus(long long id, const std::string& status,
+                                   const std::string& note, bool set_note,
+                                   std::string& json_out, std::string& err);
+    bool billingStatementCsv(long long id, std::string& csv_out, std::string& err);
+
     // 租户：计费与设备归属边界（默认租户 id=1）
     bool tenantList(std::string& json_out);
     bool tenantCreate(const std::string& name, const std::string& note, const std::string& by,

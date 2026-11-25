@@ -775,6 +775,48 @@ export const DOCS = [
     resp: `{ "tenants": [{ "tenant_id": 1, "tenant_name": "默认租户", "items": [{ "metric": "bytes", "qty": 1073741824, "amount_micro": 500000 }], "total_micro": 500000 }], "total_micro": 500000, "currency": "CNY" }`,
   },
   {
+    group: 'sys', method: 'POST', path: '/api/v1/billing/statements', minRole: 'manager',
+    summary: '生成或重算账期结算单',
+    note: '需要 billing.write。只处理草稿：已有草稿按最新用量重算，已出账的记录跳过。'
+      + 'tenant_id 省略或 0 表示所有租户。',
+    body: `{ "period": "2026-11", "tenant_id": 0 }`,
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"period":"2026-11"}' "$RT/api/v1/billing/statements"`,
+    resp: `{ "period": "2026-11", "from": "2026-11-01", "to": "2026-11-31", "created": [{ "id": 1, "tenant_id": 1, "total_micro": 500000 }], "updated": [], "skipped": [] }`,
+  },
+  {
+    group: 'sys', method: 'GET', path: '/api/v1/billing/statements', minRole: 'manager',
+    summary: '结算单列表（含明细快照）',
+    note: '接入令牌只能看本租户。',
+    params: [
+      { name: 'period', in: 'query', desc: '账期 YYYY-MM' },
+      { name: 'status', in: 'query', desc: 'draft|issued|paid|void' },
+      { name: 'tenant_id', in: 'query', desc: '只列该租户（控制台账号可用）' },
+    ],
+    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/billing/statements?period=2026-11"`,
+    resp: `{ "items": [{ "id": 1, "tenant_id": 1, "tenant_name": "默认租户", "period": "2026-11", "total_micro": 500000, "status": "draft", "lines": [{ "metric": "bytes", "qty": 1073741824, "unit_size": 1073741824, "price_micro": 500000, "amount_micro": 500000 }], "note": "", "created_ms": 0, "updated_ms": 0, "issued_ms": 0, "paid_ms": 0 }] }`,
+  },
+  {
+    group: 'sys', method: 'GET', path: '/api/v1/billing/statements/:id', minRole: 'manager',
+    summary: '结算单详情',
+    note: '接入令牌读取别家结算单返回 403。',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/billing/statements/1"`,
+  },
+  {
+    group: 'sys', method: 'PUT', path: '/api/v1/billing/statements/:id', minRole: 'manager',
+    summary: '结算单状态流转',
+    note: '需要 billing.write。draft→issued→paid；draft/issued 可→void，paid/void 为终态。'
+      + 'issued 与 paid 会记录时间戳，note 可选。',
+    body: `{ "status": "issued", "note": "2026-11 账期" }`,
+    curl: `curl -sS -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"status":"issued"}' "$RT/api/v1/billing/statements/1"`,
+    resp: `{ "id": 1, "status": "issued", "issued_ms": 1764000000000, ... }`,
+  },
+  {
+    group: 'sys', method: 'GET', path: '/api/v1/billing/statements/:id/csv', minRole: 'manager',
+    summary: '导出结算单 CSV（Excel 可直接打开）',
+    note: '带 UTF-8 BOM；一行一个指标明细，接入令牌只能导出本租户。',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" -o statement-1.csv "$RT/api/v1/billing/statements/1/csv"`,
+  },
+  {
     group: 'sys', method: 'GET', path: '/api/v1/certs', minRole: 'manager',
     summary: '证书台账',
     curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/certs"`,
