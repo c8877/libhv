@@ -72,6 +72,8 @@ stop_all
 
 [ -x "$BIN" ] || { echo "缺少 $BIN" >&2; exit 5; }
 [ -f "$ARGS_FILE" ] || { echo "缺少参数文件 $ARGS_FILE" >&2; exit 5; }
+# 参数文件里可能有 --admin-token，不能被同机其它用户读到
+chmod 600 "$ARGS_FILE" 2>/dev/null || true
 
 # 参数文件里不要写 shell 元字符；这里按空白拆分是刻意的。
 # RELAY_ARGS="..." 形式（systemd EnvironmentFile）去掉前缀和引号后同样处理。

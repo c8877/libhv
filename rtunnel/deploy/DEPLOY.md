@@ -149,11 +149,19 @@ EOF
 
 # 5) 启动/重启（同一命令，可重复执行）
 /tmp/rtunnel/relay/restart.sh --prefix /tmp/rtunnel/relay --log /tmp/rtunnel/relay.log
+
+# 6) 开机自启 + 存活看护（无 systemd 时唯一可靠的方式）
+/tmp/rtunnel/relay/install-boot.sh --prefix /tmp/rtunnel/relay --log /tmp/rtunnel/relay.log
 ```
 
 `restart.sh` 的规则：`pidof rtunnel-relay` 找进程（不用路径匹配，兼容相对/绝对路径启动）→
 SIGTERM 等最多 15s 让 drain 完成 → `nohup $PREFIX/bin/rtunnel-relay $RELAY_ARGS` →
-等 2s 检查端口。退出码 3 启动失败、4 端口未监听。
+等 2s 检查端口；启动前会把参数文件（含 `--admin-token`）改成 0600。
+退出码 3 启动失败、4 端口未监听。
+
+`install-boot.sh` 给**当前用户**装两条 crontab：`@reboot` 启动、`*/5` 分钟进程不在就拉起；
+重复执行只替换自己的标记行。`--print` 只打印不落盘，`--remove` 移除。
+`install.sh --boot` 会在安装时一并调用它（`rt-bootstrap.sh --boot` 可透传）。
 
 验证：
 
@@ -190,6 +198,34 @@ RT=https://192.168.1.133:9443 ATK_FILE=/etc/rtunnel/atk \
 ```
 
 上传单文件受 `file.max_upload_mb`（默认 32 MiB）限制；包更大时先在「系统设置」调大。
+
+### 从 1.4.105 及更早的 agent 迁到统一布局
+
+旧 agent 的 manifest 校验要求 `binary = bin/rtunnel-agent-<variant>-<ver>`，直接推新包会被
+`manifest binary mismatch` 拒绝。打一个迁移包（多带一份旧名字的二进制，manifest 指过去），
+推一次即可，之后都走标准布局：
+
+```bash
+# 打迁移包：只有 -mig 后缀的产物，不影响标准包
+RTUNNEL_ARCH=armv7l RTUNNEL_LEGACY_MANIFEST=1 \
+RTUNNEL_PKG_RUNNER="qemu-arm-static -L <sysroot>" \
+  ./rtunnel/deploy/package_agent.sh <版本>
+
+# 上传（client repo put，publish.sh 只认标准文件名）
+rtunnel-client repo put --rt $RT --atk-file $ATK_FILE --insecure \
+  --dir packages/agent/<版本>/armv7l \
+  --file rtunnel-agent-web-<版本>-armv7l-mig.tar.gz
+
+# 建 OTA 任务：file 必须是仓库相对路径，dir 由 file 推导
+curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \
+  -d '{"kind":"ota","version":"<版本>",
+       "file":"packages/agent/<版本>/armv7l/rtunnel-agent-web-<版本>-armv7l-mig.tar.gz",
+       "devids":["<devid>"],"max_retries":1}' \
+  "$RT/api/v1/distributions"
+```
+
+迁移包里的 `install.sh` 已经是新脚本，安装后 `bin/rtunnel-agent` 成为唯一入口，
+下一次 OTA 用标准包即可。
 
 
 

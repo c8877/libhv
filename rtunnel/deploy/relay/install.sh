@@ -25,19 +25,21 @@ START=0
 RESTART=0
 UNITS=1
 FORCE=0
+BOOT=0
 # 容器/临时前缀安装时可用环境变量彻底跳过 unit 操作
 [ "${RTUNNEL_INSTALL_NO_UNITS:-0}" = "1" ] && UNITS=0
 
 usage() {
     cat <<'EOF'
 用法:
-  install.sh --pkg-dir DIR [--prefix P] [--start|--restart] [--no-units] [--force]
+  install.sh --pkg-dir DIR [--prefix P] [--start|--restart] [--no-units] [--boot] [--force]
   install.sh --rollback [--prefix P] [--restart]
   install.sh --status   [--prefix P]
 
 --start     首次安装时 enable --now 服务
 --restart   显式重启服务；重启后健康检查失败会自动回滚
 --no-units  只装二进制/配置，不碰 systemd（测试用）
+--boot      无 systemd 时装 crontab：@reboot 启动 + 每 5 分钟存活看护
 --force     允许安装比当前更低的版本
 EOF
 }
@@ -49,6 +51,7 @@ while [ $# -gt 0 ]; do
         --start) START=1; shift ;;
         --restart) RESTART=1; shift ;;
         --no-units) UNITS=0; shift ;;
+        --boot) BOOT=1; shift ;;
         --force) FORCE=1; shift ;;
         --rollback) ACTION=rollback; shift ;;
         --status) ACTION=status; shift ;;
@@ -83,27 +86,35 @@ if [ "$ACTION" = status ]; then
     fi
     if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
         echo "service:  $(systemctl is-active "$UNIT" 2>/dev/null || true)"
+    else
+        p=$(pidof rtunnel-relay 2>/dev/null || pgrep -x rtunnel-relay 2>/dev/null || true)
+        echo "process:  ${p:-未运行}"
     fi
     exit 0
 fi
 
-# 健康检查：以 systemd 单元状态为准，未用 systemd 时跳过
+# 健康检查：有 systemd 用单元状态；没有就交给同目录的 restart.sh（随包安装），
+# 两者都没有才报错——不能静默返回 0，否则 --start/--restart 会假装成功。
 restart_unit() {
-    if [ "$UNITS" != 1 ] || [ ! -d /run/systemd/system ] || ! command -v systemctl >/dev/null 2>&1; then
-        echo "非 systemd 环境，请手动启动: $BIN/rtunnel-relay" >&2
-        return 0
-    fi
-    if ! systemctl restart "$UNIT"; then
+    if [ "$UNITS" = 1 ] && [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+        if ! systemctl restart "$UNIT"; then
+            return 1
+        fi
+        i=0
+        while [ "$i" -lt 15 ]; do
+            if systemctl is-active --quiet "$UNIT"; then
+                return 0
+            fi
+            sleep 1
+            i=$((i + 1))
+        done
         return 1
     fi
-    i=0
-    while [ "$i" -lt 15 ]; do
-        if systemctl is-active --quiet "$UNIT"; then
-            return 0
-        fi
-        sleep 1
-        i=$((i + 1))
-    done
+    if [ -x "$PREFIX/restart.sh" ]; then
+        "$PREFIX/restart.sh" --prefix "$PREFIX" || return 1
+        return 0
+    fi
+    echo "非 systemd 环境且缺少 $PREFIX/restart.sh，请手动启动: $BIN/rtunnel-relay" >&2
     return 1
 }
 
@@ -209,6 +220,11 @@ if [ -f "$PKG_DIR/bin/restart.sh" ]; then
     cp "$PKG_DIR/bin/restart.sh" "$PREFIX/restart.sh"
     chmod 0755 "$PREFIX/restart.sh"
 fi
+# 无 systemd 环境的开机自启（crontab @reboot + 存活看护）
+if [ -f "$PKG_DIR/bin/install-boot.sh" ]; then
+    cp "$PKG_DIR/bin/install-boot.sh" "$PREFIX/install-boot.sh"
+    chmod 0755 "$PREFIX/install-boot.sh"
+fi
 
 # 4. 配置：不存在才装
 if [ ! -f "$CONF_DIR/$CONF" ]; then
@@ -295,4 +311,16 @@ elif [ "$RESTART" = 1 ]; then
         fi
         exit 7
     fi
+fi
+
+# 9. 无 systemd 的自启：显式 --boot 才动 crontab；没加就提示，不擅自改用户计划任务
+if [ "$BOOT" = 1 ] && [ "$UNITS" = 1 ] && { [ ! -d /run/systemd/system ] || ! command -v systemctl >/dev/null 2>&1; }; then
+    if [ -x "$PREFIX/install-boot.sh" ]; then
+        "$PREFIX/install-boot.sh" --prefix "$PREFIX" --log "$PREFIX/relay.log"
+    else
+        echo "包内缺少 install-boot.sh，无法安装开机自启" >&2
+        exit 8
+    fi
+elif [ "$UNITS" = 1 ] && [ "$START" = 1 ] && { [ ! -d /run/systemd/system ] || ! command -v systemctl >/dev/null 2>&1; }; then
+    echo "提示: 非 systemd 环境，重启后不会自启；补一条 $0 --boot --prefix $PREFIX" >&2
 fi

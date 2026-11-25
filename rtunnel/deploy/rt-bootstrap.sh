@@ -8,7 +8,7 @@
 #                   [--arch $(uname -m)] [--variant web|lite]
 #                   [--rt URL] [--atk-file F] [--insecure] [--tls-ca F]
 #                   [--client BIN] [--workdir DIR] [--prefix P]
-#                   [--start|--restart] [--keep]
+#                   [--start|--restart] [--boot] [--keep]
 #   rt-bootstrap.sh --component C --status
 #   rt-bootstrap.sh --component C --rollback [--restart]
 #
@@ -30,6 +30,7 @@ PREFIX=""
 ACTION=install
 START=0
 RESTART=0
+BOOT=0
 KEEP=0
 NO_UNITS=0
 
@@ -52,6 +53,7 @@ while [ $# -gt 0 ]; do
         --prefix) PREFIX=$2; shift 2 ;;
         --start) START=1; shift ;;
         --restart) RESTART=1; shift ;;
+        --boot) BOOT=1; shift ;;
         --keep) KEEP=1; shift ;;
         --no-units) NO_UNITS=1; shift ;;
         --status) ACTION=status; shift ;;
@@ -178,6 +180,7 @@ case "$COMP" in
 esac
 [ "$START" = 1 ] && set -- "$@" --start
 [ "$RESTART" = 1 ] && set -- "$@" --restart
+[ "$BOOT" = 1 ] && set -- "$@" --boot
 [ "$NO_UNITS" = 1 ] && set -- "$@" --no-units
 echo "执行 $PKGROOT/install.sh $*"
 sh "$PKGROOT/install.sh" "$@"

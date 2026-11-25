@@ -510,12 +510,15 @@ RT=https://relay:9443 ATK_FILE=/etc/rtunnel/atk \
 
 # 无 systemd（容器 / /tmp 部署）：用包内 restart.sh，读 $PREFIX/etc/relay.env
 /tmp/rtunnel/relay/restart.sh --prefix /tmp/rtunnel/relay --log /tmp/rtunnel/relay.log
+# 开机自启 + 每 5 分钟存活看护（crontab，重复执行只替换自己的行）
+/tmp/rtunnel/relay/install-boot.sh --prefix /tmp/rtunnel/relay --log /tmp/rtunnel/relay.log
 ```
 
 仓库布局 `packages/<component>/<ver>/<arch>/<pkg>.tar.gz`，指针
 `packages/<component>/latest/<arch>.json`（agent 为 `<arch>-<variant>.json`）。
 `install.sh` 只做文件操作：先校验 `manifest.json`、`--version` 与 `SHA256SUMS`，再原子切换软链；
-`--start/--restart` 才动 systemd，重启失败自动回滚一次。
+`--start/--restart` 才动 systemd，重启失败自动回滚一次；无 systemd 时改调 `restart.sh`，
+不会再“假装启动成功”。
 
 ## Agent OTA 升级
 
@@ -545,6 +548,11 @@ OTA 不另建传输通道：部署包走「文件上传 + 文件分发」落到�
 任务状态：`scheduled→queued→running→verifying→installing→confirming→success`；
 失败分支为 `failed / timeout / conflict / unsupported / canceled`，重试沿用分发任务的
 退避与截止时间。OTA 与普通分发任务都在「任务」页查看，可按 `kind=ota` 过滤。
+
+**从 1.4.105 及更早版本迁移**：旧 agent 只认 `bin/rtunnel-agent-<variant>-<ver>`，
+用 `RTUNNEL_LEGACY_MANIFEST=1 ./deploy/package_agent.sh <ver>` 打一个 `-mig` 包
+（manifest 指向旧名字，包内同时保留 `bin/rtunnel-agent`），推一次即可；
+装完就是统一布局，后续标准包直接可用。详细命令见 `deploy/DEPLOY.md`。
 
 失败与回滚：
 

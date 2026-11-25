@@ -116,7 +116,7 @@ def main():
         e2e.check("pkg: relay 包为顶层目录",
                   out.splitlines()[0].startswith("rtunnel-relay-%s-x86_64/" % VER), out[:120])
         for part in ("bin/rtunnel-relay", "bin/rtunnel-client", "bin/rt-bootstrap.sh",
-                     "bin/restart.sh",
+                     "bin/restart.sh", "bin/install-boot.sh",
                      "install.sh", "manifest.json", "SHA256SUMS",
                      "service/rtunnel-relay.service"):
             e2e.check("pkg: relay 包含 %s" % part,
@@ -154,6 +154,14 @@ def main():
                   os.path.isfile(os.path.join(p_relay, "rt-bootstrap.sh")), "")
         e2e.check("bootstrap: relay 带 restart.sh",
                   os.path.isfile(os.path.join(p_relay, "restart.sh")), "")
+        e2e.check("bootstrap: relay 带 install-boot.sh",
+                  os.path.isfile(os.path.join(p_relay, "install-boot.sh")), "")
+        rc, out = run([os.path.join(p_relay, "install-boot.sh"), "--prefix", p_relay, "--print"], env)
+        e2e.check("boot: 生成 @reboot 与存活看护",
+                  rc == 0 and "@reboot" in out and "*/5 * * * *" in out and "restart.sh" in out, out)
+        rc, out = run([os.path.join(p_relay, "install-boot.sh"), "--prefix", p_relay,
+                       "--every", "0", "--print"], env)
+        e2e.check("boot: 非法间隔被拒", rc == 2, "rc=%d" % rc)
 
         # 自举：agent（统一布局 bin/rtunnel-agent + manifest + SHA256SUMS）
         p_agent = os.path.join(LOG, "prefix-agent")

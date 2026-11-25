@@ -64,11 +64,18 @@ make_one() {
     local variant="$1" src="$2"
     local name="rtunnel-agent-$VER-$ARCH"           # 解压后的目录
     local file="rtunnel-agent-$variant-$VER-$ARCH"  # tar.gz 基名（OTA 按它选变体）
+    [ "${RTUNNEL_LEGACY_MANIFEST:-0}" = 1 ] && file="$file-mig"
     local d="$STAGE/$name"
     rm -rf "$d"
     mkdir -p "$d/bin" "$d/etc" "$d/service"
     cp "$src" "$d/bin/rtunnel-agent"
     chmod 0755 "$d/bin/rtunnel-agent"
+    # 迁移包：1.4.105 及更早的 agent 只认 bin/rtunnel-agent-<variant>-<ver>，
+    # 多放一份同内容文件并让 manifest 指向它；新版 install.sh 仍用 bin/rtunnel-agent。
+    if [ "${RTUNNEL_LEGACY_MANIFEST:-0}" = 1 ]; then
+        cp "$src" "$d/bin/rtunnel-agent-$variant-$VER"
+        chmod 0755 "$d/bin/rtunnel-agent-$variant-$VER"
+    fi
     cp "$SRC_DIR/agent-boot-check.sh" "$d/bin/agent-boot-check.sh"
     chmod 0755 "$d/bin/agent-boot-check.sh"
     if [ -x "$CLIENT" ]; then
@@ -82,8 +89,13 @@ make_one() {
     cp "$SRC_DIR/rtunnel-agent.json" "$d/etc/rtunnel-agent.json"
     cp "$SRC_DIR/rtunnel-agent.service" "$d/service/rtunnel-agent.service"
 
-    printf '{"name":"rtunnel-agent","variant":"%s","version":"%s","arch":"%s","binary":"bin/rtunnel-agent"}\n' \
-        "$variant" "$VER" "$ARCH" > "$d/manifest.json"
+    if [ "${RTUNNEL_LEGACY_MANIFEST:-0}" = 1 ]; then
+        printf '{"name":"rtunnel-agent","variant":"%s","version":"%s","arch":"%s","binary":"bin/rtunnel-agent-%s-%s"}\n' \
+            "$variant" "$VER" "$ARCH" "$variant" "$VER" > "$d/manifest.json"
+    else
+        printf '{"name":"rtunnel-agent","variant":"%s","version":"%s","arch":"%s","binary":"bin/rtunnel-agent"}\n' \
+            "$variant" "$VER" "$ARCH" > "$d/manifest.json"
+    fi
 
     # 包内校验清单（install.sh 会执行 sha256sum -c）
     ( cd "$d" && find . -type f ! -name SHA256SUMS -printf '%P\n' | sort | xargs -r sha256sum > SHA256SUMS )

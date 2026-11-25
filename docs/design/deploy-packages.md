@@ -30,7 +30,8 @@ rtunnel-relay-<ver>-<arch>/
 │   ├── rtunnel-relay
 │   ├── rtunnel-client             自举副本：下一版用它下载
 │   ├── rt-bootstrap.sh            自举脚本副本（安装到 prefix）
-│   └── restart.sh                 无 systemd 环境的重启脚本（安装到 prefix）
+│   ├── restart.sh                 无 systemd 环境的重启脚本（安装到 prefix）
+│   └── install-boot.sh            无 systemd 的开机自启（crontab，--boot 时调用）
 ├── etc/relay.args.example         → /etc/rtunnel/relay.env（不覆盖现网）
 └── service/rtunnel-relay.service  @PREFIX@/@STATE_DIR@/@FRONTEND_ARGS@ 由 install.sh 渲染
 
@@ -52,6 +53,9 @@ rtunnel-agent-<ver>-<arch>/        （文件名 rtunnel-agent-<lite|web>-<ver>-<
 - 压缩：`tar --format=ustar | gzip -9 -n`，同时产出 `<pkg>.tar.gz.sha256`
 - agent 的文件名保留 `lite|web`，因为 OTA 页面按文件名选择变体；解压目录不带 variant（spec 要求的统一布局）
 - `manifest.json` 里的 `binary` 固定为 `bin/rtunnel-agent` / `bin/rtunnel-relay` / `bin/rtunnel-client`
+- **迁移包**：1.4.105 及更早的 agent 只认 `bin/rtunnel-agent-<variant>-<ver>`，用
+  `RTUNNEL_LEGACY_MANIFEST=1` 打 `-mig` 包（manifest 指旧名，包内同时保留统一入口），
+  推一次即可；新版 agent 只认统一入口，迁移完成后不需要兼容分支
 
 ## 2. 仓库布局
 
@@ -97,6 +101,8 @@ RT=https://relay:9443 ATK_FILE=/etc/rtunnel/atk \
 /opt/rtunnel/relay/install.sh --rollback --restart
 # 无 systemd（容器 / /tmp 部署）：装完用包内的 restart.sh，读 $PREFIX/etc/relay.env
 /tmp/rtunnel/relay/restart.sh --prefix /tmp/rtunnel/relay --log /tmp/rtunnel/relay.log
+# 无 systemd 的开机自启与存活看护（crontab，重复执行只替换自己的行）
+/tmp/rtunnel/relay/install-boot.sh --prefix /tmp/rtunnel/relay --log /tmp/rtunnel/relay.log
 ```
 
 ## 4. 自举时序
@@ -137,7 +143,7 @@ rt-bootstrap.sh --component relay --version latest
 ## 5. install.sh 契约
 
 ```
-install.sh --pkg-dir DIR [--prefix P] [--start|--restart] [--no-units] [--force]
+install.sh --pkg-dir DIR [--prefix P] [--start|--restart] [--no-units] [--boot] [--force]
 install.sh --rollback [--prefix P] [--restart]
 install.sh --status   [--prefix P]
 ```
