@@ -173,7 +173,8 @@ void AdminServer::handlePermGroupSave(const HttpContextPtr& ctx, const std::stri
     want.all_devices = all_devices != 0;
     want.global_scope = global_scope != 0;
     if (!want.all_devices) want.devices.insert(devices.begin(), devices.end());
-    want.ports = ports;
+    // 没有端口转发能力的组不参与端口范围比较（与 permGroupScope / subjectPortsLocked 一致）
+    if (want.resources.count("device.port")) want.ports = ports;
     DbPermScope old;
     if (id) {
         if (!db_.permGroupScope(id, old)) { apiNotFound(ctx, "权限组不存在"); return; }

@@ -13,8 +13,9 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+REPO = os.path.dirname(ROOT)
 FRAME_HPP = os.path.join(ROOT, "rtnp", "frame.hpp")
-DOC = os.path.join(ROOT, "docs", "design", "rtunnel.md")
+DOC = os.path.join(REPO, "docs", "design", "rtunnel.md")
 
 ENUM_RE = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=\s*0x[0-9A-Fa-f]+\s*,?")
 
@@ -51,7 +52,7 @@ def main():
     head = src[:600]
     m = re.search(r"docs/design/[a-z_]+\.md", head)
     if m:
-        target = os.path.join(ROOT, m.group(0))
+        target = os.path.join(REPO, m.group(0))
         check("frame.hpp 引用的文档存在", os.path.isfile(target), m.group(0))
 
     def const(name):

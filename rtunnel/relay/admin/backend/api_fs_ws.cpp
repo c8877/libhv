@@ -36,6 +36,7 @@ struct DevWsSession {
     std::string role;
     std::string actor_label;   // 打开时抓取，部署线程写审计用
     std::string tag;    // fs / svc，用于审计
+    bool        can_deploy = false;   // 打开时判定的部署权限，消息路径不能读 tl_actor
     std::thread th;
     std::atomic<bool> closed{false};
     std::shared_ptr<PushJob> push;
@@ -255,6 +256,9 @@ bool AdminServer::handleAgentWsOpen(const WebSocketChannelPtr& channel, const Ht
         return true;
     }
     bool want_rw = hasPerm("file.write");
+    // 部署权限在打开时判定并落到会话上：WS 消息回调与 HTTP 请求共用 worker 线程，
+    // tl_actor 会被同线程上其它请求覆盖，消息路径不能再读它。
+    bool can_deploy = !svc_stream && hasPerm("repo.read") && want_rw;
     std::string err;
     int fd = (flags & rtnp::OPEN_SVC) ? openSvcStream(cfg_, devid, err)
                                       : openFsStream(cfg_, devid, want_rw, err);
@@ -278,6 +282,7 @@ bool AdminServer::handleAgentWsOpen(const WebSocketChannelPtr& channel, const Ht
     s->role = role;
     s->actor_label = actorLabel();
     s->tag = tag;
+    s->can_deploy = can_deploy;
     {
         std::lock_guard<std::mutex> lk(g_dev_mu);
         g_dev_ws[channel.get()] = s;
@@ -354,7 +359,7 @@ bool AdminServer::handleAgentWsMessage(const WebSocketChannelPtr& channel, const
                     if (s->ws && s->ws->isConnected()) s->ws->send(r.dump());
                 };
                 // 仓库是全局资源，推送到设备属于设备写操作：两者都要有
-                if (!hasPerm("repo.read") || !hasPerm("file.write")) { err("没有部署权限", false); return true; }
+                if (!s->can_deploy) { err("没有部署权限", false); return true; }
                 if (repo.empty() || !adminValidRepoPath(repo)) { err("非法仓库文件路径", false); return true; }
                 if (target.size() < 2 || target[0] != '/' || target.size() > 1024 ||
                     target.find("..") != std::string::npos || target.back() == '/') {

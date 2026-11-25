@@ -38,6 +38,7 @@ clean-master:
 # rtunnel 端到端验收（需先 make x86 或 ./enp_build.sh 构建）
 rtunnel_test:
 	python3 rtunnel/tests/e2e.py
+	python3 rtunnel/tests/permission_e2e.py
 	python3 rtunnel/tests/compat_e2e.py
 	python3 rtunnel/tests/protocol_doc_test.py
 

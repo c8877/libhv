@@ -311,6 +311,8 @@ sequenceDiagram
 | `payload` | n B | 按 `type` 解释 |
 
 - 全部**大端**；字符串为 `u16 len + bytes`（无 NUL）。
+- 协议版本由 `PROTO_VERSION` / `PROTO_MIN_VERSION` 定义（当前均为 1），帧头 `VERSION` 固定为 1；
+  单帧 payload 上限为 `MAX_PAYLOAD = 32768`，由 `HELLO_ACK.max_payload` 协商。
 - **未知 type**：`stream_id > 0` → 对该 stream `RESET(PROTOCOL_ERROR)`（跳过 DATA 会让字节流错位）；`stream_id == 0` → 关闭连接。
 - `length > max_payload` 或 `reserved != 0` → 关闭连接。
 - 前向兼容预留：`type` 最高位为 1 表示「可选扩展」，不认识的连接级扩展按 length 跳过；v1 不定义任何可选类型。
@@ -342,6 +344,16 @@ sequenceDiagram
 | `0x20` | `FILE_ACK` | C→B | `str json {ok,received,error}` |
 | `0x21` | `FILE_CHECK_REQ` | B→C | `str dir + str name` |
 | `0x22` | `FILE_CHECK_ACK` | C→B | `str json {exists,size,sha256,error}` |
+| `0x29` | `TTY_LIST_REQ` | B→C | 空：请求串口列表 |
+| `0x2A` | `TTY_LIST_ACK` | C→B | `str json [{path,by_id}]` |
+| `0x2B` | `TTY_CFG_SET` | B→C | `str json [{path,enabled,baud,data_bits,parity,stop_bits}]` |
+| `0x2C` | `METRICS_CFG` | B→C | `str json` 采样配置 |
+| `0x2D` | `METRICS_STATUS` | C→B | `str json {applied,error}` |
+| `0x2E` | `METRICS_QUERY` | B→C | `str json {series,since_ts}`，sid 为请求号 |
+| `0x2F` | `METRICS_DATA` | C→B | `str json {series,points,...}`，sid 回显 |
+| `0x30` | `OTA_APPLY` | B→C | `str json {path,version,size,sha256}`，sid 为安装号 |
+| `0x31` | `OTA_APPLY_ACK` | C→B | `str json {ok,phase,error}`（phase=verified\|installed） |
+| `0x32` | `OTA_CANCEL` | B→C | 空：安装开始前取消 |
 | `0x33` | `NET_REQ` | B→C | `str json {scope,proc,limit,refresh}`，sid 为请求号 |
 | `0x34` | `NET_INFO` | C→B | `str json`：TCP/UDP/UNIX/IPC 快照，sid 回显 |
 | `0x35` | `PROC_REQ` | B→C | `str json {op:list|detail|signal,...}`，sid 为请求号 |

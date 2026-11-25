@@ -1748,13 +1748,16 @@ void scopeFromGroupsLocked(sqlite3* db, const char* type, const std::string& id,
     out.ports = subjectPortsLocked(db, type, id);
 }
 
-// 主体所有权限组 ports 的并集（组级端口范围）
+// 主体所有权限组 ports 的并集（只计入真正授予 device.port 的组）。
+// 没有端口转发能力的组即使带了 ports（新建组默认 "*"）也不能放大别人的端口范围。
 std::string subjectPortsLocked(sqlite3* db, const char* type, const std::string& id) {
     sqlite3_stmt* st = nullptr;
     std::vector<PortRange> rs;
     if (sqlite3_prepare_v2(db,
             "SELECT g.ports FROM perm_group_members m JOIN perm_groups g ON g.id=m.group_id"
-            " WHERE m.subject_type=? AND m.subject_id=?",
+            " WHERE m.subject_type=? AND m.subject_id=?"
+            " AND EXISTS(SELECT 1 FROM perm_group_resources r WHERE r.group_id=g.id"
+            "             AND r.resource_key='device.port' AND r.allowed=1)",
             -1, &st, nullptr) == SQLITE_OK) {
         sqlite3_bind_text(st, 1, type, -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(st, 2, id.c_str(), -1, SQLITE_TRANSIENT);
