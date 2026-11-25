@@ -25,8 +25,11 @@ const h = require('../lib/harness')
   h.check('默认显示空状态',
     (await p.locator('.el-table__empty-block', { hasText: '所选范围内没有用量' }).count()) === 1)
 
+  // 租户筛选在指标之前，按顺序取第 2 个才是指标
+  h.check('有租户筛选', (await p.locator('.panel-head .el-select').count()) >= 2)
+
   // 切换指标后仍能加载（会话时长）
-  await p.locator('.panel-head .el-select').first().click()
+  await p.locator('.panel-head .el-select').nth(1).click()
   await p.waitForSelector('.el-select-dropdown:visible', { timeout: 5000 })
   await p.locator('.el-select-dropdown__item', { hasText: '设备在线时长' }).click()
   await p.waitForTimeout(800)

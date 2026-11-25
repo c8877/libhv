@@ -53,7 +53,9 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
                relay/admin/backend/api_relay.cpp
                relay/admin/backend/admin_db_accounts.cpp
                relay/admin/backend/admin_db_usage.cpp
+               relay/admin/backend/admin_db_tenant.cpp
                relay/admin/backend/api_usage.cpp
+               relay/admin/backend/api_tenant.cpp
                relay/admin/backend/admin_db_admin_tokens.cpp
                relay/admin/backend/api_accounts.cpp
                relay/admin/backend/api_admin_tokens.cpp

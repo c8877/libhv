@@ -80,6 +80,10 @@
             <el-tag :type="row.online ? 'success' : 'info'" size="small">{{ row.online ? '在线' : '离线' }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="租户" min-width="110" prop="tenant_name"
+                       sortable :sort-orders="TEXT_ORDERS">
+          <template #default="{ row }">{{ row.tenant_name || '默认租户' }}</template>
+        </el-table-column>
         <el-table-column label="所属组" width="80" prop="group_count"
                        sortable :sort-orders="NUM_ORDERS">
           <template #default="{ row }">{{ row.group_count || 0 }}</template>
@@ -163,6 +167,11 @@
         <el-form-item v-if="tab !== 'devices'" label="说明">
           <el-input v-model="form.description" maxlength="128" placeholder="可选" />
         </el-form-item>
+        <el-form-item v-if="tab === 'devices'" label="租户">
+          <el-select v-model="form.tenant_id" style="width: 100%">
+            <el-option v-for="t in tenants" :key="t.id" :label="t.name" :value="t.id" />
+          </el-select>
+        </el-form-item>
         <el-form-item :label="tab === 'devices' ? '允许授权' : '启用'">
           <el-switch v-model="form.enabled" />
         </el-form-item>
@@ -198,7 +207,8 @@ const loading = ref(false)
 const dlg = ref(false)
 const saving = ref(false)
 const formRef = ref(null)
-const form = reactive({ id: 0, key: '', value: '', devid: '', name: '', description: '', enabled: true })
+const form = reactive({ id: 0, key: '', value: '', devid: '', name: '', description: '', enabled: true, tenant_id: 1 })
+const tenants = ref([])
 const rules = {
   value: [{
     validator: (rule, v, cb) => {
@@ -229,6 +239,10 @@ function query() {
 async function load() {
   loading.value = true
   try {
+    if (tab.value === 'devices' && !tenants.value.length) {
+      const t = await Api.get('/api/v1/tenants').catch(() => null)
+      tenants.value = (t && t.items) || []
+    }
     const r = await Api.get('/api/v1/permission/dicts?' + query())
     rows.value = (r && r.items) || []
     total.value = Number(r && r.total) || 0
@@ -270,7 +284,7 @@ function onSize(s) {
 }
 
 function openAdd() {
-  Object.assign(form, { id: 0, key: '', value: '', devid: '', name: '', description: '', enabled: true })
+  Object.assign(form, { id: 0, key: '', value: '', devid: '', name: '', description: '', enabled: true, tenant_id: 1 })
   dlg.value = true
 }
 
@@ -283,6 +297,7 @@ function openEdit(row) {
     name: row.name || '',
     description: row.description || '',
     enabled: !!row.enabled,
+    tenant_id: row.tenant_id || 1,
   })
   dlg.value = true
 }
@@ -304,6 +319,7 @@ async function save() {
       await Api.put('/api/v1/permission/devices/' + encodeURIComponent(form.devid), {
         name: form.name.trim(),
         enabled: !!form.enabled,
+        tenant_id: form.tenant_id,
       })
     } else {
       const kind = tab.value

@@ -31,6 +31,7 @@ struct DbGroupAclRule {
     int  file = 0;      // 0 无 / 1 只读 / 2 读写
     bool svc = false;
     long long token_id = 0;  // 0 = 账号级；>0 = 仅该 rtk 令牌
+    long long tenant_id = 1; // 只对同租户设备生效（数据面强制）
 };
 
 // 一次请求的有效授权：功能资源 + 设备范围
@@ -197,10 +198,10 @@ public:
     bool clientAccountList(const std::string& q, std::string& json_out);
     bool clientAccountGet(long long id, std::string& json_out, std::string& err);
     bool clientAccountCreate(const std::string& username, const std::string& display_name,
-                             const std::string& note, const std::string& by,
+                             const std::string& note, long long tenant_id, const std::string& by,
                              long long& out_id, std::string& err);
     bool clientAccountUpdate(long long id, const std::string& display_name, const std::string& note,
-                             const std::string& status, std::string& err);
+                             const std::string& status, long long tenant_id, std::string& err);
     bool clientAccountDelete(long long id, std::string& err);
     bool clientTokenList(long long account_id, std::string& json_out, std::string& err);
     bool clientTokenCreate(long long account_id, const DbTokenSpec& spec, const std::string& by,
@@ -224,10 +225,23 @@ public:
     // 查询日聚合；from/to 为 YYYY-MM-DD（空表示不限），total=true 时按主体+指标汇总
     bool usageQuery(const std::string& from, const std::string& to,
                     const std::string& subject_type, const std::string& subject_id,
-                    const std::string& metric, bool total, std::string& json_out,
-                    std::string& err);
+                    const std::string& metric, long long tenant_id, bool total,
+                    std::string& json_out, std::string& err);
     // 清理早于 before_ms 的流水（日聚合保留）
     bool usagePrune(long long before_ms, int& n);
+
+    // 租户：计费与设备归属边界（默认租户 id=1）
+    bool tenantList(std::string& json_out);
+    bool tenantCreate(const std::string& name, const std::string& note, const std::string& by,
+                      long long& id, std::string& err);
+    bool tenantUpdate(long long id, const std::string& name, const std::string& note,
+                      const std::string& status, std::string& err);
+    bool tenantExists(long long id);
+    bool tenantOfClient(long long account_id, long long& out);
+    bool tenantDevices(long long tenant_id, std::vector<std::string>& out);
+    bool deviceTenants(std::map<std::string, long long>& out);
+    bool deviceTenant(const std::string& devid, long long& out);
+    bool setDeviceTenant(const std::string& devid, long long tenant_id, std::string& err);
 
     // 管理台账号 API Token（atk-）
     bool adminTokenList(long long user_id, const std::string& q, std::string& json_out);

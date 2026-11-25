@@ -30,6 +30,7 @@ const routes = [
   { path: '/ota', component: () => import('./pages/ota.vue'), meta: { title: 'Agent 升级' } },
   { path: '/relay-list', component: () => import('./pages/relay-list.vue'), meta: { title: '中继列表' } },
   { path: '/usage', component: () => import('./pages/usage.vue'), meta: { title: '用量' } },
+  { path: '/tenants', component: () => import('./pages/tenants.vue'), meta: { title: '租户' } },
   { path: '/audit', component: () => import('./pages/audit.vue'), meta: { title: '审计' } },
   { path: '/settings', component: () => import('./pages/settings.vue'), meta: { title: '设置' } },
   { path: '/profile', component: () => import('./pages/profile.vue'), meta: { title: '个人设置' } },

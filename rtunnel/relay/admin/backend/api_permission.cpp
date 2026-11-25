@@ -7,6 +7,8 @@
 
 using nlohmann::json;
 
+extern thread_local AdminActor tl_actor;
+
 void AdminServer::handleDictPorts(const HttpContextPtr& ctx) {
     std::string out;
     if (!db_.dictPorts(ctx->param("q"), out)) { apiBad(ctx, "db error"); return; }
@@ -432,6 +434,31 @@ void AdminServer::handleUserPermGroupsSave(const HttpContextPtr& ctx, const std:
 void AdminServer::handlePermSubjects(const HttpContextPtr& ctx) {
     std::string out;
     if (!db_.permSubjects(out)) { apiBad(ctx, "db error"); return; }
+    if (tl_actor.is_client) {
+        // 接入令牌只看本租户的接入账号与其令牌；控制台账号/atk 不对其暴露
+        json arr = json::parse(out, nullptr, false);
+        if (!arr.is_discarded() && arr.is_array()) {
+            json keep = json::array();
+            for (auto& s : arr) {
+                std::string type = s.value("type", std::string());
+                long long acc = 0;
+                if (type == "client") {
+                    acc = atoll(s.value("id", std::string()).c_str());
+                } else if (type == "rtk") {
+                    DbTokenSpec spec;
+                    long long tid = atoll(s.value("id", std::string()).c_str());
+                    std::string err;
+                    if (!db_.clientTokenSpec(tid, spec, acc, nullptr, err)) continue;
+                } else {
+                    continue;
+                }
+                long long t = 0;
+                if (db_.tenantOfClient(acc, t) && t == tl_actor.tenant_id) keep.push_back(s);
+            }
+            ctx->send(keep.dump());
+            return;
+        }
+    }
     ctx->send(out);
 }
 
@@ -449,6 +476,14 @@ void AdminServer::handleResDeviceUpdate(const HttpContextPtr& ctx, const std::st
         apiBad(ctx, err);
         return;
     }
+    // 归属租户：把设备划给某个租户后，只有该租户的接入账号能访问
+    if (req.contains("tenant_id") && req["tenant_id"].is_number()) {
+        long long tenant_id = req["tenant_id"].get<long long>();
+        if (!db_.setDeviceTenant(devid, tenant_id, err)) {
+            apiBad(ctx, err);
+            return;
+        }
+    }
     audit(role, "permission.device.update", devid);
     refreshGroupAcl();
     ctx->send("{\"ok\":true}");
@@ -456,6 +491,8 @@ void AdminServer::handleResDeviceUpdate(const HttpContextPtr& ctx, const std::st
 
 void AdminServer::handleClientPermGroups(const HttpContextPtr& ctx) {
     long long id = atoll(ctx->param("id").c_str());
+    std::string td = accountTenantDenied(id);
+    if (!td.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, td); return; }
     std::string acc, err;
     if (!db_.clientAccountGet(id, acc, err)) { apiNotFound(ctx, "接入账号不存在"); return; }
     std::vector<long long> ids;
@@ -470,6 +507,8 @@ void AdminServer::handleClientPermGroups(const HttpContextPtr& ctx) {
 
 void AdminServer::handleClientPermGroupsSave(const HttpContextPtr& ctx, const std::string& role) {
     long long id = atoll(ctx->param("id").c_str());
+    std::string td = accountTenantDenied(id);
+    if (!td.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, td); return; }
     std::string acc, err;
     if (!db_.clientAccountGet(id, acc, err)) { apiNotFound(ctx, "接入账号不存在"); return; }
     json req = json::parse(ctx->body(), nullptr, false);
@@ -502,6 +541,8 @@ void AdminServer::handleClientPermGroupsSave(const HttpContextPtr& ctx, const st
 void AdminServer::handleSubjectGroups(const HttpContextPtr& ctx) {
     std::string type = ctx->param("type");
     std::string id = ctx->param("id");
+    std::string td = subjectTenantDenied(type, id);
+    if (!td.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, td); return; }
     std::vector<long long> ids;
     db_.permGroupsOfSubject(type, id, ids);
     std::string all;
@@ -515,6 +556,8 @@ void AdminServer::handleSubjectGroups(const HttpContextPtr& ctx) {
 void AdminServer::handleSubjectGroupsSave(const HttpContextPtr& ctx, const std::string& role) {
     std::string type = ctx->param("type");
     std::string id = ctx->param("id");
+    std::string td = subjectTenantDenied(type, id);
+    if (!td.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, td); return; }
     // 不允许改自己的组：避免误操作把自己（尤其是唯一的超级管理员）锁在门外
     if (type == "user" && atoll(id.c_str()) == currentActor().id) {
         apiError(ctx, HTTP_STATUS_FORBIDDEN, "不能修改自己的权限组");

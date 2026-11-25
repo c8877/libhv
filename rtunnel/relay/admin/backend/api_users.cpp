@@ -87,17 +87,31 @@ bool AdminServer::tokenScoped() {
 
 // 只按设备列表过滤（全部设备 / 超级权限不限制）
 bool AdminServer::scopeRestricted() {
+    // 接入账号的「全部设备」只在租户内成立，列表仍要按租户过滤
+    if (tl_actor.is_client) return true;
     return !(tl_actor.super || tl_actor.all_devices);
 }
 
 std::vector<std::string> AdminServer::myDevids() {
     std::vector<std::string> v;
+    if (tl_actor.is_client) {
+        std::vector<std::string> tdev;
+        db_.tenantDevices(tl_actor.tenant_id, tdev);
+        if (tl_actor.super || tl_actor.all_devices) return tdev;
+        for (const auto& d : tdev)
+            if (tl_actor.devices.count(d)) v.push_back(d);
+        return v;
+    }
     if (tl_actor.super || tl_actor.all_devices) return v;
     v.assign(tl_actor.devices.begin(), tl_actor.devices.end());
     return v;
 }
 
 bool AdminServer::ownsDevid(const std::string& devid) {
+    if (tl_actor.is_client) {
+        long long t = 0;
+        if (!db_.deviceTenant(devid, t) || t != tl_actor.tenant_id) return false;
+    }
     if (tl_actor.super || tl_actor.all_devices) return true;
     return tl_actor.devices.count(devid) > 0;
 }

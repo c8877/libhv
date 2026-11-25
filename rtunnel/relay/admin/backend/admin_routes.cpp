@@ -262,6 +262,15 @@ void AdminServer::registerRoutes() {
     // manager：审计/证书列表
     access("audit.read", "GET", "/api/v1/audit", &AdminServer::handleAudit);
     access("usage.read", "GET", "/api/v1/usage", &AdminServer::handleUsage);
+    access("tenant.read", "GET", "/api/v1/tenants", &AdminServer::handleTenants);
+    service_.Handle("POST", "/api/v1/tenants", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requirePerm(ctx, "tenant.write", role); if (rc) return rc;
+        handleTenantCreate(ctx, role); return 200;
+    });
+    service_.Handle("PUT", "/api/v1/tenants/:id", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requirePerm(ctx, "tenant.write", role); if (rc) return rc;
+        handleTenantUpdate(ctx, role); return 200;
+    });
     access("cert.read", "GET", "/api/v1/certs", &AdminServer::handleCerts);
 
     service_.Handle("DELETE", "/api/v1/streams/:a_sid", [this](const HttpContextPtr& ctx) {

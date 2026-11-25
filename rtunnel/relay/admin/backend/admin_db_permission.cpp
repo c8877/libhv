@@ -204,6 +204,7 @@ bool permIsGlobalKey(const std::string& key) {
         "token.read", "token.write",
         "cert.read", "cert.write",
         "audit.read", "usage.read",
+        "tenant.read", "tenant.write",
         "settings.read", "settings.write", "system.shutdown",
         "repo.read", "repo.write", "repo.delete",
     };
@@ -273,25 +274,28 @@ bool AdminDb::permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::st
     std::vector<PortRange> disabledPorts = disabledPortRanges(db_);
     std::set<std::string> disabledTtys = disabledTtyPatterns(db_);
 
-    std::vector<std::pair<long long, std::string>> accounts;
+    struct AccRow { long long id; std::string user; long long tenant; };
+    std::vector<AccRow> accounts;
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, "SELECT id,username FROM client_accounts WHERE status='active' ORDER BY id",
-                           -1, &st, nullptr) == SQLITE_OK) {
+    if (sqlite3_prepare_v2(db_, "SELECT id,username,tenant_id FROM client_accounts WHERE status='active'"
+                               " ORDER BY id", -1, &st, nullptr) == SQLITE_OK) {
         while (sqlite3_step(st) == SQLITE_ROW)
-            accounts.emplace_back(sqlite3_column_int64(st, 0), dbColText(st, 1));
+            accounts.push_back({sqlite3_column_int64(st, 0), dbColText(st, 1),
+                                sqlite3_column_int64(st, 2)});
     }
     sqlite3_finalize(st);
 
     for (const auto& acc : accounts) {
         // 所有接入账号都纳入分组鉴权：未分组 = 无权限，不再回落到 --acl
-        users.insert(acc.second);
+        users.insert(acc.user);
 
         auto emitFor = [&](const DbPermScope& sc, const std::string& portsIn, long long token_id) {
             if (!sc.has_groups) return;
             ClientCaps caps = capsForScope(sc, portsIn, disabledPorts, disabledTtys);
             DbGroupAclRule base;
-            base.user = acc.second;
+            base.user = acc.user;
             base.token_id = token_id;
+            base.tenant_id = acc.tenant;
             base.ports = caps.ports;
             base.tty = caps.tty;
             base.tty_write = caps.tty_write;
@@ -308,8 +312,8 @@ bool AdminDb::permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::st
         };
 
         DbPermScope accScope;
-        scopeFromGroupsLocked(db_, "client", std::to_string(acc.first), accScope);
-        std::string accPorts = subjectPortsLocked(db_, "client", std::to_string(acc.first));
+        scopeFromGroupsLocked(db_, "client", std::to_string(acc.id), accScope);
+        std::string accPorts = subjectPortsLocked(db_, "client", std::to_string(acc.id));
         emitFor(accScope, accPorts, 0);
 
         // 该账号下未过期的 rtk 令牌：有令牌组的生成收窄规则
@@ -319,7 +323,7 @@ bool AdminDb::permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::st
                 "SELECT id FROM client_tokens WHERE account_id=? AND status='active' AND revoked_ms=0"
                 " AND (expires_at_ms=0 OR expires_at_ms>?) ORDER BY id",
                 -1, &st, nullptr) == SQLITE_OK) {
-            sqlite3_bind_int64(st, 1, acc.first);
+            sqlite3_bind_int64(st, 1, acc.id);
             sqlite3_bind_int64(st, 2, nowMs());
             while (sqlite3_step(st) == SQLITE_ROW) token_ids.push_back(sqlite3_column_int64(st, 0));
         }
@@ -334,7 +338,8 @@ bool AdminDb::permClientRules(std::vector<DbGroupAclRule>& out, std::set<std::st
             if (!tokScope.has_groups) {
                 // 显式绑定过组但当前为空：下发一条全空规则，明确拒绝该令牌
                 DbGroupAclRule deny;
-                deny.user = acc.second;
+                deny.user = acc.user;
+                deny.tenant_id = acc.tenant;
                 deny.token_id = tid;
                 deny.devid = "*";
                 out.push_back(deny);
@@ -496,6 +501,8 @@ const PermResDef kPermRes[] = {
 
     {"audit.read", "审计", "查看审计", "管理台操作审计日志"},
     {"usage.read", "运营", "查看用量", "隧道流量、会话与设备在线用量报表（全局）"},
+    {"tenant.read", "运营", "查看租户", "租户列表与设备/账号归属"},
+    {"tenant.write", "运营", "管理租户", "新建、改名、启停租户"},
 
     {"settings.read", "系统", "查看设置", "系统设置与告警状态"},
     {"settings.write", "系统", "修改设置", "系统设置与告警测试"},
@@ -1958,10 +1965,11 @@ bool AdminDb::resDevicesPage(const std::string& q, int page, int page_size, std:
     if (page_size > 200) page_size = 200;
     std::lock_guard<std::mutex> lk(mu_);
     std::string where;
-    if (!q.empty()) where = " WHERE devid LIKE ? OR name LIKE ?";
+    // tenants 也有 name，必须带别名限定，否则 join 后列名歧义
+    if (!q.empty()) where = " WHERE d.devid LIKE ? OR d.name LIKE ?";
     long long total = 0;
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, ("SELECT COUNT(*) FROM res_devices" + where).c_str(), -1, &st, nullptr) !=
+    if (sqlite3_prepare_v2(db_, ("SELECT COUNT(*) FROM res_devices d" + where).c_str(), -1, &st, nullptr) !=
         SQLITE_OK)
         return false;
     if (!q.empty()) {
@@ -1974,8 +1982,10 @@ bool AdminDb::resDevicesPage(const std::string& q, int page, int page_size, std:
 
     std::string sql =
         "SELECT d.devid,d.name,d.version,d.online,d.last_seen_ms,d.enabled,d.source,"
-        "(SELECT COUNT(*) FROM perm_group_devices g WHERE g.devid=d.devid)"
-        " FROM res_devices d" + where + " ORDER BY d.devid LIMIT ? OFFSET ?";
+        "(SELECT COUNT(*) FROM perm_group_devices g WHERE g.devid=d.devid),"
+        "d.tenant_id,COALESCE(t.name,'')"
+        " FROM res_devices d LEFT JOIN tenants t ON t.id=d.tenant_id" + where +
+        " ORDER BY d.devid LIMIT ? OFFSET ?";
     if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return false;
     int idx = 1;
     if (!q.empty()) {
@@ -1996,6 +2006,8 @@ bool AdminDb::resDevicesPage(const std::string& q, int page, int page_size, std:
         j["enabled"] = sqlite3_column_int(st, 5) != 0;
         j["source"] = dbColText(st, 6);
         j["group_count"] = (int)sqlite3_column_int(st, 7);
+        j["tenant_id"] = (long long)sqlite3_column_int64(st, 8);
+        j["tenant_name"] = dbColText(st, 9);
         items.push_back(j);
     }
     sqlite3_finalize(st);

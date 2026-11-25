@@ -59,6 +59,7 @@ struct AdminActor {
     std::set<std::string> perms; // 有效资源键（权限组并集）
     bool        is_client = false;   // 本次请求来自 rtk_ 接入账号 Token
     long long   client_id = 0;       // 接入账号 id（client_accounts.id）
+    long long   tenant_id = 0;       // 接入账号归属租户（0 = 运营方/控制台账号）
     bool        all_devices = false; // 有效授权包含全部设备
     bool        global_scope = false; // 有效授权包含全局权限（仓库/设置/审计等跨设备资源）
     bool        token_scoped = false;// 令牌自带权限组（设备范围需按令牌收窄）
@@ -118,6 +119,10 @@ private:
     std::string manageDenied(const DbPermScope& target) const;
     // 接入账号是否在自己可管理的范围内（不在返回原因，空串表示可以）
     std::string accountDenied(long long account_id);
+    // 接入令牌只能操作本租户的接入账号（控制台账号不受限）
+    std::string accountTenantDenied(long long account_id);
+    // 授权对象（client/rtk）同样受租户约束；user/atk 不对接入令牌开放
+    std::string subjectTenantDenied(const std::string& type, const std::string& id);
     // 主体（user/atk/client/rtk）的当前有效范围；主体不存在返回 false
     bool        subjectScope(const std::string& type, const std::string& id, DbPermScope& out);
     // 主体换组后按类型断开已收窄的会话
@@ -258,6 +263,9 @@ private:
     void handleAudit(const HttpContextPtr& ctx);
     // api_usage.cpp：用量流水日聚合查询
     void handleUsage(const HttpContextPtr& ctx);
+    void handleTenants(const HttpContextPtr& ctx);
+    void handleTenantCreate(const HttpContextPtr& ctx, const std::string& role);
+    void handleTenantUpdate(const HttpContextPtr& ctx, const std::string& role);
     // api_certs.cpp
     void handleCerts(const HttpContextPtr& ctx);
     void handleCertIssue(const HttpContextPtr& ctx, const std::string& role);

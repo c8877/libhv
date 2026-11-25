@@ -60,6 +60,8 @@
 | 备注 | 可选，≤256 |
 | 删除 | 级联删除 Token、客户端分组成员；需二次确认 |
 | 权限 | 复用现有客户端分组，不新增权限模型 |
+| 租户 | `tenant_id`（默认 1）；令牌只能访问本租户设备，用量按租户归集，见 rtunnel.md §13.11 |
+| 范围 | `rtk-` 令牌不继承运营商侧资源（权限组/字典/中继/证书/设置/atk 管理），账号接口也限定本租户 |
 
 ## 4.2 Token
 
@@ -207,6 +209,7 @@ relay 事件循环不访问 SQLite
 ```sql
 CREATE TABLE IF NOT EXISTS client_accounts(
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id     INTEGER NOT NULL DEFAULT 1,       -- 计费与设备归属边界
   username      TEXT NOT NULL UNIQUE,
   display_name  TEXT NOT NULL DEFAULT '',
   status        TEXT NOT NULL DEFAULT 'active',   -- active | disabled

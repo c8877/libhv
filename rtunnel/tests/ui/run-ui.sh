@@ -26,6 +26,7 @@ SUITES=(
   admin/metrics
   admin/relay-list
   admin/usage
+  admin/tenants
   admin/terminal
   local/page
   local/metrics

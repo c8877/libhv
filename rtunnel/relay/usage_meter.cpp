@@ -29,7 +29,7 @@ std::string RelayServer::usageLocalDay(long long ts_ms) const {
 
 void RelayServer::usagePushRaw(const char* subject_type, const std::string& subject_id,
                                const char* metric, long long qty, const std::string& meta,
-                               const std::string& day) {
+                               const std::string& day, long long tenant_id) {
     if (subject_id.empty() || metric == nullptr || qty == 0) return;
     if (usage_pending.size() >= kUsagePendingMax) {
         ++usage_dropped;
@@ -39,6 +39,7 @@ void RelayServer::usagePushRaw(const char* subject_type, const std::string& subj
     json e;
     e["ts_ms"] = now;
     e["day"] = day.empty() ? usageLocalDay(now) : day;
+    e["tenant_id"] = tenant_id;
     e["subject_type"] = subject_type;
     e["subject_id"] = subject_id;
     e["metric"] = metric;
@@ -63,7 +64,7 @@ void RelayServer::usageFlushTokenBytes(long long token_id, bool force) {
         now - u.last_report_ms < kBytesFlushMs) {
         return;
     }
-    usagePushRaw("token", std::to_string(token_id), "bytes", delta, "", usageLocalDay(now));
+    usagePushRaw("token", std::to_string(token_id), "bytes", delta, "", usageLocalDay(now), u.tenant_id);
     u.reported_bytes = u.used_bytes;
     u.last_report_ms = now;
 }
@@ -93,9 +94,9 @@ void RelayServer::usageOnStreamClose(RelayStream* s) {
     std::string subject = std::to_string(s->a->token_id);
     std::string today = usageLocalDay(now_wall);
 
-    usagePushRaw("token", subject, "sessions", 1, m, today);
+    usagePushRaw("token", subject, "sessions", 1, m, today, s->a->tenant_id);
     long long secs = (dur_ms + 500) / 1000;
-    if (secs > 0) usagePushRaw("token", subject, "session_seconds", secs, m, today);
+    if (secs > 0) usagePushRaw("token", subject, "session_seconds", secs, m, today, s->a->tenant_id);
 }
 
 // 把某设备的在线时长累加落一行；erase=false 只清零保留条目
@@ -104,7 +105,10 @@ void RelayServer::usageFlushOnline(const std::string& devid, bool erase) {
     if (it == usage_online.end()) return;
     long long secs = it->second.ms / 1000;
     if (secs > 0) {
-        usagePushRaw("device", devid, "online_seconds", secs, "", it->second.day);
+        long long tenant = 1;   // 未登记的设备按默认租户
+        auto dt = acl_device_tenant.find(devid);
+        if (dt != acl_device_tenant.end()) tenant = dt->second;
+        usagePushRaw("device", devid, "online_seconds", secs, "", it->second.day, tenant);
         it->second.ms -= secs * 1000;
     }
     if (erase) usage_online.erase(it);

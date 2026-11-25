@@ -16,8 +16,12 @@
         <template #default="{ row }">
           <b>{{ row.username }}</b>
           <div v-if="row.display_name" class="muted">{{ row.display_name }}</div>
-          <div v-if="isPhone" class="muted">{{ row.token_count || 0 }} Token</div>
+          <div v-if="isPhone" class="muted">{{ tenantName(row.tenant_id) }} · {{ row.token_count || 0 }} Token</div>
         </template>
+      </el-table-column>
+      <el-table-column v-if="!isPhone" label="租户" min-width="120" prop="tenant_name"
+                       sortable :sort-orders="TEXT_ORDERS">
+        <template #default="{ row }">{{ tenantName(row.tenant_id) }}</template>
       </el-table-column>
       <el-table-column label="状态" width="90" prop="status"
                        sortable :sort-orders="TEXT_ORDERS">
@@ -47,6 +51,11 @@
       <el-form ref="formRef" :model="form" :rules="rules" label-width="72px" @submit.prevent>
         <el-form-item label="用户名" prop="username">
           <el-input v-model="form.username" maxlength="64" placeholder="与客户端 --user 一致" />
+        </el-form-item>
+        <el-form-item label="租户">
+          <el-select v-model="form.tenant_id" style="width: 100%">
+            <el-option v-for="t in tenants" :key="t.id" :label="t.name" :value="t.id" />
+          </el-select>
         </el-form-item>
         <el-form-item label="展示名">
           <el-input v-model="form.display_name" maxlength="128" placeholder="可选" />
@@ -80,12 +89,13 @@ const canCreate = computed(() => isSuper() || can('account.write'))
 
 const router = useRouter()
 const list = ref([])
+const tenants = ref([])
 const q = ref('')
 const loading = ref(false)
 const dlg = ref(false)
 const saving = ref(false)
 const formRef = ref(null)
-const form = reactive({ username: '', display_name: '', note: '' })
+const form = reactive({ username: '', display_name: '', note: '', tenant_id: 1 })
 const rules = {
   username: [{ required: true, message: '请填写用户名', trigger: 'blur' }],
 }
@@ -96,6 +106,10 @@ async function load() {
   try {
     const suffix = q.value.trim() ? '?q=' + encodeURIComponent(q.value.trim()) : ''
     list.value = await Api.get('/api/v1/client-accounts' + suffix)
+    if (can('tenant.read')) {
+      const t = await Api.get('/api/v1/tenants').catch(() => null)
+      tenants.value = (t && t.items) || []
+    }
   } catch (e) {
     ElMessage.error('加载失败：' + e.message)
   } finally {
@@ -112,10 +126,16 @@ function openDetail(row) {
   router.push('/access/' + row.id)
 }
 
+function tenantName(id) {
+  const t = tenants.value.find((x) => x.id === id)
+  return t ? t.name : (id === 1 ? '默认租户' : '—')
+}
+
 function openCreate() {
   form.username = ''
   form.display_name = ''
   form.note = ''
+  form.tenant_id = tenants.value.length ? tenants.value[0].id : 1
   dlg.value = true
 }
 
@@ -129,6 +149,7 @@ async function create() {
       username,
       display_name: form.display_name.trim(),
       note: form.note.trim(),
+      tenant_id: form.tenant_id,
     })
     ElMessage.success('已创建 ' + username)
     dlg.value = false

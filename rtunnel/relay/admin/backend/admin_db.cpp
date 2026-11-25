@@ -296,6 +296,7 @@ bool AdminDb::migrate(std::string& err) {
         // 设备资源：agent 上线时自动 upsert，权限组按 devid 授予
         "CREATE TABLE IF NOT EXISTS res_devices("
         " devid TEXT PRIMARY KEY,"
+        " tenant_id INTEGER NOT NULL DEFAULT 1,"
         " name TEXT NOT NULL DEFAULT '',"
         " version TEXT NOT NULL DEFAULT '',"
         " online INTEGER NOT NULL DEFAULT 0,"
@@ -315,7 +316,18 @@ bool AdminDb::migrate(std::string& err) {
         " value TEXT NOT NULL DEFAULT '',"
         " PRIMARY KEY(user_id,key));"
         // 接入账号（A 侧身份主体）与 Token（临时凭据，可独立限额）
+        // 租户：计费与设备归属边界。默认租户 id=1，升级前的数据都归它
+        "CREATE TABLE IF NOT EXISTS tenants("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " name TEXT NOT NULL UNIQUE,"
+        " note TEXT NOT NULL DEFAULT '',"
+        " status TEXT NOT NULL DEFAULT 'active',"
+        " created_ms INTEGER NOT NULL,"
+        " updated_ms INTEGER NOT NULL);"
+        "INSERT OR IGNORE INTO tenants(id,name,note,status,created_ms,updated_ms)"
+        " VALUES(1,'默认租户','升级前已有的账号与设备','active',0,0);"
         "CREATE TABLE IF NOT EXISTS client_accounts("
+        " tenant_id INTEGER NOT NULL DEFAULT 1,"
         " id INTEGER PRIMARY KEY AUTOINCREMENT,"
         " username TEXT NOT NULL UNIQUE,"
         " display_name TEXT NOT NULL DEFAULT '',"
@@ -368,6 +380,7 @@ bool AdminDb::migrate(std::string& err) {
         "CREATE TABLE IF NOT EXISTS usage_events("
         " id INTEGER PRIMARY KEY AUTOINCREMENT,"
         " ts_ms INTEGER NOT NULL,"
+        " tenant_id INTEGER NOT NULL DEFAULT 0,"
         " day TEXT NOT NULL,"
         " subject_type TEXT NOT NULL,"
         " subject_id TEXT NOT NULL,"
@@ -381,6 +394,7 @@ bool AdminDb::migrate(std::string& err) {
         // 日聚合：出账/报表直接查这张表，不扫流水
         "CREATE TABLE IF NOT EXISTS usage_daily("
         " day TEXT NOT NULL,"
+        " tenant_id INTEGER NOT NULL DEFAULT 0,"
         " subject_type TEXT NOT NULL,"
         " subject_id TEXT NOT NULL,"
         " metric TEXT NOT NULL,"
@@ -388,6 +402,8 @@ bool AdminDb::migrate(std::string& err) {
         " events INTEGER NOT NULL DEFAULT 0,"
         " PRIMARY KEY(day,subject_type,subject_id,metric));"
         "CREATE INDEX IF NOT EXISTS idx_usage_daily_metric ON usage_daily(metric,day);"
+        "CREATE INDEX IF NOT EXISTS idx_usage_daily_tenant ON usage_daily(tenant_id,day);"
+        "CREATE INDEX IF NOT EXISTS idx_usage_events_tenant ON usage_events(tenant_id,ts_ms);"
         // relay 地址字典 + 有序下发列表 + 同步任务（逐设备行复用 distribution_tasks）
         "CREATE TABLE IF NOT EXISTS relay_dict("
         " id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -499,6 +515,24 @@ bool AdminDb::migrate(std::string& err) {
     }
     if (!hasColumn("perm_groups", "ports")) {
         if (!exec("ALTER TABLE perm_groups ADD COLUMN ports TEXT NOT NULL DEFAULT '*'", err)) return false;
+    }
+    // 多租户：老库补列。账号与设备归默认租户 1（升级前就是单租户）；
+    // 用量行可能是本功能上线前产生的，没有归属，统一记 0（运营方自用/无法归属）。
+    if (!hasColumn("client_accounts", "tenant_id")) {
+        if (!exec("ALTER TABLE client_accounts ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1", err))
+            return false;
+    }
+    if (!hasColumn("res_devices", "tenant_id")) {
+        if (!exec("ALTER TABLE res_devices ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1", err))
+            return false;
+    }
+    if (!hasColumn("usage_events", "tenant_id")) {
+        if (!exec("ALTER TABLE usage_events ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 0", err)) return false;
+        exec("CREATE INDEX IF NOT EXISTS idx_usage_events_tenant ON usage_events(tenant_id,ts_ms)", err);
+    }
+    if (!hasColumn("usage_daily", "tenant_id")) {
+        if (!exec("ALTER TABLE usage_daily ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 0", err)) return false;
+        exec("CREATE INDEX IF NOT EXISTS idx_usage_daily_tenant ON usage_daily(tenant_id,day)", err);
     }
     return true;
 }

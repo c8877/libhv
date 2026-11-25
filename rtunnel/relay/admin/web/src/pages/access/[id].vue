@@ -32,6 +32,7 @@
       <el-descriptions v-if="acc" :column="descCols" size="small" border>
         <el-descriptions-item label="展示名">{{ acc.display_name || '—' }}</el-descriptions-item>
         <el-descriptions-item label="账号 ID">{{ acc.id }}</el-descriptions-item>
+        <el-descriptions-item label="租户">{{ tenantName(acc.tenant_id) }}</el-descriptions-item>
         <el-descriptions-item label="创建人">{{ acc.created_by || '—' }}</el-descriptions-item>
         <el-descriptions-item label="创建时间">{{ time(acc.created_ms) }}</el-descriptions-item>
         <el-descriptions-item label="最近使用">
@@ -157,6 +158,11 @@
     <!-- 编辑账号资料 -->
     <el-dialog v-model="accDlg" title="编辑账号资料" width="440px">
       <el-form :model="accForm" label-width="72px">
+        <el-form-item label="租户">
+          <el-select v-model="accForm.tenant_id" style="width: 100%">
+            <el-option v-for="t in tenants" :key="t.id" :label="t.name" :value="t.id" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="展示名">
           <el-input v-model="accForm.display_name" maxlength="128" placeholder="可选" />
         </el-form-item>
@@ -256,12 +262,13 @@ const loading = ref(false)
 const saving = ref(false)
 const filter = ref('all')
 
+const tenants = ref([])
 const permGroups = ref([])
 const permIds = ref([])
 const permSaving = ref(false)
 
 const accDlg = ref(false)
-const accForm = reactive({ display_name: '', note: '' })
+const accForm = reactive({ display_name: '', note: '', tenant_id: 1 })
 
 const tokDlg = ref(false)
 const tokMode = ref('create')
@@ -346,6 +353,10 @@ async function load() {
     Api.get('/api/v1/client-accounts/' + id.value + '/perm-groups').catch(() => null),
   ])
   tokens.value = Array.isArray(tk) ? tk : []
+  if (can('tenant.read')) {
+    const tl = await Api.get('/api/v1/tenants').catch(() => null)
+    tenants.value = (tl && tl.items) || []
+  }
   eff.value = ef
   permGroups.value = (pg && pg.groups) || []
   permIds.value = (pg && pg.ids) || []
@@ -363,9 +374,15 @@ async function savePermGroups() {
   }
 }
 
+function tenantName(id) {
+  const t = tenants.value.find((x) => x.id === id)
+  return t ? t.name : (id === 1 ? '默认租户' : '—')
+}
+
 function openAccountEdit() {
   accForm.display_name = acc.value.display_name || ''
   accForm.note = acc.value.note || ''
+  accForm.tenant_id = acc.value.tenant_id || 1
   accDlg.value = true
 }
 
@@ -376,6 +393,7 @@ async function saveAccountEdit() {
       display_name: accForm.display_name.trim(),
       note: accForm.note.trim(),
       status: acc.value.status,
+      tenant_id: accForm.tenant_id,
     })
     ElMessage.success('已保存')
     accDlg.value = false

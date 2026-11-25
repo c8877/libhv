@@ -229,10 +229,12 @@ void RelayServer::dropPendingFor(RelayConn* a) {
 }
 
 void RelayServer::setGroupAcl(std::vector<GroupAclRule> rules, std::set<std::string> users,
-                              std::set<long long> scoped_tokens) {
+                              std::set<long long> scoped_tokens,
+                              std::map<std::string, long long> device_tenants) {
     acl_groups = std::move(rules);
     acl_grouped_users = std::move(users);
     acl_scoped_tokens = std::move(scoped_tokens);
+    acl_device_tenant = std::move(device_tenants);
     if (verbose) logf_("[relay] group acl: %zu rules, %zu grouped users, %zu scoped tokens",
                        acl_groups.size(), acl_grouped_users.size(), acl_scoped_tokens.size());
 }
@@ -280,6 +282,7 @@ void RelayServer::setAuthPolicies(const std::string& json) {
         p.burst = item.value("burst", 0);
         p.max_sessions = item.value("max_sessions", 0);
         p.quota_action = item.value("quota_action", std::string()) == "block" ? 1 : 0;
+        p.tenant_id = item.value("tenant_id", (long long)1);
         if (p.hash.empty()) continue;
 
         auto it = token_usage.find(p.id);
@@ -288,17 +291,19 @@ void RelayServer::setAuthPolicies(const std::string& json) {
             u.used_bytes = p.used_base;
             u.reported_bytes = p.used_base;   // DB 里已有的用量不再重复上报
             u.period_start_ms = p.period_start_ms;
+            u.tenant_id = p.tenant_id;
             token_usage[p.id] = u;
         } else if (p.period_start_ms > 0 && p.period_start_ms > it->second.period_start_ms) {
             // 周期已重置（或管理员改了周期），以 DB 为准；未上报的增量仍记到旧周期
             long long delta = it->second.used_bytes - it->second.reported_bytes;
             if (delta > 0) {
                 usagePushRaw("token", std::to_string(p.id), "bytes", delta, "",
-                             usageLocalDay((long long)time(NULL) * 1000));
+                             usageLocalDay((long long)time(NULL) * 1000), p.tenant_id);
             }
             it->second.used_bytes = p.used_base;
             it->second.reported_bytes = p.used_base;
             it->second.period_start_ms = p.period_start_ms;
+            it->second.tenant_id = p.tenant_id;
             it->second.bucket = 0;
         } else if (p.period_start_ms == it->second.period_start_ms && p.used_base > it->second.used_bytes) {
             // 落库值比本地大（例如重启后），取大者
@@ -319,7 +324,7 @@ void RelayServer::setAuthPolicies(const std::string& json) {
             long long delta = it->second.used_bytes - it->second.reported_bytes;
             if (delta > 0) {
                 usagePushRaw("token", std::to_string(it->first), "bytes", delta, "",
-                             usageLocalDay((long long)time(NULL) * 1000));
+                             usageLocalDay((long long)time(NULL) * 1000), it->second.tenant_id);
             }
             it = token_usage.erase(it);
         }
@@ -391,7 +396,7 @@ void RelayServer::tokenSweep() {
                 long long delta = u.used_bytes - u.reported_bytes;
                 if (delta > 0) {
                     usagePushRaw("token", std::to_string(p.id), "bytes", delta, "",
-                                 usageLocalDay((long long)now));
+                                 usageLocalDay((long long)now), u.tenant_id);
                 }
                 u.used_bytes = 0;
                 u.reported_bytes = 0;
@@ -531,8 +536,12 @@ bool RelayServer::groupAclCheck(const char* user, long long token_id, const char
                                 int is_shell, const char* tty_path, int tty_write, int is_fs, int fs_rw,
                                 int is_svc) {
     if (allow_all) return true;
+    long long dev_tenant = 1;   // 未登记的设备按默认租户
+    auto dt = acl_device_tenant.find(devid);
+    if (dt != acl_device_tenant.end()) dev_tenant = dt->second;
     for (auto& r : acl_groups) {
         if (!groupAclApplies(r, user, token_id)) continue;
+        if (r.tenant_id != dev_tenant) continue;   // 跨租户一律不匹配
         if (!pattern_match(r.devid.c_str(), devid)) continue;
         if (is_shell) {
             if (r.shell) return true;
@@ -1832,6 +1841,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             }
             c->token_id = pol->id;
             c->account_id = pol->account_id;
+            c->tenant_id = pol->tenant_id;
             snprintf(c->token_prefix, sizeof(c->token_prefix), "%s", pol->prefix.c_str());
             usage->last_used_ms = now;
             snprintf(usage->last_ip, sizeof(usage->last_ip), "%s", c->remote_addr);

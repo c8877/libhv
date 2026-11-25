@@ -4,6 +4,10 @@
       <h2>用量</h2>
       <span class="muted">共 {{ rows.length }} 行 · 合计 {{ fmtQty(total, metric) }}</span>
       <span class="spacer" />
+      <el-select v-if="can('tenant.read')" v-model="tenantId" style="width: 150px" @change="load">
+        <el-option label="全部租户" :value="0" />
+        <el-option v-for="t in tenants" :key="t.id" :label="t.name" :value="t.id" />
+      </el-select>
       <el-select v-model="metric" style="width: 150px" @change="load">
         <el-option v-for="m in METRICS" :key="m.value" :label="m.label" :value="m.value" />
       </el-select>
@@ -15,6 +19,9 @@
 
     <el-table :data="rows" v-loading="loading" size="small">
       <el-table-column prop="day" label="日期" width="120" sortable :sort-orders="TEXT_ORDERS" />
+      <el-table-column v-if="tenantId === 0" label="租户" min-width="110">
+        <template #default="{ row }">{{ tenantName(row.tenant_id) }}</template>
+      </el-table-column>
       <el-table-column label="主体" min-width="200">
         <template #default="{ row }">
           <el-tag size="small" effect="plain">{{ subjectLabel(row.subject_type) }}</el-tag>
@@ -42,6 +49,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { Api } from '@/shared/api.js'
+import { can } from '@/shared/store.js'
 import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
 
 const METRICS = [
@@ -52,6 +60,8 @@ const METRICS = [
 ]
 
 const rows = ref([])
+const tenants = ref([])
+const tenantId = ref(0)
 const loading = ref(false)
 const metric = ref('bytes')
 const range = ref(defaultRange())
@@ -105,6 +115,7 @@ async function load() {
     const q = new URLSearchParams()
     q.set('metric', metric.value)
     q.set('granularity', 'day')
+    if (tenantId.value > 0) q.set('tenant_id', String(tenantId.value))
     if (range.value && range.value.length === 2) {
       q.set('from', range.value[0])
       q.set('to', range.value[1])
@@ -118,7 +129,21 @@ async function load() {
   }
 }
 
-onMounted(load)
+function tenantName(id) {
+  const t = tenants.value.find((x) => x.id === id)
+  return t ? t.name : (id === 1 ? '默认租户' : '—')
+}
+
+async function loadTenants() {
+  if (!can('tenant.read')) return
+  const res = await Api.get('/api/v1/tenants').catch(() => null)
+  tenants.value = (res && res.items) || []
+}
+
+onMounted(() => {
+  loadTenants()
+  load()
+})
 </script>
 
 <style scoped>

@@ -8,6 +8,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <map>
 #include <set>
 
 class RelayServer;
@@ -86,6 +87,7 @@ struct RelayConn {
     char         remote_addr[64] = {0};
     long long    token_id = 0;           // auth_type=2 通过后填
     long long    account_id = 0;         // 令牌归属账号（用量归属）
+    long long    tenant_id = 0;          // 令牌归属租户（用量归属）
     char         token_prefix[24] = {0};
     int          peer_proto = 0;         // HELLO 里的语义版本，0 表示未握手
     uint64_t     usage_online_ms = 0;    // 上次计入在线时长的单调时钟
@@ -121,6 +123,7 @@ struct TokenPolicy {
     int         burst = 0;
     int         max_sessions = 0;
     int         quota_action = 0;        // 0 cut, 1 block
+    long long   tenant_id = 1;           // 归属租户（用量归属）
 };
 
 struct TokenUsage {
@@ -132,6 +135,7 @@ struct TokenUsage {
     uint64_t last_used_ms = 0;
     int64_t  reported_bytes = 0;   // 已推给管理面的字节，增量上报用
     int64_t  last_report_ms = 0;   // 上次上报时间（墙钟）：按量/按时节流
+    long long tenant_id = 0;       // 归属租户，随策略下发
     char     last_ip[64] = {0};
 };
 
@@ -160,6 +164,7 @@ struct GroupAclRule {
     int         file = 0;    // 0 无 / 1 只读 / 2 读写
     bool        svc = false;
     long long   token_id = 0; // 0 = 账号级规则；>0 = 仅该 rtk 令牌
+    long long   tenant_id = 1; // 只对本租户的设备生效
 };
 
 class RelayServer {
@@ -168,7 +173,8 @@ class RelayServer {
 public:
     int run(int argc, char** argv);
     void setGroupAcl(std::vector<GroupAclRule> rules, std::set<std::string> users,
-                     std::set<long long> scoped_tokens);
+                     std::set<long long> scoped_tokens,
+                     std::map<std::string, long long> device_tenants);
     // 认证策略全量替换（relay 线程）；JSON 由 admin 的 clientAuthPolicies 生成
     void setAuthPolicies(const std::string& json);
     // 用量快照（relay 线程），JSON 数组
@@ -246,6 +252,7 @@ public:
     std::vector<GroupAclRule> acl_groups;       // 管理台分组授权（relay 线程只读）
     std::set<std::string>     acl_grouped_users;
     std::set<long long>       acl_scoped_tokens; // 配了 rtk 权限组的令牌：只认令牌级规则
+    std::map<std::string, long long> acl_device_tenant; // devid -> 租户，ACL 判定用
     std::unordered_map<std::string, TokenPolicy> token_cache;  // sha256 hex -> policy
     std::unordered_map<std::string, int> account_active;       // username -> 1/0
     std::unordered_map<long long, TokenUsage>    token_usage;  // token id -> usage
@@ -375,7 +382,7 @@ private:
     // 用量（relay 线程）：流关闭记一次会话，设备断开冲掉剩余在线时长
     void         usagePushRaw(const char* subject_type, const std::string& subject_id,
                               const char* metric, long long qty, const std::string& meta,
-                              const std::string& day);
+                              const std::string& day, long long tenant_id);
     void         usageFlushTokenBytes(long long token_id, bool force);
     void         usageOnStreamClose(RelayStream* s);
     void         usageOnAgentClose(RelayConn* c);

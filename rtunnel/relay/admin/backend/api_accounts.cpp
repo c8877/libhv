@@ -8,6 +8,8 @@
 
 using nlohmann::json;
 
+extern thread_local AdminActor tl_actor;
+
 namespace {
 // 从请求体读取 token 限额；缺省字段保留 def
 DbTokenSpec specFromJson(const json& req, DbTokenSpec def) {
@@ -46,11 +48,24 @@ void AdminServer::handleClientAccounts(const HttpContextPtr& ctx) {
         ctx->send("{\"error\":\"db error\"}");
         return;
     }
+    if (tl_actor.is_client) {
+        // 接入令牌只看得到同租户账号
+        json arr = json::parse(out, nullptr, false);
+        if (!arr.is_discarded() && arr.is_array()) {
+            json keep = json::array();
+            for (auto& a : arr)
+                if (a.value("tenant_id", (long long)1) == tl_actor.tenant_id) keep.push_back(a);
+            ctx->send(keep.dump());
+            return;
+        }
+    }
     ctx->send(out);
 }
 
 void AdminServer::handleClientAccountGet(const HttpContextPtr& ctx) {
     long long id = atoll(ctx->param("id").c_str());
+    std::string td = accountTenantDenied(id);
+    if (!td.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, td); return; }
     std::string out, err;
     if (!db_.clientAccountGet(id, out, err)) { apiNotFound(ctx, err); return; }
     ctx->send(out);
@@ -60,10 +75,14 @@ void AdminServer::handleClientAccountCreate(const HttpContextPtr& ctx, const std
     json req = json::parse(ctx->body(), nullptr, false);
     if (req.is_discarded() || !req.is_object()) { apiBad(ctx, "bad json"); return; }
     std::string username = req.value("username", "");
+    long long tenant_id = req.value("tenant_id", (long long)1);
+    // 接入令牌只能在自租户内建账号，不能通过 tenant_id 跳到别的租户
+    if (tl_actor.is_client) tenant_id = tl_actor.tenant_id;
+    if (!db_.tenantExists(tenant_id)) { apiBad(ctx, "租户不存在"); return; }
     long long id = 0;
     std::string err;
     if (!db_.clientAccountCreate(username, req.value("display_name", ""), req.value("note", ""),
-                                 role, id, err)) {
+                                 tenant_id, role, id, err)) {
         apiBad(ctx, err);
         return;
     }
@@ -78,9 +97,11 @@ void AdminServer::handleClientAccountUpdate(const HttpContextPtr& ctx, const std
     long long id = atoll(ctx->param("id").c_str());
     json req = json::parse(ctx->body(), nullptr, false);
     if (req.is_discarded() || !req.is_object()) { apiBad(ctx, "bad json"); return; }
-    std::string denied = currentActor().super ? std::string() : accountDenied(id);
+    std::string denied = accountTenantDenied(id);
+    if (denied.empty()) denied = currentActor().super ? std::string() : accountDenied(id);
     if (!denied.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, denied); return; }
     std::string username, cur_status = "active";
+    long long cur_tenant = 1;
     {
         std::string aj, aerr;
         if (db_.clientAccountGet(id, aj, aerr)) {
@@ -88,14 +109,19 @@ void AdminServer::handleClientAccountUpdate(const HttpContextPtr& ctx, const std
             if (!a.is_discarded()) {
                 username = a.value("username", std::string());
                 cur_status = a.value("status", std::string("active"));
+                cur_tenant = a.value("tenant_id", (long long)1);
             }
         }
     }
     // 未显式传 status 时保持原状态，避免改备注把停用账号放回来
     std::string status = cur_status;
     if (req.contains("status") && req["status"].is_string()) status = req["status"].get<std::string>();
+    long long tenant_id = req.value("tenant_id", cur_tenant);
+    if (tl_actor.is_client) tenant_id = tl_actor.tenant_id;
+    if (!db_.tenantExists(tenant_id)) { apiBad(ctx, "租户不存在"); return; }
     std::string err;
-    if (!db_.clientAccountUpdate(id, req.value("display_name", ""), req.value("note", ""), status, err)) {
+    if (!db_.clientAccountUpdate(id, req.value("display_name", ""), req.value("note", ""), status,
+                                 tenant_id, err)) {
         apiNotFound(ctx, err);
         return;
     }
@@ -109,7 +135,8 @@ void AdminServer::handleClientAccountUpdate(const HttpContextPtr& ctx, const std
 
 void AdminServer::handleClientAccountDelete(const HttpContextPtr& ctx, const std::string& role) {
     long long id = atoll(ctx->param("id").c_str());
-    std::string denied = currentActor().super ? std::string() : accountDenied(id);
+    std::string denied = accountTenantDenied(id);
+    if (denied.empty()) denied = currentActor().super ? std::string() : accountDenied(id);
     if (!denied.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, denied); return; }
     std::string username;
     {
@@ -130,7 +157,8 @@ void AdminServer::handleClientAccountDelete(const HttpContextPtr& ctx, const std
 
 void AdminServer::handleClientAccountKick(const HttpContextPtr& ctx, const std::string& role) {
     long long id = atoll(ctx->param("id").c_str());
-    std::string denied = currentActor().super ? std::string() : accountDenied(id);
+    std::string denied = accountTenantDenied(id);
+    if (denied.empty()) denied = currentActor().super ? std::string() : accountDenied(id);
     if (!denied.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, denied); return; }
     std::string aj, err;
     if (!db_.clientAccountGet(id, aj, err)) { apiNotFound(ctx, err); return; }
@@ -147,6 +175,8 @@ void AdminServer::handleClientAccountKick(const HttpContextPtr& ctx, const std::
 
 void AdminServer::handleClientTokens(const HttpContextPtr& ctx) {
     long long id = atoll(ctx->param("id").c_str());
+    std::string td = accountTenantDenied(id);
+    if (!td.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, td); return; }
     std::string out, err;
     if (!db_.clientTokenList(id, out, err)) { apiBad(ctx, err); return; }
     ctx->send(out);
@@ -157,7 +187,8 @@ void AdminServer::handleClientTokenCreate(const HttpContextPtr& ctx, const std::
     json req = json::parse(ctx->body(), nullptr, false);
     if (req.is_discarded() || !req.is_object()) { apiBad(ctx, "bad json"); return; }
     // 令牌继承归属账号的权限：账号超出自己范围就不能给它签令牌
-    std::string denied = currentActor().super ? std::string() : accountDenied(account_id);
+    std::string denied = accountTenantDenied(account_id);
+    if (denied.empty()) denied = currentActor().super ? std::string() : accountDenied(account_id);
     if (!denied.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, denied); return; }
     DbTokenSpec spec = specFromJson(req, DbTokenSpec{});
     std::string plain, out, err;
@@ -185,7 +216,8 @@ void AdminServer::handleClientTokenUpdate(const HttpContextPtr& ctx, const std::
     long long account_id = 0;
     std::string status, err;
     if (!db_.clientTokenSpec(id, spec, account_id, &status, err)) { apiNotFound(ctx, err); return; }
-    std::string denied = currentActor().super ? std::string() : accountDenied(account_id);
+    std::string denied = accountTenantDenied(account_id);
+    if (denied.empty()) denied = currentActor().super ? std::string() : accountDenied(account_id);
     if (!denied.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, denied); return; }
     spec = specFromJson(req, spec);
     // 未显式传 status 时保持原状态，避免改限额时把停用的 Token 意外启用
@@ -206,7 +238,8 @@ void AdminServer::handleClientTokenRotate(const HttpContextPtr& ctx, const std::
     std::string err;
     if (!db_.clientTokenSpec(id, spec, account_id, nullptr, err)) { apiNotFound(ctx, err); return; }
     // 轮换会返回新明文，等价于重新签发：同样要求归属账号在自己范围内
-    std::string denied = currentActor().super ? std::string() : accountDenied(account_id);
+    std::string denied = accountTenantDenied(account_id);
+    if (denied.empty()) denied = currentActor().super ? std::string() : accountDenied(account_id);
     if (!denied.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, denied); return; }
     std::string plain, out;
     if (!db_.clientTokenRotate(id, plain, out, err)) { apiNotFound(ctx, err); return; }
@@ -226,7 +259,8 @@ void AdminServer::handleClientTokenDelete(const HttpContextPtr& ctx, const std::
     long long account_id = 0;
     std::string err;
     if (!db_.clientTokenSpec(id, spec, account_id, nullptr, err)) { apiNotFound(ctx, err); return; }
-    std::string denied = currentActor().super ? std::string() : accountDenied(account_id);
+    std::string denied = accountTenantDenied(account_id);
+    if (denied.empty()) denied = currentActor().super ? std::string() : accountDenied(account_id);
     if (!denied.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, denied); return; }
     if (!db_.clientTokenDelete(id, err)) { apiNotFound(ctx, err); return; }
     audit(role, "client_token.delete", std::to_string(id));
@@ -238,6 +272,8 @@ void AdminServer::handleClientTokenDelete(const HttpContextPtr& ctx, const std::
 
 void AdminServer::handleClientAccountEffective(const HttpContextPtr& ctx) {
     long long id = atoll(ctx->param("id").c_str());
+    std::string td = accountTenantDenied(id);
+    if (!td.empty()) { apiError(ctx, HTTP_STATUS_FORBIDDEN, td); return; }
     std::string aj, err;
     if (!db_.clientAccountGet(id, aj, err)) { apiNotFound(ctx, err); return; }
     json a = json::parse(aj, nullptr, false);

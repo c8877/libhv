@@ -625,15 +625,16 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 | GET | `/api/v1/permission/subjects`、`GET/PUT /permission/subjects/{type}/{id}/groups` | 授权对象与权限组绑定 |
 | GET | `/api/v1/permission/dicts?kind=resources|devices|ports|ttys` | 四类字典分页 |
 | GET/POST/PUT/DELETE | `/api/v1/permission/dict/{ports,ttys}[/{id}]` | 端口/串口字典、批量新增与删除 |
-| PUT | `/api/v1/permission/devices/{devid}` | 设备资源改名/停用 |
-| GET/POST/PUT/DELETE | `/api/v1/client-accounts[/{id}]` | 接入账号；含 `/effective`、`/{id}/tokens` |
+| PUT | `/api/v1/permission/devices/{devid}` | 设备资源改名/停用/换租户 |
+| GET/POST/PUT/DELETE | `/api/v1/client-accounts[/{id}]` | 接入账号（带 `tenant_id`）；含 `/effective`、`/{id}/tokens` |
 | PUT/POST/DELETE | `/api/v1/client-tokens/{id}`、`/rotate` | Token 限额、启停、轮换、吊销 |
 | GET/POST/PUT/DELETE | `/api/v1/admin-tokens[/{id}]`、`/{id}/rotate` | 管理台 API Token；manager 管自己的，admin 管全部，Token 不能管理 Token |
 | GET/POST/PUT/DELETE | `/api/v1/users[/{id}]` | 管理台账号、角色、状态、密码、权限组 |
 | GET/PUT | `/api/v1/settings` | 运行参数（上传上限、会话、锁定时长等） |
 | GET/POST | `/api/v1/distributions[/{id}]` | 文件分发任务与重试/取消/延长/校验 |
 | GET | `/api/v1/audit` | 审计（登录、OPEN、踢、证书、文件、终端、权限变更） |
-| GET | `/api/v1/usage` | 用量报表（日聚合）：流量/会话/设备在线，见 §13.10 |
+| GET | `/api/v1/usage` | 用量报表（日聚合）：流量/会话/设备在线，可按 `tenant_id` 过滤，见 §13.10 |
+| GET/POST/PUT | `/api/v1/tenants[/{id}]` | 租户列表/新建/改名启停，见 §13.11 |
 | GET/POST | `/api/v1/certs`、`/api/v1/certs/issue`、`/sign`、`/revoke` | 证书台账/签发/CSR 签名/吊销（admin） |
 | GET/POST/DELETE/PUT | `/api/v1/files[/{name}]` | 文件列表/上传/下载/删除/原子编辑（编辑需 manager+，上限可配置，默认 32 MiB；文件名白名单） |
 | GET | `/api/v1/uploads/{name}` | 分片上传状态与续传 |
@@ -794,8 +795,8 @@ relay 在 agent `AUTH_OK` 之后、以及同步任务下发时发送 `RELAY_LIST
 
 | 表 | 作用 |
 |---|---|
-| `usage_events` | append-only 流水：`ts_ms / day / subject_type / subject_id / metric / qty / meta` |
-| `usage_daily` | 日聚合：`(day,subject_type,subject_id,metric)` 唯一，出账与报表直接查它 |
+| `usage_events` | append-only 流水：`ts_ms / day / tenant_id / subject_type / subject_id / metric / qty / meta` |
+| `usage_daily` | 日聚合：`(day,tenant_id,subject_type,subject_id,metric)` 唯一，出账与报表直接查它 |
 
 **指标与主体**
 
@@ -846,10 +847,44 @@ GET /api/v1/usage?from=2026-11-01&to=2026-11-30&metric=bytes&subject_type=token&
 ```
 
 - `granularity=total` 按主体 + 指标汇总（出账用）；需要 `usage.read`（全局资源）
-- 管理台「监控 → 用量」按日展示，支持切换指标与日期范围
+- `tenant_id` 可选：控制台账号可按租户过滤；接入令牌固定为本租户，传别的值无效
+- 管理台「监控 → 用量」按日展示，支持切换指标、日期范围与租户
 
-**当前不做**：价目表、账单/发票、支付、租户维度、带宽限速。表结构已按
-`subject_type/subject_id/metric` 抽象，接价目表时只需加 `price` 与账期汇总，不改采集侧。
+**当前不做**：价目表、账单/发票、支付、带宽限速。表结构已按
+`tenant_id / subject_type / subject_id / metric` 抽象，接价目表时只需加 `price` 与账期汇总，
+不改采集侧。
+
+### 13.11 租户（计费与设备归属边界）
+
+租户是“谁的设备、谁付钱”的边界，不是权限组：权限组决定**能做什么**，租户决定**对谁的设备做**。
+
+| 归属 | 字段 | 隔离方式 |
+|---|---|---|
+| 设备 | `res_devices.tenant_id`，默认 1 | 接入令牌只能访问本租户设备 |
+| 接入账号 | `client_accounts.tenant_id`，默认 1 | 其下全部令牌继承该租户 |
+| 用量 | `usage_events/usage_daily.tenant_id` | 令牌用量记在账号租户；设备在线记在设备租户 |
+
+- 升级前的数据全部落到默认租户 `id=1`（种子在 `tenants` 表里建，名称唯一）
+- **数据面强制**：relay 的 ACL 规则带 `tenant_id`，OPEN 时先比对设备租户，再匹配 devid；
+  跨租户一律不匹配。权限组里的 `all_devices` 只在**本租户内**成立
+- **管理面过滤**：接入令牌（`rtk-`）调管理 API 时，`/agents`、终端、文件、分发等设备
+  相关接口都先过 `ownsDevid()`，设备列表按 `tenantDevices()` 收窄；账号接口先过
+  `accountTenantDenied()`，跨租户的账号详情/权限组绑定直接 403
+- **运营商侧资源不对接入令牌开放**：`group.*`、`dict.*`、`relay.*`、`cert.*`、`settings.*`、
+  `token.*`、`system.shutdown` 属于平台自身运维，`rtk-` 令牌即使被误授也判为无权限；
+  客户可用的只有设备、文件、分发、账号、用量与租户只读
+- **停用租户 = 停用其下全部接入账号**：`clientAuthPolicies` 把租户状态折算进
+  `account_status`，relay 拿到后断开在线连接并拒绝重新认证；默认租户不可停用
+- 设备跨租户迁移走 `PUT /api/v1/permission/devices/:devid` 的 `tenant_id`，保存后
+  立即刷新 ACL（数据面下一次 OPEN 生效，已建流不中断）
+
+**边界**：控制台账号（`users`）不属于租户，可以在多个租户间移动设备、查看全量用量；
+对外 SaaS 若要“每租户自己的管理员”，需要在账号上再加租户绑定，这不在当前范围。
+
+**已知未隔离**：文件仓库（`/api/v1/files`）与分发任务的文件名是全局共享的——租户能看到的
+只有自己的设备，但仓库里存的是所有租户的文件，且分发只按文件名取文件。因此“租户 A 猜文件名、
+把租户 B 的文件分发到自己的设备”在当前实现下是可能的。需要真正的租户级文件隔离时，
+给仓库加 `tenant_id` 目录前缀并让分发按租户解析；或直接按租户部署独立 relay。
 
 ## 14. 备选方案与取舍
 

@@ -59,6 +59,7 @@ bool AdminDb::clientAccountList(const std::string& q, std::string& json_out) {
     json arr = json::array();
     std::string sql =
         "SELECT a.id,a.username,a.display_name,a.status,a.note,a.created_by,a.created_ms,a.updated_ms,"
+        "a.tenant_id,"
         "(SELECT COUNT(*) FROM client_tokens t WHERE t.account_id=a.id AND t.status!='revoked'),"
         "(SELECT COALESCE(MAX(t.last_used_ms),0) FROM client_tokens t WHERE t.account_id=a.id) "
         "FROM client_accounts a";
@@ -81,8 +82,9 @@ bool AdminDb::clientAccountList(const std::string& q, std::string& json_out) {
         a["created_by"] = dbColText(st, 5);
         a["created_ms"] = dbColInt(st, 6);
         a["updated_ms"] = dbColInt(st, 7);
-        a["token_count"] = dbColInt(st, 8);
-        a["last_used_ms"] = dbColInt(st, 9);
+        a["tenant_id"] = dbColInt(st, 8);
+        a["token_count"] = dbColInt(st, 9);
+        a["last_used_ms"] = dbColInt(st, 10);
         arr.push_back(a);
     }
     sqlite3_finalize(st);
@@ -95,6 +97,7 @@ bool AdminDb::clientAccountGet(long long id, std::string& json_out, std::string&
     sqlite3_stmt* st = nullptr;
     const char* sql =
         "SELECT a.id,a.username,a.display_name,a.status,a.note,a.created_by,a.created_ms,a.updated_ms,"
+        "a.tenant_id,"
         "(SELECT COUNT(*) FROM client_tokens t WHERE t.account_id=a.id),"
         "(SELECT COUNT(*) FROM client_tokens t WHERE t.account_id=a.id AND t.status='active'),"
         "(SELECT COUNT(*) FROM client_tokens t WHERE t.account_id=a.id AND t.status='disabled'),"
@@ -124,35 +127,38 @@ bool AdminDb::clientAccountGet(long long id, std::string& json_out, std::string&
     a["created_by"] = dbColText(st, 5);
     a["created_ms"] = dbColInt(st, 6);
     a["updated_ms"] = dbColInt(st, 7);
-    a["token_count"] = dbColInt(st, 8);
-    a["token_active"] = dbColInt(st, 9);
-    a["token_disabled"] = dbColInt(st, 10);
-    a["token_revoked"] = dbColInt(st, 11);
-    a["last_used_ms"] = dbColInt(st, 12);
-    a["last_used_ip"] = dbColText(st, 13);
-    a["group_count"] = dbColInt(st, 14);
+    a["tenant_id"] = dbColInt(st, 8);
+    a["token_count"] = dbColInt(st, 9);
+    a["token_active"] = dbColInt(st, 10);
+    a["token_disabled"] = dbColInt(st, 11);
+    a["token_revoked"] = dbColInt(st, 12);
+    a["last_used_ms"] = dbColInt(st, 13);
+    a["last_used_ip"] = dbColText(st, 14);
+    a["group_count"] = dbColInt(st, 15);
     sqlite3_finalize(st);
     json_out = a.dump();
     return true;
 }
 
 bool AdminDb::clientAccountCreate(const std::string& username, const std::string& display_name,
-                                  const std::string& note, const std::string& by,
+                                  const std::string& note, long long tenant_id, const std::string& by,
                                   long long& out_id, std::string& err) {
+    if (tenant_id <= 0) tenant_id = 1;
     if (!validName(username, 64)) { err = "用户名需为 1-64 字节可见字符"; return false; }
     if (display_name.size() > 128 || note.size() > 256) { err = "展示名或备注过长"; return false; }
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
-    const char* sql = "INSERT INTO client_accounts(username,display_name,status,note,created_by,created_ms,updated_ms) "
-                      "VALUES(?,?,'active',?,?,?,?)";
+    const char* sql = "INSERT INTO client_accounts(username,display_name,status,note,tenant_id,"
+                      "created_by,created_ms,updated_ms) VALUES(?,?,'active',?,?,?,?,?)";
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
     long long now = nowMs();
     sqlite3_bind_text(st, 1, username.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 2, display_name.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 3, note.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 4, by.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 5, now);
+    sqlite3_bind_int64(st, 4, tenant_id);
+    sqlite3_bind_text(st, 5, by.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int64(st, 6, now);
+    sqlite3_bind_int64(st, 7, now);
     bool ok = sqlite3_step(st) == SQLITE_DONE;
     if (!ok) err = sqlite3_errmsg(db_);
     sqlite3_finalize(st);
@@ -166,21 +172,23 @@ bool AdminDb::clientAccountCreate(const std::string& username, const std::string
 
 bool AdminDb::clientAccountUpdate(long long id, const std::string& display_name,
                                   const std::string& note, const std::string& status,
-                                  std::string& err) {
+                                  long long tenant_id, std::string& err) {
     if (status != "active" && status != "disabled") { err = "bad status"; return false; }
+    if (tenant_id <= 0) tenant_id = 1;
     if (display_name.size() > 128 || note.size() > 256) { err = "展示名或备注过长"; return false; }
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
-    if (sqlite3_prepare_v2(db_, "UPDATE client_accounts SET display_name=?,note=?,status=?,updated_ms=? "
-                                "WHERE id=?", -1, &st, nullptr) != SQLITE_OK) {
+    if (sqlite3_prepare_v2(db_, "UPDATE client_accounts SET display_name=?,note=?,status=?,tenant_id=?,"
+                                "updated_ms=? WHERE id=?", -1, &st, nullptr) != SQLITE_OK) {
         err = "db error";
         return false;
     }
     sqlite3_bind_text(st, 1, display_name.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 2, note.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(st, 3, status.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 4, nowMs());
-    sqlite3_bind_int64(st, 5, id);
+    sqlite3_bind_int64(st, 4, tenant_id);
+    sqlite3_bind_int64(st, 5, nowMs());
+    sqlite3_bind_int64(st, 6, id);
     bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
     if (!ok) err = "account not found";
     sqlite3_finalize(st);
@@ -445,15 +453,21 @@ bool AdminDb::clientAuthPolicies(std::string& json_out) {
     }
     json accounts = json::object();
     sqlite3_stmt* ast = nullptr;
-    if (sqlite3_prepare_v2(db_, "SELECT username,status FROM client_accounts", -1, &ast, nullptr) == SQLITE_OK) {
+    // 租户停用等价于其下账号停用：relay 只看账号状态，这里提前折算
+    if (sqlite3_prepare_v2(db_,
+            "SELECT a.username, CASE WHEN COALESCE(t.status,'active')='active' THEN a.status ELSE 'disabled' END"
+            " FROM client_accounts a LEFT JOIN tenants t ON t.id=a.tenant_id",
+            -1, &ast, nullptr) == SQLITE_OK) {
         while (sqlite3_step(ast) == SQLITE_ROW) accounts[dbColText(ast, 0)] = dbColText(ast, 1);
     }
     sqlite3_finalize(ast);
     const char* sql =
         "SELECT t.id,t.account_id,a.username,t.token_hash,t.token_prefix,t.name,t.status,"
         "t.expires_at_ms,t.quota_bytes,t.quota_period,t.period_start_ms,t.used_bytes,"
-        "t.rate_per_min,t.burst,t.max_sessions,t.quota_action,a.status "
+        "t.rate_per_min,t.burst,t.max_sessions,t.quota_action,"
+        "CASE WHEN COALESCE(tt.status,'active')='active' THEN a.status ELSE 'disabled' END,a.tenant_id "
         "FROM client_tokens t JOIN client_accounts a ON a.id=t.account_id "
+        "LEFT JOIN tenants tt ON tt.id=a.tenant_id "
         "WHERE t.status!='revoked'";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) return false;
@@ -477,6 +491,7 @@ bool AdminDb::clientAuthPolicies(std::string& json_out) {
         t["max_sessions"] = (int)dbColInt(st, 14);
         t["quota_action"] = dbColText(st, 15);
         t["account_status"] = dbColText(st, 16);
+        t["tenant_id"] = dbColInt(st, 17);
         arr.push_back(t);
     }
     sqlite3_finalize(st);

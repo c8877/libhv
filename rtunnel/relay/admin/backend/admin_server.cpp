@@ -154,6 +154,8 @@ std::string AdminServer::roleOf(const HttpContextPtr& ctx) {
             tl_actor.token_id = token_id;
             tl_actor.is_client = true;
             tl_actor.client_id = account_id;
+            long long t = 0;
+            if (db_.tenantOfClient(account_id, t)) tl_actor.tenant_id = t;
             loadActorPerms();
             return "client";
         }
@@ -289,6 +291,27 @@ std::string AdminServer::accountDenied(long long account_id) {
     return manageDenied(sc);
 }
 
+std::string AdminServer::accountTenantDenied(long long account_id) {
+    if (!tl_actor.is_client) return std::string();   // 控制台账号可以跨租户运维
+    long long t = 0;
+    if (!db_.tenantOfClient(account_id, t)) return "接入账号不存在";
+    if (t != tl_actor.tenant_id) return "不在本租户";
+    return std::string();
+}
+
+std::string AdminServer::subjectTenantDenied(const std::string& type, const std::string& id) {
+    if (!tl_actor.is_client) return std::string();
+    if (type == "client") return accountTenantDenied(atoll(id.c_str()));
+    if (type == "rtk") {
+        DbTokenSpec spec;
+        long long acc = 0;
+        std::string err;
+        if (!db_.clientTokenSpec(atoll(id.c_str()), spec, acc, nullptr, err)) return "令牌不存在";
+        return accountTenantDenied(acc);
+    }
+    return "接入令牌不能操作该对象";
+}
+
 void AdminServer::kickSubjectShrunk(const std::string& type, const std::string& sid,
                                     const DbPermScope& before, const char* reason) {
     DbPermScope after;
@@ -313,8 +336,20 @@ std::string AdminServer::grantGroupsDenied(const std::vector<long long>& ids) {
     return std::string();
 }
 
+namespace {
+// 运营商侧资源：权限组/字典/中继/证书/系统设置/atk 管理属于平台自身运维，
+// 接入令牌（客户）即使被误授也不能用，避免跨租户看到别人的设备与配置。
+bool permIsOperatorKey(const std::string& k) {
+    static const char* kPrefix[] = {"group.", "dict.", "relay.", "cert.", "settings.", "token."};
+    for (const char* p : kPrefix)
+        if (k.rfind(p, 0) == 0) return true;
+    return k == "system.shutdown";
+}
+}  // namespace
+
 bool AdminServer::hasPerm(const std::string& key) const {
     if (tl_actor.super) return true;
+    if (tl_actor.is_client && permIsOperatorKey(key)) return false;
     if (!tl_actor.perms.count(key)) return false;
     // 全局资源需要组显式开启「全局权限」（全部设备与 super 自动视为开启），
     // 避免受限设备的组通过 relay/dict 等全局键影响范围外的设备。

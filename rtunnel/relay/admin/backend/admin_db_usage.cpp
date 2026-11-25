@@ -54,12 +54,13 @@ bool AdminDb::usageAppend(const std::string& events_json, std::string& err) {
         return false;
     };
     if (sqlite3_prepare_v2(db_,
-            "INSERT INTO usage_events(ts_ms,day,subject_type,subject_id,metric,qty,meta,source)"
-            " VALUES(?,?,?,?,?,?,?,?)", -1, &ev, nullptr) != SQLITE_OK) {
+            "INSERT INTO usage_events(ts_ms,day,tenant_id,subject_type,subject_id,metric,qty,meta,source)"
+            " VALUES(?,?,?,?,?,?,?,?,?)", -1, &ev, nullptr) != SQLITE_OK) {
         return fail("db error");
     }
     if (sqlite3_prepare_v2(db_,
-            "INSERT INTO usage_daily(day,subject_type,subject_id,metric,qty,events) VALUES(?,?,?,?,?,1)"
+            "INSERT INTO usage_daily(day,tenant_id,subject_type,subject_id,metric,qty,events)"
+            " VALUES(?,?,?,?,?,?,1)"
             " ON CONFLICT(day,subject_type,subject_id,metric)"
             " DO UPDATE SET qty=qty+excluded.qty, events=events+1", -1, &day, nullptr) != SQLITE_OK) {
         return fail("db error");
@@ -68,6 +69,7 @@ bool AdminDb::usageAppend(const std::string& events_json, std::string& err) {
     for (auto& e : arr) {
         if (!e.is_object()) continue;
         long long ts = e.value("ts_ms", (long long)0);
+        long long tenant_id = e.value("tenant_id", (long long)0);
         std::string d = e.value("day", std::string());
         std::string subject_type = e.value("subject_type", std::string());
         std::string subject_id = e.value("subject_id", std::string());
@@ -89,21 +91,23 @@ bool AdminDb::usageAppend(const std::string& events_json, std::string& err) {
         sqlite3_clear_bindings(ev);
         sqlite3_bind_int64(ev, 1, ts);
         bindText(ev, 2, d);
-        bindText(ev, 3, subject_type);
-        bindText(ev, 4, subject_id);
-        bindText(ev, 5, metric);
-        sqlite3_bind_int64(ev, 6, qty);
-        bindText(ev, 7, meta);
-        bindText(ev, 8, source);
+        sqlite3_bind_int64(ev, 3, tenant_id);
+        bindText(ev, 4, subject_type);
+        bindText(ev, 5, subject_id);
+        bindText(ev, 6, metric);
+        sqlite3_bind_int64(ev, 7, qty);
+        bindText(ev, 8, meta);
+        bindText(ev, 9, source);
         if (sqlite3_step(ev) != SQLITE_DONE) return fail("insert event failed");
 
         sqlite3_reset(day);
         sqlite3_clear_bindings(day);
         bindText(day, 1, d);
-        bindText(day, 2, subject_type);
-        bindText(day, 3, subject_id);
-        bindText(day, 4, metric);
-        sqlite3_bind_int64(day, 5, qty);
+        sqlite3_bind_int64(day, 2, tenant_id);
+        bindText(day, 3, subject_type);
+        bindText(day, 4, subject_id);
+        bindText(day, 5, metric);
+        sqlite3_bind_int64(day, 6, qty);
         if (sqlite3_step(day) != SQLITE_DONE) return fail("rollup failed");
     }
 
@@ -115,8 +119,8 @@ bool AdminDb::usageAppend(const std::string& events_json, std::string& err) {
 
 bool AdminDb::usageQuery(const std::string& from, const std::string& to,
                          const std::string& subject_type, const std::string& subject_id,
-                         const std::string& metric, bool total, std::string& json_out,
-                         std::string& err) {
+                         const std::string& metric, long long tenant_id, bool total,
+                         std::string& json_out, std::string& err) {
     if ((!from.empty() && !isDay(from)) || (!to.empty() && !isDay(to))) {
         err = "bad date";
         return false;
@@ -127,14 +131,15 @@ bool AdminDb::usageQuery(const std::string& from, const std::string& to,
     if (!subject_type.empty()) where += " AND subject_type=?";
     if (!subject_id.empty()) where += " AND subject_id=?";
     if (!metric.empty()) where += " AND metric=?";
+    if (tenant_id > 0) where += " AND tenant_id=?";
 
     std::string sql;
     if (total) {
-        sql = "SELECT subject_type,subject_id,metric,SUM(qty),SUM(events) FROM usage_daily" + where +
-              " GROUP BY subject_type,subject_id,metric ORDER BY SUM(qty) DESC LIMIT 1000";
+        sql = "SELECT tenant_id,subject_type,subject_id,metric,SUM(qty),SUM(events) FROM usage_daily" + where +
+              " GROUP BY tenant_id,subject_type,subject_id,metric ORDER BY SUM(qty) DESC LIMIT 1000";
     } else {
-        sql = "SELECT day,subject_type,subject_id,metric,qty,events FROM usage_daily" + where +
-              " ORDER BY day, subject_type, subject_id, metric LIMIT 20000";
+        sql = "SELECT day,tenant_id,subject_type,subject_id,metric,qty,events FROM usage_daily" + where +
+              " ORDER BY day, tenant_id, subject_type, subject_id, metric LIMIT 20000";
     }
 
     std::lock_guard<std::mutex> lk(mu_);
@@ -149,23 +154,26 @@ bool AdminDb::usageQuery(const std::string& from, const std::string& to,
     if (!subject_type.empty()) bindText(st, idx++, subject_type);
     if (!subject_id.empty()) bindText(st, idx++, subject_id);
     if (!metric.empty()) bindText(st, idx++, metric);
+    if (tenant_id > 0) sqlite3_bind_int64(st, idx++, tenant_id);
 
     json rows = json::array();
     while (sqlite3_step(st) == SQLITE_ROW) {
         json r;
         if (total) {
-            r["subject_type"] = (const char*)sqlite3_column_text(st, 0);
-            r["subject_id"] = (const char*)sqlite3_column_text(st, 1);
-            r["metric"] = (const char*)sqlite3_column_text(st, 2);
-            r["qty"] = sqlite3_column_int64(st, 3);
-            r["events"] = sqlite3_column_int64(st, 4);
-        } else {
-            r["day"] = (const char*)sqlite3_column_text(st, 0);
+            r["tenant_id"] = sqlite3_column_int64(st, 0);
             r["subject_type"] = (const char*)sqlite3_column_text(st, 1);
             r["subject_id"] = (const char*)sqlite3_column_text(st, 2);
             r["metric"] = (const char*)sqlite3_column_text(st, 3);
             r["qty"] = sqlite3_column_int64(st, 4);
             r["events"] = sqlite3_column_int64(st, 5);
+        } else {
+            r["day"] = (const char*)sqlite3_column_text(st, 0);
+            r["tenant_id"] = sqlite3_column_int64(st, 1);
+            r["subject_type"] = (const char*)sqlite3_column_text(st, 2);
+            r["subject_id"] = (const char*)sqlite3_column_text(st, 3);
+            r["metric"] = (const char*)sqlite3_column_text(st, 4);
+            r["qty"] = sqlite3_column_int64(st, 5);
+            r["events"] = sqlite3_column_int64(st, 6);
         }
         rows.push_back(r);
     }

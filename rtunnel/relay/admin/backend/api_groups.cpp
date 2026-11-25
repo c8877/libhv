@@ -10,6 +10,8 @@ void AdminServer::refreshGroupAcl() {
     std::set<std::string> users;
     std::set<long long> scoped_tokens;
     if (!db_.permClientRules(rules, users, scoped_tokens)) return;
+    std::map<std::string, long long> device_tenants;
+    db_.deviceTenants(device_tenants);
     std::vector<GroupAclRule> out;
     for (auto& r : rules) {
         GroupAclRule g;
@@ -22,11 +24,12 @@ void AdminServer::refreshGroupAcl() {
         g.file = r.file;
         g.svc = r.svc;
         g.token_id = r.token_id;
+        g.tenant_id = r.tenant_id;
         out.push_back(g);
         users.insert(r.user);
     }
-    callRelay([this, out, users, scoped_tokens]() {
-        relay_->setGroupAcl(out, users, scoped_tokens);
+    callRelay([this, out, users, scoped_tokens, device_tenants]() {
+        relay_->setGroupAcl(out, users, scoped_tokens, device_tenants);
         return std::string();
     });
 }
