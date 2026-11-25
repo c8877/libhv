@@ -352,6 +352,7 @@ bool AdminDb::migrate(std::string& err) {
         " burst INTEGER NOT NULL DEFAULT 0,"
         " max_sessions INTEGER NOT NULL DEFAULT 0,"
         " quota_action TEXT NOT NULL DEFAULT 'cut',"
+        " rate_kbps INTEGER NOT NULL DEFAULT 0,"
         " groups_explicit INTEGER NOT NULL DEFAULT 0,"
         " created_by TEXT NOT NULL DEFAULT '',"
         " created_ms INTEGER NOT NULL,"
@@ -515,6 +516,11 @@ bool AdminDb::migrate(std::string& err) {
     }
     if (!hasColumn("perm_groups", "ports")) {
         if (!exec("ALTER TABLE perm_groups ADD COLUMN ports TEXT NOT NULL DEFAULT '*'", err)) return false;
+    }
+    // 令牌带宽上限（kilobit/s，0 = 不限）：老库补列，默认不限，行为不变
+    if (!hasColumn("client_tokens", "rate_kbps")) {
+        if (!exec("ALTER TABLE client_tokens ADD COLUMN rate_kbps INTEGER NOT NULL DEFAULT 0", err))
+            return false;
     }
     // 多租户：老库补列。账号与设备归默认租户 1（升级前就是单租户）；
     // 用量行可能是本功能上线前产生的，没有归属，统一记 0（运营方自用/无法归属）。

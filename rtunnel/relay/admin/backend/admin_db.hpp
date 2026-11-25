@@ -59,6 +59,7 @@ struct DbTokenSpec {
     int         burst = 0;
     int         max_sessions = 0;
     std::string quota_action = "cut";
+    int         rate_kbps = 0;          // 带宽上限，kilobit/s；0 = 不限
 };
 
 struct DbUser {

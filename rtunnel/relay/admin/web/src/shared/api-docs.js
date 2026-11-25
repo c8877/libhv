@@ -462,14 +462,15 @@ export const DOCS = [
     group: 'perm', method: 'POST', path: '/api/v1/client-accounts/:id/tokens', minRole: 'manager',
     summary: '为接入账号创建 Token（配额/限速在这里）',
     params: [{ name: 'id', in: 'path', desc: '账号 ID' }],
-    note: 'rate_per_min/burst/max_sessions/quota_gb/quota_period/quota_action 可选',
+    note: 'rate_per_min/burst/max_sessions/rate_kbps/quota_gb/quota_period/quota_action 可选；'
+      + 'rate_kbps 是带宽上限（kilobit/s，0 不限），双向合计计量',
     curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"name":"box02-main","expires_in_days":180,"rate_per_min":600,"burst":100,\n       "max_sessions":16,"quota_gb":50,"quota_period":"month","quota_action":"block"}' \\\n  "$RT/api/v1/client-accounts/1/tokens"`,
   },
   {
     group: 'perm', method: 'PUT', path: '/api/v1/client-tokens/:id', minRole: 'manager',
     summary: '修改接入 Token（未传字段保持原值）',
     params: [{ name: 'id', in: 'path', desc: 'Token ID' }],
-    curl: `curl -sS -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"rate_per_min":1200,"status":"active"}' "$RT/api/v1/client-tokens/7"`,
+    curl: `curl -sS -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"rate_per_min":1200,"rate_kbps":20000,"status":"active"}' "$RT/api/v1/client-tokens/7"`,
   },
   {
     group: 'perm', method: 'POST', path: '/api/v1/client-tokens/:id/rotate', minRole: 'manager',

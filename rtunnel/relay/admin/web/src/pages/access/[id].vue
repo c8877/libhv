@@ -111,11 +111,11 @@
             <div class="muted">{{ quotaText(row) }}</div>
           </template>
         </el-table-column>
-        <el-table-column v-if="!isPhone" label="频率 · 并发" min-width="150" prop="rate_per_min"
+        <el-table-column v-if="!isPhone" label="频率 · 并发 · 带宽" min-width="170" prop="rate_per_min"
                          sortable :sort-orders="NUM_ORDERS">
           <template #default="{ row }">
             {{ row.rate_per_min ? row.rate_per_min + '/分' : '频率不限' }} · 并发 {{ row.max_sessions || '不限' }}
-            <div class="muted">{{ row.rate_per_min ? '突发 ' + (row.burst || row.rate_per_min) : '无频率限制' }}</div>
+            <div class="muted">{{ row.rate_kbps ? (row.rate_kbps / 1000).toFixed(2) + ' Mbps' : '带宽不限' }}</div>
           </template>
         </el-table-column>
         <el-table-column v-if="!isPhone" label="最近使用" min-width="150" prop="last_used_ms"
@@ -217,6 +217,10 @@
         <el-form-item label="并发会话">
           <el-input-number v-model="tokForm.max_sessions" :min="0" :step="1" style="width: 180px" />
         </el-form-item>
+        <el-form-item label="带宽上限">
+          <el-input-number v-model="tokForm.rate_mbps" :min="0" :precision="2" :step="1" style="width: 180px" />
+          <span class="unit">Mbps（0 = 不限）</span>
+        </el-form-item>
       </el-form>
       <div class="muted">0 表示不限；修改周期会清零本周期已用流量。</div>
       <template #footer>
@@ -275,6 +279,7 @@ const tokMode = ref('create')
 const tokForm = reactive({
   id: 0, name: '', expires_in_days: 30, expires_at: '', quota_gb: 0,
   quota_period: 'monthly', quota_action: 'cut', rate_per_min: 0, burst: 0, max_sessions: 0,
+  rate_mbps: 0,
 })
 const tokFormRef = ref(null)
 const tokRules = {
@@ -473,6 +478,7 @@ function resetTokenForm(t) {
   tokForm.rate_per_min = t ? (t.rate_per_min || 0) : 0
   tokForm.burst = t ? (t.burst || 0) : 0
   tokForm.max_sessions = t ? (t.max_sessions || 0) : 0
+  tokForm.rate_mbps = t && t.rate_kbps ? Number((t.rate_kbps / 1000).toFixed(2)) : 0
 }
 
 function openTokenCreate() {
@@ -496,6 +502,7 @@ function tokenBody() {
     rate_per_min: Number(tokForm.rate_per_min) || 0,
     burst: Number(tokForm.burst) || 0,
     max_sessions: Number(tokForm.max_sessions) || 0,
+    rate_kbps: Math.round((Number(tokForm.rate_mbps) || 0) * 1000),
   }
   if (tokMode.value === 'create') body.expires_in_days = Number(tokForm.expires_in_days) || 0
   else body.expires_at_ms = Number(tokForm.expires_at) || 0

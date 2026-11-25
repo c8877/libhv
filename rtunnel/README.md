@@ -173,6 +173,7 @@ python3 rtunnel/tests/stream_idle_e2e.py # 流空闲回收：闲置 RESET、活�
 python3 rtunnel/tests/permission_e2e.py  # 权限：混合组的端口范围、WS 消息按会话判定身份
 python3 rtunnel/tests/usage_e2e.py       # 用量：流量/会话/设备在线计量、日聚合、权限
 python3 rtunnel/tests/tenant_e2e.py      # 多租户：设备归属、跨租户拒绝、停用租户、用量归集
+python3 rtunnel/tests/bandwidth_e2e.py   # 带宽整形：限速生效、数据不丢、不限速不受影响
 python3 rtunnel/tests/compat_e2e.py      # HELLO 版本区间、低版本拒绝、高版本向前兼容
 python3 rtunnel/tests/protocol_doc_test.py  # 协议文档覆盖率（帧类型/常量）
 build/bin/rtunnel-endpoint-test          # --server 地址解析单测
@@ -205,6 +206,10 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
   `usage_events` 并累加 `usage_daily`；`GET /api/v1/usage` 按日或总计查询，需要 `usage.read`。
   「监控 → 用量」有报表页。原始流水保留 180 天（`usage.raw_retention_days`），日聚合长期保留。
   流量按载荷字节双向统计；管理台自身的终端/代理不计入客户用量。
+- **带宽整形**：令牌可设 `rate_kbps`（kilobit/s，0 不限），relay 按令牌做令牌桶，
+  超额时暂停数据来源侧的读（上行暂停客户端连接、下行暂停设备连接），靠 TCP 窗口回压，
+  不丢帧；容量为 200ms 的量（最小 8 KiB），单次暂停不超过 500ms。适合按流量计费时
+  防止单用户打满出口；管理台在「接入账号 → Token」里按 Mbps 填。
 - **租户**：设备与接入账号各归属一个租户（默认租户 id=1），数据面按设备租户强制隔离，
   接入令牌只看得到、连得到本租户设备；停用租户等于停用其下全部接入账号并断开在线连接。
   详见 `../docs/design/rtunnel.md` §13.11。

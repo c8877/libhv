@@ -283,6 +283,7 @@ void RelayServer::setAuthPolicies(const std::string& json) {
         p.max_sessions = item.value("max_sessions", 0);
         p.quota_action = item.value("quota_action", std::string()) == "block" ? 1 : 0;
         p.tenant_id = item.value("tenant_id", (long long)1);
+        p.rate_bps = item.value("rate_bps", (long long)0);
         if (p.hash.empty()) continue;
 
         auto it = token_usage.find(p.id);
@@ -292,6 +293,7 @@ void RelayServer::setAuthPolicies(const std::string& json) {
             u.reported_bytes = p.used_base;   // DB 里已有的用量不再重复上报
             u.period_start_ms = p.period_start_ms;
             u.tenant_id = p.tenant_id;
+            u.rate_last_ms = hloop_now_ms(loop);
             token_usage[p.id] = u;
         } else if (p.period_start_ms > 0 && p.period_start_ms > it->second.period_start_ms) {
             // 周期已重置（或管理员改了周期），以 DB 为准；未上报的增量仍记到旧周期
@@ -425,6 +427,56 @@ void RelayServer::tokenApplyCuts() {
     std::set<long long> ids;
     ids.swap(pending_token_cuts);
     for (long long id : ids) tokenDropConnections(id, rtnp::QUOTA_EXCEEDED, "token quota exceeded");
+}
+
+// 带宽整形：按令牌做令牌桶（容量 = 200ms 的量，最小 8 KiB）。
+// 超额时暂停“数据来源”那一侧的读，TCP 窗口自然把压力传回发送方；
+// 上行来源是客户端连接（精确到令牌），下行来源是设备连接（该设备上的流一起等），
+// 单次暂停上限 500ms，由 50ms 的 rateSweep 恢复。
+void RelayServer::rateCheck(RelayConn* tokenConn, RelayConn* src, uint32_t n) {
+    if (tokenConn == nullptr || src == nullptr || n == 0) return;
+    long long tid = tokenConn->token_id;
+    if (tid <= 0) return;
+    const TokenPolicy* p = tokenById(tid);
+    if (p == nullptr || p->rate_bps <= 0) return;
+    auto it = token_usage.find(tid);
+    if (it == token_usage.end()) return;
+    TokenUsage& u = it->second;
+
+    uint64_t now = hloop_now_ms(loop);
+    if (u.rate_last_ms == 0) {
+        u.rate_tokens = (double)p->rate_bps * 0.2;
+        u.rate_last_ms = now;
+    }
+    if (now > u.rate_last_ms) {
+        u.rate_tokens += (double)p->rate_bps * (double)(now - u.rate_last_ms) / 1000.0;
+        double cap = (double)p->rate_bps * 0.2;
+        if (cap < 8192.0) cap = 8192.0;
+        if (u.rate_tokens > cap) u.rate_tokens = cap;
+        u.rate_last_ms = now;
+    }
+    u.rate_tokens -= (double)n;
+    if (u.rate_tokens >= 0) return;
+
+    int wait_ms = (int)(-u.rate_tokens * 1000.0 / (double)p->rate_bps) + 1;
+    if (wait_ms < 10) wait_ms = 10;
+    if (wait_ms > 500) wait_ms = 500;
+    uint64_t until = now + (uint64_t)wait_ms;
+    if (src->rate_paused_until == 0) {
+        hio_read_stop(src->io);
+        src->rate_paused_until = until;
+    } else if (until > src->rate_paused_until) {
+        src->rate_paused_until = until;
+    }
+}
+
+void RelayServer::rateSweep() {
+    uint64_t now = hloop_now_ms(loop);
+    for (RelayConn* c = conns; c; c = c->next_all) {
+        if (c->rate_paused_until == 0 || now < c->rate_paused_until) continue;
+        c->rate_paused_until = 0;
+        hio_read_start(c->io);
+    }
 }
 
 void RelayServer::tokenAddBytes(RelayConn* c, uint32_t n) {
@@ -2046,7 +2098,11 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             }
             forward(s->c, f->type, s->c_sid, f->payload, f->len, f->flags);
             s->last_active_ms = hloop_now_ms(loop);
-            if (f->type == rtnp::DATA) { tokenAddBytes(c, f->len); s->bytes_up += f->len; }
+            if (f->type == rtnp::DATA) {
+                tokenAddBytes(c, f->len);
+                rateCheck(c, c, f->len);
+                s->bytes_up += f->len;
+            }
             if (f->type == rtnp::CLOSE) s->a_closed = 1;
             if (f->type == rtnp::RESET) { s->a_closed = s->c_closed = 1; }
             if (s->a_closed && s->c_closed) streamRemove(s);
@@ -2085,7 +2141,11 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         }
         forward(s->a, f->type, s->a_sid, f->payload, f->len, f->flags);
         s->last_active_ms = hloop_now_ms(loop);
-        if (f->type == rtnp::DATA) { tokenAddBytes(s->a, f->len); s->bytes_down += f->len; }
+        if (f->type == rtnp::DATA) {
+            tokenAddBytes(s->a, f->len);
+            rateCheck(s->a, c, f->len);
+            s->bytes_down += f->len;
+        }
         if (f->type == rtnp::CLOSE) s->c_closed = 1;
         if (f->type == rtnp::RESET) { s->a_closed = s->c_closed = 1; }
         if (s->a_closed && s->c_closed) streamRemove(s);
@@ -2410,6 +2470,11 @@ int RelayServer::run(int argc, char** argv) {
     hevent_set_userdata(t, this);
     // 过期 / 配额的兜底扫描（限流与计量本身在收发路径上实时完成）
     htimer_t* tk = htimer_add(loop, tokenCb, 5000, INFINITE);
+    // 带宽整形恢复：50ms 粒度，只有被暂停的连接才会被遍历到
+    htimer_t* rt = htimer_add(loop,
+                              [](htimer_t* t) { ((RelayServer*)hevent_userdata(t))->rateSweep(); }, 50,
+                              INFINITE);
+    hevent_set_userdata(rt, this);
     hevent_set_userdata(tk, this);
     hloop_run(loop);
     if (admin) {

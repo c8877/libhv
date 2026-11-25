@@ -34,6 +34,8 @@ DbTokenSpec specFromJson(const json& req, DbTokenSpec def) {
         def.burst = req["burst"].get<int>();
     if (req.contains("max_sessions") && req["max_sessions"].is_number())
         def.max_sessions = req["max_sessions"].get<int>();
+    if (req.contains("rate_kbps") && req["rate_kbps"].is_number())
+        def.rate_kbps = req["rate_kbps"].get<int>();
     if (req.contains("quota_action") && req["quota_action"].is_string())
         def.quota_action = req["quota_action"].get<std::string>();
     return def;

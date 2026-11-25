@@ -44,13 +44,14 @@ json tokenJson(sqlite3_stmt* st, bool with_secret_fields = false) {
     t["last_used_ip"] = dbColText(st, 17);
     t["revoked_ms"] = dbColInt(st, 18);
     if (with_secret_fields) t["token_hash"] = dbColText(st, 19);
+    t["rate_kbps"] = (int)dbColInt(st, 20);
     return t;
 }
 
 const char* kTokenSelect =
     "SELECT id,account_id,name,token_prefix,status,expires_at_ms,quota_bytes,quota_period,"
     "period_start_ms,used_bytes,rate_per_min,burst,max_sessions,quota_action,created_by,"
-    "created_ms,last_used_ms,last_used_ip,revoked_ms,token_hash FROM client_tokens";
+    "created_ms,last_used_ms,last_used_ip,revoked_ms,token_hash,rate_kbps FROM client_tokens";
 
 } // namespace
 
@@ -273,7 +274,8 @@ bool AdminDb::clientTokenCreate(long long account_id, const DbTokenSpec& spec, c
     const char* sql =
         "INSERT INTO client_tokens(account_id,name,token_hash,token_prefix,status,expires_at_ms,"
         "quota_bytes,quota_period,period_start_ms,used_bytes,rate_per_min,burst,max_sessions,"
-        "quota_action,created_by,created_ms) VALUES(?,?,?,?,'active',?,?,?,?,0,?,?,?,?,?,?)";
+        "quota_action,rate_kbps,created_by,created_ms)"
+        " VALUES(?,?,?,?,'active',?,?,?,?,0,?,?,?,?,?,?,?)";
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
     sqlite3_bind_int64(st, 1, account_id);
     sqlite3_bind_text(st, 2, spec.name.c_str(), -1, SQLITE_TRANSIENT);
@@ -287,8 +289,9 @@ bool AdminDb::clientTokenCreate(long long account_id, const DbTokenSpec& spec, c
     sqlite3_bind_int(st, 10, spec.burst);
     sqlite3_bind_int(st, 11, spec.max_sessions);
     sqlite3_bind_text(st, 12, spec.quota_action == "block" ? "block" : "cut", -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 13, by.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 14, nowMs());
+    sqlite3_bind_int(st, 13, spec.rate_kbps > 0 ? spec.rate_kbps : 0);
+    sqlite3_bind_text(st, 14, by.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 15, nowMs());
     bool ok = sqlite3_step(st) == SQLITE_DONE;
     if (!ok) err = sqlite3_errmsg(db_);
     sqlite3_finalize(st);
@@ -310,7 +313,7 @@ bool AdminDb::clientTokenSpec(long long id, DbTokenSpec& spec, long long& accoun
     std::lock_guard<std::mutex> lk(mu_);
     sqlite3_stmt* st = nullptr;
     const char* sql = "SELECT account_id,name,expires_at_ms,quota_bytes,quota_period,rate_per_min,"
-                      "burst,max_sessions,quota_action,status FROM client_tokens WHERE id=?";
+                      "burst,max_sessions,quota_action,status,rate_kbps FROM client_tokens WHERE id=?";
     if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) { err = "db error"; return false; }
     sqlite3_bind_int64(st, 1, id);
     if (sqlite3_step(st) != SQLITE_ROW) { sqlite3_finalize(st); err = "token not found"; return false; }
@@ -324,6 +327,7 @@ bool AdminDb::clientTokenSpec(long long id, DbTokenSpec& spec, long long& accoun
     spec.max_sessions = (int)dbColInt(st, 7);
     spec.quota_action = dbColText(st, 8);
     if (status != nullptr) *status = dbColText(st, 9);
+    spec.rate_kbps = (int)dbColInt(st, 10);
     sqlite3_finalize(st);
     return true;
 }
@@ -341,7 +345,7 @@ bool AdminDb::clientTokenUpdate(long long id, const DbTokenSpec& spec, const std
     // 周期变化时重置计量窗口，避免旧周期的用量落到新周期
     const char* sql =
         "UPDATE client_tokens SET name=?,status=?,expires_at_ms=?,quota_bytes=?,quota_period=?,"
-        "rate_per_min=?,burst=?,max_sessions=?,quota_action=?,"
+        "rate_per_min=?,burst=?,max_sessions=?,quota_action=?,rate_kbps=?,"
         "period_start_ms=CASE WHEN quota_period<>? THEN ? ELSE period_start_ms END,"
         "used_bytes=CASE WHEN quota_period<>? THEN 0 ELSE used_bytes END,"
         "revoked_ms=CASE WHEN ?='revoked' AND revoked_ms=0 THEN ? ELSE revoked_ms END "
@@ -359,12 +363,13 @@ bool AdminDb::clientTokenUpdate(long long id, const DbTokenSpec& spec, const std
     sqlite3_bind_int(st, 7, spec.burst);
     sqlite3_bind_int(st, 8, spec.max_sessions);
     sqlite3_bind_text(st, 9, spec.quota_action == "block" ? "block" : "cut", -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 10, per_name, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 11, period_start);
-    sqlite3_bind_text(st, 12, per_name, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(st, 13, status.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(st, 14, now);
-    sqlite3_bind_int64(st, 15, id);
+    sqlite3_bind_int(st, 10, spec.rate_kbps > 0 ? spec.rate_kbps : 0);
+    sqlite3_bind_text(st, 11, per_name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 12, period_start);
+    sqlite3_bind_text(st, 13, per_name, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(st, 14, status.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int64(st, 15, now);
+    sqlite3_bind_int64(st, 16, id);
     bool ok = sqlite3_step(st) == SQLITE_DONE && sqlite3_changes(db_) > 0;
     if (!ok) err = "token not found";
     sqlite3_finalize(st);
@@ -465,7 +470,8 @@ bool AdminDb::clientAuthPolicies(std::string& json_out) {
         "SELECT t.id,t.account_id,a.username,t.token_hash,t.token_prefix,t.name,t.status,"
         "t.expires_at_ms,t.quota_bytes,t.quota_period,t.period_start_ms,t.used_bytes,"
         "t.rate_per_min,t.burst,t.max_sessions,t.quota_action,"
-        "CASE WHEN COALESCE(tt.status,'active')='active' THEN a.status ELSE 'disabled' END,a.tenant_id "
+        "CASE WHEN COALESCE(tt.status,'active')='active' THEN a.status ELSE 'disabled' END,a.tenant_id,"
+        "t.rate_kbps "
         "FROM client_tokens t JOIN client_accounts a ON a.id=t.account_id "
         "LEFT JOIN tenants tt ON tt.id=a.tenant_id "
         "WHERE t.status!='revoked'";
@@ -492,6 +498,8 @@ bool AdminDb::clientAuthPolicies(std::string& json_out) {
         t["quota_action"] = dbColText(st, 15);
         t["account_status"] = dbColText(st, 16);
         t["tenant_id"] = dbColInt(st, 17);
+        // 带宽以字节/秒下发，relay 只做限速不需要知道单位换算
+        t["rate_bps"] = (long long)dbColInt(st, 18) * 1000 / 8;
         arr.push_back(t);
     }
     sqlite3_finalize(st);

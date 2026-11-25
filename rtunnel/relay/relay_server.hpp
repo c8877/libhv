@@ -91,6 +91,7 @@ struct RelayConn {
     char         token_prefix[24] = {0};
     int          peer_proto = 0;         // HELLO 里的语义版本，0 表示未握手
     uint64_t     usage_online_ms = 0;    // 上次计入在线时长的单调时钟
+    uint64_t     rate_paused_until = 0;  // 限速暂停读的到期时间（单调时钟），0 = 未暂停
 };
 
 // OPEN_SHELL 到 a:<user> 但 agent 尚未注册时挂起，等 A 侧 agent 上线后继续
@@ -124,6 +125,7 @@ struct TokenPolicy {
     int         max_sessions = 0;
     int         quota_action = 0;        // 0 cut, 1 block
     long long   tenant_id = 1;           // 归属租户（用量归属）
+    long long   rate_bps = 0;            // 带宽上限，字节/秒；0 = 不限
 };
 
 struct TokenUsage {
@@ -136,6 +138,8 @@ struct TokenUsage {
     int64_t  reported_bytes = 0;   // 已推给管理面的字节，增量上报用
     int64_t  last_report_ms = 0;   // 上次上报时间（墙钟）：按量/按时节流
     long long tenant_id = 0;       // 归属租户，随策略下发
+    double    rate_tokens = 0;     // 带宽令牌桶余额（字节）
+    uint64_t  rate_last_ms = 0;    // 上次补充时间（单调时钟）
     char     last_ip[64] = {0};
 };
 
@@ -383,6 +387,9 @@ private:
     void         usagePushRaw(const char* subject_type, const std::string& subject_id,
                               const char* metric, long long qty, const std::string& meta,
                               const std::string& day, long long tenant_id);
+    // 带宽整形：tokenConn 带令牌（取限额），src 是被暂停读取的那一侧连接
+    void         rateCheck(RelayConn* tokenConn, RelayConn* src, uint32_t n);
+    void         rateSweep();
     void         usageFlushTokenBytes(long long token_id, bool force);
     void         usageOnStreamClose(RelayStream* s);
     void         usageOnAgentClose(RelayConn* c);
