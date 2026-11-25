@@ -220,6 +220,67 @@ def main():
         ids = [d.get("devid") for d in items]
         e2e.check("tenant: 租户 2 令牌只看本租户设备", "dev1" in ids, str(ids))
 
+        # 3.5) 租户套餐：并发上限（数据面）
+        call("PUT", "/api/v1/tenants/%d" % tid, {"name": "租户二", "max_sessions": 1})
+        time.sleep(0.6)
+        s1, rep = e2e.socks5_open(socks_ep, "dev1", echo_port, timeout=6)
+        e2e.check("quota: 首个会话可建", s1 is not None, "rep=%s" % rep)
+        s2, rep2 = e2e.socks5_open(socks_ep, "dev1", echo_port, timeout=6)
+        e2e.check("quota: 超出并发被拒", s2 is None and rep2 != 0, "rep=%s" % rep2)
+        if s1 is not None:
+            s1.close()
+        call("PUT", "/api/v1/tenants/%d" % tid, {"name": "租户二", "max_sessions": 0})
+        time.sleep(0.5)
+
+        # 3.6) 租户月流量上限：超过后断开并拒绝新会话
+        call("PUT", "/api/v1/tenants/%d" % tid, {"name": "租户二", "quota_bytes": 65536})
+        time.sleep(0.6)
+        s3, rep3 = e2e.socks5_open(socks_ep, "dev1", echo_port, timeout=6)
+        cut, received, detail = False, 0, "rep=%s" % rep3
+        if s3 is not None:
+            s3.settimeout(5)
+            try:
+                s3.sendall(b"q" * 131072)
+                while True:
+                    chunk = s3.recv(65536)
+                    if not chunk:
+                        cut = True
+                        break
+                    received += len(chunk)
+                    if received >= 131072:
+                        break
+            except OSError as e:
+                cut, detail = True, str(e)
+            finally:
+                s3.close()
+        logged = e2e.wait_log(os.path.join(LOG, "relay.log"),
+                              "tenant %d quota exceeded" % tid, timeout=3)
+        e2e.check("quota: 租户流量到顶被切断", s3 is not None and (cut or logged),
+                  "recv=%d cut=%s logged=%s detail=%s" % (received, cut, logged, detail))
+        ok, last = wait_roundtrip(socks_ep, echo_port, False, 8)
+        e2e.check("quota: 到顶后拒绝新会话", ok, last)
+        # 放开限额（先清用量归属，避免影响后续停用测试）
+        call("PUT", "/api/v1/tenants/%d" % tid, {"name": "租户二", "quota_bytes": 0})
+        time.sleep(0.5)
+
+        # 3.7) 设备数上限：分配给已满租户被拒
+        dev2 = subprocess.Popen(
+            [os.path.join(BIN, "rtunnel-agent"), "--server", "127.0.0.1", "--port", str(relay_port),
+             "--devid", "dev2", "--allow", str(echo_port),
+             "--config-file", os.path.join(LOG, "agent2.json"), "--verbose"],
+            stdout=logs["agent"], stderr=subprocess.STDOUT, env=env)
+        procs.append(dev2)
+        time.sleep(1.5)
+        call("PUT", "/api/v1/tenants/%d" % tid, {"name": "租户二", "max_devices": 1})
+        code = 200
+        try:
+            call("PUT", "/api/v1/permission/devices/dev2",
+                 {"name": "", "enabled": True, "tenant_id": tid})
+        except urllib.error.HTTPError as e:
+            code = e.code
+        e2e.check("quota: 设备数达上限后拒绝分配", code == 400, "status=%d" % code)
+        call("PUT", "/api/v1/tenants/%d" % tid, {"name": "租户二", "max_devices": 0})
+
         # 4) 停用租户 → 令牌认证被拒（relay 5s 内下发策略并断开旧连接）
         call("PUT", "/api/v1/tenants/%d" % tid, {"name": "租户二", "status": "disabled"})
         blocked, last = False, ""

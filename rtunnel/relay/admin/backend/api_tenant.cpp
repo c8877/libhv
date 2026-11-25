@@ -48,9 +48,22 @@ void AdminServer::handleTenantUpdate(const HttpContextPtr& ctx, const std::strin
     if (id <= 0) { apiBad(ctx, "bad id"); return; }
     json req = json::parse(ctx->body(), nullptr, false);
     if (req.is_discarded() || !req.is_object()) { apiBad(ctx, "bad json"); return; }
+    // 缺省字段表示保持原值（-1），避免只改名称/状态时把套餐清空
+    int max_devices = -1;
+    int max_sessions = -1;
+    long long quota_bytes = -1;
+    if (req.contains("max_devices") && req["max_devices"].is_number())
+        max_devices = req["max_devices"].get<int>();
+    if (req.contains("max_sessions") && req["max_sessions"].is_number())
+        max_sessions = req["max_sessions"].get<int>();
+    if (req.contains("quota_bytes") && req["quota_bytes"].is_number())
+        quota_bytes = req["quota_bytes"].get<long long>();
+    else if (req.contains("quota_gb") && req["quota_gb"].is_number())
+        quota_bytes = (long long)(req["quota_gb"].get<double>() * 1073741824.0 + 0.5);
     std::string err;
     if (!db_.tenantUpdate(id, req.value("name", ""), req.value("note", ""),
-                          req.value("status", std::string("active")), err)) {
+                          req.value("status", std::string("active")), max_devices, max_sessions,
+                          quota_bytes, err)) {
         apiBad(ctx, err);
         return;
     }

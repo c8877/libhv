@@ -322,6 +322,11 @@ bool AdminDb::migrate(std::string& err) {
         " name TEXT NOT NULL UNIQUE,"
         " note TEXT NOT NULL DEFAULT '',"
         " status TEXT NOT NULL DEFAULT 'active',"
+        // 套餐：0 表示不限。设备数按已登记设备计（默认租户不受限），
+        // 并发与月流量由 relay 在数据面强制
+        " max_devices INTEGER NOT NULL DEFAULT 0,"
+        " max_sessions INTEGER NOT NULL DEFAULT 0,"
+        " quota_bytes INTEGER NOT NULL DEFAULT 0,"
         " created_ms INTEGER NOT NULL,"
         " updated_ms INTEGER NOT NULL);"
         "INSERT OR IGNORE INTO tenants(id,name,note,status,created_ms,updated_ms)"
@@ -561,6 +566,18 @@ bool AdminDb::migrate(std::string& err) {
     }
     if (!hasColumn("res_devices", "tenant_id")) {
         if (!exec("ALTER TABLE res_devices ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 1", err))
+            return false;
+    }
+    if (!hasColumn("tenants", "max_devices")) {
+        if (!exec("ALTER TABLE tenants ADD COLUMN max_devices INTEGER NOT NULL DEFAULT 0", err))
+            return false;
+    }
+    if (!hasColumn("tenants", "max_sessions")) {
+        if (!exec("ALTER TABLE tenants ADD COLUMN max_sessions INTEGER NOT NULL DEFAULT 0", err))
+            return false;
+    }
+    if (!hasColumn("tenants", "quota_bytes")) {
+        if (!exec("ALTER TABLE tenants ADD COLUMN quota_bytes INTEGER NOT NULL DEFAULT 0", err))
             return false;
     }
     if (!hasColumn("usage_events", "tenant_id")) {

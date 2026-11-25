@@ -172,7 +172,7 @@ bash rtunnel/tests/storage_e2e.sh        # 目录树按路径/层级、子项求
 python3 rtunnel/tests/stream_idle_e2e.py # 流空闲回收：闲置 RESET、活跃流保留
 python3 rtunnel/tests/permission_e2e.py  # 权限：混合组的端口范围、WS 消息按会话判定身份
 python3 rtunnel/tests/usage_e2e.py       # 用量：流量/会话/设备在线计量、日聚合、权限
-python3 rtunnel/tests/tenant_e2e.py      # 多租户：设备归属、跨租户拒绝、停用租户、用量归集
+python3 rtunnel/tests/tenant_e2e.py      # 多租户：隔离、停用、用量归集、套餐（设备/并发/流量）
 python3 rtunnel/tests/bandwidth_e2e.py   # 带宽整形：限速生效、数据不丢、不限速不受影响
 python3 rtunnel/tests/billing_e2e.py     # 费用：价目、金额、按租户汇总、结算单状态机与导出
 python3 rtunnel/tests/compat_e2e.py      # HELLO 版本区间、低版本拒绝、高版本向前兼容
@@ -218,6 +218,8 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
   出账后不随用量变化；可导出 CSV 交给财务。仍未接支付与发票。
 - **租户**：设备与接入账号各归属一个租户（默认租户 id=1），数据面按设备租户强制隔离，
   接入令牌只看得到、连得到本租户设备；停用租户等于停用其下全部接入账号并断开在线连接。
+  租户可设套餐：设备上限（分配时校验）、并发上限、月流量上限（relay 数据面强制，超流量
+  断开该租户全部令牌并拒绝新会话）；0 表示不限。
   详见 `../docs/design/rtunnel.md` §13.11。
 - **自身指标**：`GET /metrics` 输出 Prometheus 文本，包含在线设备/会话/流、累计连接与认证失败、
   收发帧与转发字节、打开/失败/空闲回收的流、管理面 HTTP 派发耗时、SQLite 语句耗时与慢查询、

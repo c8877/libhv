@@ -261,6 +261,31 @@ void RelayServer::setAuthPolicies(const std::string& json) {
             account_active[it.key()] = it.value() == "active" ? 1 : 0;
         }
     }
+    // 租户套餐：并发与月流量在数据面强制。used_bytes 是成员令牌当前周期用量之和，
+    // 用作重启后的下界（本地内存里的值只会更大）。
+    tenant_limit.clear();
+    if (doc.contains("tenants") && doc["tenants"].is_object()) {
+        long long month_start =
+            rtutil::tokenPeriodStart(rtutil::PERIOD_MONTHLY, (long long)time(NULL) * 1000);
+        for (auto it = doc["tenants"].begin(); it != doc["tenants"].end(); ++it) {
+            long long tid = atoll(it.key().c_str());
+            if (tid <= 0 || !it.value().is_object()) continue;
+            TenantLimit l;
+            l.max_devices = it.value().value("max_devices", 0);
+            l.max_sessions = it.value().value("max_sessions", 0);
+            l.quota_bytes = it.value().value("quota_bytes", (long long)0);
+            tenant_limit[tid] = l;
+            TenantUsage& tu = tenant_usage[tid];
+            long long base = it.value().value("used_bytes", (long long)0);
+            if (tu.period_start_ms != month_start) {
+                tu.used_bytes = base;
+                tu.period_start_ms = month_start;
+            } else if (base > tu.used_bytes) {
+                tu.used_bytes = base;
+            }
+            tenant_period_start = month_start;
+        }
+    }
     std::unordered_map<std::string, TokenPolicy> next;
     for (auto& item : doc["tokens"]) {
         if (!item.is_object()) continue;
@@ -311,6 +336,9 @@ void RelayServer::setAuthPolicies(const std::string& json) {
             // 落库值比本地大（例如重启后），取大者
             it->second.used_bytes = p.used_base;
         }
+        // 账号换租户后，用量归属跟着走（租户统计与断连都读这里）
+        auto uit = token_usage.find(p.id);
+        if (uit != token_usage.end()) uit->second.tenant_id = p.tenant_id;
         next[p.hash] = p;
     }
     token_cache = std::move(next);
@@ -381,6 +409,14 @@ TokenPolicy* RelayServer::tokenById(long long id) {
 
 void RelayServer::tokenSweep() {
     uint64_t now = (uint64_t)time(NULL) * 1000;
+
+    // 租户月流量跨月归零（配额是自然月）
+    long long month_start = rtutil::tokenPeriodStart(rtutil::PERIOD_MONTHLY, (int64_t)now);
+    if (month_start != tenant_period_start) {
+        for (auto& kv : tenant_usage) kv.second.used_bytes = 0;
+        tenant_period_start = month_start;
+    }
+
     for (auto it = token_cache.begin(); it != token_cache.end();) {
         TokenPolicy& p = it->second;
         bool expired = p.status != 0 || !p.account_active ||
@@ -423,10 +459,28 @@ void RelayServer::tokenDropConnections(long long token_id, uint16_t code, const 
 }
 
 void RelayServer::tokenApplyCuts() {
+    if (!pending_tenant_cuts.empty()) {
+        std::set<long long> tenants;
+        tenants.swap(pending_tenant_cuts);
+        std::vector<long long> victims;
+        for (auto& kv : token_usage) {
+            if (tenants.count(kv.second.tenant_id)) victims.push_back(kv.first);
+        }
+        for (long long id : victims)
+            tokenDropConnections(id, rtnp::QUOTA_EXCEEDED, "tenant quota exceeded");
+    }
     if (pending_token_cuts.empty()) return;
     std::set<long long> ids;
     ids.swap(pending_token_cuts);
     for (long long id : ids) tokenDropConnections(id, rtnp::QUOTA_EXCEEDED, "token quota exceeded");
+}
+
+int RelayServer::tenantSessions(long long tenant_id) const {
+    int n = 0;
+    for (auto& kv : token_usage) {
+        if (kv.second.tenant_id == tenant_id) n += kv.second.active_sessions;
+    }
+    return n;
 }
 
 // 带宽整形：按令牌做令牌桶（容量 = 200ms 的量，最小 8 KiB）。
@@ -489,6 +543,27 @@ void RelayServer::tokenAddBytes(RelayConn* c, uint32_t n) {
     snprintf(u.last_ip, sizeof(u.last_ip), "%s", c->remote_addr);
 
     const TokenPolicy* p = tokenById(c->token_id);
+
+    // 租户月度流量：成员令牌累加；到顶后断开该租户全部令牌（事件循环末尾统一处理）
+    if (p != nullptr && p->tenant_id > 0) {
+        TenantUsage& tu = tenant_usage[p->tenant_id];
+        if (tenant_period_start > 0 && tu.period_start_ms != tenant_period_start) {
+            tu.used_bytes = 0;
+            tu.period_start_ms = tenant_period_start;
+        }
+        tu.used_bytes += n;
+        auto lt = tenant_limit.find(p->tenant_id);
+        if (lt != tenant_limit.end() && lt->second.quota_bytes > 0 &&
+            tu.used_bytes >= lt->second.quota_bytes &&
+            pending_tenant_cuts.count(p->tenant_id) == 0) {
+            logf_("[relay] tenant %lld quota exceeded (%lld bytes)", (long long)p->tenant_id,
+                  (long long)tu.used_bytes);
+            pending_tenant_cuts.insert(p->tenant_id);
+            htimer_t* t = htimer_add(loop, tokenCutCb, 1, 1);
+            hevent_set_userdata(t, this);
+        }
+    }
+
     if (p == nullptr || p->quota_bytes <= 0) return;
     if (u.used_bytes < p->quota_bytes) return;
     if (p->quota_action == 1) return;   // block：已有会话继续，只拒绝新 OPEN
@@ -1811,6 +1886,31 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
                 registryRemove(old);
                 hio_close(old->io);
             }
+            // 租户在线设备席位：管理台按需 agent（a:）不占席位
+            if (strncmp(c->devid, "a:", 2) != 0) {
+                long long tid = 1;   // 未登记设备按默认租户
+                auto dt = acl_device_tenant.find(c->devid);
+                if (dt != acl_device_tenant.end()) tid = dt->second;
+                auto lt = tenant_limit.find(tid);
+                if (lt != tenant_limit.end() && lt->second.max_devices > 0) {
+                    int n = 0;
+                    for (RelayConn* o = agents; o; o = o->reg_next) {
+                        if (!o->authed || strncmp(o->devid, "a:", 2) == 0) continue;
+                        long long ot = 1;
+                        auto od = acl_device_tenant.find(o->devid);
+                        if (od != acl_device_tenant.end()) ot = od->second;
+                        if (ot == tid) ++n;
+                    }
+                    if (n >= lt->second.max_devices) {
+                        logf_("[relay] tenant %lld device limit reached, reject %s", (long long)tid,
+                              c->devid);
+                        sendErr(c->io, rtnp::AUTH_FAIL, 0, rtnp::LIMIT_EXCEEDED,
+                                "tenant device limit reached");
+                        hio_close(c->io);
+                        return;
+                    }
+                }
+            }
             c->authed = 1;
             c->usage_online_ms = hloop_now_ms(loop);
             if (c->hs_timer) { htimer_del(c->hs_timer); c->hs_timer = NULL; }
@@ -2016,6 +2116,25 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
                     if (tp->quota_action == 1 && tp->quota_bytes > 0 && tu.used_bytes >= tp->quota_bytes) {
                         sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::QUOTA_EXCEEDED, "token quota exceeded");
                         return;
+                    }
+                    // 租户套餐：并发与月流量，超限一律拒绝新 OPEN
+                    auto lt = tenant_limit.find(tp->tenant_id);
+                    if (lt != tenant_limit.end()) {
+                        if (lt->second.max_sessions > 0 &&
+                            tenantSessions(tp->tenant_id) >= lt->second.max_sessions) {
+                            sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::SESSION_LIMIT,
+                                    "tenant session limit reached");
+                            return;
+                        }
+                        if (lt->second.quota_bytes > 0) {
+                            auto tut = tenant_usage.find(tp->tenant_id);
+                            if (tut != tenant_usage.end() &&
+                                tut->second.used_bytes >= lt->second.quota_bytes) {
+                                sendErr(c->io, rtnp::OPEN_FAIL, f->sid, rtnp::QUOTA_EXCEEDED,
+                                        "tenant quota exceeded");
+                                return;
+                            }
+                        }
                     }
                 }
             }

@@ -724,10 +724,11 @@ export const DOCS = [
   },
   {
     group: 'sys', method: 'GET', path: '/api/v1/tenants', minRole: 'manager',
-    summary: '租户列表（账号数、设备数、在线数）',
-    note: '租户是计费与设备归属边界。设备与接入账号各归属一个租户，接入令牌只能访问本租户设备。',
+    summary: '租户列表（账号数、设备数、在线数、套餐与当月用量）',
+    note: '租户是计费与设备归属边界。设备与接入账号各归属一个租户，接入令牌只能访问本租户设备。'
+      + 'used_bytes_month 来自用量日聚合，用于展示；数据面强制用的是 relay 内存里的实时值。',
     curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/tenants"`,
-    resp: `{ "items": [{ "id": 1, "name": "默认租户", "note": "", "status": "active", "accounts": 2, "devices": 8, "online": 5 }] }`,
+    resp: `{ "items": [{ "id": 1, "name": "默认租户", "note": "", "status": "active", "accounts": 2, "devices": 8, "online": 5, "max_devices": 0, "max_sessions": 0, "quota_bytes": 0, "used_bytes_month": 0 }] }`,
   },
   {
     group: 'sys', method: 'POST', path: '/api/v1/tenants', minRole: 'manager',
@@ -739,10 +740,12 @@ export const DOCS = [
   },
   {
     group: 'sys', method: 'PUT', path: '/api/v1/tenants/:id', minRole: 'manager',
-    summary: '修改租户名称/备注/启停',
-    note: '需要 tenant.write。停用租户等价于停用其下全部接入账号（在线连接会被断开）；默认租户不可停用。',
-    body: `{ "name": "某客户", "note": "", "status": "active|disabled" }`,
-    curl: `curl -sS -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"name":"某客户","status":"disabled"}' "$RT/api/v1/tenants/2"`,
+    summary: '修改租户名称/备注/启停/套餐',
+    note: '需要 tenant.write。停用租户等价于停用其下全部接入账号（在线连接会被断开）；默认租户不可停用。'
+      + 'max_devices/max_sessions/quota_bytes/quota_gb 省略表示保持不变，0 表示不限；'
+      + '设备数按已登记设备计（默认租户不受限），并发与月流量在数据面强制。',
+    body: `{ "name": "某客户", "note": "", "status": "active|disabled", "max_devices": 10, "max_sessions": 20, "quota_gb": 100 }`,
+    curl: `curl -sS -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"name":"某客户","max_devices":10,"quota_gb":100}' "$RT/api/v1/tenants/2"`,
     resp: `{ "ok": true }`,
   },
   {

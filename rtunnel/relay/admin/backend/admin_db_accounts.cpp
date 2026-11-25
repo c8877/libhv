@@ -503,9 +503,30 @@ bool AdminDb::clientAuthPolicies(std::string& json_out) {
         arr.push_back(t);
     }
     sqlite3_finalize(st);
+    // 租户套餐与当前月用量：用量取成员令牌当前周期之和，重启后作为 relay 的下界
+    json tarr = json::object();
+    sqlite3_stmt* tst = nullptr;
+    if (sqlite3_prepare_v2(db_,
+            "SELECT t.id,t.max_devices,t.max_sessions,t.quota_bytes,"
+            " (SELECT COALESCE(SUM(ct.used_bytes),0) FROM client_tokens ct"
+            "   JOIN client_accounts a2 ON a2.id=ct.account_id"
+            "   WHERE a2.tenant_id=t.id AND ct.status!='revoked')"
+            " FROM tenants t",
+            -1, &tst, nullptr) == SQLITE_OK) {
+        while (sqlite3_step(tst) == SQLITE_ROW) {
+            json t;
+            t["max_devices"] = (int)dbColInt(tst, 1);
+            t["max_sessions"] = (int)dbColInt(tst, 2);
+            t["quota_bytes"] = dbColInt(tst, 3);
+            t["used_bytes"] = dbColInt(tst, 4);
+            tarr[std::to_string(dbColInt(tst, 0))] = t;
+        }
+    }
+    sqlite3_finalize(tst);
     json out;
     out["accounts"] = accounts;
     out["tokens"] = arr;
+    out["tenants"] = tarr;
     json_out = out.dump();
     return true;
 }

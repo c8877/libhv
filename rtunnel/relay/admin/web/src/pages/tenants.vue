@@ -29,6 +29,15 @@
                        sortable :sort-orders="NUM_ORDERS">
         <template #default="{ row }">{{ row.devices || 0 }}<span class="muted"> · 在线 {{ row.online || 0 }}</span></template>
       </el-table-column>
+      <el-table-column v-if="!isPhone" label="套餐" min-width="200">
+        <template #default="{ row }">
+          <div>设备 {{ row.max_devices ? (row.devices || 0) + '/' + row.max_devices : '不限' }}</div>
+          <div class="muted">
+            并发 {{ row.max_sessions || '不限' }} · 月流量
+            {{ row.quota_bytes ? fmtBytes(row.used_bytes_month || 0) + '/' + fmtBytes(row.quota_bytes) : '不限' }}
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column v-if="!isPhone" label="创建时间" min-width="150" prop="created_ms"
                        sortable :sort-orders="NUM_ORDERS">
         <template #default="{ row }">{{ row.created_ms ? time(row.created_ms) : '—' }}</template>
@@ -45,6 +54,8 @@
     <div class="hint muted">
       设备与接入账号都归属一个租户；接入令牌只能访问本租户的设备，用量按租户归集。
       停用租户等价于停用其下全部接入账号，在线连接会被断开。默认租户不可停用。
+      套餐的设备数按已登记设备计（默认租户不受限），并发与月流量由 relay 在数据面强制；
+      超出流量会断开该租户全部令牌，并发/流量到顶后拒绝新会话。
     </div>
 
     <el-dialog v-model="createDlg" title="新建租户" width="440px">
@@ -73,6 +84,18 @@
         <el-form-item label="状态">
           <el-switch v-model="edit.status" active-value="active" inactive-value="disabled"
                      :disabled="edit.id === 1" inline-prompt active-text="启用" inactive-text="停用" />
+        </el-form-item>
+        <el-form-item label="设备上限">
+          <el-input-number v-model="edit.max_devices" :min="0" :step="1" style="width: 140px" />
+          <span class="unit">台（0 = 不限）</span>
+        </el-form-item>
+        <el-form-item label="并发上限">
+          <el-input-number v-model="edit.max_sessions" :min="0" :step="1" style="width: 140px" />
+          <span class="unit">会话（0 = 不限）</span>
+        </el-form-item>
+        <el-form-item label="月流量">
+          <el-input-number v-model="edit.quota_gb" :min="0" :precision="2" :step="1" style="width: 140px" />
+          <span class="unit">GB/月（0 = 不限）</span>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -103,7 +126,8 @@ const createForm = reactive({ name: '', note: '' })
 
 const editDlg = ref(false)
 const editRef = ref(null)
-const edit = reactive({ id: 0, name: '', note: '', status: 'active' })
+const edit = reactive({ id: 0, name: '', note: '', status: 'active',
+  max_devices: 0, max_sessions: 0, quota_gb: 0 })
 
 const rules = {
   name: [{ required: true, message: '请填写租户名', trigger: 'blur' }],
@@ -119,6 +143,14 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function fmtBytes(n) {
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+  let v = Number(n) || 0
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
+  return (i === 0 ? String(v) : v.toFixed(v >= 100 ? 0 : 1)) + ' ' + units[i]
 }
 
 function openCreate() {
@@ -152,6 +184,9 @@ function openEdit(row) {
     name: row.name || '',
     note: row.note || '',
     status: row.status || 'active',
+    max_devices: row.max_devices || 0,
+    max_sessions: row.max_sessions || 0,
+    quota_gb: row.quota_bytes ? Number((row.quota_bytes / 1073741824).toFixed(2)) : 0,
   })
   editDlg.value = true
 }
@@ -171,6 +206,9 @@ async function saveEdit() {
       name: edit.name.trim(),
       note: edit.note.trim(),
       status: edit.status,
+      max_devices: Number(edit.max_devices) || 0,
+      max_sessions: Number(edit.max_sessions) || 0,
+      quota_gb: Number(edit.quota_gb) || 0,
     })
     ElMessage.success('已保存')
     editDlg.value = false
@@ -187,6 +225,7 @@ onMounted(load)
 
 <style scoped>
 .ml6 { margin-left: 6px; }
+.unit { margin-left: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
 .hint { margin-top: 10px; font-size: 12.5px; line-height: 1.7; }
 @media (max-width: 599px) {
   .panel-head { flex-wrap: wrap; }

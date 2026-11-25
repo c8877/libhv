@@ -472,14 +472,22 @@ void AdminServer::handleResDeviceUpdate(const HttpContextPtr& ctx, const std::st
         return;
     }
     std::string err;
+    // 先校验租户套餐（设备数），避免改名/启停成功、换租户失败的半截状态
+    long long want_tenant = 0;
+    if (req.contains("tenant_id") && req["tenant_id"].is_number()) {
+        want_tenant = req["tenant_id"].get<long long>();
+        if (!db_.tenantDeviceFit(devid, want_tenant, err)) {
+            apiBad(ctx, err);
+            return;
+        }
+    }
     if (!db_.resDeviceUpdate(devid, req.value("name", std::string()), req.value("enabled", true) ? 1 : 0, err)) {
         apiBad(ctx, err);
         return;
     }
     // 归属租户：把设备划给某个租户后，只有该租户的接入账号能访问
-    if (req.contains("tenant_id") && req["tenant_id"].is_number()) {
-        long long tenant_id = req["tenant_id"].get<long long>();
-        if (!db_.setDeviceTenant(devid, tenant_id, err)) {
+    if (want_tenant > 0) {
+        if (!db_.setDeviceTenant(devid, want_tenant, err)) {
             apiBad(ctx, err);
             return;
         }

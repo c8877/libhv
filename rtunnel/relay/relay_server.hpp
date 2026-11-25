@@ -143,6 +143,19 @@ struct TokenUsage {
     char     last_ip[64] = {0};
 };
 
+// 租户套餐：0 表示不限。设备数按已登记设备计（默认租户不受限），
+// 并发与流量在数据面强制（流量按月，统计成员令牌当前周期用量之和）。
+struct TenantLimit {
+    int       max_devices = 0;
+    int       max_sessions = 0;
+    long long quota_bytes = 0;
+};
+
+struct TenantUsage {
+    long long used_bytes = 0;
+    long long period_start_ms = 0;
+};
+
 // relay 自身累计计数（只在 relay 线程读写，管理台经 callRelay 取快照）
 struct RelayCounters {
     uint64_t conns_agent_total = 0;
@@ -260,12 +273,16 @@ public:
     std::unordered_map<std::string, TokenPolicy> token_cache;  // sha256 hex -> policy
     std::unordered_map<std::string, int> account_active;       // username -> 1/0
     std::unordered_map<long long, TokenUsage>    token_usage;  // token id -> usage
+    std::map<long long, TenantLimit>             tenant_limit; // 租户套餐（随策略下发）
+    std::map<long long, TenantUsage>             tenant_usage; // 租户当月流量与并发
+    long long                                    tenant_period_start = 0; // 当月起点（本地月，随 tick 滚动）
     // 待管理面取走的用量事件（JSON 行）与设备在线时长累加（relay 线程）
     std::vector<std::string> usage_pending;
     struct OnlineAcc { std::string day; long long ms = 0; };
     std::unordered_map<std::string, OnlineAcc> usage_online;
     uint64_t usage_dropped = 0;      // 队列满丢弃的事件数（管理面长期不可用时）
     std::set<long long> pending_token_cuts;       // 流量到顶待断开（帧处理内不能直接 close）
+    std::set<long long> pending_tenant_cuts;      // 租户流量到顶，待断开其全部令牌
     PendingOpen* pending = nullptr;   // 等待 A 侧 agent 上线的 OPEN_SHELL
     // relay 下发的地址列表（只在 relay 线程读写）
     std::string relay_list_json;      // 空 = 不下发
@@ -381,6 +398,7 @@ private:
     bool         tokenRateAllow(RelayConn* c, uint32_t* retry_after_ms);
     void         tokenDropConnections(long long token_id, uint16_t code, const char* msg);
     void         tokenApplyCuts();
+    int          tenantSessions(long long tenant_id) const;
     void         tokenSessionAdd(RelayConn* c);
     void         tokenSessionRemove(RelayConn* c);
     // 用量（relay 线程）：流关闭记一次会话，设备断开冲掉剩余在线时长

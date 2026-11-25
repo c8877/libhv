@@ -18,8 +18,8 @@ const h = require('../lib/harness')
   h.check('标题可见', head.includes('租户'), head)
 
   const cols = await p.locator('.el-table__header th').allInnerTexts()
-  h.check('表头包含租户/状态/账号/设备',
-    ['租户', '状态', '账号', '设备'].every((c) => cols.some((x) => x.includes(c))), cols)
+  h.check('表头包含租户/状态/账号/设备/套餐',
+    ['租户', '状态', '账号', '设备', '套餐'].every((c) => cols.some((x) => x.includes(c))), cols)
 
   h.check('默认租户在列表里',
     (await p.locator('.el-table__row', { hasText: '默认租户' }).count()) >= 1)
@@ -38,6 +38,10 @@ const h = require('../lib/harness')
   const row = p.locator('.el-table__row', { hasText: name })
   await row.locator('button', { hasText: '编辑' }).click()
   await p.waitForSelector('.el-dialog:visible', { timeout: 5000 })
+  // 套餐：并发 2、月流量 1.5 GiB
+  const nums = p.locator('.el-dialog:visible .el-input-number input')
+  await nums.nth(1).fill('2')
+  await nums.nth(2).fill('1.5')
   await p.locator('.el-dialog:visible .el-switch').click()
   await p.locator('.el-dialog:visible .el-button--primary').click()
   await p.waitForTimeout(400)
@@ -47,8 +51,10 @@ const h = require('../lib/harness')
     await confirm.click()
     await p.waitForTimeout(1200)
   }
-  h.check('停用后状态显示停用',
-    (await p.locator('.el-table__row', { hasText: name }).innerText()).includes('停用'))
+  const rowText = await p.locator('.el-table__row', { hasText: name }).innerText()
+  h.check('停用后状态显示停用', rowText.includes('停用'), rowText)
+  h.check('套餐已保存并展示', rowText.includes('并发 2') && rowText.includes('1.5 GiB'),
+    rowText.slice(0, 200))
 
   h.check('无 JS 错误', errs.length === 0, errs)
   await b.close()

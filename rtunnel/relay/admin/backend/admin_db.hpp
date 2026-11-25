@@ -254,13 +254,16 @@ public:
     bool tenantCreate(const std::string& name, const std::string& note, const std::string& by,
                       long long& id, std::string& err);
     bool tenantUpdate(long long id, const std::string& name, const std::string& note,
-                      const std::string& status, std::string& err);
+                      const std::string& status, int max_devices, int max_sessions,
+                      long long quota_bytes, std::string& err);
     bool tenantExists(long long id);
     bool tenantOfClient(long long account_id, long long& out);
     bool tenantDevices(long long tenant_id, std::vector<std::string>& out);
     bool deviceTenants(std::map<std::string, long long>& out);
     bool deviceTenant(const std::string& devid, long long& out);
     bool setDeviceTenant(const std::string& devid, long long tenant_id, std::string& err);
+    // 预检：该设备能否划入租户（设备数上限），不改数据
+    bool tenantDeviceFit(const std::string& devid, long long tenant_id, std::string& err);
 
     // 管理台账号 API Token（atk-）
     bool adminTokenList(long long user_id, const std::string& q, std::string& json_out);
