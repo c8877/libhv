@@ -256,6 +256,8 @@ private:
 
 
     void handleAudit(const HttpContextPtr& ctx);
+    // api_usage.cpp：用量流水日聚合查询
+    void handleUsage(const HttpContextPtr& ctx);
     // api_certs.cpp
     void handleCerts(const HttpContextPtr& ctx);
     void handleCertIssue(const HttpContextPtr& ctx, const std::string& role);

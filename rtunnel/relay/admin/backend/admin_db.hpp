@@ -218,6 +218,17 @@ public:
     // relay 用量快照落库，period_start_ms 作为乐观锁
     bool clientTokenUsageApply(const std::string& json, std::string& err);
 
+    // 用量流水：events 为 JSON 数组 [{ts_ms,day,subject_type,subject_id,metric,qty,meta}]，
+    // 同一事务内写 usage_events 并累加 usage_daily。
+    bool usageAppend(const std::string& events_json, std::string& err);
+    // 查询日聚合；from/to 为 YYYY-MM-DD（空表示不限），total=true 时按主体+指标汇总
+    bool usageQuery(const std::string& from, const std::string& to,
+                    const std::string& subject_type, const std::string& subject_id,
+                    const std::string& metric, bool total, std::string& json_out,
+                    std::string& err);
+    // 清理早于 before_ms 的流水（日聚合保留）
+    bool usagePrune(long long before_ms, int& n);
+
     // 管理台账号 API Token（atk-）
     bool adminTokenList(long long user_id, const std::string& q, std::string& json_out);
     bool adminTokenCreate(long long user_id, const std::string& username, const DbTokenSpec& spec,

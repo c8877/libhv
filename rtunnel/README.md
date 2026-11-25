@@ -170,6 +170,7 @@ bash rtunnel/tests/proc_e2e.sh           # 进程列表/详情/信号与 device.
 bash rtunnel/tests/storage_e2e.sh        # 目录树按路径/层级、子项求和、越界校验与 gzip 透传
 python3 rtunnel/tests/stream_idle_e2e.py # 流空闲回收：闲置 RESET、活跃流保留
 python3 rtunnel/tests/permission_e2e.py  # 权限：混合组的端口范围、WS 消息按会话判定身份
+python3 rtunnel/tests/usage_e2e.py       # 用量：流量/会话/设备在线计量、日聚合、权限
 python3 rtunnel/tests/compat_e2e.py      # HELLO 版本区间、低版本拒绝、高版本向前兼容
 python3 rtunnel/tests/protocol_doc_test.py  # 协议文档覆盖率（帧类型/常量）
 build/bin/rtunnel-endpoint-test          # --server 地址解析单测
@@ -198,6 +199,10 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
 - **流空闲回收**：每 5s 扫描一次已建流，`--stream-idle` 秒内没有任何帧就向两侧发
   `RESET(stream idle timeout)` 并释放会话配额；端口映射这类正常空闲业务请调大或设 0 关闭。
 - **统计**：每 60s 一条 `[relay] stats:` 日志（agents/clients/streams/bytes_in/bytes_out/frames/auth 失败）。
+- **用量**：流量（token）、会话次数/时长（token）、设备在线时长（device）按 5s 增量写入
+  `usage_events` 并累加 `usage_daily`；`GET /api/v1/usage` 按日或总计查询，需要 `usage.read`。
+  「监控 → 用量」有报表页。原始流水保留 180 天（`usage.raw_retention_days`），日聚合长期保留。
+  流量按载荷字节双向统计；管理台自身的终端/代理不计入客户用量。
 - **自身指标**：`GET /metrics` 输出 Prometheus 文本，包含在线设备/会话/流、累计连接与认证失败、
   收发帧与转发字节、打开/失败/空闲回收的流、管理面 HTTP 派发耗时、SQLite 语句耗时与慢查询、
   告警队列和分发任务数。需要 `device.view` 资源（用 `atk-` Token 最方便）：

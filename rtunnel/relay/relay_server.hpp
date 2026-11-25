@@ -55,8 +55,11 @@ struct RelayStream {
     int          c_closed = 0;
     int          opened = 0;             // OPEN_OK 经过 relay 时置位
     int          a_readonly = 0;         // 只读串口流：丢弃 client 方向的 DATA（兼容旧 agent）
+    uint16_t     port = 0;               // OPEN 目标端口，用量上报用
     uint64_t     opened_at_ms = 0;       // 建流时间（管理台展示）
     uint64_t     last_active_ms = 0;     // 最近一次转发帧，空闲回收用
+    uint64_t     bytes_up = 0;           // A→C 载荷字节（用量）
+    uint64_t     bytes_down = 0;         // C→A 载荷字节（用量）
     RelayStream* next_a = nullptr;   // a->streams
     RelayStream* next_c = nullptr;   // c->streams
 };
@@ -82,8 +85,10 @@ struct RelayConn {
     uint64_t     last_seen_ms = 0;
     char         remote_addr[64] = {0};
     long long    token_id = 0;           // auth_type=2 通过后填
+    long long    account_id = 0;         // 令牌归属账号（用量归属）
     char         token_prefix[24] = {0};
     int          peer_proto = 0;         // HELLO 里的语义版本，0 表示未握手
+    uint64_t     usage_online_ms = 0;    // 上次计入在线时长的单调时钟
 };
 
 // OPEN_SHELL 到 a:<user> 但 agent 尚未注册时挂起，等 A 侧 agent 上线后继续
@@ -125,6 +130,8 @@ struct TokenUsage {
     uint64_t refill_ms = 0;
     int      active_sessions = 0;
     uint64_t last_used_ms = 0;
+    int64_t  reported_bytes = 0;   // 已推给管理面的字节，增量上报用
+    int64_t  last_report_ms = 0;   // 上次上报时间（墙钟）：按量/按时节流
     char     last_ip[64] = {0};
 };
 
@@ -166,6 +173,8 @@ public:
     void setAuthPolicies(const std::string& json);
     // 用量快照（relay 线程），JSON 数组
     std::string tokenUsageSnapshot();
+    // 取走待落库的用量事件（relay 线程），JSON 数组；含 token 字节增量与设备在线时长
+    std::string takeUsageEvents();
 
     // 更新下发给 agent 的地址列表（relay 线程）。servers 为空表示停用下发。
     // 内容变化时更新 rev 并清空旧 ACK；只改期望状态，设备上线在 AUTH_OK 后自动对齐。
@@ -240,6 +249,11 @@ public:
     std::unordered_map<std::string, TokenPolicy> token_cache;  // sha256 hex -> policy
     std::unordered_map<std::string, int> account_active;       // username -> 1/0
     std::unordered_map<long long, TokenUsage>    token_usage;  // token id -> usage
+    // 待管理面取走的用量事件（JSON 行）与设备在线时长累加（relay 线程）
+    std::vector<std::string> usage_pending;
+    struct OnlineAcc { std::string day; long long ms = 0; };
+    std::unordered_map<std::string, OnlineAcc> usage_online;
+    uint64_t usage_dropped = 0;      // 队列满丢弃的事件数（管理面长期不可用时）
     std::set<long long> pending_token_cuts;       // 流量到顶待断开（帧处理内不能直接 close）
     PendingOpen* pending = nullptr;   // 等待 A 侧 agent 上线的 OPEN_SHELL
     // relay 下发的地址列表（只在 relay 线程读写）
@@ -358,6 +372,15 @@ private:
     void         tokenApplyCuts();
     void         tokenSessionAdd(RelayConn* c);
     void         tokenSessionRemove(RelayConn* c);
+    // 用量（relay 线程）：流关闭记一次会话，设备断开冲掉剩余在线时长
+    void         usagePushRaw(const char* subject_type, const std::string& subject_id,
+                              const char* metric, long long qty, const std::string& meta,
+                              const std::string& day);
+    void         usageFlushTokenBytes(long long token_id, bool force);
+    void         usageOnStreamClose(RelayStream* s);
+    void         usageOnAgentClose(RelayConn* c);
+    void         usageFlushOnline(const std::string& devid, bool erase);
+    std::string  usageLocalDay(long long ts_ms) const;
 
     // libhv C 回调的薄封装
     static void readCb(hio_t* io, void* buf, int n);

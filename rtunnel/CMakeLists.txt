@@ -29,6 +29,7 @@ target_compile_definitions(rtunnel_sqlite PRIVATE SQLITE_THREADSAFE=1 SQLITE_OMI
 set_target_properties(rtunnel_sqlite PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_log.cpp
+               relay/usage_meter.cpp
                common/endpoint.cpp
                common/sha256.cpp common/token_util.cpp
                relay/admin/backend/admin_server.cpp
@@ -51,6 +52,8 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
                relay/admin/backend/admin_db_relay.cpp
                relay/admin/backend/api_relay.cpp
                relay/admin/backend/admin_db_accounts.cpp
+               relay/admin/backend/admin_db_usage.cpp
+               relay/admin/backend/api_usage.cpp
                relay/admin/backend/admin_db_admin_tokens.cpp
                relay/admin/backend/api_accounts.cpp
                relay/admin/backend/api_admin_tokens.cpp

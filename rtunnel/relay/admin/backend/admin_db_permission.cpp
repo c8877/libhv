@@ -203,7 +203,7 @@ bool permIsGlobalKey(const std::string& key) {
         "account.read", "account.write", "account.delete",
         "token.read", "token.write",
         "cert.read", "cert.write",
-        "audit.read",
+        "audit.read", "usage.read",
         "settings.read", "settings.write", "system.shutdown",
         "repo.read", "repo.write", "repo.delete",
     };
@@ -495,6 +495,7 @@ const PermResDef kPermRes[] = {
     {"cert.write", "证书", "签发证书", "签发、吊销、签署证书"},
 
     {"audit.read", "审计", "查看审计", "管理台操作审计日志"},
+    {"usage.read", "运营", "查看用量", "隧道流量、会话与设备在线用量报表（全局）"},
 
     {"settings.read", "系统", "查看设置", "系统设置与告警状态"},
     {"settings.write", "系统", "修改设置", "系统设置与告警测试"},
@@ -532,7 +533,8 @@ std::vector<std::string> presetResources(const std::string& builtin) {
                     k == "device.proc.read" || k == "device.proc.signal" ||
                     k == "file.read" || k == "file.write" || k == "dist.read" ||
                     k == "repo.read" || k == "repo.write" ||
-                    k == "dict.read" || k == "account.read" || k == "settings.read";
+                    k == "dict.read" || k == "account.read" || k == "settings.read" ||
+                    k == "usage.read";
         } else if (builtin == "viewer") {
             allow = k == "device.view" || k == "device.tty.read" || k == "device.proc.read" ||
                     k == "settings.read";

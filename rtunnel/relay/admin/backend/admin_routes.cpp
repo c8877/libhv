@@ -261,6 +261,7 @@ void AdminServer::registerRoutes() {
     access("repo.write", "GET", "/api/v1/uploads/:name", &AdminServer::handleUploadStatus);
     // manager：审计/证书列表
     access("audit.read", "GET", "/api/v1/audit", &AdminServer::handleAudit);
+    access("usage.read", "GET", "/api/v1/usage", &AdminServer::handleUsage);
     access("cert.read", "GET", "/api/v1/certs", &AdminServer::handleCerts);
 
     service_.Handle("DELETE", "/api/v1/streams/:a_sid", [this](const HttpContextPtr& ctx) {

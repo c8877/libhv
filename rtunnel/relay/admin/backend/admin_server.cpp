@@ -709,17 +709,36 @@ int AdminServer::start(const AdminConfig& cfg) {
     }
     spawnWorker([this]() { distLoop(); });
     spawnWorker([this]() { relaySyncLoop(); });
-    // Token 用量：relay 只保留内存计数，这里按周期拉快照落库
+    // Token 用量：relay 只保留内存计数，这里按周期拉快照落库；
+    // 同时取走用量事件（流量增量/会话/在线时长）写入流水与日聚合。
     spawnWorker([this]() {
+        std::string backlog;   // 上次写库失败的事件，下一轮先补写，避免丢账
         while (!stopping_.load()) {
             int ms = settingInt("token.usage_flush_ms", 5000);
             if (ms < 1000) ms = 1000;
             if (waitStop(ms)) break;
             if (!db_.ok()) continue;
+            if (!backlog.empty()) {
+                std::string err;
+                if (!db_.usageAppend(backlog, err)) {
+                    logf_("[usage] append retry failed: %s", err.c_str());
+                    continue;
+                }
+                backlog.clear();
+            }
             std::string snap = callRelay([this]() { return relay_->tokenUsageSnapshot(); });
-            if (snap.empty() || snap[0] != '[') continue;
-            std::string err;
-            db_.clientTokenUsageApply(snap, err);
+            if (!snap.empty() && snap[0] == '[') {
+                std::string err;
+                db_.clientTokenUsageApply(snap, err);
+            }
+            std::string ev = callRelay([this]() { return relay_->takeUsageEvents(); });
+            if (ev.size() > 2) {
+                std::string err;
+                if (!db_.usageAppend(ev, err)) {
+                    backlog = ev;
+                    logf_("[usage] append failed: %s", err.c_str());
+                }
+            }
         }
     });
     spawnWorker([this]() {
@@ -750,6 +769,14 @@ int AdminServer::start(const AdminConfig& cfg) {
             cleanupUploads();
             cleanupTtyLogs();
             audit_.rotate(100 * 1024 * 1024);
+            // 流水按天保留（默认 180 天）；日聚合不清理，出账/报表依赖它
+            int raw_days = settingInt("usage.raw_retention_days", 180);
+            if (raw_days < 7) raw_days = 7;
+            int pruned = 0;
+            long long before = (long long)time(NULL) * 1000 - (long long)raw_days * 86400000;
+            if (db_.usagePrune(before, pruned) && pruned > 0) {
+                logf_("[usage] pruned %d raw events older than %d days", pruned, raw_days);
+            }
         }
     });
     spawnWorker([this]() { alertLoop(); });

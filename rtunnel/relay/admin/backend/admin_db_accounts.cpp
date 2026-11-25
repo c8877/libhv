@@ -424,6 +424,25 @@ bool AdminDb::clientTokenDelete(long long id, std::string& err) {
 
 bool AdminDb::clientAuthPolicies(std::string& json_out) {
     std::lock_guard<std::mutex> lk(mu_);
+    // 周期滚动：DB 里的 period_start_ms 不跟着时间走，这里按当前时间对齐并清零用量。
+    // relay 内存里的滚动用的是同一套 tokenPeriodStart，两边因此能对上。
+    {
+        int64_t now = nowMs();
+        int64_t day_start = rtutil::tokenPeriodStart(rtutil::PERIOD_DAILY, now);
+        int64_t mon_start = rtutil::tokenPeriodStart(rtutil::PERIOD_MONTHLY, now);
+        const char* sql = "UPDATE client_tokens SET period_start_ms=?,used_bytes=0 "
+                          "WHERE quota_period=? AND period_start_ms>0 AND period_start_ms<?";
+        for (int i = 0; i < 2; ++i) {
+            sqlite3_stmt* st = nullptr;
+            if (sqlite3_prepare_v2(db_, sql, -1, &st, nullptr) != SQLITE_OK) continue;
+            int64_t start = i == 0 ? day_start : mon_start;
+            sqlite3_bind_int64(st, 1, start);
+            sqlite3_bind_text(st, 2, i == 0 ? "daily" : "monthly", -1, SQLITE_STATIC);
+            sqlite3_bind_int64(st, 3, start);
+            sqlite3_step(st);
+            sqlite3_finalize(st);
+        }
+    }
     json accounts = json::object();
     sqlite3_stmt* ast = nullptr;
     if (sqlite3_prepare_v2(db_, "SELECT username,status FROM client_accounts", -1, &ast, nullptr) == SQLITE_OK) {

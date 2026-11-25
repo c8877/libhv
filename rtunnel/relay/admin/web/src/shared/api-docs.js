@@ -705,6 +705,22 @@ export const DOCS = [
     resp: `[{ "at": "2026-11-17 10:12:03", "role": "deploy", "action": "files.edit", "detail": "fw.bin size=1024" }]`,
   },
   {
+    group: 'sys', method: 'GET', path: '/api/v1/usage', minRole: 'manager',
+    summary: '用量报表（日聚合）：流量、会话、设备在线时长',
+    note: '仓库是全局资源，需要 usage.read。metric=bytes|sessions|session_seconds|online_seconds；'
+      + 'subject_type=token|device；granularity=day|total。日按 relay 本地时区，日期为 YYYY-MM-DD。',
+    params: [
+      { name: 'from', in: 'query', desc: '起始日 YYYY-MM-DD（含）' },
+      { name: 'to', in: 'query', desc: '结束日 YYYY-MM-DD（含）' },
+      { name: 'metric', in: 'query', desc: 'bytes / sessions / session_seconds / online_seconds' },
+      { name: 'subject_type', in: 'query', desc: 'token / device' },
+      { name: 'subject_id', in: 'query', desc: '令牌 id 或 devid' },
+      { name: 'granularity', in: 'query', desc: 'day（默认）或 total' },
+    ],
+    curl: `curl -sS -H "Authorization: Bearer $ATK" \\\n  "$RT/api/v1/usage?from=2026-11-01&to=2026-11-30&metric=bytes&granularity=day"`,
+    resp: `{ "rows": [{ "day": "2026-11-25", "subject_type": "token", "subject_id": "3", "metric": "bytes", "qty": 1048576, "events": 288 }], "granularity": "day" }`,
+  },
+  {
     group: 'sys', method: 'GET', path: '/api/v1/certs', minRole: 'manager',
     summary: '证书台账',
     curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/certs"`,

@@ -29,6 +29,7 @@ const routes = [
   { path: '/tasks/:id', component: () => import('./pages/tasks/[id].vue'), meta: { title: '任务详情' } },
   { path: '/ota', component: () => import('./pages/ota.vue'), meta: { title: 'Agent 升级' } },
   { path: '/relay-list', component: () => import('./pages/relay-list.vue'), meta: { title: '中继列表' } },
+  { path: '/usage', component: () => import('./pages/usage.vue'), meta: { title: '用量' } },
   { path: '/audit', component: () => import('./pages/audit.vue'), meta: { title: '审计' } },
   { path: '/settings', component: () => import('./pages/settings.vue'), meta: { title: '设置' } },
   { path: '/profile', component: () => import('./pages/profile.vue'), meta: { title: '个人设置' } },

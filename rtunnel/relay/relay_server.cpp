@@ -140,6 +140,7 @@ void RelayServer::completePending(const char* devid) {
         auto* s = new RelayStream{};
         s->a = p->a; s->a_sid = p->a_sid;
         s->c = agent; s->c_sid = ++agent->next_c_sid;
+        s->port = p->port;
         s->opened_at_ms = s->last_active_ms = hloop_now_ms(loop);
         s->next_a = p->a->streams; p->a->streams = s;
         s->next_c = agent->streams; agent->streams = s;
@@ -285,11 +286,18 @@ void RelayServer::setAuthPolicies(const std::string& json) {
         if (it == token_usage.end()) {
             TokenUsage u;
             u.used_bytes = p.used_base;
+            u.reported_bytes = p.used_base;   // DB 里已有的用量不再重复上报
             u.period_start_ms = p.period_start_ms;
             token_usage[p.id] = u;
         } else if (p.period_start_ms > 0 && p.period_start_ms > it->second.period_start_ms) {
-            // 周期已重置（或管理员改了周期），以 DB 为准
+            // 周期已重置（或管理员改了周期），以 DB 为准；未上报的增量仍记到旧周期
+            long long delta = it->second.used_bytes - it->second.reported_bytes;
+            if (delta > 0) {
+                usagePushRaw("token", std::to_string(p.id), "bytes", delta, "",
+                             usageLocalDay((long long)time(NULL) * 1000));
+            }
             it->second.used_bytes = p.used_base;
+            it->second.reported_bytes = p.used_base;
             it->second.period_start_ms = p.period_start_ms;
             it->second.bucket = 0;
         } else if (p.period_start_ms == it->second.period_start_ms && p.used_base > it->second.used_bytes) {
@@ -306,7 +314,15 @@ void RelayServer::setAuthPolicies(const std::string& json) {
         for (auto& kv : token_cache) {
             if (kv.second.id == it->first) { keep = true; break; }
         }
-        if (keep) ++it; else it = token_usage.erase(it);
+        if (keep) ++it;
+        else {
+            long long delta = it->second.used_bytes - it->second.reported_bytes;
+            if (delta > 0) {
+                usagePushRaw("token", std::to_string(it->first), "bytes", delta, "",
+                             usageLocalDay((long long)time(NULL) * 1000));
+            }
+            it = token_usage.erase(it);
+        }
     }
 
     // 停用/过期/账号停用的 Token：踢掉在线连接（先收集，close 会同步 delete）
@@ -372,7 +388,13 @@ void RelayServer::tokenSweep() {
         if (p.quota_period != rtutil::PERIOD_TOTAL && u.period_start_ms > 0) {
             int64_t next = rtutil::tokenPeriodNextFrom((rtutil::TokenPeriod)p.quota_period, u.period_start_ms);
             if (next > 0 && (int64_t)now >= next) {
+                long long delta = u.used_bytes - u.reported_bytes;
+                if (delta > 0) {
+                    usagePushRaw("token", std::to_string(p.id), "bytes", delta, "",
+                                 usageLocalDay((long long)now));
+                }
                 u.used_bytes = 0;
+                u.reported_bytes = 0;
                 u.period_start_ms = rtutil::tokenPeriodStart((rtutil::TokenPeriod)p.quota_period, (int64_t)now);
             }
         }
@@ -564,6 +586,7 @@ void RelayServer::streamRemove(RelayStream* s) {
             if (prev) prev->next_c = s->next_c; else s->c->streams = s->next_c;
         }
     }
+    usageOnStreamClose(s);
     tokenSessionRemove(s->a);
     delete s;
 }
@@ -1728,6 +1751,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
                 hio_close(old->io);
             }
             c->authed = 1;
+            c->usage_online_ms = hloop_now_ms(loop);
             if (c->hs_timer) { htimer_del(c->hs_timer); c->hs_timer = NULL; }
             c->reg_next = agents;
             agents = c;
@@ -1807,6 +1831,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
                 return;
             }
             c->token_id = pol->id;
+            c->account_id = pol->account_id;
             snprintf(c->token_prefix, sizeof(c->token_prefix), "%s", pol->prefix.c_str());
             usage->last_used_ms = now;
             snprintf(usage->last_ip, sizeof(usage->last_ip), "%s", c->remote_addr);
@@ -1962,6 +1987,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             auto* s = new RelayStream{};
             s->a = c; s->a_sid = f->sid;
             s->c = agent; s->c_sid = ++agent->next_c_sid;
+            s->port = port;
             s->opened_at_ms = s->last_active_ms = hloop_now_ms(loop);
             // 只读串口在 relay 侧也拦写方向：老 agent 不认识只读标志，不能只依赖它
             s->a_readonly = is_tty &&
@@ -2010,7 +2036,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             }
             forward(s->c, f->type, s->c_sid, f->payload, f->len, f->flags);
             s->last_active_ms = hloop_now_ms(loop);
-            if (f->type == rtnp::DATA) tokenAddBytes(c, f->len);
+            if (f->type == rtnp::DATA) { tokenAddBytes(c, f->len); s->bytes_up += f->len; }
             if (f->type == rtnp::CLOSE) s->a_closed = 1;
             if (f->type == rtnp::RESET) { s->a_closed = s->c_closed = 1; }
             if (s->a_closed && s->c_closed) streamRemove(s);
@@ -2049,7 +2075,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         }
         forward(s->a, f->type, s->a_sid, f->payload, f->len, f->flags);
         s->last_active_ms = hloop_now_ms(loop);
-        if (f->type == rtnp::DATA) tokenAddBytes(s->a, f->len);
+        if (f->type == rtnp::DATA) { tokenAddBytes(s->a, f->len); s->bytes_down += f->len; }
         if (f->type == rtnp::CLOSE) s->c_closed = 1;
         if (f->type == rtnp::RESET) { s->a_closed = s->c_closed = 1; }
         if (s->a_closed && s->c_closed) streamRemove(s);
@@ -2105,6 +2131,7 @@ void RelayServer::onClose(RelayConn* c) {
             }
         }
         registryRemove(c);
+        usageOnAgentClose(c);
         if (c->devid[0]) {
             // 断线后旧的 RELAY_LIST ACK 不再可信：设备可能重装/换机，
             // 重连时 AUTH_OK 会重新下发并重新 ACK。

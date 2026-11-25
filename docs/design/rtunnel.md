@@ -633,6 +633,7 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 | GET/PUT | `/api/v1/settings` | 运行参数（上传上限、会话、锁定时长等） |
 | GET/POST | `/api/v1/distributions[/{id}]` | 文件分发任务与重试/取消/延长/校验 |
 | GET | `/api/v1/audit` | 审计（登录、OPEN、踢、证书、文件、终端、权限变更） |
+| GET | `/api/v1/usage` | 用量报表（日聚合）：流量/会话/设备在线，见 §13.10 |
 | GET/POST | `/api/v1/certs`、`/api/v1/certs/issue`、`/sign`、`/revoke` | 证书台账/签发/CSR 签名/吊销（admin） |
 | GET/POST/DELETE/PUT | `/api/v1/files[/{name}]` | 文件列表/上传/下载/删除/原子编辑（编辑需 manager+，上限可配置，默认 32 MiB；文件名白名单） |
 | GET | `/api/v1/uploads/{name}` | 分片上传状态与续传 |
@@ -784,6 +785,71 @@ relay 在 agent `AUTH_OK` 之后、以及同步任务下发时发送 `RELAY_LIST
   未完成的行统一取消，任务记 `failed`
 - 取消会把已发出的 `running` 行一并置为 `cancelled`；暂停期间不释放、不补发，
   恢复后继续当前批次，下一批由调度器按批间隔释放
+
+### 13.10 用量与配额（按量计费底座）
+
+目标：把“用了多少”记全，且记账口径与配额执行一致，后续加价目/账单只读这张表。
+
+**数据模型**
+
+| 表 | 作用 |
+|---|---|
+| `usage_events` | append-only 流水：`ts_ms / day / subject_type / subject_id / metric / qty / meta` |
+| `usage_daily` | 日聚合：`(day,subject_type,subject_id,metric)` 唯一，出账与报表直接查它 |
+
+**指标与主体**
+
+| metric | subject_type | 口径 |
+|---|---|---|
+| `bytes` | `token` | 隧道载荷字节，双向合计；攒够 4 MiB 或满 10 分钟落一条，会话关闭时强制结算 |
+| `sessions` | `token` | 成功建立（收到 `OPEN_OK`）的会话次数，流关闭时记一条 |
+| `session_seconds` | `token` | 会话时长（流关闭时间 - 建立时间） |
+| `online_seconds` | `device` | 设备在线时长；满 1 小时或跨天落一条，设备断开时冲掉尾巴 |
+
+- `meta` 里带 `token_id / account_id / user / devid / port / started_ms / ended_ms /
+  bytes_up / bytes_down`，会话明细可从流水还原
+- 管理台内部链路（终端、设备 Web 反代、文件/服务 WS）`token_id=0`，不计入客户用量；
+  `a:<user>` 的按需 agent 不计设备在线时长
+- **日按 relay 本地时区**；令牌配额周期（daily/monthly）仍按 UTC（既有行为）。
+  两者边界可能差几小时，出账以日聚合为准，配额只影响是否掐断，不参与结算
+
+**采集路径**（不阻塞数据面）
+
+```
+relay 线程：token_usage 增量 / 流关闭 / agent 断开 → usage_pending[]
+管理面 worker（每 5s，token.usage_flush_ms）：
+  takeUsageEvents() → db.usageAppend()（同一事务写 events + daily）
+  失败时保留 backlog，下一轮先补写，不丢账
+```
+
+字节流水有意做了节流（4 MiB / 10 分钟 / 会话关闭），避免长连接把 `usage_events`
+写成每秒一行；配额执行读的是 relay 内存计数，不受节流影响，超限仍然实时掐断。
+
+**配额与计量共用一份配置**
+
+- 配额、周期、限速来自 `client_tokens`，relay 的 `TokenUsage` 只是加速缓存；
+  `used_bytes` 每次增量上报后同步到 `client_tokens.used_bytes`
+- 周期滚动在管理面按 `tokenPeriodStart` 对齐 DB 的 `period_start_ms`，relay 内存用同一
+  函数；两边对得上，重启后不会把上一周期的用量算进本期
+- 超额动作仍是 `cut`（断连）/`block`（只拒绝新 OPEN），计量本身不触发任何动作
+
+**保留策略**
+
+- `usage_events` 默认保留 180 天（`usage.raw_retention_days`，最小 7，每小时清理）
+- `usage_daily` 不自动清理：行数按“天 × 主体 × 指标”增长，适合长期保留出账
+
+**查询接口**
+
+```
+GET /api/v1/usage?from=2026-11-01&to=2026-11-30&metric=bytes&subject_type=token&granularity=day
+→ {"rows":[{"day","subject_type","subject_id","metric","qty","events"}],"granularity":"day"}
+```
+
+- `granularity=total` 按主体 + 指标汇总（出账用）；需要 `usage.read`（全局资源）
+- 管理台「监控 → 用量」按日展示，支持切换指标与日期范围
+
+**当前不做**：价目表、账单/发票、支付、租户维度、带宽限速。表结构已按
+`subject_type/subject_id/metric` 抽象，接价目表时只需加 `price` 与账期汇总，不改采集侧。
 
 ## 14. 备选方案与取舍
 

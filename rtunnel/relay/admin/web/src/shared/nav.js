@@ -10,6 +10,7 @@ export const NAV_GROUPS = [
       { path: '/overview', icon: 'Odometer', perm: 'device.view', roles: ALL },
       { path: '/agents', icon: 'Monitor', label: '设备', perm: 'device.view', roles: ALL },
       { path: '/streams', icon: 'Sort', perm: 'device.view', roles: ['operator', 'manager', 'admin'] },
+      { path: '/usage', icon: 'TrendCharts', label: '用量', perm: 'usage.read', roles: ['manager', 'admin'] },
     ],
   },
   {

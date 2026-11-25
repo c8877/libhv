@@ -39,6 +39,7 @@ clean-master:
 rtunnel_test:
 	python3 rtunnel/tests/e2e.py
 	python3 rtunnel/tests/permission_e2e.py
+	python3 rtunnel/tests/usage_e2e.py
 	python3 rtunnel/tests/compat_e2e.py
 	python3 rtunnel/tests/protocol_doc_test.py
 
