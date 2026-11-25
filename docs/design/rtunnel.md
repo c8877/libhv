@@ -635,6 +635,7 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 | GET | `/api/v1/audit` | 审计（登录、OPEN、踢、证书、文件、终端、权限变更） |
 | GET | `/api/v1/usage` | 用量报表（日聚合）：流量/会话/设备在线，可按 `tenant_id` 过滤，见 §13.10 |
 | GET/POST/PUT | `/api/v1/tenants[/{id}]` | 租户列表/新建/改名启停，见 §13.11 |
+| GET/PUT | `/api/v1/billing/prices[/{metric}]`、`/billing/summary` | 价目与费用试算，见 §13.12 |
 | GET/POST | `/api/v1/certs`、`/api/v1/certs/issue`、`/sign`、`/revoke` | 证书台账/签发/CSR 签名/吊销（admin） |
 | GET/POST/DELETE/PUT | `/api/v1/files[/{name}]` | 文件列表/上传/下载/删除/原子编辑（编辑需 manager+，上限可配置，默认 32 MiB；文件名白名单） |
 | GET | `/api/v1/uploads/{name}` | 分片上传状态与续传 |
@@ -883,8 +884,8 @@ GET /api/v1/usage?from=2026-11-01&to=2026-11-30&metric=bytes&subject_type=token&
   相关接口都先过 `ownsDevid()`，设备列表按 `tenantDevices()` 收窄；账号接口先过
   `accountTenantDenied()`，跨租户的账号详情/权限组绑定直接 403
 - **运营商侧资源不对接入令牌开放**：`group.*`、`dict.*`、`relay.*`、`cert.*`、`settings.*`、
-  `token.*`、`system.shutdown` 属于平台自身运维，`rtk-` 令牌即使被误授也判为无权限；
-  客户可用的只有设备、文件、分发、账号、用量与租户只读
+  `token.*`、`billing.write`、`system.shutdown` 属于平台自身运维，`rtk-` 令牌即使被误授
+  也判为无权限；客户可用的只有设备、文件、分发、账号、用量、费用与租户只读
 - **停用租户 = 停用其下全部接入账号**：`clientAuthPolicies` 把租户状态折算进
   `account_status`，relay 拿到后断开在线连接并拒绝重新认证；默认租户不可停用
 - 设备跨租户迁移走 `PUT /api/v1/permission/devices/:devid` 的 `tenant_id`，保存后
@@ -897,6 +898,50 @@ GET /api/v1/usage?from=2026-11-01&to=2026-11-30&metric=bytes&subject_type=token&
 只有自己的设备，但仓库里存的是所有租户的文件，且分发只按文件名取文件。因此“租户 A 猜文件名、
 把租户 B 的文件分发到自己的设备”在当前实现下是可能的。需要真正的租户级文件隔离时，
 给仓库加 `tenant_id` 目录前缀并让分发按租户解析；或直接按租户部署独立 relay。
+
+### 13.12 价目与费用试算
+
+目标：把“用了多少”变成“大概多少钱”，验证计量口径能对上账；**不生成账单/发票**。
+
+**数据模型**
+
+| 表 | 说明 |
+|---|---|
+| `price_rules` | `metric` 主键 + `unit_size`（计价单位包含多少 metric 单位）+ `price_micro`（每单位价格 × 1e6）+ `currency` |
+
+- 默认四个指标都建行、单价 0：升级后行为不变，设置单价后才开始算钱
+- `metric` 白名单与采集侧一致：`bytes / sessions / session_seconds / online_seconds`，
+  避免价目表出现永远不会被引用的键
+- 金额用 1e-6 元（整数）存储和计算，避免浮点误差；接口同时接受 `price_micro` 与
+  `price_yuan`（后者在前端填“元”时用）
+
+**计算**
+
+```
+amount = qty ÷ unit_size × price        // 先整商再算余数，最后向下取整到 1e-6 元
+```
+
+- 数据源是 `usage_daily`（日聚合），按 `tenant_id` 汇总；接入令牌只能算本租户
+- 时间范围按日（含首尾），日按 relay 本地时区，与用量报表一致
+- `online_seconds` 的自然单位是“设备·天”（86400），`bytes` 是 GiB，会话次数是千次，
+  分钟级时长是小时——单位可改，改完立即按新口径重算
+
+**接口**
+
+```
+GET /api/v1/billing/prices            → {"items":[{"metric","unit_size","price_micro","currency"}]}
+PUT /api/v1/billing/prices/{metric}   ← {"unit_size":1073741824,"price_yuan":0.5}
+GET /api/v1/billing/summary?from&to&tenant_id
+→ {"tenants":[{"tenant_id","tenant_name","items":[{metric,qty,unit_size,price_micro,amount_micro}],
+   "total_micro"}],"total_micro","currency"}
+```
+
+- `billing.read` 看价目与费用；`billing.write` 改价目（预置组里只有超管有）
+- 价目是全局的：接入令牌（`rtk-`）即使被授了 `billing.write` 也不生效，只能看本租户费用
+- 管理台「监控 → 费用」：按租户×指标列出用量与金额，底部价目表可调单价
+
+**还没做**：账期锁定、阶梯价/包年包月、税额、账单与支付、对账导出。计算逻辑集中在
+`billingSummary` 一处，接账单时只需加“账期快照 + 状态机”，不需要改采集与价目结构。
 
 ## 14. 备选方案与取舍
 

@@ -271,6 +271,12 @@ void AdminServer::registerRoutes() {
         std::string role; int rc = requirePerm(ctx, "tenant.write", role); if (rc) return rc;
         handleTenantUpdate(ctx, role); return 200;
     });
+    access("billing.read", "GET", "/api/v1/billing/prices", &AdminServer::handleBillingPrices);
+    access("billing.read", "GET", "/api/v1/billing/summary", &AdminServer::handleBillingSummary);
+    service_.Handle("PUT", "/api/v1/billing/prices/:metric", [this](const HttpContextPtr& ctx) {
+        std::string role; int rc = requirePerm(ctx, "billing.write", role); if (rc) return rc;
+        handleBillingPriceSet(ctx, role); return 200;
+    });
     access("cert.read", "GET", "/api/v1/certs", &AdminServer::handleCerts);
 
     service_.Handle("DELETE", "/api/v1/streams/:a_sid", [this](const HttpContextPtr& ctx) {

@@ -266,6 +266,9 @@ private:
     void handleTenants(const HttpContextPtr& ctx);
     void handleTenantCreate(const HttpContextPtr& ctx, const std::string& role);
     void handleTenantUpdate(const HttpContextPtr& ctx, const std::string& role);
+    void handleBillingPrices(const HttpContextPtr& ctx);
+    void handleBillingPriceSet(const HttpContextPtr& ctx, const std::string& role);
+    void handleBillingSummary(const HttpContextPtr& ctx);
     // api_certs.cpp
     void handleCerts(const HttpContextPtr& ctx);
     void handleCertIssue(const HttpContextPtr& ctx, const std::string& role);

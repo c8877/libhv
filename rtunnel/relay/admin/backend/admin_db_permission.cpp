@@ -205,6 +205,7 @@ bool permIsGlobalKey(const std::string& key) {
         "cert.read", "cert.write",
         "audit.read", "usage.read",
         "tenant.read", "tenant.write",
+        "billing.read", "billing.write",
         "settings.read", "settings.write", "system.shutdown",
         "repo.read", "repo.write", "repo.delete",
     };
@@ -503,6 +504,8 @@ const PermResDef kPermRes[] = {
     {"usage.read", "运营", "查看用量", "隧道流量、会话与设备在线用量报表（全局）"},
     {"tenant.read", "运营", "查看租户", "租户列表与设备/账号归属"},
     {"tenant.write", "运营", "管理租户", "新建、改名、启停租户"},
+    {"billing.read", "运营", "查看费用", "按租户查看用量金额与价目表"},
+    {"billing.write", "运营", "修改价目", "调整各指标计价单位与单价"},
 
     {"settings.read", "系统", "查看设置", "系统设置与告警状态"},
     {"settings.write", "系统", "修改设置", "系统设置与告警测试"},
@@ -533,7 +536,7 @@ std::vector<std::string> presetResources(const std::string& builtin) {
             allow = true;
         } else if (builtin == "manager") {
             allow =                     k != "settings.write" && k != "system.shutdown" && k != "cert.write" &&
-                    k != "account.delete";
+                    k != "account.delete" && k != "billing.write";
         } else if (builtin == "operator") {
             allow = k == "device.view" || k == "device.terminal" || k == "device.port" ||
                     k == "device.svc" || k == "device.tty.read" || k == "device.tty.write" ||

@@ -12,6 +12,7 @@ export const NAV_GROUPS = [
       { path: '/streams', icon: 'Sort', perm: 'device.view', roles: ['operator', 'manager', 'admin'] },
       { path: '/usage', icon: 'TrendCharts', label: '用量', perm: 'usage.read', roles: ['manager', 'admin'] },
       { path: '/tenants', icon: 'OfficeBuilding', label: '租户', perm: 'tenant.read', roles: ['manager', 'admin'] },
+      { path: '/billing', icon: 'Wallet', label: '费用', perm: 'billing.read', roles: ['manager', 'admin'] },
     ],
   },
   {

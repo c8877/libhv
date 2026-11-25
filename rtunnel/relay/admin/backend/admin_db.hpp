@@ -231,6 +231,13 @@ public:
     // 清理早于 before_ms 的流水（日聚合保留）
     bool usagePrune(long long before_ms, int& n);
 
+    // 价目与费用试算：用量 × 单价（金额单位 1e-6 元）
+    bool billingPrices(std::string& json_out);
+    bool billingPriceSet(const std::string& metric, long long unit_size, long long price_micro,
+                         const std::string& currency, std::string& err);
+    bool billingSummary(const std::string& from, const std::string& to, long long tenant_id,
+                        std::string& json_out, std::string& err);
+
     // 租户：计费与设备归属边界（默认租户 id=1）
     bool tenantList(std::string& json_out);
     bool tenantCreate(const std::string& name, const std::string& note, const std::string& by,

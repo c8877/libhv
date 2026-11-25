@@ -343,7 +343,8 @@ bool permIsOperatorKey(const std::string& k) {
     static const char* kPrefix[] = {"group.", "dict.", "relay.", "cert.", "settings.", "token."};
     for (const char* p : kPrefix)
         if (k.rfind(p, 0) == 0) return true;
-    return k == "system.shutdown";
+    // 价目是全局的：接入令牌可以看本租户费用，但不能改全局单价
+    return k == "system.shutdown" || k == "billing.write";
 }
 }  // namespace
 

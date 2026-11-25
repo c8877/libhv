@@ -174,6 +174,7 @@ python3 rtunnel/tests/permission_e2e.py  # 权限：混合组的端口范围、W
 python3 rtunnel/tests/usage_e2e.py       # 用量：流量/会话/设备在线计量、日聚合、权限
 python3 rtunnel/tests/tenant_e2e.py      # 多租户：设备归属、跨租户拒绝、停用租户、用量归集
 python3 rtunnel/tests/bandwidth_e2e.py   # 带宽整形：限速生效、数据不丢、不限速不受影响
+python3 rtunnel/tests/billing_e2e.py     # 费用试算：价目、金额、按租户汇总
 python3 rtunnel/tests/compat_e2e.py      # HELLO 版本区间、低版本拒绝、高版本向前兼容
 python3 rtunnel/tests/protocol_doc_test.py  # 协议文档覆盖率（帧类型/常量）
 build/bin/rtunnel-endpoint-test          # --server 地址解析单测
@@ -210,6 +211,9 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
   超额时暂停数据来源侧的读（上行暂停客户端连接、下行暂停设备连接），靠 TCP 窗口回压，
   不丢帧；容量为 200ms 的量（最小 8 KiB），单次暂停不超过 500ms。适合按流量计费时
   防止单用户打满出口；管理台在「接入账号 → Token」里按 Mbps 填。
+- **费用试算**：`price_rules` 存每个指标的计价单位与单价（金额 1e-6 元），
+  `GET /api/v1/billing/summary` 把日聚合用量乘单价、按租户汇总；「监控 → 费用」可改价目
+  （`billing.write`，默认只有超管）。只核算，不出账单/发票。
 - **租户**：设备与接入账号各归属一个租户（默认租户 id=1），数据面按设备租户强制隔离，
   接入令牌只看得到、连得到本租户设备；停用租户等于停用其下全部接入账号并断开在线连接。
   详见 `../docs/design/rtunnel.md` §13.11。
@@ -234,7 +238,7 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
 
 relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，独立 worker 线程）：
 
-- 能力：概览、设备/会话、踢会话/下线、权限（权限组 / 授权对象 / 资源与设备字典）、接入账号与 Token（时效 / 流量 / 频率 / 并发）、租户与用量报表、设备文件与服务管理、证书签发/吊销、文件仓库、分发与 OTA、审计、系统设置
+- 能力：概览、设备/会话、踢会话/下线、权限（权限组 / 授权对象 / 资源与设备字典）、接入账号与 Token（时效 / 流量 / 频率 / 并发 / 带宽）、租户、用量与费用试算、设备文件与服务管理、证书签发/吊销、文件仓库、分发与 OTA、审计、系统设置
 - 资源键与数据面能力一一对应：`device.view` 只读可见，`device.svc` 才能启停服务，
   串口分 `device.tty.read`（只读流）与 `device.tty.write`（写入/接管）。令牌吊销、账号停用、
   权限组变更会立即断开该主体的在线连接；管理台的终端/串口/文件/服务页面在权限变小、

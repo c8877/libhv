@@ -405,6 +405,18 @@ bool AdminDb::migrate(std::string& err) {
         "CREATE INDEX IF NOT EXISTS idx_usage_daily_metric ON usage_daily(metric,day);"
         "CREATE INDEX IF NOT EXISTS idx_usage_daily_tenant ON usage_daily(tenant_id,day);"
         "CREATE INDEX IF NOT EXISTS idx_usage_events_tenant ON usage_events(tenant_id,ts_ms);"
+        // 价目：每个指标一个计价单位与单价（金额 1e-6 元）。默认 0 元，先试算不收费
+        "CREATE TABLE IF NOT EXISTS price_rules("
+        " metric TEXT PRIMARY KEY,"
+        " unit_size INTEGER NOT NULL DEFAULT 1,"
+        " price_micro INTEGER NOT NULL DEFAULT 0,"
+        " currency TEXT NOT NULL DEFAULT 'CNY',"
+        " updated_ms INTEGER NOT NULL DEFAULT 0);"
+        "INSERT OR IGNORE INTO price_rules(metric,unit_size,price_micro,currency,updated_ms) VALUES"
+        " ('bytes',1073741824,0,'CNY',0),"
+        " ('sessions',1000,0,'CNY',0),"
+        " ('session_seconds',3600,0,'CNY',0),"
+        " ('online_seconds',86400,0,'CNY',0);"
         // relay 地址字典 + 有序下发列表 + 同步任务（逐设备行复用 distribution_tasks）
         "CREATE TABLE IF NOT EXISTS relay_dict("
         " id INTEGER PRIMARY KEY AUTOINCREMENT,"

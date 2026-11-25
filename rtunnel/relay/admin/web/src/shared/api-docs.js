@@ -746,6 +746,35 @@ export const DOCS = [
     resp: `{ "ok": true }`,
   },
   {
+    group: 'sys', method: 'GET', path: '/api/v1/billing/prices', minRole: 'manager',
+    summary: '价目表（每个指标的计价单位与单价）',
+    note: '金额单位是 1e-6 元。默认单价为 0，即只试算不收费。需要 billing.read。',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/billing/prices"`,
+    resp: `{ "items": [{ "metric": "bytes", "unit_size": 1073741824, "price_micro": 500000, "currency": "CNY" }] }`,
+  },
+  {
+    group: 'sys', method: 'PUT', path: '/api/v1/billing/prices/:metric', minRole: 'manager',
+    summary: '设置某指标的计价单位与单价',
+    note: '需要 billing.write（默认只有超级管理员）。metric 取 bytes|sessions|session_seconds|online_seconds；'
+      + 'price_yuan 以元为单位，避免前端换算丢精度。',
+    body: `{ "unit_size": 1073741824, "price_yuan": 0.5, "currency": "CNY" }`,
+    curl: `curl -sS -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"unit_size":1073741824,"price_yuan":0.5}' "$RT/api/v1/billing/prices/bytes"`,
+    resp: `{ "ok": true }`,
+  },
+  {
+    group: 'sys', method: 'GET', path: '/api/v1/billing/summary', minRole: 'manager',
+    summary: '按租户试算费用（用量 × 单价）',
+    note: '需要 billing.read。接入令牌只能算本租户；控制台账号可按 tenant_id 过滤。'
+      + '金额向下取整到 0.000001 元，仅用于核算，不生成账单。',
+    params: [
+      { name: 'from', in: 'query', desc: '起始日 YYYY-MM-DD（含）' },
+      { name: 'to', in: 'query', desc: '结束日 YYYY-MM-DD（含）' },
+      { name: 'tenant_id', in: 'query', desc: '只算该租户' },
+    ],
+    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/billing/summary?from=2026-11-01&to=2026-11-30"`,
+    resp: `{ "tenants": [{ "tenant_id": 1, "tenant_name": "默认租户", "items": [{ "metric": "bytes", "qty": 1073741824, "amount_micro": 500000 }], "total_micro": 500000 }], "total_micro": 500000, "currency": "CNY" }`,
+  },
+  {
     group: 'sys', method: 'GET', path: '/api/v1/certs', minRole: 'manager',
     summary: '证书台账',
     curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/certs"`,
