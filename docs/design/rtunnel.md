@@ -40,7 +40,7 @@
 | **devid** | 设备唯一标识，命名规则见 §8.5 |
 | **a_sid / c_sid** | A↔B 段与 B↔C 段各自的 stream_id，由 B 映射（§10） |
 | **a:\<user\>** | A 侧按需 agent 的 devid：shell 落在开发者机器上，而不是设备 |
-| **admin** | B 上的管理台：HTTP API + WebSocket 终端 + Web 前端（dist，需 `--admin-docroot`） |
+| **admin** | B 上的管理台：HTTP API + WebSocket 终端 + Web 前端（`--admin-docroot` 或内嵌版） |
 | **RTNP** | 反向通道协议（Reverse Tunnel Protocol），运行在 TCP 之上 |
 
 ---
@@ -582,7 +582,7 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 |---|---|
 | `--admin ADDR` | 监听地址，如 `127.0.0.1:9443`；启动时不带凭据且非回环会被拒绝 |
 | `--admin-token T` | 首次初始化 admin 用；初始化完成后仅作紧急入口（仍只放行 setup） |
-| `--admin-docroot D` | 前端静态目录，指向 `web/dist`；未指定时管理台页面不可用 |
+| `--admin-docroot D` | 前端静态目录，指向 `web/dist`；未指定且非内嵌版时管理台页面不可用 |
 | `--admin-ca-cert/--admin-ca-key/--admin-cert-dir` | 签发 CA 与台账目录 |
 | `--admin-file-dir D` | 文件管理根目录 |
 | `--admin-db PATH` | SQLite 库：管理台账号、会话、设备、权限分组、接入账号/Token、API Token；需 OpenSSL 构建（PBKDF2） |
@@ -729,8 +729,23 @@ queued/scheduled → canceled
 
 ### 13.8 管理台前端
 
-前端是独立的 Vite + Vue 3 + Element Plus 工程：`relay/admin/web`，构建产物在 `web/dist`，
-relay 用 `--admin-docroot` 指向该目录提供静态文件（不传时页面 404，仅 API 可用）。
+前端是独立的 Vite + Vue 3 + Element Plus 工程：`relay/admin/web`，构建产物在 `web/dist`。
+两种交付方式，源码只有一份：
+
+| 方式 | 构建 | 运行时 |
+|---|---|---|
+| 磁盘目录（默认） | `npm run build` | `--admin-docroot web/dist`；不传则页面 404，仅 API 可用 |
+| 内嵌（发布） | `-DRTUNNEL_ADMIN_WEB=ON` 后 `--target rtunnel-relay-embedded` | 无需 docroot，单二进制自带前端 |
+
+- 内嵌是独立 target，默认不构建：`rtunnel-relay` 仍是不带前端的小二进制，
+  日常开发用 docroot 热改，发布用内嵌版，避免“换了 relay 忘了换 admin/web”的版本错配
+- 构建期由 `rtunnel/cmake/gen_admin_web.cmake` 遍历 `web/dist`，优先嵌 `.gz` 预压缩体，
+  生成 `{ 路径, 数据, 长度, 是否 gzip, Content-Type }` 表；
+  `web/dist` 任一文件变化都会重跑生成
+- 运行优先磁盘：`--admin-docroot` 命中的文件按磁盘返回，磁盘没有（或没配）再回退内嵌；
+  根路径先在磁盘里找 `admin.html`/`index.html`，两个都没有才查内嵌，避免内嵌 `admin.html`
+  盖掉磁盘 `index.html`
+- 客户端不支持 gzip 时首次访问解压一份并缓存；`/assets/*` 仍加长缓存头
 
 ```
 relay/admin/web/src

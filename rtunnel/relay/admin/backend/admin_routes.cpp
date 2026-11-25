@@ -1,5 +1,6 @@
 // 管理台路由注册
 #include "admin_server.hpp"
+#include "admin_web_assets.hpp"
 
 #include "cpputil/json.hpp"
 
@@ -618,8 +619,24 @@ void AdminServer::registerRoutes() {
     service_.Handle("HEAD", "/device/*", devproxy);
 
     service_.GET("/", [this](const HttpContextPtr& ctx) {
-        int rc = serveFrontend(ctx, "admin.html", "text/html");
-        if (rc == HTTP_STATUS_NOT_FOUND) rc = serveFrontend(ctx, "index.html", "text/html");
+        // 两个名字都要在同一来源里找完，再换下一个来源，避免内嵌 admin.html
+        // 抢在磁盘 index.html 前面
+        int rc = serveFrontend(ctx, "admin.html", "text/html", kAdminWebDiskOnly);
+        if (rc == HTTP_STATUS_NOT_FOUND)
+            rc = serveFrontend(ctx, "index.html", "text/html", kAdminWebDiskOnly);
+        if (rc == HTTP_STATUS_NOT_FOUND)
+            rc = serveFrontend(ctx, "admin.html", "text/html", kAdminWebEmbeddedOnly);
+        if (rc == HTTP_STATUS_NOT_FOUND)
+            rc = serveFrontend(ctx, "index.html", "text/html", kAdminWebEmbeddedOnly);
+        // 两种来源都没有：给一条能照着做的提示，而不是 hv 的空白 404
+        if (rc == HTTP_STATUS_NOT_FOUND && cfg_.docroot.empty() && !adminWebAssetsAvailable()) {
+            ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+            ctx->response->content_type = http_content_type_enum("text/plain");
+            ctx->response->body =
+                "admin frontend not deployed: start relay with --admin-docroot <web/dist>, "
+                "or use rtunnel-relay-embedded (built with -DRTUNNEL_ADMIN_WEB=ON)\n";
+            return 404;
+        }
         return rc;
     });
     // 前端静态产物（Vite）

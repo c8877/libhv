@@ -91,6 +91,15 @@ ss -tn | grep ':18443'        # 设备应自动重连
 ```
 
 管理台前端改动要先构建 `rtunnel/relay/admin/web/dist`，否则页面还是旧的。
+想彻底避免“二进制换了、前端没换”，用内嵌版（前端编进二进制，不再分发 `admin/web`）：
+
+```bash
+cmake -S . -B build_static -DRTUNNEL_ADMIN_WEB=ON
+cmake --build build_static --target rtunnel-relay-embedded -j8
+# 产物 build_static/bin/rtunnel-relay-embedded，替换时直接改名/覆盖 rtunnel-relay
+```
+
+内嵌版带 `--admin-docroot` 时仍以磁盘为准（磁盘缺文件回退内嵌），排障时可临时指目录。
 
 ### 文件仓库（OTA 分发用）
 

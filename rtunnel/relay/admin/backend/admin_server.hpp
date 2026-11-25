@@ -30,7 +30,7 @@ struct TerminalSession;
 struct AdminConfig {
     std::string addr;        // 形如 127.0.0.1:9443
     std::string token;       // 仅首次初始化使用的 token
-    std::string docroot;     // 前端磁盘目录（调试用，空则内嵌）
+    std::string docroot;     // 前端磁盘目录（开发用；为空时用内嵌前端，普通构建没有内嵌）
     std::string ca_cert;     // 签发用 CA 证书
     std::string ca_key;      // 签发用 CA 私钥
     std::string cert_dir;    // 证书台账目录（index.txt/revoked.txt/audit.log）
@@ -153,7 +153,11 @@ private:
     void        refreshGroupAcl();
     void        refreshTokenCache();
     void        registerRoutes();
-    int         serveFrontend(const HttpContextPtr& ctx, const char* name, const char* ctype);
+    // 前端来源：磁盘目录与内嵌资源可以分别尝试。/ 先后试 admin.html 与 index.html，
+    // 必须先两个都查完磁盘再查内嵌，否则内嵌的 admin.html 会盖掉磁盘的 index.html。
+    enum AdminWebSource { kAdminWebBoth = 0, kAdminWebDiskOnly, kAdminWebEmbeddedOnly };
+    int         serveFrontend(const HttpContextPtr& ctx, const char* name, const char* ctype,
+                              int source = kAdminWebBoth);
 
     // handlers（api_*.cpp）
     void handleOverview(const HttpContextPtr& ctx);

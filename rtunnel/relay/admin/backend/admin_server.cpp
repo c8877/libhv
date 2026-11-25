@@ -1,5 +1,6 @@
 #include "admin_server.hpp"
 #include "admin_tls.hpp"
+#include "admin_web_assets.hpp"
 #include "common/logging.hpp"
 #include "common/token_util.hpp"
 #include "cpputil/json.hpp"
@@ -616,7 +617,42 @@ void AdminServer::kickConsoleWsShrunk(const std::map<long long, DbPermScope>& be
 
 // ---------------------------------------------------------------- 前端
 
-int AdminServer::serveFrontend(const HttpContextPtr& ctx, const char* name, const char* ctype) {
+namespace {
+
+// Accept-Encoding: gzip / gzip;q=0.5 / br, gzip;q=0 / *
+bool adminAcceptsEncoding(const std::string& ae, const char* want) {
+    size_t pos = 0;
+    while (pos < ae.size()) {
+        size_t comma = ae.find(',', pos);
+        std::string item = ae.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+        size_t b = item.find_first_not_of(" \t");
+        size_t e = item.find_last_not_of(" \t");
+        if (b == std::string::npos) {
+            if (comma == std::string::npos) break;
+            pos = comma + 1;
+            continue;
+        }
+        item = item.substr(b, e - b + 1);
+        size_t semi = item.find(';');
+        std::string token = item.substr(0, semi);
+        for (auto& ch : token) ch = (char)tolower((unsigned char)ch);
+        if (token == want || token == "*") {
+            if (semi != std::string::npos) {
+                size_t q = item.find("q=", semi);
+                if (q != std::string::npos && atof(item.c_str() + q + 2) <= 0) return false;
+            }
+            return true;
+        }
+        if (comma == std::string::npos) break;
+        pos = comma + 1;
+    }
+    return false;
+}
+
+}  // namespace
+
+int AdminServer::serveFrontend(const HttpContextPtr& ctx, const char* name, const char* ctype,
+                               int source) {
     ctx->response->headers["Cache-Control"] = "no-store";
     if (name == nullptr || strstr(name, "..") != nullptr) {
         ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
@@ -637,37 +673,62 @@ int AdminServer::serveFrontend(const HttpContextPtr& ctx, const char* name, cons
         if (!ok) body.clear();
         return ok;
     };
-    if (cfg_.docroot.empty()) {
-        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
-        ctx->response->content_type = http_content_type_enum("text/plain");
-        ctx->response->body = "admin frontend not deployed: start relay with --admin-docroot <web/dist>\n";
-        return 404;
-    }
-    std::string path = cfg_.docroot + "/" + name;
-    // 构建期生成的 .br/.gz 预压缩文件，按 Accept-Encoding 直接返回
     std::string ae = ctx->header("Accept-Encoding");
-    const char* encoding = NULL;
-    const char* ext = NULL;
-    if (ae.find("br") != std::string::npos) {
-        encoding = "br"; ext = ".br";
-    } else if (ae.find("gzip") != std::string::npos) {
-        encoding = "gzip"; ext = ".gz";
-    }
-    if (encoding) {
+    const bool br_ok = adminAcceptsEncoding(ae, "br");
+    const bool gzip_ok = adminAcceptsEncoding(ae, "gzip");
+
+    const bool try_disk = (source != kAdminWebEmbeddedOnly) && !cfg_.docroot.empty();
+    const bool try_embedded = (source != kAdminWebDiskOnly);
+
+    // 1) 磁盘目录优先：开发时用 --admin-docroot 指到 web/dist 即可热改
+    if (try_disk) {
+        std::string path = cfg_.docroot + "/" + name;
+        // 构建期生成的 .br/.gz 预压缩文件，按 Accept-Encoding 直接返回
+        const char* encoding = NULL;
+        const char* ext = NULL;
+        if (br_ok) {
+            encoding = "br"; ext = ".br";
+        } else if (gzip_ok) {
+            encoding = "gzip"; ext = ".gz";
+        }
+        if (encoding) {
+            std::string body;
+            if (read_file(path + ext, body)) {
+                ctx->response->content_type = http_content_type_enum(ctype);
+                ctx->response->headers["Content-Encoding"] = encoding;
+                ctx->response->headers["Vary"] = "Accept-Encoding";
+                ctx->response->body = std::move(body);
+                return 200;
+            }
+        }
         std::string body;
-        if (read_file(path + ext, body)) {
+        if (read_file(path, body)) {
             ctx->response->content_type = http_content_type_enum(ctype);
-            ctx->response->headers["Content-Encoding"] = encoding;
-            ctx->response->headers["Vary"] = "Accept-Encoding";
             ctx->response->body = std::move(body);
             return 200;
         }
     }
-    std::string body;
-    if (read_file(path, body)) {
-        ctx->response->content_type = http_content_type_enum(ctype);
-        ctx->response->body = std::move(body);
+
+    // 2) 磁盘没有（或没配 docroot）：回退到编译期内嵌的前端
+    //    rtunnel-relay 里这个查询永远返回 false；rtunnel-relay-embedded 带资源表。
+    AdminWebAsset asset;
+    if (try_embedded && adminWebAssetGet(name, gzip_ok, asset)) {
+        ctx->response->content_type = http_content_type_enum(asset.ctype.c_str());
+        if (asset.gzip) {
+            ctx->response->headers["Content-Encoding"] = "gzip";
+            ctx->response->headers["Vary"] = "Accept-Encoding";
+        }
+        ctx->response->body = std::move(asset.body);
         return 200;
+    }
+
+    if (source == kAdminWebBoth && cfg_.docroot.empty() && !adminWebAssetsAvailable()) {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->response->content_type = http_content_type_enum("text/plain");
+        ctx->response->body =
+            "admin frontend not deployed: start relay with --admin-docroot <web/dist>, "
+            "or use rtunnel-relay-embedded (built with -DRTUNNEL_ADMIN_WEB=ON)\n";
+        return 404;
     }
     ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
     return 404;
@@ -911,7 +972,11 @@ int AdminServer::start(const AdminConfig& cfg) {
               cfg_.token.empty() ? "no auth (loopback)" : "bearer token", 0);
     }
     if (cfg_.docroot.empty()) {
-        logf_("[admin] WARNING: --admin-docroot not set, admin UI disabled");
+        if (adminWebAssetsAvailable()) {
+            logf_("[admin] serving embedded frontend (no --admin-docroot)");
+        } else {
+            logf_("[admin] WARNING: --admin-docroot not set and no embedded frontend, admin UI disabled");
+        }
     }
     return 0;
 }

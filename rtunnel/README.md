@@ -175,6 +175,7 @@ python3 rtunnel/tests/usage_e2e.py       # 用量：流量/会话/设备在线�
 python3 rtunnel/tests/tenant_e2e.py      # 多租户：隔离、停用、用量归集、套餐（设备/并发/流量）
 python3 rtunnel/tests/bandwidth_e2e.py   # 带宽整形：限速生效、数据不丢、不限速不受影响
 python3 rtunnel/tests/billing_e2e.py     # 费用：价目、金额、按租户汇总、结算单状态机与导出
+python3 rtunnel/tests/admin_embedded_e2e.py  # 内嵌前端：无 docroot 出页面、gzip、回退与优先级
 python3 rtunnel/tests/compat_e2e.py      # HELLO 版本区间、低版本拒绝、高版本向前兼容
 python3 rtunnel/tests/protocol_doc_test.py  # 协议文档覆盖率（帧类型/常量）
 build/bin/rtunnel-endpoint-test          # --server 地址解析单测
@@ -270,7 +271,10 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 - 文件哈希：上传即计算 sha256；同设备同哈希重复分发标记「冲突」，
   可校验设备文件（相同则直接成功）或强制重发
 - 前端：构建 `rtunnel/relay/admin/web` 后，用 `--admin-docroot DIR` 指向 `dist/`；
-  未指定时管理台页面不可用（仅 API 正常）
+  未指定时管理台页面不可用（仅 API 正常）。不想带目录时用内嵌版：
+  `cmake .. -DRTUNNEL_ADMIN_WEB=ON && cmake --build . --target rtunnel-relay-embedded`，
+  换出的二进制自带前端（构建期把 `web/dist` 的预压缩体嵌入，体积约 +0.8 MB）；
+  指定 `--admin-docroot` 时仍以磁盘为准，磁盘缺文件再回退内嵌
 - 鉴权：`--admin-token T` 仅用于首次初始化管理员；之后使用账号密码登录
   （SQLite + HttpOnly 会话）；非回环监听必须配置 `--admin-token`；
 - 证书配置：`--admin-ca-cert C --admin-ca-key K --admin-cert-dir D`（台账 index.txt、
@@ -634,7 +638,7 @@ http://B:9443/device/<devid>/<port>/<path>
 | `--admin-ca-cert/--admin-ca-key/--admin-cert-dir` | 证书签发 CA 与台账目录 |
 | `--admin-tls-cert/--admin-tls-key` | 管理台 HTTPS：使用已有证书 |
 | `--admin-tls-selfsigned [--admin-tls-dir D] [--admin-tls-days N]` | 管理台 HTTPS：自签并自动续期 |
-| `--admin-file-dir` / `--admin-docroot` | 文件管理目录 / 前端磁盘目录 |
+| `--admin-file-dir` / `--admin-docroot` | 文件管理目录 / 前端磁盘目录（内嵌版可省略） |
 | `--drain-timeout` | 优雅退出等待时长，默认 10000ms |
 | `--stream-idle SEC` | 流空闲回收：超过 SEC 秒没有任何帧就 RESET 并释放会话配额，默认 1800，0 关闭 |
 

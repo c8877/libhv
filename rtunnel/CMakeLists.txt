@@ -28,7 +28,8 @@ add_library(rtunnel_sqlite STATIC 3rd/sqlite3/sqlite3.c)
 target_compile_definitions(rtunnel_sqlite PRIVATE SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION=1)
 set_target_properties(rtunnel_sqlite PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_log.cpp
+set(RTUNNEL_RELAY_SOURCES
+               relay/main.cpp relay/relay_server.cpp relay/audit_log.cpp
                relay/usage_meter.cpp
                common/endpoint.cpp
                common/sha256.cpp common/token_util.cpp
@@ -76,6 +77,12 @@ add_executable(rtunnel-relay  relay/main.cpp relay/relay_server.cpp relay/audit_
                relay/admin/backend/dist_scheduler.cpp
                relay/admin/backend/relay_sync.cpp
                relay/admin/backend/terminal.cpp)
+add_executable(rtunnel-relay ${RTUNNEL_RELAY_SOURCES} relay/admin/backend/admin_web_stub.cpp)
+
+# 独立发布 target：把管理台前端（web/dist，构建期已预压缩）内嵌进 relay。
+# 默认关闭，日常构建仍是只读 --admin-docroot 的小二进制；发布包用
+#   cmake .. -DRTUNNEL_ADMIN_WEB=ON && cmake --build . --target rtunnel-relay-embedded
+option(RTUNNEL_ADMIN_WEB "构建 rtunnel-relay-embedded（内嵌管理台前端）" OFF)
 
 # agent 两件套：rtunnel-agent 带本地设备详情页；rtunnel-agent-noweb 不含 Web 代码。
 # 页面是内嵌单文件 HTML，无外部资源，适合离线设备。
@@ -156,6 +163,36 @@ add_executable(rtunnel-endpoint-test tests/endpoint_test.cpp)
 
 target_include_directories(rtunnel-relay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/3rd/sqlite3)
 target_link_libraries(rtunnel-relay  rtnp rtunnel_sqlite rtunnel_gzip)
+
+if (RTUNNEL_ADMIN_WEB)
+    set(RTUNNEL_ADMIN_DIST "${CMAKE_CURRENT_SOURCE_DIR}/relay/admin/web/dist")
+    if (NOT EXISTS "${RTUNNEL_ADMIN_DIST}/index.html")
+        message(WARNING "RTUNNEL_ADMIN_WEB=ON 但 ${RTUNNEL_ADMIN_DIST} 未构建；"
+                        "先执行 (cd rtunnel/relay/admin/web && npm run build)，跳过 rtunnel-relay-embedded")
+    else()
+        # 构建期生成，dist 里任何文件改动都会重跑（配置期生成会漏掉内容改动）
+        file(GLOB_RECURSE RTUNNEL_ADMIN_DIST_FILES CONFIGURE_DEPENDS
+             "${RTUNNEL_ADMIN_DIST}/*")
+        set(RTUNNEL_ADMIN_DATA "${CMAKE_CURRENT_BINARY_DIR}/generated/admin_web_assets_data.hpp")
+        add_custom_command(
+            OUTPUT "${RTUNNEL_ADMIN_DATA}"
+            COMMAND ${CMAKE_COMMAND} "-DADMIN_DIST=${RTUNNEL_ADMIN_DIST}"
+                    "-DOUT=${RTUNNEL_ADMIN_DATA}"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/gen_admin_web.cmake"
+            DEPENDS ${RTUNNEL_ADMIN_DIST_FILES}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/gen_admin_web.cmake"
+            COMMENT "rtunnel-admin-web: embedding web/dist"
+            VERBATIM)
+        add_executable(rtunnel-relay-embedded ${RTUNNEL_RELAY_SOURCES}
+                       relay/admin/backend/admin_web_embedded.cpp
+                       "${RTUNNEL_ADMIN_DATA}")
+        target_include_directories(rtunnel-relay-embedded PRIVATE
+                                   ${CMAKE_CURRENT_SOURCE_DIR}/3rd/sqlite3
+                                   "${CMAKE_CURRENT_BINARY_DIR}/generated")
+        target_link_libraries(rtunnel-relay-embedded rtnp rtunnel_sqlite rtunnel_gzip)
+    endif()
+endif()
+
 target_link_libraries(rtunnel-agent  rtunnel_common crypt)
 target_link_libraries(rtunnel-client rtunnel_common)
 target_link_libraries(rtnp-codec-test rtnp)
@@ -163,6 +200,9 @@ target_link_libraries(rtunnel-endpoint-test rtunnel_common)
 
 if (RTUNNEL_STATIC_LIBGCC)
     target_link_options(rtunnel-relay  PRIVATE -static-libstdc++ -static-libgcc)
+    if (TARGET rtunnel-relay-embedded)
+        target_link_options(rtunnel-relay-embedded PRIVATE -static-libstdc++ -static-libgcc)
+    endif()
     target_link_options(rtunnel-agent  PRIVATE -static-libstdc++ -static-libgcc)
     if (TARGET rtunnel-agent-noweb)
         target_link_options(rtunnel-agent-noweb PRIVATE -static-libstdc++ -static-libgcc)
@@ -190,6 +230,12 @@ if (TARGET rtunnel-agent-noweb)
 else()
     set(RTUNNEL_AGENT_LITE_TARGET rtunnel-agent)
 endif()
+# 内嵌前端的发布变体：部署目录里只放一个二进制，不再带 web/dist
+if (TARGET rtunnel-relay-embedded)
+    set(RTUNNEL_DEPLOY_RELAY_TARGET rtunnel-relay-embedded)
+else()
+    set(RTUNNEL_DEPLOY_RELAY_TARGET rtunnel-relay)
+endif()
 # 只裁剪部署副本，保留构建目录里的调试符号
 set(RTUNNEL_STRIP_ARGS "")
 if(CMAKE_STRIP)
@@ -204,6 +250,16 @@ if(CMAKE_STRIP AND RTUNNEL_AGENT_WEB)
         COMMAND ${CMAKE_STRIP} --strip-all "${RTUNNEL_DEPLOY_DIR}/agent-web/bin/rtunnel-agent"
         COMMAND ${CMAKE_STRIP} --strip-all "${RTUNNEL_DEPLOY_DIR}/agent-web/bin/rtunnel-client")
 endif()
+# 内嵌版不再分发 web/dist，避免二进制与磁盘前端版本不一致
+if (TARGET rtunnel-relay-embedded)
+    set(RTUNNEL_DEPLOY_WEB_ARGS
+        COMMAND ${CMAKE_COMMAND} -E remove_directory "${RTUNNEL_DEPLOY_DIR}/relay/web")
+else()
+    set(RTUNNEL_DEPLOY_WEB_ARGS
+        COMMAND ${CMAKE_COMMAND} -E remove_directory "${RTUNNEL_DEPLOY_DIR}/relay/web/dist"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${RTUNNEL_WEB_DIST}" "${RTUNNEL_DEPLOY_DIR}/relay/web/dist")
+endif()
 add_custom_target(rtunnel-deploy
     COMMAND ${CMAKE_COMMAND} -E make_directory
             "${RTUNNEL_DEPLOY_DIR}/relay/bin"
@@ -213,7 +269,7 @@ add_custom_target(rtunnel-deploy
             "${RTUNNEL_DEPLOY_DIR}/agent/etc"
             "${RTUNNEL_DEPLOY_DIR}/agent/service"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_FILE:rtunnel-relay> "${RTUNNEL_DEPLOY_DIR}/relay/bin/rtunnel-relay"
+            $<TARGET_FILE:${RTUNNEL_DEPLOY_RELAY_TARGET}> "${RTUNNEL_DEPLOY_DIR}/relay/bin/rtunnel-relay"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:rtunnel-client> "${RTUNNEL_DEPLOY_DIR}/agent/bin/rtunnel-client"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -234,11 +290,8 @@ add_custom_target(rtunnel-deploy
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${CMAKE_CURRENT_SOURCE_DIR}/deploy/agent/rtunnel-agent.json"
             "${RTUNNEL_DEPLOY_DIR}/agent/etc/rtunnel-agent.json"
-    COMMAND ${CMAKE_COMMAND} -E remove_directory
-            "${RTUNNEL_DEPLOY_DIR}/relay/web/dist"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${RTUNNEL_WEB_DIST}" "${RTUNNEL_DEPLOY_DIR}/relay/web/dist"
-    DEPENDS rtunnel-relay rtunnel-client ${RTUNNEL_AGENT_LITE_TARGET}
+    ${RTUNNEL_DEPLOY_WEB_ARGS}
+    DEPENDS ${RTUNNEL_DEPLOY_RELAY_TARGET} rtunnel-client ${RTUNNEL_AGENT_LITE_TARGET}
     COMMENT "assembling rtunnel deploy directory (agent: build_mp135.sh)")
 
 if (RTUNNEL_AGENT_WEB)
