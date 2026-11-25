@@ -49,7 +49,7 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="下发顺序" width="170">
+          <el-table-column label="优先级" width="170">
             <template #default="{ row }">
               <template v-if="posOf(row.id)">
                 <el-tag size="small" effect="plain" class="pos">{{ posOf(row.id) }}</el-tag>
@@ -83,7 +83,8 @@
                          layout="prev, pager, next, total" background @current-change="loadDict" />
         </div>
         <div class="hint muted">
-          顺序即故障切换顺序：当前 relay 断开后设备依次尝试后面的地址；设备上线时会自动对齐这份列表。
+          顺序即优先级（数字越小越高）：设备首次连接和每次重连都从高到低尝试；连不上或握手失败的地址 30 秒内跳过。
+          已建立的连接不会被更高优先级的地址抢占，重新排序在下次重连生效。
           保存只更新期望状态，立即下发请在「设备」页创建同步任务。
         </div>
       </el-tab-pane>

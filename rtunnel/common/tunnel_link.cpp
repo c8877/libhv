@@ -7,6 +7,10 @@
 #include <string.h>
 #include <stdlib.h>
 
+// 连不上/握手失败的地址在这段时间内跳过，避免每次重连都在故障地址上超时；
+// 冷却结束后会重新从高优先级开始尝试。
+static const long long kEndpointFailCooldownMs = 30000;
+
 // ---------------------------------------------------------------- 回调薄封装
 
 void TunnelLink::tunnelReadCb(hio_t* io, void* buf, int n) {
@@ -85,6 +89,7 @@ void TunnelLink::handleFrame(rtnp::Frame* f) {
         state = 2;
         backoff_ms = 1000;
         ping_unacked_ = 0;
+        if (ep_index_ < ep_fail_until_.size()) ep_fail_until_[ep_index_] = 0;
         if (hs_timer_) { htimer_del(hs_timer_); hs_timer_ = NULL; }
         // 可选尾部：账号 Token 会带回来用户名与限额，旧 relay 不发送
         rtnp::Reader r(f->payload, f->len);
@@ -168,10 +173,14 @@ void TunnelLink::onTunnelClose() {
     if (!autoReconnect()) return;
 
     if (pin_next_) {
-        // 按 relay 下发的新列表迁移：已经设好 ep_index_，不再顺移
+        // 按 relay 下发的新列表迁移：已经设好 ep_index_，不再重新选
         pin_next_ = false;
     } else {
-        advanceEndpoint(was_ready ? "session lost" : "connect/auth failed");
+        // 连不上/握手失败：给该地址一个冷却期，然后从最高优先级重新选；
+        // 已建立过连接再断开的（relay 重启等）不计冷却，下次仍优先试它。
+        if (!was_ready && ep_index_ < ep_fail_until_.size())
+            ep_fail_until_[ep_index_] = (long long)hloop_now_ms(loop) + kEndpointFailCooldownMs;
+        pickPreferred(was_ready ? "session lost" : "connect/auth failed");
     }
     logf_("[%s] tunnel closed, reconnect in %d ms", logTag(), backoff_ms);
     scheduleReconnect();
@@ -271,18 +280,13 @@ void TunnelLink::scheduleReconnect() {
     hevent_set_userdata(t, this);
 }
 
-// 切到下一个可用地址；全部失败时保持当前地址继续重试
-void TunnelLink::advanceEndpoint(const char* why) {
+// 按优先级选地址：从下标 0 开始，跳过认证失败与冷却中的地址。
+// 全部不可用时保持当前地址，交给退避重试；已建立的连接不会被更高优先级抢占。
+void TunnelLink::pickPreferred(const char* why) {
     if (endpoints.size() <= 1) return;
-    size_t next = ep_index_;
-    for (size_t i = 1; i <= endpoints.size(); ++i) {
-        size_t cand = (ep_index_ + i) % endpoints.size();
-        if (ep_auth_bad_.size() > cand && ep_auth_bad_[cand]) continue;
-        next = cand;
-        break;
-    }
-    if (next == ep_index_) return;
-    logf_("[%s] failover %s:%d -> %s:%d (%s)", logTag(),
+    size_t next = tunnel_pick_endpoint(ep_auth_bad_, ep_fail_until_, (long long)hloop_now_ms(loop));
+    if (next >= endpoints.size() || next == ep_index_) return;
+    logf_("[%s] prefer %s:%d -> %s:%d (%s)", logTag(),
           endpoints[ep_index_].host.c_str(), endpoints[ep_index_].port,
           endpoints[next].host.c_str(), endpoints[next].port, why);
     size_t from = ep_index_;
@@ -299,10 +303,19 @@ bool TunnelLink::replaceEndpoints(const std::vector<TunnelEndpoint>& eps, bool a
     }
     if (cur == eps.size() && !allow_leave) return false;
 
+    // 列表常常在每次重连时整份下发，故障地址的冷却要按 host:port 继承下来，
+    // 否则每次重连都会把已知的故障地址重新超时一遍。
+    std::vector<long long> fail_until(eps.size(), 0);
+    for (size_t i = 0; i < eps.size(); ++i) {
+        size_t old = tunnel_endpoint_index(endpoints, eps[i]);
+        if (old < endpoints.size() && old < ep_fail_until_.size()) fail_until[i] = ep_fail_until_[old];
+    }
+
     // 保留当前连接，只换后续故障切换用的列表；当前地址不在列表里才迁移。
     endpoints = eps;
     ep_index_ = (cur == eps.size()) ? 0 : cur;
     ep_auth_bad_.assign(endpoints.size(), 0);
+    ep_fail_until_ = fail_until;
     auth_fatal_ = 0;
     if (cur == eps.size()) {
         switching = true;
@@ -325,6 +338,7 @@ void TunnelLink::appendEndpoints(const std::vector<TunnelEndpoint>& extra) {
         if (tunnel_endpoint_index(endpoints, e) != endpoints.size()) continue;
         endpoints.push_back(e);
         ep_auth_bad_.push_back(0);
+        ep_fail_until_.push_back(0);
     }
 }
 
@@ -338,6 +352,7 @@ void TunnelLink::init(hloop_t* loop) {
     }
     if (ep_index_ >= endpoints.size()) ep_index_ = 0;
     ep_auth_bad_.assign(endpoints.size(), 0);
+    ep_fail_until_.assign(endpoints.size(), 0);
     if (jitter_seed_ == 0) {
         jitter_seed_ = (uint32_t)(hloop_now_ms(loop) ^ (uint64_t)(uintptr_t)this);
         if (jitter_seed_ == 0) jitter_seed_ = 1;

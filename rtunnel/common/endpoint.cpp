@@ -84,3 +84,18 @@ size_t tunnel_endpoint_index(const std::vector<TunnelEndpoint>& eps, const Tunne
     }
     return eps.size();
 }
+
+size_t tunnel_pick_endpoint(const std::vector<char>& auth_bad,
+                            const std::vector<long long>& fail_until_ms, long long now_ms) {
+    size_t n = auth_bad.size() > fail_until_ms.size() ? auth_bad.size() : fail_until_ms.size();
+    size_t probe = n;
+    long long probe_until = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (i < auth_bad.size() && auth_bad[i]) continue;   // 凭证被拒的地址不再尝试
+        long long until = i < fail_until_ms.size() ? fail_until_ms[i] : 0;
+        if (until <= now_ms) return i;
+        // 全都在冷却：返回最早解冻的一个去探测，避免死等已知故障的当前地址
+        if (probe == n || until < probe_until) { probe = i; probe_until = until; }
+    }
+    return probe;
+}

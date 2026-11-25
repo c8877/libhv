@@ -752,13 +752,18 @@ relay 在 agent `AUTH_OK` 之后、以及同步任务下发时发送 `RELAY_LIST
 {"servers":"r1.example.com:8443,r2.example.com:8443","rev":2957691368,"allow_leave":false}
 ```
 
-- `servers` 与 `--server` 同语法（逗号分隔，最多 8 个，可省端口用 agent 默认端口）
+- `servers` 与 `--server` 同语法（逗号分隔，最多 8 个，可省端口用 agent 默认端口）；
+  顺序即优先级，第 0 个最高
+- agent 首次连接和每次断线重连都从优先级最高的地址开始尝试；连不上/握手失败/认证失败的
+  地址进入 30s 冷却，冷却期内跳过；没有可用地址时挑冷却最早到期的一个继续探测。
+  已建立的连接不会被更高优先级地址抢占，重新排序在下次重连时生效
 - `rev` 是 `servers` 与 `allow_leave` 的 32 位内容哈希，只用于对齐，agent 不比较大小
 - 新列表不含 agent 当前连接的 relay 时，只有 `allow_leave=true` 才切换，否则回
   `{ok:false,error:"current relay ... not in list"}` 并保留原列表
 - 接受后写入 agent 配置（`relay_servers` / `relay_servers_rev`），重启仍生效；
   `--server` 在启动时补在列表末尾兜底，不落盘
-- `switching=true` 表示 agent 会延迟 200ms（先发 ACK）断开并按新列表第 0 个地址重连
+- `switching=true` 表示 agent 会延迟 200ms（先发 ACK）断开并按新列表第 0 个地址
+  （最高优先级）重连
 - agent < 1.4.98 不识别该帧；同步任务把这类设备直接判失败，不会一直等 ACK
 - relay 每 5s 巡检 agent 控制连接，连续 60s 无帧即断开并标记离线；agent 每 15s 发 PING，
   整机失联不会长期停留在「在线」，断线同时清掉该设备的 ACK
@@ -766,7 +771,9 @@ relay 在 agent `AUTH_OK` 之后、以及同步任务下发时发送 `RELAY_LIST
 管理台数据模型：
 
 - `relay_dict` 地址字典（host/port + 名称/备注/启停），`relay_list` 存有序引用，
-  `position` 即故障切换顺序；保存列表只更新期望状态，不主动推送
+  `position` 即优先级（0 最高）；保存列表只更新期望状态，不主动推送
+- 列表是全局的，不提供逐设备指派：要让设备换 relay，只能把当前 relay 移出列表并开启
+  `allow_leave`，这会影响所有仍连在那台 relay 上的设备；逐设备迁移需要额外的设备级覆盖表
 - 主动下发走同步任务：任务快照当前列表（`list_json` + `list_rev` + `allow_leave`），
   逐设备行复用 `distribution_tasks`（`kind='relay'`），支持定时开始、分批灰度、
   失败率闸门、暂停/继续/取消/重试

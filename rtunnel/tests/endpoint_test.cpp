@@ -75,6 +75,30 @@ int main() {
         expect(tunnel_endpoint_index(std::vector<TunnelEndpoint>(), cur) == 0, "empty list index");
     }
 
+    // 优先级选择：下标 0 最高；跳过认证失败与失败冷却中的地址
+    {
+        std::vector<char> bad = {0, 0, 0};
+        std::vector<long long> until = {0, 0, 0};
+        expect(tunnel_pick_endpoint(bad, until, 1000) == 0, "pick top priority");
+        bad = {1, 0, 0};
+        expect(tunnel_pick_endpoint(bad, until, 1000) == 1, "skip auth rejected");
+        bad = {0, 0, 0};
+        until = {2000, 0, 0};
+        expect(tunnel_pick_endpoint(bad, until, 1000) == 1, "skip cooling endpoint");
+        until = {1000, 0, 0};
+        expect(tunnel_pick_endpoint(bad, until, 1000) == 0, "cooldown expired");
+        // 全都在冷却：挑最早解冻的探测，而不是死等当前地址
+        until = {2000, 1500, 3000};
+        expect(tunnel_pick_endpoint(bad, until, 1000) == 1, "all cooling -> earliest");
+        bad = {1, 1, 1};
+        until = {0, 0, 0};
+        expect(tunnel_pick_endpoint(bad, until, 1000) == 3, "all auth rejected -> none");
+        bad = {1, 0, 0};
+        until = {0, 2000, 0};
+        expect(tunnel_pick_endpoint(bad, until, 1000) == 2, "skip bad and cooling");
+        expect(tunnel_pick_endpoint({}, {}, 1000) == 0, "empty pick");
+    }
+
     if (g_fail) {
         printf("%d check(s) failed\n", g_fail);
         return 1;

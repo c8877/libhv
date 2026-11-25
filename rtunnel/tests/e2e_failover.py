@@ -109,7 +109,7 @@ def main():
         ok, detail = wait_roundtrip(socks_ep, echo_port, timeout=10)
         e2e.check("failover: 初始经 r1 连通", ok, detail)
         e2e.check("failover: agent 首选 r1",
-                  e2e.wait_log(os.path.join(LOG, "agent.log"), "failover 127.0.0.1", timeout=0.1) is False,
+                  e2e.wait_log(os.path.join(LOG, "agent.log"), "prefer 127.0.0.1", timeout=0.1) is False,
                   "agent 不应在成功前切换")
 
         # 杀掉 r1，两端都应自动切到 r2
@@ -117,22 +117,28 @@ def main():
         ok, detail = wait_roundtrip(socks_ep, echo_port, timeout=20)
         e2e.check("failover: r1 下线后经 r2 恢复", ok, detail)
         e2e.check("failover: agent 记录了切换",
-                  e2e.wait_log(os.path.join(LOG, "agent.log"), "failover", timeout=5))
+                  e2e.wait_log(os.path.join(LOG, "agent.log"), "prefer", timeout=5))
         e2e.check("failover: client 记录了切换",
-                  e2e.wait_log(os.path.join(LOG, "client.log"), "failover", timeout=5))
+                  e2e.wait_log(os.path.join(LOG, "client.log"), "prefer", timeout=5))
 
-        # r1 恢复：应保持 r2（sticky）
+        # r1 恢复：已建立的连接不被抢占，仍留在 r2
         r1b = start_relay(r1_port, logs["relay1b"], admin1, db1)
         procs.append(r1b)
         time.sleep(2.0)
         ok, detail = wait_roundtrip(socks_ep, echo_port, timeout=10)
         e2e.check("failover: r1 恢复后仍可用", ok, detail)
-        e2e.check("failover: r1 恢复后不切回（sticky）",
+        e2e.check("failover: r1 恢复后不抢占现有连接",
                   e2e.wait_log(os.path.join(LOG, "relay1b.log"), "agent online: dev1", timeout=0.2) is False,
                   "r1 不应看到 dev1 重连")
 
-        # 双 relay 全挂：进程不退出，继续重试
+        # 断开当前 r2 后按优先级回到 r1（列表第 0 个）
         r2.send_signal(signal.SIGTERM)
+        ok, detail = wait_roundtrip(socks_ep, echo_port, timeout=40)
+        e2e.check("failover: r2 下线后回到高优先级 r1", ok, detail)
+        e2e.check("failover: agent 按优先级重选到 r1",
+                  e2e.wait_log(os.path.join(LOG, "relay1b.log"), "agent online: dev1", timeout=10))
+
+        # 双 relay 全挂：进程不退出，继续重试
         r1b.send_signal(signal.SIGTERM)
         time.sleep(2.5)
         e2e.check("failover: 全挂时不退出", agent.poll() is None and client.poll() is None,

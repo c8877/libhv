@@ -23,7 +23,7 @@ public:
     // 配置（init 前填）
     const char* host = "127.0.0.1";
     int         port = 8443;
-    std::vector<TunnelEndpoint> endpoints;   // 非空时优先于 host/port
+    std::vector<TunnelEndpoint> endpoints;   // 非空时优先于 host/port；下标即优先级（0 最高）
     char        tls_ca[256] = {0};
     char        tls_cert[256] = {0};
     char        tls_key[256] = {0};
@@ -74,7 +74,9 @@ private:
     void onPing();
     void onReconnect();
     void scheduleReconnect();
-    void advanceEndpoint(const char* why);
+    // 按优先级选下一个地址（下标 0 最高）：跳过认证失败与冷却中的地址，
+    // 已建立的连接不主动抢占，只在断线/重连时重新选择。
+    void pickPreferred(const char* why);
 
     rtnp::Decoder in_;
     htimer_t*     hs_timer_ = nullptr;   // 握手/认证阶段超时
@@ -83,7 +85,8 @@ private:
     int           relay_proto_ = 0;      // HELLO_ACK 上报的 relay 语义版本
     size_t        ep_index_ = 0;         // 当前 relay 下标
     std::vector<char> ep_auth_bad_;      // 各地址是否被凭证拒绝
-    bool          pin_next_ = false;     // 下次断开不 advanceEndpoint（按新列表迁移）
+    std::vector<long long> ep_fail_until_;  // 各地址的失败冷却截止（ms）
+    bool          pin_next_ = false;     // 下次断开不重新选（按新列表迁移）
     uint32_t      jitter_seed_ = 0;
 
     // libhv C 回调的薄封装（对象经 hio_context / hevent_userdata 取回）
