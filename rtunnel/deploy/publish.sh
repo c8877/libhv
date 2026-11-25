@@ -76,9 +76,11 @@ put_latest() {
     local comp="$1" name="$2" file="$3" extra="$4"
     local tmp; tmp=$(mktemp)
     local sha; sha=$(sha256_of "$PKG_DIR/$file")
+    # published_at 取包文件时间而不是当前时间：同一版本重复发布时 latest
+    # 内容不变，才能整份跳过（否则每次都会因为时间戳重写指针）
+    local at; at=$(date -u -r "$PKG_DIR/$file" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ)
     printf '{"component":"%s","version":"%s","arch":"%s"%s,"file":"%s","sha256":"%s","published_at":"%s"}\n' \
-        "$comp" "$VER" "$ARCH" "$extra" "$file" "$sha" \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$tmp"
+        "$comp" "$VER" "$ARCH" "$extra" "$file" "$sha" "$at" > "$tmp"
     repo put --dir "packages/$comp/latest" --file "$tmp" --name "$name" --quiet
     rm -f "$tmp"
 }

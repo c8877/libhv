@@ -204,6 +204,11 @@ if [ -f "$PKG_DIR/bin/rt-bootstrap.sh" ]; then
     cp "$PKG_DIR/bin/rt-bootstrap.sh" "$PREFIX/rt-bootstrap.sh"
     chmod 0755 "$PREFIX/rt-bootstrap.sh"
 fi
+# 无 systemd 环境的重启脚本（有 systemd 时仍用 systemctl）
+if [ -f "$PKG_DIR/bin/restart.sh" ]; then
+    cp "$PKG_DIR/bin/restart.sh" "$PREFIX/restart.sh"
+    chmod 0755 "$PREFIX/restart.sh"
+fi
 
 # 4. 配置：不存在才装
 if [ ! -f "$CONF_DIR/$CONF" ]; then

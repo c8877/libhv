@@ -507,6 +507,9 @@ RT=https://relay:9443 ATK_FILE=/etc/rtunnel/atk \
 # 日常
 /opt/rtunnel/relay/install.sh --status
 /opt/rtunnel/relay/install.sh --rollback --restart
+
+# 无 systemd（容器 / /tmp 部署）：用包内 restart.sh，读 $PREFIX/etc/relay.env
+/tmp/rtunnel/relay/restart.sh --prefix /tmp/rtunnel/relay --log /tmp/rtunnel/relay.log
 ```
 
 仓库布局 `packages/<component>/<ver>/<arch>/<pkg>.tar.gz`，指针

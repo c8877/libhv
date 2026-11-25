@@ -89,6 +89,9 @@ build_relay() {
     chmod 0755 "$d/install.sh"
     cp "$ROOT/rtunnel/deploy/rt-bootstrap.sh" "$d/bin/rt-bootstrap.sh"
     chmod 0755 "$d/bin/rt-bootstrap.sh"
+    # 无 systemd 环境（容器、/tmp 手工部署）用它重启
+    cp "$ROOT/rtunnel/deploy/relay/restart.sh" "$d/bin/restart.sh"
+    chmod 0755 "$d/bin/restart.sh"
     cp "$ROOT/rtunnel/deploy/relay/relay.args.example" "$d/etc/relay.args.example"
     cp "$ROOT/rtunnel/deploy/relay/rtunnel-relay.service" "$d/service/rtunnel-relay.service"
     if [ -d "$webdir" ] && [ -n "$(ls -A "$webdir" 2>/dev/null)" ]; then

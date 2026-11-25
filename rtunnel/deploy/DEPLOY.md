@@ -111,25 +111,65 @@ RT=https://192.168.1.133:9443 ATK_FILE=/etc/rtunnel/atk \
 <admin-file-dir>/packages/relay/latest/<arch>.json      # {"version","file","sha256"}
 ```
 
-### 方式 B：直接替换（无 systemd / 临时排障）
+### 方式 B：无 systemd（容器 / `/tmp` 手工部署，B 机器就是这种）
 
-替换流程：
+没有 systemd 时 `install.sh --no-units` 只装文件，启动交给包内的 `restart.sh`。
+以 B（`guest@192.168.1.133`，前缀 `/tmp/rtunnel/relay`）为例，完整可复现流程：
 
-1. sftp 到 `/tmp/rtunnel-relay.new`，比对 sha256
-2. `cp -a rtunnel-relay rtunnel-relay.bak-<ts>` → `mv rtunnel-relay.new rtunnel-relay`
-3. 停旧进程（SIGTERM 走 drain，等设备重连）→ `nohup ./rtunnel-relay $(cat relay.opts) >> relay.log 2>&1 < /dev/null &`
+```bash
+# 0) 本机构建 + 打包（内嵌前端版）
+cmake -S . -B build_static -DRTUNNEL_ADMIN_WEB=ON -DBUILD_SHARED=OFF
+cmake --build build_static --target rtunnel-relay-embedded rtunnel-client -j8
+cmake --build build_static --target rtunnel-deploy -j8
+./rtunnel/deploy/build_packages.sh <版本> --arch x86_64
+
+# 1) 首次：只需要把一个 rtunnel-client 放进目标机
+scp rtunnel-client-<版本>-x86_64.tar.gz guest@B:/tmp/
+# 解出 bin/rtunnel-client，写 /tmp/rtpkg/tok2（atk-，0600）
+
+# 2) 发布（在目标机本地执行，走 127.0.0.1，避免自签证书）
+RT=https://127.0.0.1:9443 ATK_FILE=/tmp/rtpkg/tok2 \
+  RTUNNEL_CLIENT=/tmp/rtpkg/bin/rtunnel-client \
+  ./publish.sh --component relay --version <版本> --arch x86_64 --dir /tmp/rtpkg --insecure
+
+# 3) 自举安装（无 systemd）
+RTUNNEL_CLIENT=/tmp/rtpkg/bin/rtunnel-client ./rt-bootstrap.sh \
+  --component relay --version latest --arch x86_64 \
+  --prefix /tmp/rtunnel/relay --no-units \
+  --rt https://127.0.0.1:9443 --atk-file /tmp/rtpkg/tok2 --insecure
+
+# 4) 参数文件：$PREFIX/etc/relay.env（RELAY_ARGS="..."），内嵌版不要 --admin-docroot
+cat > /tmp/rtunnel/relay/etc/relay.env <<'EOF'
+RELAY_ARGS="--host 0.0.0.0 --port 18443 --admin 0.0.0.0:9443 \
+--admin-token <token> --admin-db /tmp/rtunnel/admin.db \
+--admin-ca-cert /tmp/rtunnel/admin/ca.crt --admin-ca-key /tmp/rtunnel/admin/ca.key \
+--admin-cert-dir /tmp/rtunnel/admin/certs --admin-file-dir /tmp/rtunnel/admin/files \
+--verbose --admin-tls-selfsigned"
+EOF
+
+# 5) 启动/重启（同一命令，可重复执行）
+/tmp/rtunnel/relay/restart.sh --prefix /tmp/rtunnel/relay --log /tmp/rtunnel/relay.log
+```
+
+`restart.sh` 的规则：`pidof rtunnel-relay` 找进程（不用路径匹配，兼容相对/绝对路径启动）→
+SIGTERM 等最多 15s 让 drain 完成 → `nohup $PREFIX/bin/rtunnel-relay $RELAY_ARGS` →
+等 2s 检查端口。退出码 3 启动失败、4 端口未监听。
 
 验证：
 
 ```bash
-pidof rtunnel-relay
+/tmp/rtunnel/relay/bin/rtunnel-relay --version      # 与包版本一致
+/tmp/rtunnel/relay/install.sh --status              # current / previous
+curl -sk -o /dev/null -w '%{http_code}\n' https://127.0.0.1:9443/   # 内嵌前端 200
 ss -ltn | grep -E ':18443|:9443'
-curl -k -s -o /dev/null -w '%{http_code}\n' https://127.0.0.1:9443/
-ss -tn | grep ':18443'        # 设备应自动重连
+curl -sk -H "Authorization: Bearer $ATK" https://127.0.0.1:9443/api/v1/agents
 ```
 
-管理台前端改动要先构建 `rtunnel/relay/admin/web/dist`，否则页面还是旧的。
-内嵌版带 `--admin-docroot` 时仍以磁盘为准（磁盘缺文件回退内嵌），排障时可临时指目录。
+回滚：`/tmp/rtunnel/relay/install.sh --rollback --prefix /tmp/rtunnel/relay`，再跑一次
+`restart.sh`（`--rollback` 只切软链，不启动进程）。
+
+管理台前端不需要单独部署：内嵌版已经把 `web/dist` 编进二进制，误加 `--admin-docroot`
+会以磁盘为准，反而可能盖掉新前端。
 
 ### 文件仓库（OTA 分发用）
 

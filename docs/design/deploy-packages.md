@@ -29,7 +29,8 @@ rtunnel-relay-<ver>-<arch>/
 ├── bin/
 │   ├── rtunnel-relay
 │   ├── rtunnel-client             自举副本：下一版用它下载
-│   └── rt-bootstrap.sh            自举脚本副本（安装到 prefix）
+│   ├── rt-bootstrap.sh            自举脚本副本（安装到 prefix）
+│   └── restart.sh                 无 systemd 环境的重启脚本（安装到 prefix）
 ├── etc/relay.args.example         → /etc/rtunnel/relay.env（不覆盖现网）
 └── service/rtunnel-relay.service  @PREFIX@/@STATE_DIR@/@FRONTEND_ARGS@ 由 install.sh 渲染
 
@@ -94,6 +95,8 @@ RT=https://relay:9443 ATK_FILE=/etc/rtunnel/atk \
 # 4) 日常运维
 /opt/rtunnel/relay/install.sh --status
 /opt/rtunnel/relay/install.sh --rollback --restart
+# 无 systemd（容器 / /tmp 部署）：装完用包内的 restart.sh，读 $PREFIX/etc/relay.env
+/tmp/rtunnel/relay/restart.sh --prefix /tmp/rtunnel/relay --log /tmp/rtunnel/relay.log
 ```
 
 ## 4. 自举时序

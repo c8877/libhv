@@ -116,6 +116,7 @@ def main():
         e2e.check("pkg: relay 包为顶层目录",
                   out.splitlines()[0].startswith("rtunnel-relay-%s-x86_64/" % VER), out[:120])
         for part in ("bin/rtunnel-relay", "bin/rtunnel-client", "bin/rt-bootstrap.sh",
+                     "bin/restart.sh",
                      "install.sh", "manifest.json", "SHA256SUMS",
                      "service/rtunnel-relay.service"):
             e2e.check("pkg: relay 包含 %s" % part,
@@ -151,6 +152,8 @@ def main():
                   os.path.isfile(os.path.join(p_relay, "bin/rtunnel-client")), "")
         e2e.check("bootstrap: relay 带自举脚本",
                   os.path.isfile(os.path.join(p_relay, "rt-bootstrap.sh")), "")
+        e2e.check("bootstrap: relay 带 restart.sh",
+                  os.path.isfile(os.path.join(p_relay, "restart.sh")), "")
 
         # 自举：agent（统一布局 bin/rtunnel-agent + manifest + SHA256SUMS）
         p_agent = os.path.join(LOG, "prefix-agent")
