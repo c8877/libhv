@@ -181,15 +181,7 @@ curl -sk -H "Authorization: Bearer $ATK" https://127.0.0.1:9443/api/v1/agents
 
 ### 文件仓库（OTA 分发用）
 
-`upload_agent.sh` 里内置了测试环境的默认令牌（`ATK="${ATK:-atk-...}"`），直接跑即可；
-轮换后改那一行。`/tmp` 脚本里的旧令牌都已失效，不要复用。
-
-```bash
-RT=https://192.168.1.133:9443 INSECURE=1 RTUNNEL_ARCH=armv7l \
-    bash rtunnel/deploy/upload_agent.sh <版本>
-```
-
-新流程用 `rtunnel-client repo` 直传，不依赖 curl：
+统一用 `publish.sh`：它调用 `rtunnel-client repo` 直传，不依赖 curl，按 sha256 幂等跳过。
 
 ```bash
 RT=https://192.168.1.133:9443 ATK_FILE=/etc/rtunnel/atk \
@@ -198,37 +190,6 @@ RT=https://192.168.1.133:9443 ATK_FILE=/etc/rtunnel/atk \
 ```
 
 上传单文件受 `file.max_upload_mb`（默认 32 MiB）限制；包更大时先在「系统设置」调大。
-
-### 从 1.4.105 及更早的 agent 迁到统一布局
-
-旧 agent 的 manifest 校验要求 `binary = bin/rtunnel-agent-<variant>-<ver>`，直接推新包会被
-`manifest binary mismatch` 拒绝。打一个迁移包（多带一份旧名字的二进制，manifest 指过去），
-推一次即可，之后都走标准布局：
-
-```bash
-# 打迁移包：只有 -mig 后缀的产物，不影响标准包
-RTUNNEL_ARCH=armv7l RTUNNEL_LEGACY_MANIFEST=1 \
-RTUNNEL_PKG_RUNNER="qemu-arm-static -L <sysroot>" \
-  ./rtunnel/deploy/package_agent.sh <版本>
-
-# 上传（client repo put，publish.sh 只认标准文件名）
-rtunnel-client repo put --rt $RT --atk-file $ATK_FILE --insecure \
-  --dir packages/agent/<版本>/armv7l \
-  --file rtunnel-agent-web-<版本>-armv7l-mig.tar.gz
-
-# 建 OTA 任务：file 必须是仓库相对路径，dir 由 file 推导
-curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \
-  -d '{"kind":"ota","version":"<版本>",
-       "file":"packages/agent/<版本>/armv7l/rtunnel-agent-web-<版本>-armv7l-mig.tar.gz",
-       "devids":["<devid>"],"max_retries":1}' \
-  "$RT/api/v1/distributions"
-```
-
-迁移包里的 `install.sh` 已经是新脚本，安装后 `bin/rtunnel-agent` 成为唯一入口，
-下一次 OTA 用标准包即可。
-
-
-
 
 ## 部署后怎么报
 

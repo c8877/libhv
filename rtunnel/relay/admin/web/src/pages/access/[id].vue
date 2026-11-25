@@ -251,6 +251,7 @@ import { can } from '@/shared/store.js'
 import { bytes, copyText, time } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
+import { useTenants } from '@/shared/tenants.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -266,7 +267,7 @@ const loading = ref(false)
 const saving = ref(false)
 const filter = ref('all')
 
-const tenants = ref([])
+const { tenants, loadTenants, tenantName } = useTenants()
 const permGroups = ref([])
 const permIds = ref([])
 const permSaving = ref(false)
@@ -358,10 +359,7 @@ async function load() {
     Api.get('/api/v1/client-accounts/' + id.value + '/perm-groups').catch(() => null),
   ])
   tokens.value = Array.isArray(tk) ? tk : []
-  if (can('tenant.read')) {
-    const tl = await Api.get('/api/v1/tenants').catch(() => null)
-    tenants.value = (tl && tl.items) || []
-  }
+  await loadTenants()
   eff.value = ef
   permGroups.value = (pg && pg.groups) || []
   permIds.value = (pg && pg.ids) || []
@@ -377,11 +375,6 @@ async function savePermGroups() {
   } finally {
     permSaving.value = false
   }
-}
-
-function tenantName(id) {
-  const t = tenants.value.find((x) => x.id === id)
-  return t ? t.name : (id === 1 ? '默认租户' : '—')
 }
 
 function openAccountEdit() {

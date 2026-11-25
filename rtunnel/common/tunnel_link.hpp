@@ -39,7 +39,6 @@ public:
 
     bool ready() const { return state == 2 && io && !hio_is_closed(io); }
     // relay 在 HELLO_ACK 尾部报告的语义版本；0 = 旧 relay 未上报
-    int relayProto() const { return relay_proto_; }
     size_t endpointIndex() const { return ep_index_; }
     const TunnelEndpoint& currentEndpoint() const { return endpoints[ep_index_]; }
 
@@ -82,7 +81,6 @@ private:
     htimer_t*     hs_timer_ = nullptr;   // 握手/认证阶段超时
     int           ping_unacked_ = 0;     // 连续未获 PONG 的 PING 数
     int           auth_fatal_ = 0;       // 认证被永久拒绝：不再重连
-    int           relay_proto_ = 0;      // HELLO_ACK 上报的 relay 语义版本
     size_t        ep_index_ = 0;         // 当前 relay 下标
     std::vector<char> ep_auth_bad_;      // 各地址是否被凭证拒绝
     std::vector<long long> ep_fail_until_;  // 各地址的失败冷却截止（ms）

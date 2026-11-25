@@ -1,5 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { auth, ensureBoot, roleOf, can } from './shared/store.js'
+import { auth, ensureBoot, can } from './shared/store.js'
 import { canVisit } from './shared/nav.js'
 import { setUnauthorizedHandler } from './shared/api.js'
 
@@ -47,7 +47,7 @@ router.beforeEach(async (to) => {
   await ensureBoot()
   if (!to.meta.public && !auth.me) return { path: '/login', replace: true }
   if (to.path === '/login' && auth.me) return { path: '/', replace: true }
-  if (!to.meta.public && auth.me && !canVisit(to.path, roleOf(), can)) return { path: '/overview', replace: true }
+  if (!to.meta.public && auth.me && !canVisit(to.path, can)) return { path: '/overview', replace: true }
   document.title = (to.meta.title ? to.meta.title + ' · ' : '') + 'rtunnel'
   return true
 })

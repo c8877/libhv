@@ -1,5 +1,6 @@
 // 系统配置与个人偏好
 #include "admin_server.hpp"
+#include "admin_util.hpp"
 #include "common/logging.hpp"
 #include "cpputil/json.hpp"
 
@@ -57,16 +58,6 @@ bool isSecretKey(const std::string& key) {
     return key == "alert.webhook_url" || key == "alert.webhook_secret";
 }
 
-// 只保留 scheme+主机+末 4 位，够判断配没配、指向谁，又不会泄露完整 token
-std::string maskUrl(const std::string& url) {
-    if (url.empty()) return "";
-    size_t scheme = url.find("://");
-    size_t host_start = scheme == std::string::npos ? 0 : scheme + 3;
-    size_t slash = url.find('/', host_start);
-    std::string head = url.substr(0, slash == std::string::npos ? url.size() : slash);
-    std::string tail = url.size() > 4 ? url.substr(url.size() - 4) : url;
-    return head + "/…" + tail;
-}
 
 const Def* findDef(const std::string& k) {
     for (auto& d : kDefs) if (k == d.key) return &d;
@@ -142,7 +133,7 @@ void AdminServer::handleSettingsGet(const HttpContextPtr& ctx) {
         j[kv.first] = kv.second;
     }
     if (!admin) {
-        j["alert.webhook_url"] = maskUrl(settings_.count("alert.webhook_url")
+        j["alert.webhook_url"] = adminMaskUrl(settings_.count("alert.webhook_url")
                                              ? settings_["alert.webhook_url"] : "");
         j["_redacted"] = true;
     }

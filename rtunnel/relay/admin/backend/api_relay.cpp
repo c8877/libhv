@@ -15,7 +15,6 @@
 
 using nlohmann::json;
 
-static long long relayNowMs() { return AdminDb::nowMs(); }
 
 // ---------------------------------------------------------------- 字典
 
@@ -403,7 +402,7 @@ void AdminServer::createRelaySyncTask(const HttpContextPtr& ctx, const json& req
         ctx->send("{\"error\":\"bad task params\"}");
         return;
     }
-    long long now = relayNowMs();
+    long long now = AdminDb::nowMs();
     long long start = req.value("start_at_ms", now);
     long long deadline = req.value("deadline_at_ms", start + 24LL * 3600 * 1000);
     if (start < now - 60000) start = now;
@@ -613,7 +612,7 @@ void AdminServer::handleRelaySyncAction(const HttpContextPtr& ctx, const std::st
         }
     }
     std::string st = t.value("status", std::string());
-    long long now = relayNowMs();
+    long long now = AdminDb::nowMs();
     int wave = t.value("current_wave", 0);
     if (action == "pause") {
         if (st != "running" && st != "scheduled") {

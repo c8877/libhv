@@ -10,7 +10,6 @@
 
 using nlohmann::json;
 
-static long long rsNowMs() { return AdminDb::nowMs(); }
 
 // "1.4.98" / "1.4.98-armv7l" → 至少 1.4.98
 static bool versionAtLeast(const std::string& v, int maj, int min, int patch) {
@@ -33,7 +32,7 @@ void AdminServer::relaySyncLoop() {
 }
 
 void AdminServer::relaySyncTick() {
-    long long now = rsNowMs();
+    long long now = AdminDb::nowMs();
 
     // ---- 任务级：批量信息（状态 + 快照），同时决定哪些任务还接受下发
     struct TaskInfo {

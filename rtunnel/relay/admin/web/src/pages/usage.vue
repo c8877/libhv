@@ -51,6 +51,8 @@ import { computed, onMounted, ref } from 'vue'
 import { Api } from '@/shared/api.js'
 import { can } from '@/shared/store.js'
 import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
+import { bytesIec, spanText } from '@/shared/utils.js'
+import { useTenants } from '@/shared/tenants.js'
 
 const METRICS = [
   { value: 'bytes', label: '隧道流量' },
@@ -60,7 +62,7 @@ const METRICS = [
 ]
 
 const rows = ref([])
-const tenants = ref([])
+const { tenants, loadTenants, tenantName } = useTenants()
 const tenantId = ref(0)
 const loading = ref(false)
 const metric = ref('bytes')
@@ -84,28 +86,9 @@ function subjectLabel(t) {
   return t === 'token' ? '令牌' : t === 'device' ? '设备' : t
 }
 
-function fmtBytes(n) {
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-  let v = Number(n) || 0
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
-  return (i === 0 ? String(v) : v.toFixed(v >= 100 ? 0 : 1)) + ' ' + units[i]
-}
-
-function fmtDuration(n) {
-  let s = Math.round(Number(n) || 0)
-  const d = Math.floor(s / 86400); s -= d * 86400
-  const h = Math.floor(s / 3600); s -= h * 3600
-  const m = Math.floor(s / 60); s -= m * 60
-  if (d) return `${d}天${h}小时`
-  if (h) return `${h}小时${m}分`
-  if (m) return `${m}分${s}秒`
-  return `${s}秒`
-}
-
 function fmtQty(qty, key) {
-  if (key === 'bytes') return fmtBytes(qty)
-  if (key === 'session_seconds' || key === 'online_seconds') return fmtDuration(qty)
+  if (key === 'bytes') return bytesIec(qty)
+  if (key === 'session_seconds' || key === 'online_seconds') return spanText(qty)
   return String(qty)
 }
 
@@ -127,17 +110,6 @@ async function load() {
   } finally {
     loading.value = false
   }
-}
-
-function tenantName(id) {
-  const t = tenants.value.find((x) => x.id === id)
-  return t ? t.name : (id === 1 ? '默认租户' : '—')
-}
-
-async function loadTenants() {
-  if (!can('tenant.read')) return
-  const res = await Api.get('/api/v1/tenants').catch(() => null)
-  tenants.value = (res && res.items) || []
 }
 
 onMounted(() => {

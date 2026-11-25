@@ -13,6 +13,8 @@ struct sqlite3_stmt;
 // SQLite 列读取（定义在 admin_db.cpp）：NULL 文本按空串处理。
 std::string dbColText(sqlite3_stmt* st, int col);
 long long   dbColInt(sqlite3_stmt* st, int col);
+// 严格 YYYY-MM-DD（只校验形状，不校验日历合法性）
+bool        dbIsDay(const std::string& s);
 
 // 端口范围包含判断：target 的每个端口都必须被 allowed 覆盖（"*" 覆盖全部）。
 bool adminPortsCovered(const std::string& allowed, const std::string& target);

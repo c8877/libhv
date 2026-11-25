@@ -165,6 +165,8 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Api } from '@/shared/api.js'
 import { can } from '@/shared/store.js'
+import { bytesIec, spanText } from '@/shared/utils.js'
+import { useTenants } from '@/shared/tenants.js'
 
 const METRICS = [
   { value: 'bytes', label: '隧道流量' },
@@ -182,7 +184,7 @@ const UNIT_NAME = {
 
 const rows = ref([])
 const prices = ref([])
-const tenants = ref([])
+const { tenants, loadTenants } = useTenants()
 const tenantId = ref(0)
 const loading = ref(false)
 const totalMicro = ref(0)
@@ -226,35 +228,16 @@ function unitName(metric) {
   return UNIT_NAME[metric] || ''
 }
 
-function fmtBytes(n) {
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-  let v = Number(n) || 0
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
-  return (i === 0 ? String(v) : v.toFixed(v >= 100 ? 0 : 1)) + ' ' + units[i]
-}
-
-function fmtDuration(n) {
-  let s = Math.round(Number(n) || 0)
-  const d = Math.floor(s / 86400); s -= d * 86400
-  const h = Math.floor(s / 3600); s -= h * 3600
-  const m = Math.floor(s / 60); s -= m * 60
-  if (d) return `${d}天${h}小时`
-  if (h) return `${h}小时${m}分`
-  if (m) return `${m}分${s}秒`
-  return `${s}秒`
-}
-
 function fmtQty(qty, key) {
-  if (key === 'bytes') return fmtBytes(qty)
-  if (key === 'session_seconds' || key === 'online_seconds') return fmtDuration(qty)
+  if (key === 'bytes') return bytesIec(qty)
+  if (key === 'session_seconds' || key === 'online_seconds') return spanText(qty)
   return String(qty)
 }
 
 function unitText(row) {
   const u = Number(row.unit_size) || 0
   const name = unitName(row.metric)
-  if (row.metric === 'bytes') return fmtBytes(u)
+  if (row.metric === 'bytes') return bytesIec(u)
   if (row.metric === 'session_seconds') return u === 3600 ? '1 小时' : u + ' 秒'
   if (row.metric === 'online_seconds') return u === 86400 ? '1 天' : u + ' 秒'
   return u + ' ' + name
@@ -301,12 +284,6 @@ async function loadPrices() {
   } catch (e) {
     ElMessage.error('价目加载失败：' + e.message)
   }
-}
-
-async function loadTenants() {
-  if (!can('tenant.read')) return
-  const res = await Api.get('/api/v1/tenants').catch(() => null)
-  tenants.value = (res && res.items) || []
 }
 
 async function loadStatements() {

@@ -100,7 +100,6 @@ private:
     std::string callRelay(std::function<std::string()> fn);
     std::string roleOf(const HttpContextPtr& ctx);          // "" = 未授权
     void        loadActorPerms();
-    int         requireRole(const HttpContextPtr& ctx, int need, std::string& role);
     // 资源鉴权：need 为 perm_resources.key（"auth" 表示只要求登录）
     int         requirePerm(const HttpContextPtr& ctx, const std::string& need, std::string& role);
     bool        hasPerm(const std::string& key) const;
@@ -417,5 +416,4 @@ private:
 };
 
 // 角色权重：viewer=1 operator=2 admin=3
-enum AdminRole { ROLE_VIEWER = 1, ROLE_OPERATOR = 2, ROLE_MANAGER = 3, ROLE_ADMIN = 4 };
 

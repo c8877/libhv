@@ -381,7 +381,7 @@ relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，�
 - API：`GET/POST /api/v1/admin-tokens`、`PUT /api/v1/admin-tokens/{id}`、
   `POST /api/v1/admin-tokens/{id}/rotate`、`DELETE /api/v1/admin-tokens/{id}`；
   权限组用 `GET/PUT /api/v1/permission/subjects/atk/{id}/groups`
-- 页面：「API Token」导航页（manager/admin）
+- 页面：「API Token」导航页（需要 `token.read`，创建/轮换需要 `token.write`）
 
 ```bash
 # 创建后只显示一次的明文
@@ -413,7 +413,7 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
   会话、系统信息与 mTLS 证书状态
 - 顶部摘要条展示设备名、agent 版本、连接信息、流量与采集时间，和一级 tab 一起吸顶
 - 「能力」tab 展示 TCP 端口、Shell、SYSINFO、mTLS、OTA、可重启/可关机、文件/服务能力与串口白名单；
-  管理台 manager/admin 可在线编辑，设备本地页只读
+  管理台有 `device.caps.write` 的账号可在线编辑，设备本地页只读
 - 表格默认 10 行/页，支持 5/10/20/50；进程、服务、网络（TCP/UDP、Unix、IPC）和
   分发/OTA 任务都在服务端排序后再分页，只回传当前页；网卡/串口和文件列表在浏览器端排序。
   管理台和设备本地页共用 `components/DeviceView.vue`，都用 Element 的
@@ -484,7 +484,7 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
   `GET /api/v1/distributions` 查询进度；经 RTNP 推到设备 `--file-dir/dir`
   （默认 `/opt/data/files`），32KiB 分片、256KiB 窗口、sha256 校验、断点续传、
   冲突校验；`.part` 超过 24h 自动清理
-  （端口 manager/admin；Shell 仅 admin；设备离线直接报错）
+  （端口与 Shell 开关都看 `device.caps.write`；设备离线直接报错）
 
 ## 部署包与自举（relay / agent / client）
 
@@ -531,9 +531,10 @@ OTA 不另建传输通道：部署包走「文件上传 + 文件分发」落到�
    `bin/rtunnel-client`、`etc/rtunnel-agent.json`、`service/rtunnel-agent.service`、
    `manifest.json` 与 `SHA256SUMS`；variant 只体现在文件名与 manifest；
    版本取二进制 `--version`，架构取 `uname -m`（交叉编译用 `RTUNNEL_ARCH` 指定）；
-2. `deploy/upload_agent.sh` 上传到文件仓库 `agent/`（需要 atk 令牌），
-   `/ota` 页从文件名解析 variant、版本和架构，并按架构过滤设备；
-3. 传输复用 `FILE_BEGIN/DATA/END`（0x1D-0x1F），落盘 `file_dir/agent/xxx.tar.gz`；
+2. `deploy/publish.sh --component agent --variant web` 用 `rtunnel-client repo` 上传到
+   文件仓库 `packages/agent/<版本>/<架构>/`（需要 atk 令牌），
+   `/ota` 页按文件名递归搜索该目录，解析 variant、版本和架构，并按架构过滤设备；
+3. 传输复用 `FILE_BEGIN/DATA/END`（0x1D-0x1F），落盘设备侧 `packages/agent/<版本>/<架构>/xxx.tar.gz`；
 4. relay 发 `OTA_APPLY`（0x30，JSON：path/version/size/sha256）：
    agent 校验大小与 sha256 → 解压 → 解包到 `.ota/`（拒绝 `..`、绝对路径、符号链接）→
    manifest（版本/架构）与 `--version` 自检（`verifying`）→ ACK `verified`（`installing`）；
@@ -548,11 +549,6 @@ OTA 不另建传输通道：部署包走「文件上传 + 文件分发」落到�
 任务状态：`scheduled→queued→running→verifying→installing→confirming→success`；
 失败分支为 `failed / timeout / conflict / unsupported / canceled`，重试沿用分发任务的
 退避与截止时间。OTA 与普通分发任务都在「任务」页查看，可按 `kind=ota` 过滤。
-
-**从 1.4.105 及更早版本迁移**：旧 agent 只认 `bin/rtunnel-agent-<variant>-<ver>`，
-用 `RTUNNEL_LEGACY_MANIFEST=1 ./deploy/package_agent.sh <ver>` 打一个 `-mig` 包
-（manifest 指向旧名字，包内同时保留 `bin/rtunnel-agent`），推一次即可；
-装完就是统一布局，后续标准包直接可用。详细命令见 `deploy/DEPLOY.md`。
 
 失败与回滚：
 
@@ -768,7 +764,7 @@ relay 每 5s 巡检一次 agent 控制连接：连续 60s 没有收到任何帧�
   `"local_web": "0.0.0.0:8080"` 改地址，或用 `false` 关闭。
   `build/deploy/agent` / `build/deploy/agent-web` 是对应的两份部署目录；
   `deploy/package_agent.sh` 生成带 `install.sh` 的 `.tar.gz` 部署包（OTA 和手工安装共用），
-  `deploy/upload_agent.sh` 上传到文件仓库 `agent/` 目录
+  `deploy/publish.sh` 上传到文件仓库 `packages/agent/` 目录
 
 #### 线程与内存
 

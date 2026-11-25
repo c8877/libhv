@@ -873,11 +873,9 @@ int AdminServer::handleAgentStorage(const HttpContextPtr& ctx) {
             ctx->send(body.substr(1));
             return;
         }
-        // 旧格式（无标记）：body 只有 nodes 数组，和 meta 合并后回明文
-        json nodes = json::parse(body, nullptr, false);
-        if (nodes.is_discarded() || !nodes.is_array()) nodes = json::array();
-        m["nodes"] = std::move(nodes);
-        ctx->send(m.dump());
+        // 首字节只可能是 '\1'（gzip）或 '\0'（明文），其它都是协议错误
+        ctx->response->status_code = HTTP_STATUS_BAD_GATEWAY;
+        ctx->send("{\"error\":\"bad storage response\"}");
     });
     return HTTP_STATUS_NEXT;
 }

@@ -64,9 +64,9 @@ examples/rpc/*.hrpc.h
 *.db
 
 include
-lib
-bin
-tmp
+/lib
+/bin
+/tmp
 dist
 test
 *_test

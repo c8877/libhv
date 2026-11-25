@@ -81,6 +81,7 @@ import { can, isSuper } from '@/shared/store.js'
 import { time } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
+import { useTenants } from '@/shared/tenants.js'
 
 const { isPhone } = useBreakpoint()
 
@@ -89,7 +90,7 @@ const canCreate = computed(() => isSuper() || can('account.write'))
 
 const router = useRouter()
 const list = ref([])
-const tenants = ref([])
+const { tenants, loadTenants, tenantName } = useTenants()
 const q = ref('')
 const loading = ref(false)
 const dlg = ref(false)
@@ -106,10 +107,7 @@ async function load() {
   try {
     const suffix = q.value.trim() ? '?q=' + encodeURIComponent(q.value.trim()) : ''
     list.value = await Api.get('/api/v1/client-accounts' + suffix)
-    if (can('tenant.read')) {
-      const t = await Api.get('/api/v1/tenants').catch(() => null)
-      tenants.value = (t && t.items) || []
-    }
+    await loadTenants()
   } catch (e) {
     ElMessage.error('加载失败：' + e.message)
   } finally {
@@ -124,11 +122,6 @@ function onSearch() {
 
 function openDetail(row) {
   router.push('/access/' + row.id)
-}
-
-function tenantName(id) {
-  const t = tenants.value.find((x) => x.id === id)
-  return t ? t.name : (id === 1 ? '默认租户' : '—')
 }
 
 function openCreate() {

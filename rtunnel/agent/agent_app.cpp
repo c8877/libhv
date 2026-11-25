@@ -1,5 +1,6 @@
 #include "agent_app.hpp"
 #include "common/gzip_util.hpp"
+#include "common/stream_util.hpp"
 #include "common/sha256.hpp"
 #include "hversion.h"
 #include "cpputil/json.hpp"
@@ -252,27 +253,11 @@ void AgentApp::flushPending(LocalStream* s) {
 }
 
 void AgentApp::maybeGrantWindow(LocalStream* s) {
-    if (s->local == NULL || hio_is_closed(s->local) || s->unacked == 0) return;
-    if (hio_write_bufsize(s->local) > rtnp::LOW_WATER) {
-        hio_setcb_write(s->local, localWriteCb);
-        return;
-    }
-    if (io) {
-        rtnp::Writer w;
-        w.u32(s->unacked);
-        rtnp::send(io, rtnp::WINDOW, s->sid, w.data, (uint16_t)w.len);
-    }
-    s->unacked = 0;
-    if (!s->want_shutdown) hio_setcb_write(s->local, NULL);
+    rtMaybeGrantWindow(s->local, io, s->sid, s->unacked, s->want_shutdown, localWriteCb);
 }
 
 void AgentApp::maybeShutdownWrite(LocalStream* s) {
-    if (!s->want_shutdown || s->local == NULL || hio_is_closed(s->local)) return;
-    if (hio_write_is_complete(s->local)) {
-        shutdown(hio_fd(s->local), SHUT_WR);
-        s->want_shutdown = 0;
-        hio_setcb_write(s->local, NULL);
-    }
+    rtShutdownLocalWrite(s->local, s->want_shutdown);
 }
 
 void AgentApp::onLocalWrite(LocalStream* s) {

@@ -14,6 +14,27 @@ export function bytes(n, iec = false) {
   return n.toFixed(digits) + ' ' + units[i]
 }
 
+// 1024 进制、最多 1 位小数；用量/费用/租户页共用这套口径
+export function bytesIec(n) {
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+  let v = Number(n) || 0
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
+  return (i === 0 ? String(v) : v.toFixed(v >= 100 ? 0 : 1)) + ' ' + units[i]
+}
+
+// 秒数 → "1天2小时" / "3分4秒"，用量与费用页共用
+export function spanText(seconds) {
+  let s = Math.round(Number(seconds) || 0)
+  const d = Math.floor(s / 86400); s -= d * 86400
+  const h = Math.floor(s / 3600); s -= h * 3600
+  const m = Math.floor(s / 60); s -= m * 60
+  if (d) return `${d}天${h}小时`
+  if (h) return `${h}小时${m}分`
+  if (m) return `${m}分${s}秒`
+  return `${s}秒`
+}
+
 export function duration(ms) {
   let s = Math.max(0, Math.floor((Number(ms) || 0) / 1000))
   const d = Math.floor(s / 86400)

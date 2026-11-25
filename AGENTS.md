@@ -124,7 +124,7 @@ GitHub Actions (`.github/workflows/CI.yml`): builds and tests on Linux (with Ope
 
 - 测试环境用直推：板子跑 `install.sh`，relay 换静态二进制 + `admin/web` 目录。**直推不需要 `RT` / `ATK`**；只有「上传文件仓库 → OTA 分发」才需要令牌，别把直推当成缺凭据。
 - 部署前先找本机已有的脚本和通道（`/tmp/*.py`、免密 SSH、`relay.opts`），找不到再问；不要用"需要你提供……"收尾。
-- 上传文件仓库用 `deploy/upload_agent.sh`；atk 内置在该脚本的默认值里，轮换后改那一行，需要新的就直接开口要。
+- 上传文件仓库用 `deploy/publish.sh`（rtunnel-client + atk）；令牌放 `ATK_FILE`（0600），不要写进脚本或仓库，需要新的就直接开口要。
 - 汇报只说结果：版本、服务状态、隧道是否 ESTAB、线程/RSS。不要复述步骤清单。
 
 ## 前端（管理台与设备本地页）组件规则

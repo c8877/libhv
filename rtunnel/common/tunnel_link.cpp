@@ -62,14 +62,11 @@ void TunnelLink::handleFrame(rtnp::Frame* f) {
             hr.u32();   // heartbeat_ms
             hr.u32();
             if (!hr.err && hr.remaining() >= 2) {
-                int rv = hr.u8();
-                int rm = hr.u8();
-                relay_proto_ = rv;
-                if (rv < rtnp::PROTO_VERSION) {
-                    logf_("[%s] relay protocol %d < local %d, 使用兼容路径",
-                          logTag(), rv, rtnp::PROTO_VERSION);
-                } else if (rm > rtnp::PROTO_VERSION) {
-                    logf_("[%s] relay requires protocol >= %d, local %d", logTag(), rm, rtnp::PROTO_VERSION);
+                int rv = hr.u8();   // relay 自身版本
+                int rm = hr.u8();   // relay 要求的最低版本
+                if (rm > rtnp::PROTO_VERSION) {
+                    logf_("[%s] relay(v%d) requires protocol >= %d, local %d", logTag(), rv, rm,
+                          rtnp::PROTO_VERSION);
                 }
             }
         }

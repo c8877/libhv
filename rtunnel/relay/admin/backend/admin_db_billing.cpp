@@ -12,14 +12,6 @@ using nlohmann::json;
 
 namespace {
 
-bool isDay(const std::string& s) {
-    if (s.size() != 10 || s[4] != '-' || s[7] != '-') return false;
-    for (size_t i = 0; i < s.size(); ++i) {
-        if (i == 4 || i == 7) continue;
-        if (s[i] < '0' || s[i] > '9') return false;
-    }
-    return true;
-}
 
 // 只允许已计量的四个指标，避免价目表里出现永远不会被引用的键
 bool knownMetric(const std::string& m) {
@@ -90,7 +82,7 @@ bool AdminDb::billingPriceSet(const std::string& metric, long long unit_size, lo
 
 bool AdminDb::billingSummary(const std::string& from, const std::string& to, long long tenant_id,
                              std::string& json_out, std::string& err) {
-    if ((!from.empty() && !isDay(from)) || (!to.empty() && !isDay(to))) {
+    if ((!from.empty() && !dbIsDay(from)) || (!to.empty() && !dbIsDay(to))) {
         err = "bad date";
         return false;
     }

@@ -13,7 +13,6 @@
 
 using nlohmann::json;
 
-static long long nowMs() { return AdminDb::nowMs(); }
 
 static bool otaVersionValid(const std::string& v) {
     if (v.empty() || v.size() > 40) return false;
@@ -39,7 +38,7 @@ void AdminServer::handleDistCreate(const HttpContextPtr& ctx, const AdminActor& 
     if (req.contains("devids") && req["devids"].is_array()) {
         for (auto& v : req["devids"]) if (v.is_string()) devids.push_back(v.get<std::string>());
     }
-    long long now = nowMs();
+    long long now = AdminDb::nowMs();
     long long start = req.value("start_at_ms", now);
     long long deadline = req.value("deadline_at_ms", start + 24LL * 3600 * 1000);
     int max_retries = req.value("max_retries", 3);
@@ -254,7 +253,7 @@ void AdminServer::handleDistRetry(const HttpContextPtr& ctx, const AdminActor& a
         ctx->send("{\"error\":\"forbidden\"}");
         return;
     }
-    long long now = nowMs();
+    long long now = AdminDb::nowMs();
     std::string st = j.value("status", "");
     std::string kind = j.value("kind", std::string("file"));
     bool can = (st == "failed") ||
@@ -301,7 +300,7 @@ void AdminServer::handleDistCancel(const HttpContextPtr& ctx, const AdminActor& 
     if (st == "running" && tid) {
         callRelay([this, tid]() { return relay_->cancelFilePush(tid) ? "1" : "0"; });
     }
-    db_.distUpdate(id, "canceled", "canceled", j.value("sent", 0LL), 0, nowMs(), 0,
+    db_.distUpdate(id, "canceled", "canceled", j.value("sent", 0LL), 0, AdminDb::nowMs(), 0,
                    j.value("retry_count", 0));
     audit(actor.username, "distribution.cancel", std::to_string(id));
     ctx->send("{\"ok\":true}");
@@ -353,7 +352,7 @@ void AdminServer::handleDistVerify(const HttpContextPtr& ctx, const AdminActor& 
     auto a = json::parse(acc, nullptr, false);
     bool exists = !a.is_discarded() && a.value("exists", false);
     std::string got = a.is_discarded() ? std::string() : a.value("sha256", std::string());
-    long long now = nowMs();
+    long long now = AdminDb::nowMs();
     if (exists && !want.empty() && got == want) {
         db_.distUpdate(id, "success", "", j.value("file_size", 0LL), 0, now, 0,
                        j.value("retry_count", 0));
@@ -385,7 +384,7 @@ void AdminServer::handleDistExtend(const HttpContextPtr& ctx, const AdminActor& 
     }
     auto req = json::parse(ctx->body(), nullptr, false);
     long long nd = req.is_discarded() ? 0 : req.value("deadline_at_ms", 0LL);
-    long long now = nowMs();
+    long long now = AdminDb::nowMs();
     long long old = j.value("deadline_at_ms", 0LL);
     long long start = j.value("start_at_ms", 0LL);
     if (j.value("status", "") != "timeout" || j.value("extend_count", 0) != 0) {

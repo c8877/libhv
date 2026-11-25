@@ -1,5 +1,6 @@
 #include "admin_server.hpp"
 #include "admin_tls.hpp"
+#include "admin_util.hpp"
 #include "admin_web_assets.hpp"
 #include "common/logging.hpp"
 #include "common/token_util.hpp"
@@ -82,32 +83,13 @@ std::string AdminServer::callRelay(std::function<std::string()> fn) {
 
 thread_local AdminActor tl_actor;
 
-static std::string cookieValue(const HttpContextPtr& ctx, const std::string& key) {
-    const HttpCookie& ck = ctx->request->GetCookie(key.c_str());
-    if (!ck.name.empty()) return ck.value;
-    std::string c = ctx->header("Cookie");
-    size_t pos = 0;
-    while (pos < c.size()) {
-        size_t semi = c.find(';', pos);
-        std::string item = c.substr(pos, semi == std::string::npos ? std::string::npos : semi - pos);
-        size_t eq = item.find('=');
-        if (eq != std::string::npos) {
-            std::string k = item.substr(0, eq);
-            while (!k.empty() && (k[0] == ' ' || k[0] == '\t')) k.erase(0, 1);
-            if (k == key) return item.substr(eq + 1);
-        }
-        if (semi == std::string::npos) break;
-        pos = semi + 1;
-    }
-    return "";
-}
 
 std::string AdminServer::roleOf(const HttpContextPtr& ctx) {
     tl_actor = AdminActor{};
     if (ctx->request) tl_actor.ip = ctx->request->client_addr.ip;
 
     // 1) 会话 Cookie
-    std::string sid = cookieValue(ctx, "rt_sid");
+    std::string sid = adminCookieValue(ctx, "rt_sid");
     if (!sid.empty() && db_.ok()) {
         DbUser u;
         bool got = db_.getSession(AdminDb::sha256Hex(sid), u, AdminDb::nowMs());
@@ -178,14 +160,6 @@ std::string AdminServer::roleOf(const HttpContextPtr& ctx) {
         }
     }
     return "";
-}
-
-static int roleWeight(const std::string& role) {
-    if (role == "admin") return ROLE_ADMIN;
-    if (role == "manager") return ROLE_MANAGER;
-    if (role == "operator") return ROLE_OPERATOR;
-    if (role == "viewer") return ROLE_VIEWER;
-    return 0;
 }
 
 void AdminServer::loadActorPerms() {
@@ -372,24 +346,6 @@ int AdminServer::requirePerm(const HttpContextPtr& ctx, const std::string& need,
     ctx->response->content_type = APPLICATION_JSON;
     ctx->response->body = "{\"error\":\"forbidden\",\"need\":\"" + need + "\"}";
     return 403;
-}
-
-int AdminServer::requireRole(const HttpContextPtr& ctx, int need, std::string& role) {
-    role = roleOf(ctx);
-    int w = roleWeight(role);
-    if (w == 0) {
-        ctx->response->status_code = HTTP_STATUS_UNAUTHORIZED;
-        ctx->response->content_type = APPLICATION_JSON;
-        ctx->response->body = "{\"error\":\"unauthorized\"}";
-        return 401;
-    }
-    if (w < need) {
-        ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
-        ctx->response->content_type = APPLICATION_JSON;
-        ctx->response->body = "{\"error\":\"forbidden\",\"need_role\":" + std::to_string(need) + "}";
-        return 403;
-    }
-    return 0;
 }
 
 bool AdminServer::wsAuthorize(const HttpRequestPtr& req, AdminActor& actor, std::string& role) {

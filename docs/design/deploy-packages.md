@@ -53,9 +53,6 @@ rtunnel-agent-<ver>-<arch>/        （文件名 rtunnel-agent-<lite|web>-<ver>-<
 - 压缩：`tar --format=ustar | gzip -9 -n`，同时产出 `<pkg>.tar.gz.sha256`
 - agent 的文件名保留 `lite|web`，因为 OTA 页面按文件名选择变体；解压目录不带 variant（spec 要求的统一布局）
 - `manifest.json` 里的 `binary` 固定为 `bin/rtunnel-agent` / `bin/rtunnel-relay` / `bin/rtunnel-client`
-- **迁移包**：1.4.105 及更早的 agent 只认 `bin/rtunnel-agent-<variant>-<ver>`，用
-  `RTUNNEL_LEGACY_MANIFEST=1` 打 `-mig` 包（manifest 指旧名，包内同时保留统一入口），
-  推一次即可；新版 agent 只认统一入口，迁移完成后不需要兼容分支
 
 ## 2. 仓库布局
 

@@ -2,6 +2,7 @@
 #include "common/logging.hpp"
 #include "common/shell_spawn.hpp"
 #include "common/token_util.hpp"
+#include "common/stream_util.hpp"
 
 #include <sys/ioctl.h>
 #include "shell_client.hpp"
@@ -232,28 +233,11 @@ void ClientApp::onLocalRead(ClientStream* s, void* buf, int readbytes) {
 }
 
 void ClientApp::maybeShutdownWrite(ClientStream* s) {
-    if (!s->want_shutdown || s->local == NULL || hio_is_closed(s->local)) return;
-    if (hio_write_is_complete(s->local)) {
-        shutdown(hio_fd(s->local), SHUT_WR);
-        s->want_shutdown = 0;
-        hio_setcb_write(s->local, NULL);
-    }
+    rtShutdownLocalWrite(s->local, s->want_shutdown);
 }
 
 void ClientApp::maybeGrantWindow(ClientStream* s) {
-    if (s->local == NULL || hio_is_closed(s->local) || s->unacked == 0) return;
-    // 只有本地写队列降到低水位才补窗口（hio_write 入队不代表对端已消费）
-    if (hio_write_bufsize(s->local) > rtnp::LOW_WATER) {
-        hio_setcb_write(s->local, localWriteCb);
-        return;
-    }
-    if (io) {
-        rtnp::Writer w;
-        w.u32(s->unacked);
-        rtnp::send(io, rtnp::WINDOW, s->sid, w.data, (uint16_t)w.len);
-    }
-    s->unacked = 0;
-    if (!s->want_shutdown) hio_setcb_write(s->local, NULL);
+    rtMaybeGrantWindow(s->local, io, s->sid, s->unacked, s->want_shutdown, localWriteCb);
 }
 
 void ClientApp::onLocalWrite(ClientStream* s) {

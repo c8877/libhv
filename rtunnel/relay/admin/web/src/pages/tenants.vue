@@ -34,7 +34,7 @@
           <div>设备 {{ row.max_devices ? (row.devices || 0) + '/' + row.max_devices : '不限' }}</div>
           <div class="muted">
             并发 {{ row.max_sessions || '不限' }} · 月流量
-            {{ row.quota_bytes ? fmtBytes(row.used_bytes_month || 0) + '/' + fmtBytes(row.quota_bytes) : '不限' }}
+            {{ row.quota_bytes ? bytesIec(row.used_bytes_month || 0) + '/' + bytesIec(row.quota_bytes) : '不限' }}
           </div>
         </template>
       </el-table-column>
@@ -110,7 +110,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { Api } from '@/shared/api.js'
 import { can } from '@/shared/store.js'
-import { time } from '@/shared/utils.js'
+import { bytesIec, time } from '@/shared/utils.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
 
@@ -143,14 +143,6 @@ async function load() {
   } finally {
     loading.value = false
   }
-}
-
-function fmtBytes(n) {
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-  let v = Number(n) || 0
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
-  return (i === 0 ? String(v) : v.toFixed(v >= 100 ? 0 : 1)) + ' ' + units[i]
 }
 
 function openCreate() {

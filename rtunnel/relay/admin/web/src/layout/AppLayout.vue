@@ -89,7 +89,7 @@ const deskNav = ref(null)
 const drawerNav = ref(null)
 const ov = ref(overview.data)
 
-const items = computed(() => navFor(roleOf(), can))
+const items = computed(() => navFor(can))
 const active = computed(() => route.path)
 const activeGroup = computed(() => {
   const p = route.path

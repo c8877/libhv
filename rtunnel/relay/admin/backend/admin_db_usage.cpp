@@ -21,14 +21,6 @@ std::string localDay(long long ts_ms) {
     return std::string(buf);
 }
 
-bool isDay(const std::string& s) {
-    if (s.size() != 10 || s[4] != '-' || s[7] != '-') return false;
-    for (size_t i = 0; i < s.size(); ++i) {
-        if (i == 4 || i == 7) continue;
-        if (s[i] < '0' || s[i] > '9') return false;
-    }
-    return true;
-}
 
 void bindText(sqlite3_stmt* st, int idx, const std::string& v) {
     sqlite3_bind_text(st, idx, v.c_str(), -1, SQLITE_TRANSIENT);
@@ -84,7 +76,7 @@ bool AdminDb::usageAppend(const std::string& events_json, std::string& err) {
         // 主体/指标缺失或数值为零的事件没有意义（0 秒会话、0 字节 flush）
         if (subject_type.empty() || subject_id.empty() || metric.empty() || qty == 0) continue;
         if (d.empty()) d = localDay(ts);
-        if (!isDay(d)) continue;
+        if (!dbIsDay(d)) continue;
         if (source.empty()) source = "relay";
 
         sqlite3_reset(ev);
@@ -121,7 +113,7 @@ bool AdminDb::usageQuery(const std::string& from, const std::string& to,
                          const std::string& subject_type, const std::string& subject_id,
                          const std::string& metric, long long tenant_id, bool total,
                          std::string& json_out, std::string& err) {
-    if ((!from.empty() && !isDay(from)) || (!to.empty() && !isDay(to))) {
+    if ((!from.empty() && !dbIsDay(from)) || (!to.empty() && !dbIsDay(to))) {
         err = "bad date";
         return false;
     }

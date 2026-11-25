@@ -550,19 +550,21 @@ relay 在 hloop_run 返回后、admin stop 前刷一次
 
 ## 5.9 管理 API
 
-| 方法 | 路径 | 说明 | 角色 |
+接口只按权限组里的资源键授权（`users.role` 不授予权限）；下表是每个接口要求的资源键。
+
+| 方法 | 路径 | 说明 | 资源键 |
 |---|---|---|---|
-| GET | `/api/v1/client-accounts` | 列表，支持 `q` 搜索 | operator |
-| GET | `/api/v1/client-accounts/:id` | 详情，含 Token 统计与分组成员数 | operator |
-| POST | `/api/v1/client-accounts` | 新建 `{username,display_name,note}` | manager |
-| PUT | `/api/v1/client-accounts/:id` | 改展示名/备注/状态 | manager |
-| DELETE | `/api/v1/client-accounts/:id` | 级联删除 | admin |
-| GET | `/api/v1/client-accounts/:id/tokens` | Token 列表（不含明文） | operator |
-| POST | `/api/v1/client-accounts/:id/tokens` | 新建 Token，返回一次明文 | manager |
-| PUT | `/api/v1/client-tokens/:id` | 改名称/状态/限额 | manager |
-| POST | `/api/v1/client-tokens/:id/rotate` | 轮换，返回一次明文 | manager |
-| DELETE | `/api/v1/client-tokens/:id` | 吊销 | manager |
-| GET | `/api/v1/client-accounts/:id/effective` | 有效权限，复用预览逻辑 | operator |
+| GET | `/api/v1/client-accounts` | 列表，支持 `q` 搜索 | `account.read` |
+| GET | `/api/v1/client-accounts/:id` | 详情，含 Token 统计与分组成员数 | `account.read` |
+| POST | `/api/v1/client-accounts` | 新建 `{username,display_name,note,tenant_id}` | `account.write` |
+| PUT | `/api/v1/client-accounts/:id` | 改展示名/备注/状态/租户 | `account.write` |
+| DELETE | `/api/v1/client-accounts/:id` | 级联删除 | `account.delete` |
+| GET | `/api/v1/client-accounts/:id/tokens` | Token 列表（不含明文） | `account.read` |
+| POST | `/api/v1/client-accounts/:id/tokens` | 新建 Token，返回一次明文 | `account.write` |
+| PUT | `/api/v1/client-tokens/:id` | 改名称/状态/限额 | `account.write` |
+| POST | `/api/v1/client-tokens/:id/rotate` | 轮换，返回一次明文 | `account.write` |
+| DELETE | `/api/v1/client-tokens/:id` | 吊销 | `account.write` |
+| GET | `/api/v1/client-accounts/:id/effective` | 有效权限，复用预览逻辑 | `account.read` |
 
 旧凭据导入接口未实现，见 §10.5。
 

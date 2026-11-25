@@ -34,6 +34,7 @@ set(RTUNNEL_RELAY_SOURCES
                common/endpoint.cpp
                common/sha256.cpp common/token_util.cpp
                relay/admin/backend/admin_server.cpp
+               relay/admin/backend/admin_util.cpp
                relay/admin/backend/admin_tls.cpp
                relay/admin/backend/alert_notifier.cpp
                relay/admin/backend/admin_routes.cpp

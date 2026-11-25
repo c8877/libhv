@@ -9,7 +9,6 @@
 
 using nlohmann::json;
 
-static long long nowMs() { return AdminDb::nowMs(); }
 
 // ---------------------------------------------------------------- 调度
 
@@ -25,7 +24,7 @@ void AdminServer::distTick() {
     auto arr = json::parse(js, nullptr, false);
     if (arr.is_discarded() || !arr.is_array()) return;
 
-    long long now = nowMs();
+    long long now = AdminDb::nowMs();
     int apply_timeout_ms = settingInt("ota.apply_timeout_s", 180) * 1000;
     if (apply_timeout_ms < 30000) apply_timeout_ms = 30000;
 

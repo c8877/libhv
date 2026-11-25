@@ -602,7 +602,8 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 - 快照字段：version/args/caps、uname/CPU/内存/分区/负载/网卡、证书（mTLS 未配置则 `mtls=false`）
 - `CONFIG_SET(0x1B)` / `CONFIG_ACK(0x1C, sid 回显)`：在线修改 `ports` 与 `shell`；
   agent 校验→原子替换→写 `--config-file`（默认 `/opt/data/etc/rtunnel-agent.json`）→ ACK
-- `PUT /api/v1/agents/{devid}/caps`：manager/admin 改端口，Shell 仅 admin；离线返回 404
+- `PUT /api/v1/agents/{devid}/caps`：按字段鉴权，端口/串口/OTA 分别要求
+  `device.caps.write` / `device.tty.write` / `device.ota.write`；离线返回 404
 
 ### 13.3 接口
 
@@ -614,7 +615,7 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 | GET | `/api/v1/agents/{devid}/net` | 网络与 IPC 快照（scope/proc/limit/refresh） |
 | GET | `/api/v1/agents/{devid}/procs[/{pid}]` | 进程列表与详情 |
 | POST | `/api/v1/agents/{devid}/procs/signal` | 结束进程 / 发送信号 |
-| PUT | `/api/v1/agents/{devid}/caps` | 在线改端口与 Shell（Shell 仅 admin） |
+| PUT | `/api/v1/agents/{devid}/caps` | 在线改端口/Shell/串口/OTA 开关（按字段校验资源键） |
 | POST | `/api/v1/agents/{devid}/kick` | 强制设备下线（agent 自动重连） |
 | GET | `/api/v1/clients`、`/api/v1/streams` | 客户端与流列表 |
 | DELETE | `/api/v1/streams/{a_sid}` | 踢单个会话（双侧 RESET） |

@@ -75,6 +75,15 @@ std::string dbColText(sqlite3_stmt* st, int col) {
 
 long long dbColInt(sqlite3_stmt* st, int col) { return sqlite3_column_int64(st, col); }
 
+bool dbIsDay(const std::string& s) {
+    if (s.size() != 10 || s[4] != '-' || s[7] != '-') return false;
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (i == 4 || i == 7) continue;
+        if (s[i] < '0' || s[i] > '9') return false;
+    }
+    return true;
+}
+
 AdminDb::~AdminDb() {
     if (db_) { sqlite3_close(db_); db_ = nullptr; }
 }

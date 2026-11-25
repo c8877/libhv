@@ -1,6 +1,7 @@
 // 告警：设备离线/恢复、证书到期、分发任务失败 → webhook。
 // 采集与发送都在 alertLoop 这一个受管 worker 里，不阻塞 relay 与 HTTP 线程。
 #include "admin_server.hpp"
+#include "admin_util.hpp"
 
 #include "admin_tls.hpp"
 #include "common/logging.hpp"
@@ -78,16 +79,6 @@ std::string relayName() {
     return host;
 }
 
-// 与 api_settings.cpp 的脱敏一致：只露 scheme+主机+末 4 位
-std::string maskUrlForStatus(const std::string& url) {
-    if (url.empty()) return "";
-    size_t scheme = url.find("://");
-    size_t host_start = scheme == std::string::npos ? 0 : scheme + 3;
-    size_t slash = url.find('/', host_start);
-    std::string head = url.substr(0, slash == std::string::npos ? url.size() : slash);
-    std::string tail = url.size() > 4 ? url.substr(url.size() - 4) : url;
-    return head + "/…" + tail;
-}
 
 } // namespace
 
@@ -401,7 +392,7 @@ std::string AdminServer::alertStatusJson() {
     json j;
     j["enabled"] = settingInt("alert.enabled", 0);
     j["kind"] = settingStr("alert.kind", "generic");
-    j["url"] = url.empty() ? "" : maskUrlForStatus(url);
+    j["url"] = url.empty() ? "" : adminMaskUrl(url);
     {
         std::lock_guard<std::mutex> lk(alert_mu_);
         j["last_try_ms"] = alert_last_try_ms_;

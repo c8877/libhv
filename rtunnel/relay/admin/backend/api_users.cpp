@@ -2,6 +2,7 @@
 // 账号/会话/设备归属 API（SQLite）
 #include "common/logging.hpp"
 #include "admin_server.hpp"
+#include "admin_util.hpp"
 #include "cpputil/json.hpp"
 
 #include <ctime>
@@ -12,31 +13,6 @@ using nlohmann::json;
 
 extern thread_local AdminActor tl_actor;
 
-// 本次请求是否走 HTTPS：管理台本地 TLS，或反代声明 X-Forwarded-Proto
-static bool reqIsHttps(const HttpContextPtr& ctx) {
-    if (ctx->request && ctx->request->scheme == "https") return true;
-    return ctx->header("X-Forwarded-Proto") == "https";
-}
-
-static std::string cookieVal(const HttpContextPtr& ctx, const std::string& key) {
-    const HttpCookie& ck = ctx->request->GetCookie(key.c_str());
-    if (!ck.name.empty()) return ck.value;
-    std::string c = ctx->header("Cookie");
-    size_t pos = 0;
-    while (pos < c.size()) {
-        size_t semi = c.find(';', pos);
-        std::string item = c.substr(pos, semi == std::string::npos ? std::string::npos : semi - pos);
-        size_t eq = item.find('=');
-        if (eq != std::string::npos) {
-            std::string k = item.substr(0, eq);
-            while (!k.empty() && (k[0] == ' ' || k[0] == '\t')) k.erase(0, 1);
-            if (k == key) return item.substr(eq + 1);
-        }
-        if (semi == std::string::npos) break;
-        pos = semi + 1;
-    }
-    return "";
-}
 
 // 登录失败限流：username -> (fails, lock_until)
 static std::mutex g_login_mu;
@@ -222,7 +198,7 @@ void AdminServer::handleLogin(const HttpContextPtr& ctx) {
         ctx->send("{\"error\":\"session create failed\"}");
         return;
     }
-    bool https = reqIsHttps(ctx);
+    bool https = adminReqIsHttps(ctx);
     ctx->response->headers["Set-Cookie"] =
         "rt_sid=" + sid + "; Path=/; HttpOnly; SameSite=Strict; Max-Age=" +
         std::to_string(hours * 3600) + (https ? "; Secure" : "");
@@ -238,10 +214,10 @@ void AdminServer::handleLogin(const HttpContextPtr& ctx) {
 }
 
 void AdminServer::handleLogout(const HttpContextPtr& ctx) {
-    std::string sid = cookieVal(ctx, "rt_sid");
+    std::string sid = adminCookieValue(ctx, "rt_sid");
     if (!sid.empty() && db_.ok()) db_.dropSession(AdminDb::sha256Hex(sid));
     ctx->response->headers["Set-Cookie"] = "rt_sid=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0" +
-        std::string(reqIsHttps(ctx) ? "; Secure" : "");
+        std::string(adminReqIsHttps(ctx) ? "; Secure" : "");
     ctx->send("{\"ok\":true}");
 }
 

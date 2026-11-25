@@ -188,6 +188,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Api } from '@/shared/api.js'
+import { time } from '@/shared/utils.js'
 import { can } from '@/shared/store.js'
 import { useBreakpoint } from '@/shared/useBreakpoint.js'
 import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
@@ -391,12 +392,6 @@ async function remove(row) {
   } catch (e) {
     ElMessage.error('删除失败：' + e.message)
   }
-}
-
-function time(ms) {
-  if (!ms) return '—'
-  const d = new Date(Number(ms))
-  return d.toLocaleString('zh-CN', { hour12: false })
 }
 
 async function toggleDevice(row) {

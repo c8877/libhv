@@ -7,17 +7,17 @@
     </div>
 
     <div class="cfg">
-      <label class="cfg-item">升级包（文件库 agent/）
+      <label class="cfg-item">升级包（文件库 packages/agent/）
         <div class="pick">
-          <el-select v-model="fileName" filterable placeholder="选择 rtunnel-agent 部署包" class="w260"
+          <el-select v-model="pkgPath" filterable placeholder="选择 rtunnel-agent 部署包" class="w320"
                      @change="onFilePick">
-            <el-option v-for="f in files" :key="f.name" :label="f.name" :value="f.name">
+            <el-option v-for="f in files" :key="f.path" :label="f.name" :value="f.path">
               <span>{{ f.name }}</span>
               <el-tag v-if="parsePkg(f.name)" size="small" class="vt">{{ parsePkg(f.name).variant }}</el-tag>
               <el-tag v-if="parsePkg(f.name)" size="small" type="info" class="vt">{{ parsePkg(f.name).arch }}</el-tag>
               <span class="muted" style="float:right">{{ bytes(f.size, true) }}</span>
             </el-option>
-            <template #empty><span class="muted">agent 目录暂无升级包</span></template>
+            <template #empty><span class="muted">packages/agent 下暂无升级包</span></template>
           </el-select>
           <el-button link type="primary" :loading="fileLoading" @click="loadFiles">刷新</el-button>
         </div>
@@ -37,10 +37,10 @@
       <el-button link type="primary" @click="$router.push('/files')">上传新版本 →</el-button>
     </div>
     <div class="hint muted">
-      升级包放在文件库 <code>agent/</code> 目录，命名
+      升级包由 <code>publish.sh</code> 发布到文件库 <code>packages/agent/&lt;版本&gt;/&lt;架构&gt;/</code>，命名
       <code>rtunnel-agent-&lt;lite|web&gt;-&lt;版本&gt;-&lt;架构&gt;.tar.gz</code>
       （由 <code>deploy/package_agent.sh</code> 生成，含安装脚本和服务文件）；
-      选择后自动填入版本号，并按架构过滤设备。
+      选择后自动填入版本号，并按架构过滤设备。列表按文件名递归搜索，无需手工敲路径。
     </div>
 
     <el-alert type="warning" :closable="false" show-icon
@@ -89,7 +89,7 @@
       <el-pagination v-model:current-page="page" :page-size="per" :total="filtered.length"
                      layout="prev, pager, next, total" background />
       <span class="spacer" />
-      <el-button type="primary" :loading="saving" :disabled="!fileName || !version || !selected.size"
+      <el-button type="primary" :loading="saving" :disabled="!pkgPath || !version || !selected.size"
                  @click="submit">创建升级任务（{{ selected.size }}）</el-button>
     </div>
   </div>
@@ -163,7 +163,7 @@ const devices = ref([])
 const devTable = ref(null)
 const loading = ref(false)
 const saving = ref(false)
-const fileName = ref('')
+const pkgPath = ref('')
 const version = ref('')
 const deadline = ref(Date.now() + 3600 * 1000)
 const maxRetries = ref(2)
@@ -183,7 +183,7 @@ const taskTotal = ref(0)
 let timer = null
 
 const onlineCount = computed(() => devices.value.filter((d) => d.online).length)
-const pkgInfo = computed(() => parsePkg(fileName.value))
+const pkgInfo = computed(() => parsePkg(baseName(pkgPath.value)))
 const filtered = computed(() => {
   const k = q.value.trim().toLowerCase()
   if (!k) return devices.value
@@ -222,12 +222,15 @@ function onSelect(rows) {
 async function loadFiles() {
   fileLoading.value = true
   try {
-    const fl = await Api.get('/api/v1/files?dir=agent').catch(() => [])
-    const list = (fl || []).filter((f) => (!f.type || f.type === 'file') && parsePkg(f.name))
+    const fl = await Api.get('/api/v1/files?dir=packages/agent&recursive=1&q=rtunnel-agent')
+      .catch(() => [])
+    const list = (fl || [])
+      .filter((f) => (!f.type || f.type === 'file') && parsePkg(f.name))
+      .sort((a, b) => String(b.path).localeCompare(String(a.path)))
     files.value = list
-    if (!list.some((f) => f.name === fileName.value)) {
-      fileName.value = list.length ? list[0].name : ''
-      onFilePick(fileName.value)
+    if (!list.some((f) => f.path === pkgPath.value)) {
+      pkgPath.value = list.length ? list[0].path : ''
+      onFilePick(pkgPath.value)
     }
   } finally {
     fileLoading.value = false
@@ -243,8 +246,13 @@ function parsePkg(name) {
   return { variant: m[1], version: m[2], arch: m[3] }
 }
 
-function onFilePick(name) {
-  const p = parsePkg(name)
+function baseName(p) {
+  const s = String(p || '')
+  return s.slice(s.lastIndexOf('/') + 1)
+}
+
+function onFilePick(path) {
+  const p = parsePkg(baseName(path))
   const v = p ? p.version : ''
   if (v && (!version.value || version.value === autoVersion)) version.value = v
   autoVersion = v
@@ -304,7 +312,7 @@ async function loadTasks() {
 }
 
 async function submit() {
-  if (!fileName.value || !version.value || !selected.value.size) return
+  if (!pkgPath.value || !version.value || !selected.value.size) return
   const p = pkgInfo.value
   if (!p) {
     ElMessage.error('请选择 rtunnel-agent 部署包')
@@ -333,7 +341,7 @@ async function submit() {
   try {
     const r = await Api.post('/api/v1/distributions', {
       kind: 'ota',
-      file: 'agent/' + fileName.value,
+      file: pkgPath.value.replace(/^\//, ''),
       version: version.value.trim(),
       devids: Array.from(selected.value),
       deadline_at_ms: end,
