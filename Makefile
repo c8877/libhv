@@ -45,6 +45,7 @@ rtunnel_test:
 	python3 rtunnel/tests/billing_e2e.py
 	python3 rtunnel/tests/admin_embedded_e2e.py
 	python3 rtunnel/tests/packages_e2e.py
+	python3 rtunnel/tests/exec_e2e.py
 	python3 rtunnel/tests/compat_e2e.py
 	python3 rtunnel/tests/protocol_doc_test.py
 

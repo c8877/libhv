@@ -57,12 +57,16 @@ const filtered = computed(() => {
     x.action.toLowerCase().includes(k) || x.detail.toLowerCase().includes(k))
 })
 
-function parse(line) {
-  const m = /^\[([^\]]+)\] actor=(.*?) action=(\S+) detail=(.*)$/.exec(line)
-  if (!m) return { at: '', actor: '', action: '', detail: line }
+function parse(row) {
+  // 接口返回结构化对象：at/actor/actor_type/action/target_type/target_id/result/detail
   return {
-    at: m[1].replace('T', ' ').replace('Z', ''),
-    actor: m[2], action: m[3], detail: m[4],
+    at: String(row.at || '').replace('T', ' ').replace('Z', ''),
+    actor: row.actor || '',
+    actor_type: row.actor_type || '',
+    action: row.action || '',
+    result: row.result || '',
+    target: row.target_id ? (row.target_type || '') + ':' + row.target_id : '',
+    detail: row.detail || '',
   }
 }
 

@@ -82,6 +82,10 @@ enum Type : uint8_t {
     STORAGE_END    = 0x41,   // C→B：str json {ok,size,error}；sid 回显
     RELAY_LIST     = 0x42,   // B→C：str json {servers,rev,allow_leave}；连接级
     RELAY_LIST_ACK = 0x43,   // C→B：str json {ok,rev,count,current,switching,error}
+    EXEC_REQ       = 0x44,   // B→C：str json {argv,cwd,timeout_ms,max_bytes}；sid=请求号，不经过 shell
+    EXEC_DATA      = 0x45,   // C→B：原始字节，首字节 0=stdout 1=stderr，顺序拼接；sid 回显
+    EXEC_END       = 0x46,   // C→B：str json {ok,exit_code,signal,duration_ms,stdout_bytes,
+                             //                     stderr_bytes,truncated,timed_out,error}；sid 回显
 };
 
 // 错误码

@@ -228,6 +228,7 @@ public:
     std::unordered_map<std::string, std::string> caps_local_web;  // devid -> 本地页监听地址
     std::unordered_map<std::string, int> caps_net;                 // devid -> 支持 NET_REQ
     std::unordered_map<std::string, int> caps_proc;                // devid -> 支持 PROC_REQ
+    std::unordered_map<std::string, int> caps_exec;                // devid -> 支持 EXEC_REQ
     std::string admin_proxy_secret;   // 进程内生成的随机密钥，仅供 AdminServer 代理连接 relay
     std::unordered_map<std::string, std::string> agent_versions;
     std::unordered_map<std::string, uint64_t> agent_boot_ms;   // devid -> 系统开机时间（epoch ms）
@@ -256,6 +257,9 @@ public:
     std::unordered_map<uint32_t, ChunkAcc> storage_acc;
     std::unordered_map<uint32_t, ChunkAcc> storage_results;
     uint32_t storage_seq = 0;
+    std::unordered_map<uint32_t, ChunkAcc> exec_acc;
+    std::unordered_map<uint32_t, ChunkAcc> exec_results;
+    uint32_t exec_seq = 0;
     std::unordered_map<std::string, uint64_t> warm_sent_ms; // devid -> 上次下发预热的时间
     struct NetCache { std::string json; uint64_t ts = 0; };
     std::unordered_map<std::string, NetCache> net_cache;
@@ -351,6 +355,10 @@ private:
     int          agentOtaCap(const char* devid);   // -1 未知 0 不支持 1 支持
     int          agentNetCap(const char* devid);   // -1 未知 0 不支持 1 支持
     int          agentProcCap(const char* devid);  // -1 未知 0 不支持 1 支持
+    int          agentExecCap(const char* devid);  // -1 未知 0 不支持 1 支持
+    bool         startExec(const char* devid, const std::string& json, uint32_t& rid, std::string& err);
+    // 取走执行结果；meta 是 EXEC_END 的 json，body 是带流标记的输出块。
+    bool         takeExecResult(uint32_t rid, std::string& meta, std::string& body);
     bool         startPowerAction(const char* devid, const std::string& json, uint32_t& rid, std::string& err);
     std::string  takePowerResult(uint32_t rid);
     bool         startDiag(const char* devid, const std::string& json, uint32_t& rid, std::string& err);

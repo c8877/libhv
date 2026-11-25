@@ -233,6 +233,18 @@ public:
     // 清理早于 before_ms 的流水（日聚合保留）
     bool usagePrune(long long before_ms, int& n);
 
+    // 操作作业：plan 冻结 → apply 执行 → verify 复核。
+    // idem_key 非空时 (actor,idem_key) 唯一，重复提交返回已有作业。
+    bool opsCreate(const std::string& actor, const std::string& actor_type, const std::string& kind,
+                   const std::string& target_type, const std::string& target_id,
+                   const std::string& plan_json, const std::string& plan_hash, int risk,
+                   const std::string& idem_key, long long& out_id, std::string& err);
+    bool opsGet(long long id, std::string& json_out);
+    bool opsList(const std::string& devid, int limit, std::string& json_out);
+    bool opsSetStatus(long long id, const std::string& status, const std::string& result,
+                      const std::string& error);
+    bool opsFindByIdem(const std::string& actor, const std::string& idem_key, std::string& json_out);
+
     // 价目与费用试算：用量 × 单价（金额单位 1e-6 元）
     bool billingPrices(std::string& json_out);
     bool billingPriceSet(const std::string& metric, long long unit_size, long long price_micro,

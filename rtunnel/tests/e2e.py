@@ -855,7 +855,8 @@ def main():
                 check("目录穿越被拒", e.code in (400, 404), "code=%d" % e.code)
 
             au = admin_get("/api/v1/audit")
-            check("审计日志", any("certs.issue" in x for x in au) and any("certs.revoke" in x for x in au), str(au)[:120])
+            acts = [x.get("action", "") if isinstance(x, dict) else x for x in au]
+            check("审计日志", any("certs.issue" in a for a in acts) and any("certs.revoke" in a for a in acts), str(acts)[:120])
 
         # 13. mTLS 负向：证书 SAN 与 devid 不符必须被拒
         if mtls:

@@ -153,6 +153,35 @@ void AdminServer::registerRoutes() {
         if (rc) return rc;
         return handleAgentProcSignal(ctx);
     });
+    service_.Handle("POST", "/api/v1/agents/:devid/exec", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "device.exec", role);
+        if (rc) return rc;
+        return handleAgentExec(ctx, role);
+    });
+    // 操作作业：plan 冻结 → apply 执行 → verify 复核
+    service_.Handle("POST", "/api/v1/operations/plan", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "device.exec", role);
+        if (rc) return rc;
+        handleOpsPlan(ctx, role);
+        return 200;
+    });
+    service_.Handle("POST", "/api/v1/operations/:id/apply", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "device.exec", role);
+        if (rc) return rc;
+        handleOpsApply(ctx, role);
+        return HTTP_STATUS_NEXT;
+    });
+    service_.Handle("POST", "/api/v1/operations/:id/verify", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "device.exec", role);
+        if (rc) return rc;
+        handleOpsVerify(ctx, role);
+        return HTTP_STATUS_NEXT;
+    });
+    access("device.view", "GET", "/api/v1/operations", &AdminServer::handleOpsList);
     service_.Handle("GET", "/api/v1/agents/:devid/storage", [this](const HttpContextPtr& ctx) {
         std::string role;
         int rc = requirePerm(ctx, "device.view", role);

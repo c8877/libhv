@@ -468,6 +468,7 @@ const PermResDef kPermRes[] = {
     {"device.diag", "设备", "下载诊断包", "生成并下载设备诊断信息"},
     {"device.proc.read", "设备", "查看进程", "进程列表、资源占用与进程详情"},
     {"device.proc.signal", "设备", "管理进程", "结束进程或发送信号"},
+    {"device.exec", "设备", "执行命令", "在设备上执行白名单内的命令（argv，不经过 shell）"},
 
     {"file.read", "文件", "查看文件", "仓库列表、下载、Hex 与尾部"},
     {"file.write", "文件", "写入文件", "上传、新建、编辑、移动"},
@@ -541,6 +542,7 @@ std::vector<std::string> presetResources(const std::string& builtin) {
             allow = k == "device.view" || k == "device.terminal" || k == "device.port" ||
                     k == "device.svc" || k == "device.tty.read" || k == "device.tty.write" ||
                     k == "device.proc.read" || k == "device.proc.signal" ||
+                    k == "device.exec" ||
                     k == "file.read" || k == "file.write" || k == "dist.read" ||
                     k == "repo.read" || k == "repo.write" ||
                     k == "dict.read" || k == "account.read" || k == "settings.read" ||

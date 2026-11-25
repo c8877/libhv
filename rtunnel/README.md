@@ -177,6 +177,7 @@ python3 rtunnel/tests/bandwidth_e2e.py   # 带宽整形：限速生效、数据�
 python3 rtunnel/tests/billing_e2e.py     # 费用：价目、金额、按租户汇总、结算单状态机与导出
 python3 rtunnel/tests/admin_embedded_e2e.py  # 内嵌前端：无 docroot 出页面、gzip、回退与优先级
 python3 rtunnel/tests/packages_e2e.py    # 部署包：打包→发布→client 自举安装→篡改拒绝→回滚
+python3 rtunnel/tests/exec_e2e.py        # 受控执行：白名单、分流、超时截断、作业 plan/apply/verify
 python3 rtunnel/tests/compat_e2e.py      # HELLO 版本区间、低版本拒绝、高版本向前兼容
 python3 rtunnel/tests/protocol_doc_test.py  # 协议文档覆盖率（帧类型/常量）
 build/bin/rtunnel-endpoint-test          # --server 地址解析单测
@@ -213,6 +214,9 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
   超额时暂停数据来源侧的读（上行暂停客户端连接、下行暂停设备连接），靠 TCP 窗口回压，
   不丢帧；容量为 200ms 的量（最小 8 KiB），单次暂停不超过 500ms。适合按流量计费时
   防止单用户打满出口；管理台在「接入账号 → Token」里按 Mbps 填。
+- **受控执行**：agent 用 `--allow-exec` 配白名单后，`POST /api/v1/agents/:devid/exec` 可执行
+  argv（不经过 shell），stdout/stderr 分流、超时强杀、超字节截断；写审计 `device.exec`。
+  写动作还可用 `operations` 走 plan→apply→verify，带 `plan_hash` 防 TOCTOU、`Idempotency-Key` 防重放。
 - **费用试算**：`price_rules` 存每个指标的计价单位与单价（金额 1e-6 元），
   `GET /api/v1/billing/summary` 把日聚合用量乘单价、按租户汇总；「监控 → 费用」可改价目
   （`billing.write`，默认只有超管）。
@@ -244,7 +248,7 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
 
 relay 启动加 `--admin 127.0.0.1:9443` 开启管理台（libhv HttpService，独立 worker 线程）：
 
-- 能力：概览、设备/会话、踢会话/下线、权限（权限组 / 授权对象 / 资源与设备字典）、接入账号与 Token（时效 / 流量 / 频率 / 并发 / 带宽）、租户、用量与费用试算、设备文件与服务管理、证书签发/吊销、文件仓库、分发与 OTA、审计、系统设置
+- 能力：概览、设备/会话、踢会话/下线、受控命令执行与操作作业、权限（权限组 / 授权对象 / 资源与设备字典）、接入账号与 Token（时效 / 流量 / 频率 / 并发 / 带宽）、租户、用量与费用试算、设备文件与服务管理、证书签发/吊销、文件仓库、分发与 OTA、审计、系统设置
 - 资源键与数据面能力一一对应：`device.view` 只读可见，`device.svc` 才能启停服务，
   串口分 `device.tty.read`（只读流）与 `device.tty.write`（写入/接管）。令牌吊销、账号停用、
   权限组变更会立即断开该主体的在线连接；管理台的终端/串口/文件/服务页面在权限变小、
@@ -704,6 +708,8 @@ relay 每 5s 巡检一次 agent 控制连接：连续 60s 没有收到任何帧�
 | `--server/--port --devid` | relay 地址与设备 ID；`--server` 可重复或逗号分隔（最多 8 个，故障自动切换） |
 | `--allow 22,80` / `--allow-all` | 目标端口白名单 |
 | `--allow-shell` / `--max-idle` | 允许 `OPEN_SHELL` / 空闲自退秒数 |
+| `--allow-exec "cmd a *;cmd b"` | 受控命令执行白名单（分号分隔的 argv 模板，逐段通配）；不配则 `EXEC` 不可用 |
+| `--exec-timeout` / `--exec-max-bytes` | 单次执行超时（默认 30000ms）与 stdout+stderr 合计上限（默认 256 KiB） |
 | `--allow-ota` | 允许 relay 通知安装 file_dir 中的新版本（命令行默认关；部署包自带配置为开） |
 | `--local-web [ADDR:]PORT` | 本地设备详情页（内置单文件 Web），默认 `127.0.0.1:8080` |
 | `--file-root DIR` | 文件管理根目录，默认同 `--file-dir`（`/opt/data/files`） |

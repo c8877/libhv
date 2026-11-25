@@ -1226,6 +1226,11 @@ int RelayServer::agentProcCap(const char* devid) {
     return it == caps_proc.end() ? -1 : it->second;
 }
 
+int RelayServer::agentExecCap(const char* devid) {
+    auto it = caps_exec.find(devid);
+    return it == caps_exec.end() ? -1 : it->second;
+}
+
 bool RelayServer::startProcQuery(const char* devid, const std::string& json, uint32_t& rid, std::string& err) {
     RelayConn* a = findAgent(devid);
     if (!a || !a->io) {
@@ -1236,6 +1241,28 @@ bool RelayServer::startProcQuery(const char* devid, const std::string& json, uin
     rtnp::Writer w;
     w.str(json.c_str());
     rtnp::send(a->io, rtnp::PROC_REQ, rid, w.data, (uint16_t)w.len);
+    return true;
+}
+
+bool RelayServer::startExec(const char* devid, const std::string& json, uint32_t& rid, std::string& err) {
+    RelayConn* a = findAgent(devid);
+    if (!a || !a->io) {
+        err = "device offline";
+        return false;
+    }
+    rid = ++exec_seq;
+    rtnp::Writer w;
+    w.str(json.c_str());
+    rtnp::send(a->io, rtnp::EXEC_REQ, rid, w.data, (uint16_t)w.len);
+    return true;
+}
+
+bool RelayServer::takeExecResult(uint32_t rid, std::string& meta, std::string& body) {
+    auto it = exec_results.find(rid);
+    if (it == exec_results.end()) return false;
+    meta = it->second.meta;
+    body = std::move(it->second.body);
+    exec_results.erase(it);
     return true;
 }
 
@@ -1712,6 +1739,33 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
         if (storage_results.size() > 8) storage_results.erase(storage_results.begin());
         return;
     }
+    case rtnp::EXEC_DATA: {
+        ChunkAcc& acc = exec_acc[f->sid];
+        // 输出上限在 agent 侧已经截断（默认 256KB），这里再兜一层防止异常对端
+        if (acc.body.size() + f->len > 8 * 1024 * 1024) {
+            acc.body.clear();
+            acc.meta = "{\"ok\":false,\"error\":\"output too large\"}";
+            return;
+        }
+        acc.body.append((const char*)f->payload, f->len);
+        return;
+    }
+    case rtnp::EXEC_END: {
+        auto it = exec_acc.find(f->sid);
+        ChunkAcc acc;
+        if (it != exec_acc.end()) {
+            acc = std::move(it->second);
+            exec_acc.erase(it);
+        }
+        rtnp::Reader rr(f->payload, f->len);
+        static char em[8192];
+        rr.str(em, sizeof em);
+        acc.meta = rr.err ? std::string("{\"ok\":false,\"error\":\"bad exec end\"}") : std::string(em);
+        exec_results[f->sid] = std::move(acc);
+        // 管理台一直不来取才丢：最多保留 16 份
+        while (exec_results.size() > 16) exec_results.erase(exec_results.begin());
+        return;
+    }
     case rtnp::FILE_CHECK_ACK: {
         rtnp::Reader rr(f->payload, f->len);
         static char buf[1024];
@@ -1854,6 +1908,9 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             }
             if (!sj.is_discarded() && sj.contains("caps") && sj["caps"].contains("proc")) {
                 caps_proc[c->devid] = sj["caps"]["proc"].get<bool>() ? 1 : 0;
+            }
+            if (!sj.is_discarded() && sj.contains("caps") && sj["caps"].contains("exec")) {
+                caps_exec[c->devid] = sj["caps"]["exec"].get<bool>() ? 1 : 0;
             }
             // uptime 只出现在全量帧；用收帧时刻反推开机时间，列表可随时算当前时长
             if (full && !sj.is_discarded()) {

@@ -87,6 +87,12 @@ thread_local AdminActor tl_actor;
 std::string AdminServer::roleOf(const HttpContextPtr& ctx) {
     tl_actor = AdminActor{};
     if (ctx->request) tl_actor.ip = ctx->request->client_addr.ip;
+    // AI 调用方用 X-Actor: ai:<模型/会话> 自报身份，只进审计标签，不参与授权。
+    // 限制前缀与长度，避免被伪造成普通账号名。
+    {
+        std::string xa = ctx->header("X-Actor");
+        if (xa.rfind("ai:", 0) == 0 && xa.size() <= 80) tl_actor.ai_actor = xa;
+    }
 
     // 1) 会话 Cookie
     std::string sid = adminCookieValue(ctx, "rt_sid");
@@ -447,6 +453,8 @@ std::string AdminServer::actorLabel() const {
     if (a.token_id > 0) who += "/token" + std::to_string(a.token_id);
     if (!a.role.empty()) who += "/" + a.role;
     if (!a.ip.empty()) who += "/" + a.ip;
+    // 模型调用：把标签放最前面，审计可按 actor_type=ai 过滤
+    if (!a.ai_actor.empty()) who = a.ai_actor + "|" + who;
     return who;
 }
 
@@ -455,6 +463,22 @@ void AdminServer::audit(const std::string& role, const std::string& action, cons
     std::string who = actorLabel();
     if (who.empty()) who = role.empty() ? "anonymous" : role;
     audit_.write(who, action, detail);
+}
+
+void AdminServer::auditEx(const std::string& action, const std::string& target_type,
+                          const std::string& target_id, const std::string& result,
+                          const std::string& detail, const std::string& op_id) {
+    std::string who = actorLabel();
+    if (who.empty()) who = "anonymous";
+    AuditEntry e;
+    e.actor = who;
+    e.action = action;
+    e.target_type = target_type;
+    e.target_id = target_id;
+    e.result = result.empty() ? "ok" : result;
+    e.detail = detail;
+    e.op_id = op_id;
+    audit_.writeEntry(e);
 }
 
 int AdminServer::kickClients(const std::vector<std::string>& users, long long token_id, const char* reason) {

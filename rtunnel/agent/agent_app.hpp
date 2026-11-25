@@ -71,6 +71,10 @@ public:
     int allow_all = 0;
     int allow_shell = 0;                  // 允许 OPEN_SHELL（forkpty 起 shell，默认禁用）
     char allow_tty[512] = {0};            // 逗号分隔的串口白名单
+    std::string allow_exec;               // 分号分隔的命令白名单模板（空=禁用 EXEC）
+    int exec_timeout_ms = 30000;          // 单次执行上限
+    int exec_max_bytes = 262144;          // stdout+stderr 合计上限
+    int exec_active = 0;                  // 正在执行的命令数（loop 线程读写）
     std::string config_file = "/opt/data/etc/rtunnel-agent.json"; // --config-file 可覆盖
     bool config_loaded = false;                          // 本次启动是否成功读取配置文件
     // relay 下发的地址列表（落盘到配置文件的 relay_servers）：roll 版本用于对齐
@@ -176,6 +180,20 @@ private:
     std::atomic<bool> query_stop_{false};
     static const size_t kQueryMaxQueue = 16;
 
+    // 命令执行 worker：单独一条线程。exec 可能跑到超时（默认 30s），
+    // 放进查询队列会把进程/网络/服务页一起卡住。
+    void execStart();
+    void execStop();
+    void execLoop();
+    bool execSubmit(std::function<void()> fn);
+    std::thread exec_thread_;
+    std::mutex exec_start_mu_;
+    std::mutex exec_mu_;
+    std::condition_variable exec_cv_;
+    std::deque<std::function<void()>> exec_q_;
+    std::atomic<bool> exec_stop_{false};
+    static const size_t kExecMaxQueue = 4;
+
     // 阻塞 worker：服务操作（高优先级）与目录扫描（低优先级）共用一个线程。
     // 单核设备上 systemctl 与整盘遍历串行执行即可，没必要各占一个线程。
     // 按需启动，空闲时睡在条件变量，不是周期轮询。
@@ -260,6 +278,7 @@ private:
     void handlePowerReq(const rtnp::Frame* f);
     void handleDiagReq(const rtnp::Frame* f);
     void handleStorageReq(const rtnp::Frame* f);
+    void handleExecReq(const rtnp::Frame* f);
     static void powerTimerCb(htimer_t* t);
     // 校验本机 root 密码（/etc/shadow + crypt）。失败 err 给可展示的原因。
     bool verifyRootPassword(const std::string& password, std::string& err);

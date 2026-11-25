@@ -10,6 +10,7 @@
 #include "net_service.hpp"
 #include "proc_service.hpp"
 #include "storage_service.hpp"
+#include "exec_service.hpp"
 #include "ota_pkg.hpp"
 #ifdef RTUNNEL_AGENT_WEB
 #include "agent_web.hpp"
@@ -733,6 +734,30 @@ void AgentApp::loadConfig() {
         }
         snprintf(allow_tty, sizeof(allow_tty), "%s", joined.c_str());
     }
+    // 命令白名单只从本地配置文件/启动参数加载，不接受 CONFIG_SET 下发：
+    // 否则管理面（或被攻陷的 relay）就能自行把任意命令加进白名单。
+    if (j.contains("exec_allow") && j["exec_allow"].is_array()) {
+        std::string joined;
+        for (auto& v : j["exec_allow"]) {
+            if (!v.is_string()) continue;
+            std::string one = v.get<std::string>();
+            if (one.empty() || one.size() > 512) continue;
+            if (!joined.empty()) joined += ";";
+            joined += one;
+            if (joined.size() > 4096) break;
+        }
+        allow_exec = joined;
+    }
+    if (j.contains("exec_timeout_ms") && j["exec_timeout_ms"].is_number()) {
+        exec_timeout_ms = j["exec_timeout_ms"].get<int>();
+        if (exec_timeout_ms < 1000) exec_timeout_ms = 1000;
+        if (exec_timeout_ms > 300000) exec_timeout_ms = 300000;
+    }
+    if (j.contains("exec_max_bytes") && j["exec_max_bytes"].is_number()) {
+        exec_max_bytes = j["exec_max_bytes"].get<int>();
+        if (exec_max_bytes < 1024) exec_max_bytes = 1024;
+        if (exec_max_bytes > 4 * 1024 * 1024) exec_max_bytes = 4 * 1024 * 1024;
+    }
     if (j.contains("metrics") && j["metrics"].is_object()) {
         auto& m = j["metrics"];
         if (m.contains("series") && m["series"].is_array()) {
@@ -871,6 +896,20 @@ bool AgentApp::saveConfig() {
             pos = comma + 1;
         }
     }
+    j["exec_allow"] = nlohmann::json::array();
+    {
+        std::string list = allow_exec;
+        size_t pos = 0;
+        while (pos <= list.size()) {
+            size_t semi = list.find(';', pos);
+            std::string one = list.substr(pos, semi == std::string::npos ? std::string::npos : semi - pos);
+            if (!one.empty()) j["exec_allow"].push_back(one);
+            if (semi == std::string::npos) break;
+            pos = semi + 1;
+        }
+    }
+    j["exec_timeout_ms"] = exec_timeout_ms;
+    j["exec_max_bytes"] = exec_max_bytes;
     // relay 下发的地址列表：saveRelayList 单独维护，这里只保证不被能力配置覆盖。
     // 以现有文件为底稿读写，本函数不认识该键时也会原样保留。
     std::string tmp = config_file + ".tmp";
@@ -2433,6 +2472,14 @@ nlohmann::json AgentApp::buildSysinfo() {
         caps["diag"] = true;        // 支持 DIAG_REQ 诊断包
         caps["net"] = true;         // 支持 NET_REQ 网络/IPC 快照
         caps["proc"] = true;        // 支持 PROC_REQ 进程列表与信号
+        caps["exec"] = !allow_exec.empty();   // 支持 EXEC_REQ 受控命令执行
+        caps["exec_allow"] = nlohmann::json::array();
+        {
+            std::vector<std::string> tmpls = rtexec::parseAllow(allow_exec);
+            for (auto& t : tmpls) caps["exec_allow"].push_back(t);
+        }
+        caps["exec_timeout_ms"] = exec_timeout_ms;
+        caps["exec_max_bytes"] = exec_max_bytes;
         caps["warm"] = true;        // 支持 WARM_REQ 详情页预采样
         caps["allow_tty"] = nlohmann::json::array();
         {
@@ -2678,6 +2725,31 @@ void chunkPostCb(hevent_t* ev) {
         e.str(p->end.c_str());
         rtnp::send(io, p->end_type, p->sid, e.data, (uint16_t)e.len);
     }
+    delete p;
+}
+
+// 执行结果：DATA 每块首字节是流标记（0=stdout 1=stderr），END 带汇总。
+// 分块在发送前组装好，避免在 loop 线程里再切分把标记切到块中间。
+struct ExecPost {
+    hevent_t ev;
+    AgentApp* app = nullptr;
+    uint32_t sid = 0;
+    std::vector<std::string> chunks;
+    std::string end;
+};
+
+void execPostCb(hevent_t* ev) {
+    ExecPost* p = static_cast<ExecPost*>(hevent_userdata(ev));
+    hio_t* io = p->app ? p->app->io : nullptr;
+    if (io) {
+        for (const auto& c : p->chunks) {
+            rtnp::send(io, rtnp::EXEC_DATA, p->sid, c.data(), (uint16_t)c.size());
+        }
+        rtnp::Writer w;
+        w.str(p->end.c_str());
+        rtnp::send(io, rtnp::EXEC_END, p->sid, w.data, (uint16_t)w.len);
+    }
+    if (p->app) p->app->exec_active--;
     delete p;
 }
 
@@ -3039,6 +3111,51 @@ void AgentApp::queryLoop() {
     }
 }
 
+void AgentApp::execStart() {
+    std::lock_guard<std::mutex> lk(exec_start_mu_);
+    if (exec_stop_.load() || exec_thread_.joinable()) return;
+    exec_thread_ = std::thread([this]() {
+        agentThreadName("rtagent-exec");
+        execLoop();
+    });
+}
+
+void AgentApp::execStop() {
+    std::lock_guard<std::mutex> lk(exec_start_mu_);
+    exec_stop_.store(true);
+    {
+        std::lock_guard<std::mutex> qlk(exec_mu_);
+        exec_q_.clear();
+    }
+    exec_cv_.notify_all();
+    if (exec_thread_.joinable()) exec_thread_.join();
+}
+
+void AgentApp::execLoop() {
+    for (;;) {
+        std::function<void()> fn;
+        {
+            std::unique_lock<std::mutex> lk(exec_mu_);
+            exec_cv_.wait(lk, [this]() { return exec_stop_.load() || !exec_q_.empty(); });
+            if (exec_stop_.load()) return;
+            fn = std::move(exec_q_.front());
+            exec_q_.pop_front();
+        }
+        fn();
+    }
+}
+
+bool AgentApp::execSubmit(std::function<void()> fn) {
+    execStart();
+    {
+        std::lock_guard<std::mutex> lk(exec_mu_);
+        if (exec_stop_.load() || exec_q_.size() >= kExecMaxQueue) return false;
+        exec_q_.push_back(std::move(fn));
+    }
+    exec_cv_.notify_one();
+    return true;
+}
+
 bool AgentApp::querySubmit(std::function<void()> fn) {
     queryStart();
     {
@@ -3264,6 +3381,113 @@ void AgentApp::handleStorageReq(const rtnp::Frame* f) {
         e["path"] = rj.value("path", std::string());
         sendJsonFrame(io, rtnp::STORAGE_INFO, sid, e);
         sendJsonFrame(io, rtnp::STORAGE_END, sid, e);
+    }
+}
+
+// B→C：受控命令执行。只接受 argv 数组，不经过 shell；必须命中 --allow-exec 白名单。
+void AgentApp::handleExecReq(const rtnp::Frame* f) {
+    using nlohmann::json;
+    uint32_t sid = f->sid;
+    json rj = json::object();
+    if (f->len) {
+        rtnp::Reader r(f->payload, f->len);
+        std::string req = r.strBytes();
+        auto j = json::parse(req, nullptr, false);
+        if (!j.is_discarded() && j.is_object()) rj = j;
+    }
+    auto fail = [this, sid](const std::string& err) {
+        json e;
+        e["ok"] = false;
+        e["error"] = err;
+        sendJsonFrame(io, rtnp::EXEC_END, sid, e);
+    };
+
+    rtexec::Options opt;
+    opt.allow = rtexec::parseAllow(allow_exec);
+    opt.max_timeout_ms = exec_timeout_ms;
+    opt.max_bytes = exec_max_bytes;
+    if (opt.allow.empty()) {
+        fail("命令执行未启用（启动参数缺少 --allow-exec）");
+        return;
+    }
+    if (rj.contains("shell") && rj["shell"].is_boolean() && rj["shell"].get<bool>()) {
+        fail("不支持 shell 模式，请传 argv 数组");
+        return;
+    }
+    std::vector<std::string> argv;
+    if (rj.contains("argv") && rj["argv"].is_array()) {
+        for (auto& v : rj["argv"]) {
+            if (!v.is_string()) {
+                fail("argv 必须是字符串数组");
+                return;
+            }
+            argv.push_back(v.get<std::string>());
+        }
+    }
+    if (argv.empty()) {
+        fail("argv 为空");
+        return;
+    }
+    std::string reason;
+    if (!rtexec::allowed(opt, argv, reason)) {
+        fail(reason);
+        return;
+    }
+    if (exec_active >= 2) {
+        fail("busy: 同时执行的命令过多");
+        return;
+    }
+
+    int timeout_ms = rj.value("timeout_ms", exec_timeout_ms);
+    size_t max_bytes = (size_t)rj.value("max_bytes", (long long)exec_max_bytes);
+    std::string cwd = rj.value("cwd", std::string());
+    exec_active++;
+    bool submitted = execSubmit([this, sid, argv, cwd, timeout_ms, max_bytes, opt]() {
+        rtexec::Result r;
+        rtexec::run(opt, argv, cwd, timeout_ms, max_bytes, r);
+
+        ExecPost* p = new ExecPost;
+        memset(&p->ev, 0, sizeof p->ev);
+        p->ev.cb = execPostCb;
+        p->ev.userdata = p;
+        p->app = this;
+        p->sid = sid;
+        const size_t kChunk = rtnp::MAX_PAYLOAD - 5;   // 1 字节流标记 + 4 字节长度
+        auto addChunks = [&](char tag, const std::string& s) {
+            for (size_t off = 0; off < s.size(); off += kChunk) {
+                size_t n = s.size() - off;
+                if (n > kChunk) n = kChunk;
+                std::string c;
+                c.reserve(n + 5);
+                c.push_back(tag);
+                // 长度用大端 4 字节：relay 原样拼接，管理面按此切分
+                c.push_back((char)((n >> 24) & 0xff));
+                c.push_back((char)((n >> 16) & 0xff));
+                c.push_back((char)((n >> 8) & 0xff));
+                c.push_back((char)(n & 0xff));
+                c.append(s, off, n);
+                p->chunks.push_back(std::move(c));
+            }
+        };
+        addChunks(0, r.out);
+        addChunks(1, r.err);
+
+        json end;
+        end["ok"] = r.ok;
+        end["exit_code"] = r.exit_code;
+        end["signal"] = r.signal;
+        end["duration_ms"] = r.duration_ms;
+        end["stdout_bytes"] = (long long)r.stdout_bytes;
+        end["stderr_bytes"] = (long long)r.stderr_bytes;
+        end["truncated"] = r.truncated;
+        end["timed_out"] = r.timed_out;
+        if (!r.error.empty()) end["error"] = r.error;
+        p->end = end.dump();
+        hloop_post_event(loop, &p->ev);
+    });
+    if (!submitted) {
+        exec_active--;
+        fail("busy: 命令队列已满");
     }
 }
 
@@ -3585,6 +3809,7 @@ void AgentApp::onFrame(rtnp::Frame* f) {
     case rtnp::POWER_REQ: handlePowerReq(f); return;
     case rtnp::DIAG_REQ: handleDiagReq(f); return;
     case rtnp::STORAGE_REQ: handleStorageReq(f); return;
+    case rtnp::EXEC_REQ: handleExecReq(f); return;
     case rtnp::TTY_LIST_REQ: {
         nlohmann::json arr = nlohmann::json::array();
         DIR* d = opendir("/dev");
@@ -3952,6 +4177,19 @@ int AgentApp::run(int argc, char** argv) {
         else if (strcmp(argv[i], "--allow-shell") == 0) {
             allow_shell = 1;
         }
+        else if (strcmp(argv[i], "--allow-exec") == 0 && i + 1 < argc) {
+            allow_exec = argv[++i];
+        }
+        else if (strcmp(argv[i], "--exec-timeout") == 0 && i + 1 < argc) {
+            exec_timeout_ms = atoi(argv[++i]);
+            if (exec_timeout_ms < 1000) exec_timeout_ms = 1000;
+            if (exec_timeout_ms > 300000) exec_timeout_ms = 300000;
+        }
+        else if (strcmp(argv[i], "--exec-max-bytes") == 0 && i + 1 < argc) {
+            exec_max_bytes = atoi(argv[++i]);
+            if (exec_max_bytes < 1024) exec_max_bytes = 1024;
+            if (exec_max_bytes > 4 * 1024 * 1024) exec_max_bytes = 4 * 1024 * 1024;
+        }
         else if (strcmp(argv[i], "--allow-ota") == 0) {
             allow_ota = 1;
         }
@@ -4173,6 +4411,7 @@ int AgentApp::run(int argc, char** argv) {
     hloop_run(lp);
     workerStop();
     queryStop();
+    execStop();
 #ifdef RTUNNEL_AGENT_WEB
     if (web_enabled) agentWebStop();
 #endif

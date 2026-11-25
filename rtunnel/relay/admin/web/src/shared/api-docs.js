@@ -85,6 +85,68 @@ export const DOCS = [
     resp: `{ "op": "signal", "ok": true, "pid": 812, "signal": 15 }`,
   },
   {
+    group: 'device', method: 'POST', path: '/api/v1/agents/:devid/exec', minRole: 'manager',
+    summary: '在设备上执行白名单内的命令（argv，不经过 shell）',
+    params: [
+      { name: 'devid', in: 'path', desc: '设备 ID' },
+      { name: 'argv', in: 'body', desc: '字符串数组，逐段匹配 agent 的 --allow-exec 模板' },
+      { name: 'cwd', in: 'body', desc: '工作目录，可选' },
+      { name: 'timeout_ms', in: 'body', desc: '1000–30000，默认 30000' },
+      { name: 'max_bytes', in: 'body', desc: 'stdout+stderr 合计上限，默认 65536，最大 1 MiB' },
+    ],
+    note: '需要 device.exec；agent 必须用 --allow-exec 配了白名单，否则 501。'
+      + '不经过 shell，超时/超字节会强杀子进程并在结果里标 timed_out/truncated；写审计 device.exec',
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n     -d '{"argv":["df","-h"],"timeout_ms":5000}' "$RT/api/v1/agents/mp135/exec"`,
+    resp: `{ "ok": true, "exit_code": 0, "stdout": "Filesystem Size Used Avail Use%\n...", "stderr": "", "duration_ms": 12, "truncated": false, "timed_out": false }`,
+  },
+  {
+    group: 'device', method: 'POST', path: '/api/v1/operations/plan', minRole: 'manager',
+    summary: '为一个写操作生成计划（不做任何设备动作）',
+    params: [
+      { name: 'kind', in: 'body', desc: '目前只支持 exec' },
+      { name: 'devid', in: 'body', desc: '目标设备' },
+      { name: 'argv', in: 'body', desc: '要执行的 argv' },
+      { name: 'Idempotency-Key', in: 'header', desc: '可选；同键返回同一作业' },
+    ],
+    note: '需要 device.exec。返回 id 与 plan_hash；apply 必须回传同一个 hash。risk 1=只读 2=改状态 3=破坏性',
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n     -d '{"kind":"exec","devid":"mp135","argv":["systemctl","restart","nginx"]}' "$RT/api/v1/operations/plan"`,
+    resp: `{ "id": 7, "status": "planned", "risk": 2, "plan_hash": "9f2c…", "plan": { "kind": "exec", "devid": "mp135", "argv": ["systemctl","restart","nginx"] } }`,
+  },
+  {
+    group: 'device', method: 'POST', path: '/api/v1/operations/:id/apply', minRole: 'manager',
+    summary: '执行计划（plan_hash 必须匹配）',
+    params: [
+      { name: 'id', in: 'path', desc: '作业 id' },
+      { name: 'plan_hash', in: 'body', desc: 'plan 返回的 hash' },
+      { name: 'Idempotency-Key', in: 'header', desc: '可选；同 actor+key 只执行一次' },
+    ],
+    note: '需要 device.exec。状态 applied/failed 后重复 apply 直接返回原结果，不会重跑命令',
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n     -d '{"plan_hash":"9f2c…"}' "$RT/api/v1/operations/7/apply"`,
+    resp: `{ "id": 7, "status": "applied", "result": { "ok": true, "exit_code": 0, "stdout": "" } }`,
+  },
+  {
+    group: 'device', method: 'POST', path: '/api/v1/operations/:id/verify', minRole: 'manager',
+    summary: '复核作业结果（可带探针命令）',
+    params: [
+      { name: 'id', in: 'path', desc: '作业 id' },
+      { name: 'argv', in: 'body', desc: '可选探针命令；不传则以 apply 结果判定' },
+    ],
+    note: '需要 device.exec。带 argv 时探针 exit_code=0 才算通过；结果写审计 operation.verify',
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n     -d '{"argv":["systemctl","is-active","nginx"]}' "$RT/api/v1/operations/7/verify"`,
+    resp: `{ "id": 7, "verified": true, "probe": { "ok": true, "exit_code": 0, "stdout": "active\n" } }`,
+  },
+  {
+    group: 'device', method: 'GET', path: '/api/v1/operations', minRole: 'viewer',
+    summary: '操作作业列表',
+    params: [
+      { name: 'devid', in: 'query', desc: '只看某台设备' },
+      { name: 'limit', in: 'query', desc: '默认 50，最大 500' },
+    ],
+    note: '需要 device.view；受限账号只能看到授权范围内设备的作业',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/operations?devid=mp135&limit=20"`,
+    resp: `{ "items": [{ "id": 7, "kind": "exec", "target_id": "mp135", "status": "applied", "risk": 2 }] }`,
+  },
+  {
     group: 'device', method: 'GET', path: '/api/v1/agents/:devid/net', minRole: 'viewer',
     summary: '网络与 IPC 快照（TCP/UDP/UNIX/IPC）',
     params: [

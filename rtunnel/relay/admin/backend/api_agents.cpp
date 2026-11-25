@@ -1,5 +1,6 @@
 // A/C 连接列表与设备详情（在 relay 线程内取快照，JSON 序列化后回 admin 线程）
 #include "admin_server.hpp"
+#include "api_reply.hpp"
 #include "cpputil/hasync.h"
 #include "cpputil/json.hpp"
 #include "common/gzip_util.hpp"
@@ -13,6 +14,8 @@
 #include <ctype.h>
 
 #include <algorithm>
+#include <thread>
+#include <unistd.h>
 
 using nlohmann::json;
 
@@ -653,6 +656,175 @@ int AdminServer::proxyAgentProc(const HttpContextPtr& ctx, const std::string& de
         }
         ctx->send(js);
     });
+    return HTTP_STATUS_NEXT;
+}
+
+// 同步执行并等待结果：exec 接口与 operations.apply/verify 共用。
+// 必须在工作线程调用（最多阻塞 timeout_ms + 3s）。
+bool AdminServer::execOnDevice(const std::string& devid, const std::string& payload, int timeout_ms,
+                               json& out, std::string& err) {
+    uint32_t rid = 0;
+    bool sent = callRelay([this, &devid, &payload, &rid, &err]() {
+                    return relay_->startExec(devid.c_str(), payload, rid, err) ? std::string("1")
+                                                                              : std::string("0");
+                }) == "1";
+    if (!sent) {
+        if (err.empty()) err = "device offline";
+        return false;
+    }
+    std::string meta, raw;
+    bool got = false;
+    int waits = (timeout_ms + 3000) / 50;
+    for (int i = 0; i < waits; ++i) {
+        usleep(50000);
+        got = callRelay([this, rid, &meta, &raw]() {
+            return relay_->takeExecResult(rid, meta, raw) ? std::string("1") : std::string("0");
+        }) == "1";
+        if (got) break;
+    }
+    if (!got) {
+        err = "timeout waiting for device";
+        return false;
+    }
+    json r = json::parse(meta, nullptr, false);
+    if (r.is_discarded() || !r.is_object()) r = json::object();
+
+    // 输出块格式：u8 tag + u32 大端长度 + 数据；按序拼成 stdout/stderr
+    std::string outbuf, errbuf;
+    size_t i = 0;
+    while (i + 5 <= raw.size()) {
+        unsigned char tag = (unsigned char)raw[i];
+        size_t n = ((size_t)(unsigned char)raw[i + 1] << 24) |
+                   ((size_t)(unsigned char)raw[i + 2] << 16) |
+                   ((size_t)(unsigned char)raw[i + 3] << 8) |
+                   (size_t)(unsigned char)raw[i + 4];
+        i += 5;
+        if (n > raw.size() - i) n = raw.size() - i;
+        (tag == 1 ? errbuf : outbuf).append(raw, i, n);
+        i += n;
+    }
+    out = json::object();
+    out["ok"] = r.value("ok", false);
+    out["exit_code"] = r.value("exit_code", -1);
+    out["signal"] = r.value("signal", 0);
+    out["duration_ms"] = r.value("duration_ms", (long long)0);
+    out["truncated"] = r.value("truncated", false);
+    out["timed_out"] = r.value("timed_out", false);
+    out["stdout_bytes"] = r.value("stdout_bytes", (long long)outbuf.size());
+    out["stderr_bytes"] = r.value("stderr_bytes", (long long)errbuf.size());
+    if (r.contains("error")) out["error"] = r["error"];
+    // 设备输出可能不是合法 UTF-8：替换而不是抛异常
+    out["stdout"] = json::parse(json(outbuf).dump(-1, ' ', false, json::error_handler_t::replace));
+    out["stderr"] = json::parse(json(errbuf).dump(-1, ' ', false, json::error_handler_t::replace));
+    return true;
+}
+
+// 受控命令执行。请求体 {"argv":["df","-h"],"cwd":"/tmp","timeout_ms":5000,"max_bytes":65536}，
+// 不接受 shell 字符串：agent 侧按白名单逐段匹配 argv，再做 fork/exec。
+int AdminServer::handleAgentExec(const HttpContextPtr& ctx, const std::string& role) {
+    (void)role;   // 审计主体由 actorLabel 自动带上，这里只需要权限已通过
+    std::string devid = ctx->param("devid");
+    if (!ownsDevid(devid)) {
+        apiError(ctx, HTTP_STATUS_FORBIDDEN, "设备不在授权范围内");
+        return HTTP_STATUS_FORBIDDEN;
+    }
+    json body = json::parse(ctx->body(), nullptr, false);
+    if (body.is_discarded() || !body.is_object()) {
+        apiError(ctx, HTTP_STATUS_BAD_REQUEST, "bad json");
+        return HTTP_STATUS_BAD_REQUEST;
+    }
+    if (body.contains("shell") && body["shell"].is_boolean() && body["shell"].get<bool>()) {
+        apiError(ctx, HTTP_STATUS_BAD_REQUEST, "不支持 shell 模式，请传 argv 数组");
+        return HTTP_STATUS_BAD_REQUEST;
+    }
+    std::vector<std::string> argv;
+    if (body.contains("argv") && body["argv"].is_array()) {
+        for (auto& v : body["argv"]) {
+            if (!v.is_string()) {
+                apiError(ctx, HTTP_STATUS_BAD_REQUEST, "argv 必须是字符串数组");
+                return HTTP_STATUS_BAD_REQUEST;
+            }
+            argv.push_back(v.get<std::string>());
+        }
+    }
+    if (argv.empty() || argv.size() > 64) {
+        apiError(ctx, HTTP_STATUS_BAD_REQUEST, "argv 不能为空且最多 64 段");
+        return HTTP_STATUS_BAD_REQUEST;
+    }
+    size_t total = 0;
+    for (auto& a : argv) total += a.size() + 1;
+    if (total > 8192) {
+        apiError(ctx, HTTP_STATUS_BAD_REQUEST, "argv 过长");
+        return HTTP_STATUS_BAD_REQUEST;
+    }
+    int timeout_ms = body.value("timeout_ms", 30000);
+    if (timeout_ms < 1000) timeout_ms = 1000;
+    // 直接执行接口是同步等待的，上限压到 30s；长任务走终端或 operations
+    if (timeout_ms > 30000) {
+        apiError(ctx, HTTP_STATUS_BAD_REQUEST, "timeout_ms 上限 30000，长任务请用终端");
+        return HTTP_STATUS_BAD_REQUEST;
+    }
+    long long max_bytes = body.value("max_bytes", (long long)65536);
+    if (max_bytes < 1024) max_bytes = 1024;
+    if (max_bytes > 1048576) max_bytes = 1048576;
+
+    json payload;
+    payload["argv"] = argv;
+    payload["timeout_ms"] = timeout_ms;
+    payload["max_bytes"] = max_bytes;
+    if (body.contains("cwd") && body["cwd"].is_string()) payload["cwd"] = body["cwd"];
+    std::string js = payload.dump();
+
+    bool online = callRelay([this, &devid]() {
+                      return relay_->agentOnline(devid.c_str()) ? std::string("1") : std::string("0");
+                  }) == "1";
+    if (!online) {
+        apiError(ctx, HTTP_STATUS_NOT_FOUND, "device offline");
+        return HTTP_STATUS_NOT_FOUND;
+    }
+    int cap = -1;
+    callRelay([this, &devid, &cap]() {
+        cap = relay_->agentExecCap(devid.c_str());
+        return std::string("1");
+    });
+    if (cap != 1) {
+        apiError(ctx, HTTP_STATUS_NOT_IMPLEMENTED, "agent 未启用命令执行（需要 --allow-exec）");
+        return HTTP_STATUS_NOT_IMPLEMENTED;
+    }
+
+    // 异步等待前先固化身份：审计线程里没有请求上下文，actorLabel() 会是空
+    std::string who = actorLabel();
+    if (who.empty()) who = "anonymous";
+
+    // 单独起线程等待：命令可能跑满 30s，不能占 hv 的公共异步池
+    std::thread([this, ctx, devid, js, timeout_ms, argv, who]() {
+        json resp;
+        std::string err;
+        if (!execOnDevice(devid, js, timeout_ms, resp, err)) {
+            ctx->response->status_code = HTTP_STATUS_GATEWAY_TIMEOUT;
+            apiError(ctx, HTTP_STATUS_GATEWAY_TIMEOUT, err);
+            return;
+        }
+        std::string cmdline;
+        for (size_t k = 0; k < argv.size(); ++k) {
+            if (k) cmdline += ' ';
+            cmdline += argv[k];
+        }
+        if (cmdline.size() > 300) cmdline = cmdline.substr(0, 300) + "…";
+        std::string detail = devid + " `" + cmdline + "` exit=" +
+                             std::to_string(resp["exit_code"].get<int>()) +
+                             (resp["timed_out"].get<bool>() ? " timeout" : "");
+
+        AuditEntry ae;
+        ae.actor = who;
+        ae.action = "device.exec";
+        ae.target_type = "device";
+        ae.target_id = devid;
+        ae.result = resp["ok"].get<bool>() ? "ok" : "error";
+        ae.detail = detail;
+        audit_.writeEntry(ae);
+        ctx->send(resp.dump(-1, ' ', false, json::error_handler_t::replace));
+    }).detach();
     return HTTP_STATUS_NEXT;
 }
 

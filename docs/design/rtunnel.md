@@ -371,6 +371,9 @@ sequenceDiagram
 | `0x41` | `STORAGE_END` | C→B | `str json {ok,size,error}`，sid 回显 |
 | `0x42` | `RELAY_LIST` | B→C | `str json {servers,rev,allow_leave}`：下发给 agent 的 relay 地址列表 |
 | `0x43` | `RELAY_LIST_ACK` | C→B | `str json {ok,rev,count,current,switching,persisted,error}` |
+| `0x44` | `EXEC_REQ` | B→C | `str json {argv,cwd,timeout_ms,max_bytes}`，sid 为请求号；argv 逐段匹配 `--allow-exec`，不经过 shell |
+| `0x45` | `EXEC_DATA` | C→B | 每块 `u8 tag + u32 大端长度 + 数据`：tag `0`=stdout、`1`=stderr；按序拼接，sid 回显 |
+| `0x46` | `EXEC_END` | C→B | `str json {ok,exit_code,signal,duration_ms,stdout_bytes,stderr_bytes,truncated,timed_out,error}` |
 
 **会话级（stream_id > 0）**
 
@@ -615,6 +618,9 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 | GET | `/api/v1/agents/{devid}/net` | 网络与 IPC 快照（scope/proc/limit/refresh） |
 | GET | `/api/v1/agents/{devid}/procs[/{pid}]` | 进程列表与详情 |
 | POST | `/api/v1/agents/{devid}/procs/signal` | 结束进程 / 发送信号 |
+| POST | `/api/v1/agents/{devid}/exec` | 执行白名单内的命令（argv，不经过 shell），见 §13.13 |
+| POST | `/api/v1/operations/plan`、`/{id}/apply`、`/{id}/verify` | 操作作业三阶段，见 §13.13 |
+| GET | `/api/v1/operations` | 作业列表（按 devid / limit） |
 | PUT | `/api/v1/agents/{devid}/caps` | 在线改端口/Shell/串口/OTA 开关（按字段校验资源键） |
 | POST | `/api/v1/agents/{devid}/kick` | 强制设备下线（agent 自动重连） |
 | GET | `/api/v1/clients`、`/api/v1/streams` | 客户端与流列表 |
@@ -993,6 +999,65 @@ GET /api/v1/billing/summary?from&to&tenant_id
 **还没做**：阶梯价/包年包月、税额、在线支付、对账文件（银行/支付渠道格式）、账期自动生成。
 计算与快照集中在 `billingSummary` + `billingStatementGenerate` 两处，接支付时只需加状态回调，
 不改采集与价目结构。
+
+### 13.13 自动化与 AI 接入面：受控执行 + 操作作业 + 结构化审计
+
+让模型/脚本“能看也能动手”，同时保证每一步可复现、可审计、可回放。三块能力：
+
+#### 受控命令执行（EXEC）
+
+| 项 | 约定 |
+|---|---|
+| 传参 | `argv` 数组，**不经过 `/bin/sh`**；`shell:true` 直接拒绝 |
+| 白名单 | agent 启动参数 `--allow-exec "systemctl status *;df -h;journalctl -u * -n 100"`，模板按段通配（`*`/`?`），段数必须相等 |
+| 上限 | `--exec-timeout`（默认 30s，最大 300s）、`--exec-max-bytes`（默认 256 KiB，最大 4 MiB） |
+| 输出 | stdout/stderr 分流，首字节标记流；超字节截断，`truncated=true` |
+| 终止 | 超时对进程组 `SIGKILL`，`timed_out=true` |
+| 开关 | 默认关闭；空白名单 = 不支持，caps 里 `exec=false` |
+| 权限 | 管理面 `device.exec`；agent 侧白名单是第二道闸门，两边都要过 |
+
+- 白名单**只从本地配置文件/启动参数加载**，`CONFIG_SET` 不接受 `exec_allow`：
+  否则管理面（或被攻陷的 relay）能自行把任意命令加进白名单
+- caps 上报 `exec / exec_allow / exec_timeout_ms / exec_max_bytes`，管理面据此判断 501
+
+#### 操作作业（operations）
+
+写动作不再“一调就生效”，而是先 plan 再 apply，最后 verify：
+
+```
+plan   → 校验目标与权限，生成规范化 plan + plan_hash，落 status=planned（不碰设备）
+apply  → 必须回传同一个 plan_hash；不一致 = 409（设备/参数在这期间变了）
+verify → 可带探针 argv；探针 exit_code=0 才算通过
+```
+
+- `plan_hash` 是规范化 plan JSON 的 sha256，apply 时比对，拦住 TOCTOU
+- `Idempotency-Key`：`(actor,key)` 唯一，重复 apply 返回首次结果，不会重跑命令
+- 状态：`planned → running → applied | failed → verified`；已 applied 的重复 apply 直接回原结果
+- `risk`：1 只读、2 改运行状态、3 破坏性（当前只用于展示，P1 接审批闸门）
+- 目前只有 `kind=exec`；svc/ota 后续复用同一张表与同一套状态机
+
+#### 结构化审计
+
+审计同时写两份：
+
+| 文件 | 用途 |
+|---|---|
+| `<audit.log>` | 人读，`[ts] actor=... action=... detail=...`（保持原有 grep 习惯） |
+| `<audit.log>.jsonl` | 机器读，一行一个对象 |
+
+JSONL 字段：`at / actor_type / actor / action / target_type / target_id / result / detail / op_id`。
+
+- `actor_type` = `user | client | token | ai | anonymous`；模型调用方用
+  `X-Actor: ai:<模型>:<会话>` 自报，标签只进审计、不参与授权
+- 异步处理器（exec/operations）必须在起线程**之前**固化 actor：线程里没有请求上下文，
+  否则审计会写成 `anonymous`
+- `/api/v1/audit` 直接返回对象数组（前端列由 `actor/action/detail` 改为同一组字段）
+
+#### 边界（当前不做）
+
+- 没有带宽/时长维度的执行配额、没有审批闸门（P1）、没有事件流与分钟级指标（P2）
+- 不给模型“万能 exec”：没有白名单就不可用，也不提供 shell 模式
+- 模型只能提议动作，授权仍由权限组判定；不因“是 AI”而放宽资源键
 
 ## 14. 备选方案与取舍
 

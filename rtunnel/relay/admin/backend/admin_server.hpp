@@ -65,6 +65,7 @@ struct AdminActor {
     bool        token_scoped = false;// 令牌自带权限组（设备范围需按令牌收窄）
     std::set<std::string> devices;   // 有效设备列表（all_devices 时为空）
     std::string ports;               // 有效端口范围（组级并集，空 = 无端口）
+    std::string ai_actor;            // X-Actor: ai:...（模型调用的标记，只影响审计标签）
 };
 
 // 一条待发告警：由采集线程入队，通知线程发送
@@ -132,6 +133,10 @@ private:
     // WebSocket 握手鉴权（浏览器自动带 Cookie）
     bool        wsAuthorize(const HttpRequestPtr& req, AdminActor& actor, std::string& role);
     void        audit(const std::string& role, const std::string& action, const std::string& detail);
+    // 结构化审计：target/result/op_id 进 JSONL，AI 与外部系统按字段聚合
+    void        auditEx(const std::string& action, const std::string& target_type,
+                        const std::string& target_id, const std::string& result,
+                        const std::string& detail, const std::string& op_id = std::string());
     // 后台线程没有请求上下文，用打开时抓取的主体串写审计
     void        auditAs(const std::string& who, const std::string& action, const std::string& detail) {
         audit_.write(who, action, detail);
@@ -169,6 +174,14 @@ private:
     int  handleAgentDiag(const HttpContextPtr& ctx);    // 诊断包下载，返回 HTTP_STATUS_NEXT
     int  handleAgentProcs(const HttpContextPtr& ctx);   // 进程列表，返回 HTTP_STATUS_NEXT
     int  handleAgentProcDetail(const HttpContextPtr& ctx);
+    int  handleAgentExec(const HttpContextPtr& ctx, const std::string& role);
+    // 同步执行并等待单片结果（工作线程调用）；exec 接口与 operations 共用
+    bool execOnDevice(const std::string& devid, const std::string& payload, int timeout_ms,
+                      nlohmann::json& out, std::string& err);
+    void handleOpsPlan(const HttpContextPtr& ctx, const std::string& role);
+    void handleOpsApply(const HttpContextPtr& ctx, const std::string& role);
+    void handleOpsVerify(const HttpContextPtr& ctx, const std::string& role);
+    void handleOpsList(const HttpContextPtr& ctx);
     int  handleAgentProcSignal(const HttpContextPtr& ctx);
     int  proxyAgentProc(const HttpContextPtr& ctx, const std::string& devid, const nlohmann::json& req);
     void handleTtyList(const HttpContextPtr& ctx);
