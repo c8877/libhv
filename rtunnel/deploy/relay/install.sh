@@ -199,6 +199,11 @@ fi
 # 3. install.sh 复制到 prefix，设备上日常 --status/--rollback 无需保留包目录
 cp "$PKG_DIR/install.sh" "$PREFIX/install.sh"
 chmod 0755 "$PREFIX/install.sh"
+# 自举脚本副本：设备上可继续用同一个脚本升级其它组件
+if [ -f "$PKG_DIR/bin/rt-bootstrap.sh" ]; then
+    cp "$PKG_DIR/bin/rt-bootstrap.sh" "$PREFIX/rt-bootstrap.sh"
+    chmod 0755 "$PREFIX/rt-bootstrap.sh"
+fi
 
 # 4. 配置：不存在才装
 if [ ! -f "$CONF_DIR/$CONF" ]; then

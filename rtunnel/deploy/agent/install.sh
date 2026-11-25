@@ -139,6 +139,11 @@ cp "$PKG_DIR/bin/agent-boot-check.sh" "$BIN/agent-boot-check.sh"
 chmod 0755 "$BIN/agent-boot-check.sh"
 cp "$PKG_DIR/install.sh" "$PREFIX/install.sh"
 chmod 0755 "$PREFIX/install.sh"
+# 自举脚本副本：设备上可继续用同一个脚本升级其它组件
+if [ -f "$PKG_DIR/bin/rt-bootstrap.sh" ]; then
+    cp "$PKG_DIR/bin/rt-bootstrap.sh" "$PREFIX/rt-bootstrap.sh"
+    chmod 0755 "$PREFIX/rt-bootstrap.sh"
+fi
 # 自举副本：设备上用它下载后续升级包（包里带了才装）
 if [ -f "$PKG_DIR/bin/rtunnel-client" ]; then
     cp "$PKG_DIR/bin/rtunnel-client" "$BIN/.rtunnel-client.tmp.$$"

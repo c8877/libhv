@@ -28,12 +28,14 @@ rtunnel-relay-<ver>-<arch>/
 ├── SHA256SUMS                     包内文件校验清单（install.sh 会核对）
 ├── bin/
 │   ├── rtunnel-relay
-│   └── rtunnel-client             自举副本：下一版用它下载
+│   ├── rtunnel-client             自举副本：下一版用它下载
+│   └── rt-bootstrap.sh            自举脚本副本（安装到 prefix）
 ├── etc/relay.args.example         → /etc/rtunnel/relay.env（不覆盖现网）
 └── service/rtunnel-relay.service  @PREFIX@/@STATE_DIR@/@FRONTEND_ARGS@ 由 install.sh 渲染
 
 rtunnel-client-<ver>-<arch>/
 ├── bin/rtunnel-client
+├── bin/rt-bootstrap.sh
 ├── etc/client.args.example        RT / ATK_FILE / SERVER / TOKEN
 └── service/rtunnel-client-socks.service   可选常驻 SOCKS
 
@@ -41,6 +43,7 @@ rtunnel-agent-<ver>-<arch>/        （文件名 rtunnel-agent-<lite|web>-<ver>-<
 ├── bin/rtunnel-agent             统一入口名；variant 只写在 manifest
 ├── bin/agent-boot-check.sh
 ├── bin/rtunnel-client
+├── bin/rt-bootstrap.sh
 ├── etc/rtunnel-agent.json
 └── service/rtunnel-agent.service
 ```

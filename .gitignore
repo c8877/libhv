@@ -73,6 +73,7 @@ test
 build
 build-*
 build_*
+!rtunnel/deploy/build_packages.sh
 config.mk
 hconfig.h
 html/uploads

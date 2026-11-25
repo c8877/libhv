@@ -154,6 +154,11 @@ mv -f "$tmp" "$BIN/$NEW_TARGET"
 
 cp "$PKG_DIR/install.sh" "$PREFIX/install.sh"
 chmod 0755 "$PREFIX/install.sh"
+# 自举脚本副本：设备上可继续用同一个脚本升级其它组件
+if [ -f "$PKG_DIR/bin/rt-bootstrap.sh" ]; then
+    cp "$PKG_DIR/bin/rt-bootstrap.sh" "$PREFIX/rt-bootstrap.sh"
+    chmod 0755 "$PREFIX/rt-bootstrap.sh"
+fi
 
 if [ ! -f "$CONF_DIR/$CONF" ]; then
     if [ -f "$PKG_DIR/etc/client.args.example" ]; then

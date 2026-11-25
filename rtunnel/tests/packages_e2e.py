@@ -115,8 +115,9 @@ def main():
         rc, out = run(["tar", "-tzf", os.path.join(OUT, "rtunnel-relay-%s-x86_64.tar.gz" % VER)], env)
         e2e.check("pkg: relay 包为顶层目录",
                   out.splitlines()[0].startswith("rtunnel-relay-%s-x86_64/" % VER), out[:120])
-        for part in ("bin/rtunnel-relay", "bin/rtunnel-client", "install.sh", "manifest.json",
-                     "SHA256SUMS", "service/rtunnel-relay.service"):
+        for part in ("bin/rtunnel-relay", "bin/rtunnel-client", "bin/rt-bootstrap.sh",
+                     "install.sh", "manifest.json", "SHA256SUMS",
+                     "service/rtunnel-relay.service"):
             e2e.check("pkg: relay 包含 %s" % part,
                       ("rtunnel-relay-%s-x86_64/" % VER + part) in out, "")
 
@@ -148,6 +149,8 @@ def main():
         e2e.check("bootstrap: relay 版本正确", out.strip() == VER, out.strip())
         e2e.check("bootstrap: relay 带自举 client",
                   os.path.isfile(os.path.join(p_relay, "bin/rtunnel-client")), "")
+        e2e.check("bootstrap: relay 带自举脚本",
+                  os.path.isfile(os.path.join(p_relay, "rt-bootstrap.sh")), "")
 
         # 自举：agent（统一布局 bin/rtunnel-agent + manifest + SHA256SUMS）
         p_agent = os.path.join(LOG, "prefix-agent")
@@ -163,6 +166,13 @@ def main():
         # status
         rc, out = run([os.path.join(p_relay, "install.sh"), "--status", "--prefix", p_relay], env)
         e2e.check("install: --status 显示当前版本", rc == 0 and "rtunnel-relay-%s" % VER in out, out)
+
+        # bootstrap 的 --status 应委派给已安装的 install.sh
+        rc, out = run(["bash", os.path.join(ROOT, "rtunnel/deploy/rt-bootstrap.sh"),
+                       "--component", "relay", "--version", "latest", "--arch", "x86_64",
+                       "--prefix", p_relay, "--no-units", "--status"], env)
+        e2e.check("bootstrap: --status 委派给 install.sh",
+                  rc == 0 and "rtunnel-relay-%s" % VER in out, out[-200:])
 
         # 篡改：把仓库里的 client 包写坏，bootstrap 必须拒绝
         bad = os.path.join(LOG, "files/packages/client/%s/x86_64" % VER,

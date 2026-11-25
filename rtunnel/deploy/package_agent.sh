@@ -77,6 +77,8 @@ make_one() {
     fi
     cp "$SRC_DIR/install.sh" "$d/install.sh"
     chmod 0755 "$d/install.sh"
+    cp "$ROOT/rtunnel/deploy/rt-bootstrap.sh" "$d/bin/rt-bootstrap.sh"
+    chmod 0755 "$d/bin/rt-bootstrap.sh"
     cp "$SRC_DIR/rtunnel-agent.json" "$d/etc/rtunnel-agent.json"
     cp "$SRC_DIR/rtunnel-agent.service" "$d/service/rtunnel-agent.service"
 
