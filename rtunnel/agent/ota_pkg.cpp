@@ -296,8 +296,8 @@ bool readManifest(const std::string& dir, Manifest& m, std::string& err) {
             return false;
         }
     }
-    std::string want = "bin/rtunnel-agent-" + m.variant + "-" + m.version;
-    if (m.binary != want) {
+    // 统一包布局：包内固定为 bin/rtunnel-agent（变体只体现在 manifest 与文件名）
+    if (m.binary != "bin/rtunnel-agent") {
         err = "manifest binary mismatch";
         return false;
     }

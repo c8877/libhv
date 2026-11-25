@@ -1,0 +1,16 @@
+# relay 运行参数（systemd EnvironmentFile 的示例，安装时复制为 /etc/rtunnel/relay.env）。
+# 安装脚本只在目标文件不存在时写入，已有配置不会被覆盖。
+#
+# 必填：管理台初始化令牌（首次登录后在管理台改密码）
+# RELAY_ARGS="--admin-token 改成你的令牌"
+#
+# 常用可选项：
+#   --admin 0.0.0.0:9443                 管理台监听地址（默认 127.0.0.1:9443）
+#   --admin-tls-selfsigned               自签 HTTPS
+#   --admin-tls-cert / --admin-tls-key   使用自己的证书
+#   --admin-ca-cert / --admin-ca-key     设备证书签发 CA
+#   --admin-cert-dir                     已签发证书目录
+#   --acl / --client-users               数据面白名单（按需）
+#
+# 注意：前端若是内嵌版（rtunnel-relay-embedded），不要加 --admin-docroot。
+RELAY_ARGS="--admin-token change-me"

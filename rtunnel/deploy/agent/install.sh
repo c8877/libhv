@@ -52,6 +52,11 @@ done
 BIN=$PREFIX/bin
 STATE=$PREFIX/state
 
+# 临时前缀（测试/容器）默认把配置放在 prefix 下，正常安装仍用设备数据分区
+if [ "$PREFIX" != "/opt/rtunnel/agent" ] && [ -z "${RTUNNEL_CONF_DIR:-}" ]; then
+    CONF_DIR=$PREFIX/etc
+fi
+
 # 只有标准安装路径强制 root；指定了别的 prefix 时按目标目录权限自然失败即可
 if [ "$(id -u)" != 0 ] && [ "$PREFIX" = "/opt/rtunnel/agent" ]; then
     echo "需要 root 安装到 $PREFIX" >&2
@@ -84,18 +89,32 @@ if [ "$ACTION" = rollback ]; then
     exit 0
 fi
 
-[ -n "$PKG_DIR" ] && [ -n "$VARIANT" ] && [ -n "$VERSION" ] || { usage >&2; exit 2; }
+[ -n "$PKG_DIR" ] && [ -n "$VARIANT" ] || { usage >&2; exit 2; }
 case "$VARIANT" in lite|web) ;; *) echo "variant 必须是 lite 或 web" >&2; exit 2 ;; esac
 
+# 版本可以从 manifest.json 取；OTA 会显式传 --version，手工安装可省略
+if [ -z "$VERSION" ] && [ -f "$PKG_DIR/manifest.json" ]; then
+    VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$PKG_DIR/manifest.json" | head -1)
+fi
+[ -n "$VERSION" ] || { echo "缺少 --version，且 manifest.json 里没有版本" >&2; exit 2; }
+
 NEW_TARGET=rtunnel-agent-$VARIANT-$VERSION
-SRC=$PKG_DIR/bin/$NEW_TARGET
-[ -f "$SRC" ] || { echo "包内缺少 bin/$NEW_TARGET" >&2; exit 4; }
+SRC=$PKG_DIR/bin/rtunnel-agent
+[ -f "$SRC" ] || { echo "包内缺少 bin/rtunnel-agent" >&2; exit 4; }
 [ -f "$PKG_DIR/etc/$CONF" ] || { echo "包内缺少 etc/$CONF" >&2; exit 4; }
 [ -f "$PKG_DIR/service/$UNIT" ] || { echo "包内缺少 service/$UNIT" >&2; exit 4; }
 
 chmod 0755 "$SRC" 2>/dev/null || true
 got=$("$SRC" --version 2>/dev/null | tr -d '\r\n' || true)
 [ "$got" = "$VERSION" ] || { echo "版本自检失败: 期望 $VERSION，实际 ${got:-无法执行}" >&2; exit 4; }
+
+# 包内 sha256 清单（构建脚本生成）；老包没有清单时跳过
+if [ -f "$PKG_DIR/SHA256SUMS" ]; then
+    ( cd "$PKG_DIR" && sha256sum -c SHA256SUMS >/dev/null ) || {
+        echo "包内文件 sha256 校验失败" >&2
+        exit 4
+    }
+fi
 
 if [ "$START" = 1 ] && [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
     if ! grep -q -- '--devid' /opt/data/etc/rtunnel-agent.args 2>/dev/null; then
@@ -120,6 +139,12 @@ cp "$PKG_DIR/bin/agent-boot-check.sh" "$BIN/agent-boot-check.sh"
 chmod 0755 "$BIN/agent-boot-check.sh"
 cp "$PKG_DIR/install.sh" "$PREFIX/install.sh"
 chmod 0755 "$PREFIX/install.sh"
+# 自举副本：设备上用它下载后续升级包（包里带了才装）
+if [ -f "$PKG_DIR/bin/rtunnel-client" ]; then
+    cp "$PKG_DIR/bin/rtunnel-client" "$BIN/.rtunnel-client.tmp.$$"
+    chmod 0755 "$BIN/.rtunnel-client.tmp.$$"
+    mv -f "$BIN/.rtunnel-client.tmp.$$" "$BIN/rtunnel-client"
+fi
 
 # 3. 配置：不存在才装，已有配置不覆盖
 mkdir -p "$CONF_DIR"

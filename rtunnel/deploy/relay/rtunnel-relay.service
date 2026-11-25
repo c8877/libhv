@@ -9,24 +9,20 @@ StartLimitIntervalSec=60
 Type=simple
 User=rtunnel
 Group=rtunnel
-WorkingDirectory=/opt/rtunnel/relay
-# 可选参数文件，例如：
-#   RELAY_ARGS=--admin 0.0.0.0:9443 --admin-token <token> \
-#              --admin-ca-cert /var/lib/rtunnel/relay/ca.crt \
-#              --admin-ca-key /var/lib/rtunnel/relay/ca.key \
-#              --admin-cert-dir /var/lib/rtunnel/relay/certs
+WorkingDirectory=@PREFIX@
+# 运行参数集中在 /etc/rtunnel/relay.env（安装时只写示例，不覆盖现网）：
+#   RELAY_ARGS=--admin-token <token> --admin-ca-cert ...
 # 管理台 HTTPS（二选一）：
 #   RELAY_ARGS=... --admin-tls-selfsigned --admin-tls-days 3650
 #   RELAY_ARGS=... --admin-tls-cert /etc/rtunnel/relay/admin.crt \
 #                  --admin-tls-key /etc/rtunnel/relay/admin.key
 EnvironmentFile=-/etc/rtunnel/relay.env
-ExecStart=/opt/rtunnel/relay/bin/rtunnel-relay \
+ExecStart=@PREFIX@/bin/rtunnel-relay \
     --host 0.0.0.0 --port 18443 \
     --admin 127.0.0.1:9443 \
-    --admin-db /var/lib/rtunnel/relay/admin.db \
-    --admin-file-dir /var/lib/rtunnel/relay/files \
-    --admin-docroot /opt/rtunnel/relay/web/dist \
-    ${RELAY_ARGS}
+    --admin-db @STATE_DIR@/admin.db \
+    --admin-file-dir @STATE_DIR@/files \
+    @FRONTEND_ARGS@ ${RELAY_ARGS}
 Restart=on-failure
 RestartSec=2
 LimitNOFILE=65535

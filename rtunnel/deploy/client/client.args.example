@@ -1,0 +1,11 @@
+# rtunnel-client 运行参数示例（安装时复制为 /etc/rtunnel/client.env）。
+# 只在目标文件不存在时写入，已有配置不会被覆盖。
+#
+# RT       管理面地址，repo/自举脚本用它（rtunnel-client repo 也接受 --rt）
+# ATK_FILE 存放 atk- 管理令牌的文件（0600），自举与发布都用它
+# SERVER   隧道连接的 relay 地址，可逗号分隔多个（优先级从高到低）
+# TOKEN    接入令牌（rtk-），由管理台「权限 → 接入账号」签发
+RT="https://127.0.0.1:9443"
+ATK_FILE="/etc/rtunnel/atk"
+SERVER="127.0.0.1:18443"
+TOKEN=""

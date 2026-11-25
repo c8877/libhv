@@ -157,7 +157,8 @@ if (RTUNNEL_AGENT_WEB)
     target_link_libraries(rtunnel-agent-noweb rtunnel_common crypt)
 endif()
 
-add_executable(rtunnel-client client/main.cpp client/client_app.cpp client/shell_client.cpp)
+add_executable(rtunnel-client client/main.cpp client/client_app.cpp client/shell_client.cpp
+               client/client_repo.cpp)
 add_executable(rtnp-codec-test tests/codec_test.cpp)
 add_executable(rtunnel-endpoint-test tests/endpoint_test.cpp)
 

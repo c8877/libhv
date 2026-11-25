@@ -45,7 +45,7 @@ mkdir -p "$T/agent" "$T/etc" "$T/files" "$T/repo"
 
 echo "== install $VER ($ARCH) into $T/agent"
 tar -C "$T" -xzf "$PKG"
-PKGROOT="$T/rtunnel-agent-lite-$VER-$ARCH"
+PKGROOT="$T/rtunnel-agent-$VER-$ARCH"
 RTUNNEL_CONF_DIR="$T/etc" sh "$PKGROOT/install.sh" \
     --pkg-dir "$PKGROOT" --variant lite --version "$VER" --prefix "$T/agent" --no-units >/dev/null
 

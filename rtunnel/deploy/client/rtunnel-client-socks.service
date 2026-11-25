@@ -1,0 +1,20 @@
+[Unit]
+Description=rtunnel client (SOCKS5)
+After=network.target
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+WorkingDirectory=@PREFIX@
+# 参数在 /etc/rtunnel/client.env：RT / ATK_FILE / SERVER / TOKEN
+EnvironmentFile=-/etc/rtunnel/client.env
+# 常驻 SOCKS5；按需改 --socks5 的监听地址
+ExecStart=/bin/sh -c 'exec @PREFIX@/bin/rtunnel-client \
+    --server "${SERVER}" --token "${TOKEN}" --socks5 127.0.0.1:1080'
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

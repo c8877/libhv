@@ -1,4 +1,6 @@
 #include "relay_server.hpp"
+
+#include "hversion.h"
 #include "cpputil/json.hpp"
 #include "common/endpoint.hpp"
 #include "common/logging.hpp"
@@ -2417,6 +2419,13 @@ void RelayServer::onShutdown(int signo) {
 // ---------------------------------------------------------------- 入口
 
 int RelayServer::run(int argc, char** argv) {
+    // 部署包与自举脚本靠 --version 对齐版本，必须与 agent/client 一致
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
+            printf("%s\n", hv_version());
+            return 0;
+        }
+    }
     g_self = this;
     const char* host = "0.0.0.0";
     int port = 8443;

@@ -176,6 +176,7 @@ python3 rtunnel/tests/tenant_e2e.py      # 多租户：隔离、停用、用量�
 python3 rtunnel/tests/bandwidth_e2e.py   # 带宽整形：限速生效、数据不丢、不限速不受影响
 python3 rtunnel/tests/billing_e2e.py     # 费用：价目、金额、按租户汇总、结算单状态机与导出
 python3 rtunnel/tests/admin_embedded_e2e.py  # 内嵌前端：无 docroot 出页面、gzip、回退与优先级
+python3 rtunnel/tests/packages_e2e.py    # 部署包：打包→发布→client 自举安装→篡改拒绝→回滚
 python3 rtunnel/tests/compat_e2e.py      # HELLO 版本区间、低版本拒绝、高版本向前兼容
 python3 rtunnel/tests/protocol_doc_test.py  # 协议文档覆盖率（帧类型/常量）
 build/bin/rtunnel-endpoint-test          # --server 地址解析单测
@@ -485,6 +486,34 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @app.tar.gz \
   冲突校验；`.part` 超过 24h 自动清理
   （端口 manager/admin；Shell 仅 admin；设备离线直接报错）
 
+## 部署包与自举（relay / agent / client）
+
+三个组件同一套包格式与命令，目标机只要有一个 `rtunnel-client` 就能升级后续所有组件
+（含它自己），不再依赖 curl/scp。设计见 `../docs/design/deploy-packages.md`。
+
+```bash
+# 打包（解压出一层 rtunnel-<component>-<ver>-<arch>/，含 bin/ etc/ service/ install.sh）
+./deploy/build_packages.sh <ver> --arch x86_64
+./deploy/package_agent.sh <ver>                 # agent 的 lite/web 变体
+
+# 发布到文件仓库（幂等：同 sha256 跳过）
+RT=https://relay:9443 ATK_FILE=/etc/rtunnel/atk \
+  ./deploy/publish.sh --component all --version <ver> --arch x86_64
+
+# 目标机自举：取 latest → 下载 → 校验 → 解包 → install.sh
+RT=https://relay:9443 ATK_FILE=/etc/rtunnel/atk \
+  ./rt-bootstrap.sh --component relay --version latest --arch x86_64 --start
+
+# 日常
+/opt/rtunnel/relay/install.sh --status
+/opt/rtunnel/relay/install.sh --rollback --restart
+```
+
+仓库布局 `packages/<component>/<ver>/<arch>/<pkg>.tar.gz`，指针
+`packages/<component>/latest/<arch>.json`（agent 为 `<arch>-<variant>.json`）。
+`install.sh` 只做文件操作：先校验 `manifest.json`、`--version` 与 `SHA256SUMS`，再原子切换软链；
+`--start/--restart` 才动 systemd，重启失败自动回滚一次。
+
 ## Agent OTA 升级
 
 OTA 不另建传输通道：部署包走「文件上传 + 文件分发」落到设备 `--file-dir`，
@@ -492,8 +521,9 @@ OTA 不另建传输通道：部署包走「文件上传 + 文件分发」落到�
 
 1. `deploy/package_agent.sh` 生成两个部署包：
    `rtunnel-agent-lite-<ver>-<arch>.tar.gz` / `rtunnel-agent-web-<ver>-<arch>.tar.gz`。
-   包内是 `manifest.json`、`install.sh`、`bin/rtunnel-agent-<variant>-<ver>`、
-   `bin/agent-boot-check.sh`、`etc/rtunnel-agent.json` 和 `service/rtunnel-agent.service`；
+   解压目录是 `rtunnel-agent-<ver>-<arch>/`，包内固定 `bin/rtunnel-agent`、`bin/agent-boot-check.sh`、
+   `bin/rtunnel-client`、`etc/rtunnel-agent.json`、`service/rtunnel-agent.service`、
+   `manifest.json` 与 `SHA256SUMS`；variant 只体现在文件名与 manifest；
    版本取二进制 `--version`，架构取 `uname -m`（交叉编译用 `RTUNNEL_ARCH` 指定）；
 2. `deploy/upload_agent.sh` 上传到文件仓库 `agent/`（需要 atk 令牌），
    `/ota` 页从文件名解析 variant、版本和架构，并按架构过滤设备；
@@ -543,9 +573,9 @@ EOF
 
 # 解包并安装（--start 首次安装会 enable --now）
 tar -xzf rtunnel-agent-lite-<ver>-<arch>.tar.gz
-sh rtunnel-agent-lite-<ver>-<arch>/install.sh \
-  --pkg-dir rtunnel-agent-lite-<ver>-<arch> \
-  --variant lite --version <ver> --start
+sh rtunnel-agent-<ver>-<arch>/install.sh \
+  --pkg-dir rtunnel-agent-<ver>-<arch> \
+  --variant lite --start
 ```
 
 设备布局固定为 `/opt/rtunnel/agent`，unit 不解析额外参数：
@@ -562,7 +592,8 @@ RTUNNEL_PKG_RUNNER="qemu-arm-static -L /opt/st/.../sysroots/cortexa7t2hf-neon-vf
 ./deploy/package_agent.sh 1.4.9
 
 # 上传（架构要与打包时一致）
-RT=https://relay:9443 ATK=atk-xxxx RTUNNEL_ARCH=armv7l ./deploy/upload_agent.sh 1.4.9
+RT=https://relay:9443 ATK_FILE=/etc/rtunnel/atk RTUNNEL_ARCH=armv7l \
+  ./deploy/publish.sh --component agent --variant web --version 1.4.9 --arch armv7l
 ```
 
 容器或临时目录里试装时，可加 `RTUNNEL_INSTALL_NO_UNITS=1`（或 `--no-units`）
@@ -656,6 +687,8 @@ relay 每 5s 巡检一次 agent 控制连接：连续 60s 没有收到任何帧�
 | `--agent-path` / `--agent-idle` | agent 路径 / 空闲自退秒数（默认 15） |
 | `--tls-ca/--tls-cert/--tls-key/--tls-sni` | TLS / mTLS |
 | `shell <devid>` | 本机终端直连设备免密 shell |
+| `repo <mkdir\|put\|get\|stat\|ls\|rm>` | 直接读写管理台文件仓库（HTTPS + atk-，不走隧道）；`put/get` 支持断点续传，`get` 落盘后校验 sha256 |
+| `--version` | 输出版本号（打包、自举与安装自检都用它） |
 
 **agent（C）**
 
