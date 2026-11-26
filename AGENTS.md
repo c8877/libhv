@@ -144,10 +144,12 @@ GitHub Actions (`.github/workflows/CI.yml`): builds and tests on Linux (with Ope
 | 分页 | `el-pagination` | 自绘页码 |
 | 进度 / 标签页 / 分段 | `el-progress` / `el-tabs` / `el-segmented` | 自绘进度条、tab 按钮、切换按钮组 |
 | 菜单 | `el-menu` / `el-dropdown` + `el-dropdown-menu` | 手写列表菜单；光标定位的右键菜单 Element 无原生支持，自建需标注 |
+| Markdown / 文档 | `components/MarkdownView.vue`（内核 `shared/markdown.js`） | 自己写 `v-html` 转义、引入第三方 markdown 库、在页面里拼文档 HTML |
 | DOM | 模板 + 响应式状态 | `document.createElement` / `innerHTML` / `insertAdjacentHTML` |
 
 - **体积不是复制实现的理由**。需要更小的部署包时发 lite 变体（`rtunnel-agent-noweb`，不含本地页），不要为体积另写一套页面、表格或组件，也不要靠构建裁剪维护第二份源码。功能差异只放在构建入口、路由和权限层。
 - 改完管理台或设备页必须跑 `cd rtunnel/relay/admin/web && npm run check:ui`；`npm run build`、`npm run dev`、`npm run build:local` 已内置，违反会直接失败。
+- Markdown 文档放 `rtunnel/relay/admin/web/src/docs/*.md`，用 `import doc from '@/docs/x.md?raw'` 交给 `MarkdownView`；不要写进 `.vue` 的字符串数组。文档里的站内链接写 `[权限组](#/groups)`，组件会走路由跳转。
 - 改管理台/设备页的行为要跑 `rtunnel/tests/ui/run-ui.sh`（Playwright，直连本机 relay + agent）。
   新增用例放 `rtunnel/tests/ui/{admin,local}/`，用 `lib/harness.js` 的 `check()`，
   再登记到 `run-ui.sh` 的 `SUITES`；不要再把 UI 测试写到 `/tmp`。

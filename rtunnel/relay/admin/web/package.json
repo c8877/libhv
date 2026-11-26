@@ -10,7 +10,8 @@
     "precompress": "node scripts/precompress.mjs dist",
     "check:docs": "node scripts/check-api-docs.mjs",
     "gen:openapi": "node scripts/gen-openapi.mjs",
-    "check:ui": "node scripts/check-ui-rules.mjs",
+    "check:markdown": "node scripts/check-markdown.mjs",
+    "check:ui": "node scripts/check-ui-rules.mjs && node scripts/check-markdown.mjs",
     "build:local": "npm run check:ui && npm run build:editor && vite build --config vite.local.config.js && node scripts/inline-local-page.mjs"
   },
   "dependencies": {

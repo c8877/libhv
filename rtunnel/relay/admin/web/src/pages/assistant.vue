@@ -42,7 +42,7 @@
 
         <div v-for="(m, i) in msgs" :key="i" class="msg" :class="m.role">
           <div class="bubble">
-            <div v-if="m.role === 'assistant'" class="md" v-html="render(m.content)" />
+            <MarkdownView v-if="m.role === 'assistant'" :source="m.content" dense />
             <div v-else class="plain">{{ m.content }}</div>
 
             <div v-if="m.actions && m.actions.length" class="acts">
@@ -186,6 +186,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Api } from '@/shared/api.js'
 import { time } from '@/shared/utils.js'
+import MarkdownView from '@/components/MarkdownView.vue'
 
 const route = useRoute()
 
@@ -323,16 +324,6 @@ function argsText(a) {
   if (!a || typeof a !== 'object') return ''
   const s = Object.entries(a).map(([k, v]) => k + '=' + v).join(' ')
   return s.length > 60 ? s.slice(0, 60) + '…' : s
-}
-
-// 极简渲染：只处理 **粗体**、`代码`、换行，其余按文本转义，避免 v-html 注入
-function render(text) {
-  const esc = String(text || '').replace(/[&<>"']/g, (c) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
-  return esc
-    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\n/g, '<br>')
 }
 
 async function scrollBottom() {
@@ -535,12 +526,7 @@ onMounted(() => {
 }
 .msg.user .bubble { background: var(--el-color-primary-light-9); }
 .plain { white-space: pre-wrap; }
-.md :deep(code) {
-  background: var(--el-fill-color);
-  padding: 1px 4px;
-  border-radius: 3px;
-  font-size: 12.5px;
-}
+.bubble :deep(.md-code) { margin: 8px 0; }
 .acts { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
 .act {
   border: 1px solid var(--el-border-color);
