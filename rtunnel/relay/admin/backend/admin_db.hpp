@@ -282,6 +282,23 @@ public:
     bool aiProfileSetKey(const std::string& subject, const std::string& hint, long long updated_ms,
                          std::string& err);
 
+    // AI 会话记录：按账号隔离、永久保留。列表按 updated_ms 倒序分页
+    // （before_ms 传上一页最后一条的 updated_ms，0 表示从头），会话内消息按 id 升序。
+    bool aiSessionCreate(const std::string& subject, const std::string& title, long long& out_id,
+                         std::string& err);
+    bool aiSessionAppend(long long session_id, const std::string& subject, const std::string& role,
+                         const std::string& content, const std::string& extra, std::string& err);
+    // 一轮问答：一次事务写 user + assistant，顺带更新计数/时间，并在标题为空时用问句生成
+    bool aiSessionAddTurn(long long session_id, const std::string& subject,
+                          const std::string& user_content, const std::string& reply,
+                          const std::string& extra, std::string& err);
+    bool aiSessionList(const std::string& subject, int limit, long long before_ms,
+                       long long before_id, std::string& json_out);
+    bool aiSessionGet(long long id, const std::string& subject, std::string& json_out);
+    bool aiSessionRename(long long id, const std::string& subject, const std::string& title,
+                         std::string& err);
+    bool aiSessionDelete(long long id, const std::string& subject, std::string& err);
+
     // 自愈规则（playbook）：告警匹配后生成 operation
     bool playbookList(std::string& json_out);
     bool playbookGet(long long id, std::string& json_out);

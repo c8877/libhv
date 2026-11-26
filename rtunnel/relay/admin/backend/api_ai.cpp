@@ -1411,6 +1411,12 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
         return;
     }
 
+    // 会话：0/缺省表示新建（线程里落库后把 id 带回去），>0 表示续在已有会话上。
+    // 归属校验交给 DB 层（带 subject 条件），别人的 id 会直接写不进去。
+    long long session_id = req.value("session_id", (long long)0);
+    if (session_id < 0) session_id = 0;
+    std::string user_text = msgs[msgs.size() - 1].value("content", std::string());
+
     // 参数固定成一组对运维问答合适的值：这些不是给用户调的东西
     int max_tokens = 2048;
     int timeout_s = 90;
@@ -1419,7 +1425,26 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
     double temperature = 0.3;
 
     std::thread([this, ctx, msgs, endpoint, model, key, max_tokens, timeout_s, max_rounds,
-                 temperature, insecure, devid, actor]() {
+                 temperature, insecure, devid, actor, session_id, subject, user_text]() {
+      long long sid = session_id;
+      // 记一轮问答：新建会话用问句做标题；失败也记下来，历史里能看到当时为什么没答上来
+      auto save_turn = [&](const std::string& reply, const json& extra) {
+          std::string e;
+          if (sid > 0) {
+              if (db_.aiSessionAddTurn(sid, subject, user_text, reply, extra.dump(), e)) return;
+              logf_("[ai] save turn failed: %s (session %lld)", e.c_str(), sid);
+              if (e != "会话不存在") return;
+              // 不是自己的会话（或已被删）：别把消息塞给别人，另起一个
+              sid = 0;
+          }
+          if (!db_.aiSessionCreate(subject, std::string(), sid, e) || sid <= 0) {
+              logf_("[ai] create session failed: %s", e.c_str());
+              sid = 0;
+              return;
+          }
+          if (!db_.aiSessionAddTurn(sid, subject, user_text, reply, extra.dump(), e))
+              logf_("[ai] save turn failed: %s", e.c_str());
+      };
       try {
         json tools = toolDefsFor(actor);
         if (tools.empty()) {
@@ -1548,6 +1573,12 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
             resp["error"] = err;
             resp["actions"] = actions;
             resp["tools"] = used;
+            json extra;
+            extra["error"] = err;
+            extra["actions"] = actions;
+            extra["tools"] = used;
+            save_turn(std::string(), extra);
+            resp["session_id"] = sid;
             aiAudit(audit_, "ai:assistant|" + actor.label, "ai.chat", "ai", devid, "error",
                     (devid.empty() ? "-" : devid) + " err=" + err.substr(0, 160), std::string());
             ctx->response->status_code = HTTP_STATUS_BAD_GATEWAY;
@@ -1559,6 +1590,23 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
         resp["tools"] = used;
         resp["rounds"] = rounds;
         resp["usage"] = {{"prompt_tokens", usage_p}, {"completion_tokens", usage_c}};
+        {
+            json extra;
+            json meta;
+            if (rounds > 0) meta["rounds"] = rounds;
+            if (usage_c > 0) meta["usage"] = usage_c;
+            if (!meta.empty()) {
+                std::string ms;
+                if (meta.contains("rounds")) ms += std::to_string(rounds) + " 轮";
+                if (meta.contains("usage"))
+                    ms += (ms.empty() ? "" : " · ") + std::to_string(usage_c) + " tokens";
+                extra["meta"] = ms;
+            }
+            if (!actions.empty()) extra["actions"] = actions;
+            if (!used.empty()) extra["tools"] = used;
+            save_turn(reply, extra);
+        }
+        resp["session_id"] = sid;
         aiAudit(audit_, "ai:assistant|" + actor.label, "ai.chat", "device", devid, "ok",
                 "tools=" + std::to_string(used.size()) + " actions=" + std::to_string(actions.size()) +
                     " rounds=" + std::to_string(rounds) +
@@ -1568,12 +1616,19 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
         logf_("[ai] chat exception: %s", e.what());
         json resp;
         resp["error"] = std::string("处理失败: ") + e.what();
+        json extra;
+        extra["error"] = resp["error"];
+        save_turn(std::string(), extra);
+        resp["session_id"] = sid;
         ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
         ctx->send(resp.dump(-1, ' ', false, json::error_handler_t::replace));
       } catch (...) {
         logf_("[ai] chat exception: unknown");
+        json extra;
+        extra["error"] = "处理失败";
+        save_turn(std::string(), extra);
         ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
-        ctx->send("{\"error\":\"处理失败\"}");
+        ctx->send("{\"error\":\"处理失败\",\"session_id\":" + std::to_string(sid) + "}");
       }
     }).detach();
 
@@ -1635,4 +1690,123 @@ void AdminServer::handleAiTest(const HttpContextPtr& ctx) {
             resp["served_model"] = doc["model"].get<std::string>();
         ctx->send(resp.dump(-1, ' ', false, json::error_handler_t::replace));
     }).detach();
+}
+
+// ---------------------------------------------------------------- 会话记录
+//
+// 会话永久保留：这里没有任何清理逻辑，只有用户主动删除。
+// 列表默认最近 10 个（updated_ms 倒序），传 before_ms 继续往前翻。
+
+void AdminServer::handleAiSessions(const HttpContextPtr& ctx) {
+    std::string subject = aiSubject(currentActor());
+    if (subject.empty()) {
+        apiError(ctx, HTTP_STATUS_UNAUTHORIZED, "请先登录管理台");
+        return;
+    }
+    int limit = 10;
+    long long before_ms = 0, before_id = 0;
+    for (const auto& kv : ctx->request->query_params) {
+        if (kv.first == "limit") limit = atoi(kv.second.c_str());
+        else if (kv.first == "before") before_ms = atoll(kv.second.c_str());
+        else if (kv.first == "before_id") before_id = atoll(kv.second.c_str());
+    }
+    if (limit < 1) limit = 10;
+    if (limit > 100) limit = 100;
+    std::string out;
+    if (!db_.aiSessionList(subject, limit, before_ms, before_id, out)) {
+        apiError(ctx, HTTP_STATUS_INTERNAL_SERVER_ERROR, "db error");
+        return;
+    }
+    ctx->send(out);
+}
+
+void AdminServer::handleAiSessionCreate(const HttpContextPtr& ctx) {
+    std::string subject = aiSubject(currentActor());
+    if (subject.empty()) {
+        apiError(ctx, HTTP_STATUS_UNAUTHORIZED, "请先登录管理台");
+        return;
+    }
+    json req = json::parse(ctx->body(), nullptr, false);
+    std::string title = req.is_object() ? req.value("title", std::string()) : std::string();
+    long long id = 0;
+    std::string err;
+    if (!db_.aiSessionCreate(subject, title, id, err)) {
+        apiError(ctx, HTTP_STATUS_INTERNAL_SERVER_ERROR, err.empty() ? "db error" : err);
+        return;
+    }
+    json resp;
+    resp["id"] = id;
+    resp["title"] = title;
+    resp["msg_count"] = 0;
+    resp["created_ms"] = AdminDb::nowMs();
+    ctx->send(resp.dump());
+}
+
+void AdminServer::handleAiSessionGet(const HttpContextPtr& ctx) {
+    std::string subject = aiSubject(currentActor());
+    if (subject.empty()) {
+        apiError(ctx, HTTP_STATUS_UNAUTHORIZED, "请先登录管理台");
+        return;
+    }
+    long long id = atoll(ctx->param("id").c_str());
+    if (id <= 0) {
+        apiBad(ctx, "会话 id 不合法");
+        return;
+    }
+    std::string out;
+    if (!db_.aiSessionGet(id, subject, out)) {
+        apiNotFound(ctx, "会话不存在");
+        return;
+    }
+    ctx->send(out);
+}
+
+void AdminServer::handleAiSessionRename(const HttpContextPtr& ctx) {
+    std::string subject = aiSubject(currentActor());
+    if (subject.empty()) {
+        apiError(ctx, HTTP_STATUS_UNAUTHORIZED, "请先登录管理台");
+        return;
+    }
+    long long id = atoll(ctx->param("id").c_str());
+    json req = json::parse(ctx->body(), nullptr, false);
+    std::string title = req.is_object() ? trimStr(req.value("title", std::string())) : std::string();
+    if (id <= 0 || title.empty()) {
+        apiBad(ctx, "需要会话 id 和非空标题");
+        return;
+    }
+    std::string err;
+    if (!db_.aiSessionRename(id, subject, title, err)) {
+        if (err == "会话不存在")
+            apiNotFound(ctx, err);
+        else
+            apiBad(ctx, err.empty() ? "db error" : err);
+        return;
+    }
+    json resp;
+    resp["id"] = id;
+    resp["title"] = title.size() > 80 ? title.substr(0, 80) : title;
+    ctx->send(resp.dump());
+}
+
+void AdminServer::handleAiSessionDelete(const HttpContextPtr& ctx) {
+    std::string subject = aiSubject(currentActor());
+    if (subject.empty()) {
+        apiError(ctx, HTTP_STATUS_UNAUTHORIZED, "请先登录管理台");
+        return;
+    }
+    long long id = atoll(ctx->param("id").c_str());
+    if (id <= 0) {
+        apiBad(ctx, "会话 id 不合法");
+        return;
+    }
+    std::string err;
+    if (!db_.aiSessionDelete(id, subject, err)) {
+        if (err == "会话不存在")
+            apiNotFound(ctx, err);
+        else
+            apiError(ctx, HTTP_STATUS_INTERNAL_SERVER_ERROR, err.empty() ? "db error" : err);
+        return;
+    }
+    auditEx("ai.session.delete", "ai", subject, "ok", "删除会话 " + std::to_string(id));
+    ctx->send("{\"ok\":true}");
 }

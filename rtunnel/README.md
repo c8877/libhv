@@ -181,6 +181,7 @@ python3 rtunnel/tests/exec_e2e.py        # 受控执行：白名单、分流、�
 python3 rtunnel/tests/events_e2e.py      # 事件流 SSE 与分钟级指标：上下线/会话/审计/续传/隔离
 python3 rtunnel/tests/playbook_e2e.py    # 自愈规则：自动执行/超限转审批/冷却/总开关/越权
 python3 rtunnel/tests/ai_e2e.py          # AI 助手：配置、测试连接、问答、提议作业/规则、越权、上游报错
+python3 rtunnel/tests/ai_session_e2e.py  # AI 会话：落库、最近 10 个+翻页、改名删除、账号隔离、重启后仍在
 python3 rtunnel/tests/mcp_e2e.py         # OpenAPI 与 MCP：工具清单、只读默认、前缀过滤、审计标记
 python3 rtunnel/tests/compat_e2e.py      # HELLO 版本区间、低版本拒绝、高版本向前兼容
 python3 rtunnel/tests/protocol_doc_test.py  # 协议文档覆盖率（帧类型/常量）
@@ -242,6 +243,9 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
   **API 密钥只写到 relay 本机 `<admin.db 同目录>/ai/<账号>.key`（0600）**，不进数据库、不回显，
   别人登录看不到也用不到。支持任意 OpenAI 兼容接口。
   「概览 → AI 诊断」一键巡检：离线设备、版本落后、失败作业、告警汇总成排查建议。
+- **历史会话**：每轮问答自动落库、**永久保留**（只有手动删除才会消失）。助手右上角「历史」
+  列出最近 10 个会话，可继续往前翻、可改名/删除；点开就是当时的完整对话（工具调用与
+  确认卡片都还原）。按账号隔离，别人的会话看不到也读不到。
 - **使用指南**：「开放接口 → 使用指南」按「部署 → 接设备 → 权限 → 日常运维 → 接 AI」走一遍，
   命令可复制，纯前端页面（API 挂了也能看）。
 - **自愈规则（playbook）**：把「告警 → 命令」固化成规则。规则只生成 `operations` 作业，

@@ -295,8 +295,9 @@ export const DOCS = [
     params: [
       { name: 'messages', in: 'body', desc: '[{role: user|assistant, content}]，只接受这两种角色' },
       { name: 'devid', in: 'body', desc: '可选：当前设备上下文，必须在授权范围内' },
+      { name: 'session_id', in: 'body', desc: '可选：续在已有会话上；0/缺省则自动新建并返回 id' },
     ],
-    note: '需要 ai.chat，且本账号已配好 provider/model/key。模型只能调用只读工具'
+    note: '需要 ai.chat，且本账号已配好 provider/model/key。每轮问答都会写入会话记录（永久保留）。模型只能调用只读工具'
       + '（设备/指标/审计/作业/用量/自愈），工具内部按调用者的资源权限与设备范围收窄。'
       + '客户端传的 system 消息会被丢弃；写操作不会被执行：模型用 propose_exec 生成待确认作业、'
       + 'draft_playbook 生成规则草稿，在 actions 里返回，由页面渲染成确认卡片',
@@ -312,6 +313,59 @@ export const DOCS = [
       + '便于排查 /v1 前缀、模型名、令牌权限',
     curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" "$RT/api/v1/ai/test"`,
     resp: `{ "ok": true, "provider": "deepseek", "endpoint": "https://api.deepseek.com/v1", "model": "deepseek-chat", "latency_ms": 860, "reply": "正常", "served_model": "deepseek-chat" }`,
+  },
+  {
+    group: 'sys', method: 'GET', path: '/api/v1/ai/sessions', minRole: 'operator',
+    summary: '本账号的历史会话（最近 10 个，可翻页）',
+    params: [
+      { name: 'limit', in: 'query', desc: '默认 10，最大 100' },
+      { name: 'before', in: 'query', desc: '翻页游标：上一页的 next_before_ms' },
+      { name: 'before_id', in: 'query', desc: '翻页游标：上一页的 next_before_id' },
+    ],
+    note: '需要 ai.chat。会话按账号隔离、**永久保留**（没有过期清理，只能主动删除）。'
+      + '列表按最后活动时间倒序；has_more 为真时用 next_before_ms/next_before_id 继续翻',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/ai/sessions?limit=10"`,
+    resp: `{ "items": [{ "id": 12, "title": "mp135 掉线的排查", "msg_count": 6, "created_ms": 1764136800000, "updated_ms": 1764137400000 }], "has_more": true, "next_before_ms": 1764137400000, "next_before_id": 12 }`,
+  },
+  {
+    group: 'sys', method: 'POST', path: '/api/v1/ai/sessions', minRole: 'operator',
+    summary: '显式新建一个空会话',
+    params: [{ name: 'title', in: 'body', desc: '可选；不给时第一句话会自动成为标题' }],
+    note: '需要 ai.chat。一般不用手动建：带 session_id=0 提问会自动建一个并返回 id',
+    body: `{ "title": "新会话" }`,
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \
+     -d '{"title":"新会话"}' "$RT/api/v1/ai/sessions"`,
+    resp: `{ "id": 13, "title": "新会话", "msg_count": 0 }`,
+  },
+  {
+    group: 'sys', method: 'GET', path: '/api/v1/ai/sessions/:id', minRole: 'operator',
+    summary: '读取一个会话的全部消息',
+    params: [{ name: 'id', in: 'path', desc: '会话 id' }],
+    note: '需要 ai.chat。只能读自己的会话，别人的 id 返回 404。'
+      + 'assistant 消息里还原了 actions / tools / meta / error，可以直接渲染成原来的样子',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/ai/sessions/12"`,
+    resp: `{ "id": 12, "title": "mp135 掉线的排查", "msg_count": 2, "messages": [{ "role": "user", "content": "mp135 为什么老掉线" }, { "role": "assistant", "content": "…", "tools": [{ "name": "device_detail", "ok": true }], "meta": "2 轮 · 96 tokens" }] }`,
+  },
+  {
+    group: 'sys', method: 'PUT', path: '/api/v1/ai/sessions/:id', minRole: 'operator',
+    summary: '给会话改名',
+    params: [
+      { name: 'id', in: 'path', desc: '会话 id' },
+      { name: 'title', in: 'body', desc: '新标题，1-80 字节' },
+    ],
+    note: '需要 ai.chat。只能改自己的会话',
+    body: `{ "title": "mp135 掉线排查" }`,
+    curl: `curl -sS -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \
+     -d '{"title":"mp135 掉线排查"}' "$RT/api/v1/ai/sessions/12"`,
+    resp: `{ "id": 12, "title": "mp135 掉线排查" }`,
+  },
+  {
+    group: 'sys', method: 'DELETE', path: '/api/v1/ai/sessions/:id', minRole: 'operator',
+    summary: '删除会话（含全部消息）',
+    params: [{ name: 'id', in: 'path', desc: '会话 id' }],
+    note: '需要 ai.chat。只能删自己的会话；删除不可恢复，其它会话不受影响',
+    curl: `curl -sS -X DELETE -H "Authorization: Bearer $ATK" "$RT/api/v1/ai/sessions/12"`,
+    resp: `{ "ok": true }`,
   },
   {
     group: 'device', method: 'GET', path: '/api/v1/agents/:devid/metrics/history', minRole: 'viewer',

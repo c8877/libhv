@@ -225,6 +225,31 @@ void AdminServer::registerRoutes() {
         handleAiChat(ctx, role);
         return HTTP_STATUS_NEXT;
     });
+    // 会话记录：按账号隔离、永久保留（列表/新建/读取/改名/删除）
+    access("ai.chat", "GET", "/api/v1/ai/sessions", &AdminServer::handleAiSessions);
+    access("ai.chat", "GET", "/api/v1/ai/sessions/:id", &AdminServer::handleAiSessionGet);
+    service_.Handle("POST", "/api/v1/ai/sessions", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "ai.chat", role);
+        if (rc) return rc;
+        handleAiSessionCreate(ctx);
+        return 200;
+    });
+    service_.Handle("PUT", "/api/v1/ai/sessions/:id", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "ai.chat", role);
+        if (rc) return rc;
+        handleAiSessionRename(ctx);
+        return 200;
+    });
+    service_.Handle("DELETE", "/api/v1/ai/sessions/:id", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "ai.chat", role);
+        if (rc) return rc;
+        handleAiSessionDelete(ctx);
+        return 200;
+    });
+
     // 连通性测试：发一次最小请求，把上游错误原文带回来
     service_.Handle("POST", "/api/v1/ai/test", [this](const HttpContextPtr& ctx) {
         std::string role;

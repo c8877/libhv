@@ -14,6 +14,7 @@
           <el-tag v-if="!d.online" size="small" type="info" class="ml6">离线</el-tag>
         </el-option>
       </el-select>
+      <el-button text @click="openHistory">历史{{ sessions.length ? '（' + sessions.length + '）' : '' }}</el-button>
       <el-button text :disabled="!msgs.length" @click="reset">新对话</el-button>
       <el-button v-if="compact" text @click="$router.push('/assistant')">全屏</el-button>
       <el-button text @click="openSetup">模型设置</el-button>
@@ -119,6 +120,32 @@
       回答由模型生成，数据来自本平台的只读接口；涉及变更请走「作业」并走审批。
     </div>
 
+    <!-- 历史会话：最近 10 个在前，可继续往前翻；记录永久保留，只能主动删除 -->
+    <el-drawer v-model="histOpen" :size="compact ? '86%' : '420px'" title="历史会话">
+      <div v-loading="histLoading" class="hist">
+        <div v-if="!sessions.length && !histLoading" class="muted hist-empty">
+          还没有历史会话。提问之后会自动保存，关掉页面也不会丢。
+        </div>
+        <div v-for="s in sessions" :key="s.id" class="hist-item" :class="{ on: s.id === sessionId }">
+          <div class="hist-main" @click="openSession(s)">
+            <div class="hist-title">{{ s.title || '未命名会话' }}</div>
+            <div class="muted hist-sub">
+              {{ ago(s.updated_ms) }}前 · {{ s.msg_count }} 条
+              <span v-if="s.id === sessionId" class="hist-cur">当前</span>
+            </div>
+          </div>
+          <div class="hist-ops">
+            <el-button text size="small" @click.stop="renameSession(s)">改名</el-button>
+            <el-button text size="small" @click.stop="removeSession(s)">删除</el-button>
+          </div>
+        </div>
+        <el-button v-if="histHasMore" text class="hist-more" :loading="histLoading"
+                   @click="loadSessions(true)">
+          加载更早的会话
+        </el-button>
+      </div>
+    </el-drawer>
+
     <!-- 模型设置：只填服务商 + 模型 + API Key，其它参数不给用户看 -->
     <el-dialog v-model="setupDlg" title="模型设置（只影响本账号）" width="560px">
       <el-form label-width="88px">
@@ -183,9 +210,9 @@
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Api } from '@/shared/api.js'
-import { time } from '@/shared/utils.js'
+import { ago, time } from '@/shared/utils.js'
 import MarkdownView from '@/components/MarkdownView.vue'
 
 const props = defineProps({
@@ -218,6 +245,13 @@ const chatHeight = computed(() => (props.compact ? '300px' : 'calc(100vh - 320px
 const cfg = ref(null)
 const devices = ref([])
 const devid = ref('')
+// 当前会话：0 = 还没落库（第一句话发出时服务端建，并把 id 带回来）
+const sessionId = ref(0)
+const sessions = ref([])
+const histOpen = ref(false)
+const histLoading = ref(false)
+const histHasMore = ref(false)
+const histCursor = ref({ before: 0, before_id: 0 })
 const msgs = ref([])
 const input = ref('')
 const busy = ref(false)
@@ -371,9 +405,95 @@ function onDevChange() {
   if (devid.value) input.value = input.value || ('看下 ' + devid.value + ' 现在的状态')
 }
 
+// ---------------------------------------------------------------- 历史会话
+// 记录永久保留：这里不做过期清理，删除只由用户点。
+// 列表默认最近 10 个，翻页用服务端给的 (before, before_id) 复合游标。
+async function loadSessions(more = false) {
+  histLoading.value = true
+  try {
+    const q = more
+      ? '?limit=10&before=' + histCursor.value.before + '&before_id=' + histCursor.value.before_id
+      : '?limit=10'
+    const r = await Api.get('/api/v1/ai/sessions' + q)
+    const items = r.items || []
+    sessions.value = more ? sessions.value.concat(items) : items
+    histHasMore.value = !!r.has_more
+    histCursor.value = { before: r.next_before_ms || 0, before_id: r.next_before_id || 0 }
+  } catch (e) {
+    if (!more) sessions.value = []
+  } finally {
+    histLoading.value = false
+  }
+}
+
+function openHistory() {
+  histOpen.value = true
+  loadSessions(false)
+}
+
+async function openSession(s) {
+  if (busy.value) {
+    ElMessage.warning('等这条回答结束再切换')
+    return
+  }
+  try {
+    const d = await Api.get('/api/v1/ai/sessions/' + s.id)
+    sessionId.value = d.id
+    msgs.value = (d.messages || []).map((m) => {
+      const out = { role: m.role, content: m.content || '' }
+      if (m.actions && m.actions.length) out.actions = m.actions
+      if (m.tools && m.tools.length) out.tools = m.tools
+      if (m.meta) out.meta = m.meta
+      if (m.error) out.error = m.error
+      return out
+    })
+    histOpen.value = false
+    scrollBottom()
+  } catch (e) {
+    ElMessage.error(e.message || '读取会话失败')
+  }
+}
+
+async function renameSession(s) {
+  try {
+    const { value } = await ElMessageBox.prompt('会话标题', '改名', {
+      inputValue: s.title || '',
+      inputPlaceholder: '例如：mp135 掉线排查',
+      inputValidator: (v) => (v && v.trim() ? true : '不能为空'),
+    })
+    const t = (value || '').trim()
+    if (!t) return
+    const r = await Api.put('/api/v1/ai/sessions/' + s.id, { title: t })
+    s.title = r.title || t
+    ElMessage.success('已改名')
+  } catch (e) {
+    if (e !== 'cancel' && e !== 'close') ElMessage.error(e.message || '改名失败')
+  }
+}
+
+async function removeSession(s) {
+  try {
+    await ElMessageBox.confirm('删除后这条会话就找不回来了（其它会话不受影响）', '删除会话', {
+      type: 'warning',
+      confirmButtonText: '删除',
+    })
+  } catch (e) {
+    return
+  }
+  try {
+    await Api.del('/api/v1/ai/sessions/' + s.id)
+    sessions.value = sessions.value.filter((x) => x.id !== s.id)
+    if (sessionId.value === s.id) reset()
+    ElMessage.success('已删除')
+  } catch (e) {
+    ElMessage.error(e.message || '删除失败')
+  }
+}
+
 function reset() {
   msgs.value = []
   input.value = ''
+  sessionId.value = 0
 }
 
 function ask(q) {
@@ -403,7 +523,12 @@ async function send() {
   // 只发最近 20 条，避免上下文过长
   const history = msgs.value.slice(-20).map((m) => ({ role: m.role, content: m.content }))
   try {
-    const r = await Api.post('/api/v1/ai/chat', { messages: history, devid: devid.value || undefined })
+    const r = await Api.post('/api/v1/ai/chat', {
+      messages: history,
+      devid: devid.value || undefined,
+      session_id: sessionId.value || undefined,
+    })
+    if (r.session_id) sessionId.value = r.session_id
     const meta = []
     if (r.rounds) meta.push(r.rounds + ' 轮')
     if (r.usage && r.usage.completion_tokens) meta.push(r.usage.completion_tokens + ' tokens')
@@ -423,7 +548,27 @@ async function send() {
   } finally {
     busy.value = false
     scrollBottom()
+    touchSessionLocal()
   }
+}
+
+// 本地同步：会话已经在服务端落库，这里只更新侧栏显示，避免每次发完都多一次请求
+function touchSessionLocal() {
+  if (!sessionId.value) return
+  const i = sessions.value.findIndex((x) => x.id === sessionId.value)
+  if (i < 0) {
+    loadSessions(false)
+    return
+  }
+  const s = sessions.value[i]
+  s.msg_count = msgs.value.length
+  s.updated_ms = Date.now()
+  if (!s.title) {
+    const first = msgs.value.find((m) => m.role === 'user')
+    if (first) s.title = first.content.slice(0, 30)
+  }
+  sessions.value.splice(i, 1)
+  sessions.value.unshift(s)
 }
 
 // ---------------------------------------------------------------- 提议的作业/规则
@@ -511,6 +656,7 @@ defineExpose({ ask })   // 页面上的“AI 诊断”直接把问题发进来�
 onMounted(() => {
   loadCfg()
   loadDevices()
+  loadSessions(false)   // 只为按钮上的数量，失败静默
   applyQuery()
 })
 </script>
@@ -526,6 +672,32 @@ onMounted(() => {
 .test { margin-top: 4px; font-size: 12.5px; color: var(--el-color-success); word-break: break-all; }
 .test.bad { color: var(--el-color-danger); }
 .msgs { padding: 4px 2px 8px; }
+.hist { display: flex; flex-direction: column; gap: 6px; min-height: 60px; }
+.hist-empty { padding: 12px 2px; font-size: 12.5px; line-height: 1.7; }
+.hist-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 7px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.hist-item:hover { border-color: var(--el-color-primary-light-5); background: var(--el-fill-color-lighter); }
+.hist-item.on { border-color: var(--el-color-primary); background: var(--el-color-primary-light-9); }
+.hist-main { flex: 1; min-width: 0; cursor: pointer; }
+.hist-title {
+  font-size: 13px;
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hist-sub { font-size: 11.5px; margin-top: 2px; }
+.hist-cur { color: var(--el-color-primary); margin-left: 4px; }
+.hist-ops { display: flex; flex: none; opacity: 0; transition: opacity 0.15s ease; }
+.hist-item:hover .hist-ops { opacity: 1; }
+.hist-more { margin-top: 4px; }
 .empty { padding: 18px 8px; }
 .empty-title { font-size: 14.5px; margin-bottom: 10px; }
 .empty-tip { margin-top: 10px; font-size: 12.5px; }

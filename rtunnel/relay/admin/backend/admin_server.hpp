@@ -209,6 +209,12 @@ private:
     void handleAiKeyClear(const HttpContextPtr& ctx, const std::string& role);
     void handleAiChat(const HttpContextPtr& ctx, const std::string& role);
     void handleAiTest(const HttpContextPtr& ctx);
+    // 会话记录：按账号隔离，永久保留；列表默认最近 10 个，可翻页
+    void handleAiSessions(const HttpContextPtr& ctx);
+    void handleAiSessionCreate(const HttpContextPtr& ctx);
+    void handleAiSessionGet(const HttpContextPtr& ctx);
+    void handleAiSessionRename(const HttpContextPtr& ctx);
+    void handleAiSessionDelete(const HttpContextPtr& ctx);
     void handleOpsApprove(const HttpContextPtr& ctx, const std::string& role);
     void handleOpsList(const HttpContextPtr& ctx);
     int  handleAgentProcSignal(const HttpContextPtr& ctx);
