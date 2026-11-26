@@ -91,7 +91,14 @@
 - “怎么防/怎么自动”：list_playbooks 看现有规则，再 draft_playbook 给草稿；说明草稿默认停用、需要人确认。
 - “帮我重启/清理”：先只读确认现状（服务状态/磁盘），再 propose_exec，说明风险级别与是否需要另一个账号批准；绝不说已执行。
 
-## deploy | 部署,安装,接入,上线,新主机,新机器,内网,install.sh,自举,安装包,agent,ota,升级
+## navigation | 页面,菜单,入口,在哪,哪里,怎么打开,界面,导航
+- 左侧菜单：概览、设备、会话/客户端、任务、文件仓库、证书、中继、租户、用量与账单、接入账号、管理台账号、权限组、审计、自愈、设置、使用指南（按账号权限显示，没权限的菜单不出现）。
+- 设备详情：概览、终端、文件、服务、指标、串口、进程；设备列表的“AI 诊断”会带着当前设备上下文提问。
+- 概览页内嵌 AI 助手，点“全屏”原地展开；运行信息面板有 AI 诊断。
+- 证书签发/吊销在「证书」，权限在「权限组/授权对象」，费用在「用量与账单」，OTA 在「任务」按 kind=ota 过滤。
+- 找不到入口时先说“这个账号可能没有该资源权限”，再给出需要哪个权限键/找谁开。
+
+## deploy | 部署,安装,装,接入,上线,新主机,新机器,内网,install,install.sh,自举,安装包,agent,ota,升级,deploy,new host
 把 rtunnel 部署到一台内网主机的正确路径：
 1. 前置条件：主机能访问 relay 的数据面端口（部署参数 --port，测试环境常用 18443）；CPU 架构在支持范围内（x86_64/aarch64/armv7l）；有一个可用的接入账号和 rtk- 令牌；主机有写权限的安装目录。
 2. 拿到 agent 部署包：仓库里 packages/agent/<版本>/<架构>/rtunnel-agent-web-<版本>-<架构>.tar.gz（带本地页）或 lite 包；也可以用 deploy/package_agent.sh 现场打包。包内有 bin/rtunnel-agent、install.sh、service/rtunnel-agent.service、manifest.json、SHA256SUMS。
@@ -102,7 +109,7 @@
 助手的边界：平台只能管已经接入的 agent；对没有 agent 的主机，助手不能远程登录或代装，只能给出上面的步骤、包路径和检查点。对已接入且有 exec 能力的设备，助手可以提议执行安装/检查命令，但必须走作业确认。
 常见失败：连不上 relay（地址/端口/防火墙）、令牌无效（rtk- 且未停用）、架构不符（manifest 校验失败）、undefined symbol: hv_version（共享库构建只拷了二进制，改用静态构建）、端口占用（client 默认 1080）。
 
-## device | 设备,离线,在线,版本,架构,负载,内存,磁盘,网卡,进程,重启,踢下线,串口
+## device | 设备,离线,在线,版本,架构,负载,内存,磁盘,网卡,进程,重启,踢下线,串口,device,offline
 - 设备列表：list_devices，可按 online_only 过滤；返回 devid、在线、版本、架构、租户。
 - 单机详情：device_detail，含在线状态、版本、负载、内存、磁盘、网卡、能力（exec/ota/串口/shell）、当前会话数。
 - 历史趋势：device_metrics，小时级回看（1–168 小时），数据来自分钟级采样。
@@ -110,7 +117,7 @@
 - 离线判定以 relay 在线表为准；刚重启的 agent 可能需要几秒到几十秒重新上线。
 - 版本/架构来自 agent 上报的 SYSINFO；OTA 目标版本按 manifest 与 caps.arch 过滤。
 
-## access | 会话,客户端,连接,端口,转发,socks,连不上,acl,认证
+## access | 会话,客户端,连接,端口,转发,socks,连不上,acl,认证,session,port,client
 - 会话：list_streams，按 devid 过滤；看接入用户、设备、状态、建立时间。
 - 客户端：list_clients，看谁在线、来源地址、涉及设备、流量。
 - 接入方式：SOCKS5（client 默认 127.0.0.1:1080）或每设备本地端口；client 用 rtk- 令牌登录，身份由令牌决定。
@@ -150,14 +157,14 @@
 - relay 列表：list_relays，按优先级下发；client/agent 会按列表切换；多 relay 只做链路冗余，不做管理面高可用。
 - 常见问题：设备连错 relay（列表顺序/地址不可达）、证书主体不匹配、CA 不一致、吊销后未换证。
 
-## tenants-billing | 租户,费用,账单,多少钱,流量,配额,限速,价格,套餐
+## tenants-billing | 租户,费用,账单,多少钱,流量,配额,限速,价格,套餐,billing,cost,usage
 - 租户是“设备归属 + 计费”边界；权限组决定“能做什么”，租户决定“对谁的设备做”。
 - 套餐/配额：设备数、并发会话、月流量；超额动作 cut（断连）或 block（拒绝新会话）；带宽限速 rate_kbps 是整形不丢数据。
 - 用量口径：bytes（双向隧道载荷）、sessions、session_seconds、online_seconds；按天聚合，按 relay 本地时区。
 - 费用：billing_summary 按用量×价目试算，单位 1e-6 元；账期结算单可导出 CSV。
 - 回答费用时说明时间范围、租户、是否含税/折扣（以价目配置为准），不要编造单价。
 
-## accounts-perms | 账号,权限,权限组,令牌,登录,密码,角色,atk,rtk,授权,成员
+## accounts-perms | 账号,权限,权限组,令牌,登录,密码,角色,atk,rtk,授权,成员,permission,token
 - 管理台账号 users：admin/manager/operator/viewer 只是内置组别名；权限只按组求值，移出所有组=零权限。
 - 接入账号 client_accounts：客户侧身份，归属租户；rtk- 令牌用于数据面。
 - atk- 是管理台 API Token（归属 users），rtk- 是接入令牌（归属 client_accounts）；令牌权限只能收窄，不能超过归属账号。
@@ -173,7 +180,7 @@
 - 回滚：作业本身不自动回滚；OTA 有版本回滚；变更前建议记录现状与回滚命令。
 - 回答“谁改的/为什么被拒”：recent_audit + recent_operations，指出状态与拦截原因（审批/配额/窗口/哈希不一致）。
 
-## troubleshooting | 排障,故障,报错,不通,失败,超时,502,401,403,404,离线,连不上,打不开
+## troubleshooting | 排障,故障,报错,不通,失败,超时,502,401,403,404,离线,连不上,打不开,异常,卡住,慢
 排障顺序：先确认范围（单设备/单账号/全局）→ 平台总览 → 设备在线与版本 → 会话/客户端 → 权限/ACL → 证书/relay → 任务/审计。
 常见现象与原因：
 - 设备离线：agent 未启动/崩溃、网络到 relay 不通、rtk 令牌停用或过期、证书过期、relay 地址列表不可达。
