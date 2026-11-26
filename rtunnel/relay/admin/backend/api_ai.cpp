@@ -1515,7 +1515,16 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
         std::string brief;
         std::string bp = aiBriefPath(cfg_.db_path, subject);
         brief = aiReadBrief(bp, libver, model);
-        if (brief.empty() && !aiBlank(aiPromptLibraryAll())) {
+        static std::mutex warm_mu;
+        static std::map<std::string, time_t> warm_fail;
+        std::string warm_key = subject + "|" + libver + "|" + model;
+        bool warm_skip = false;
+        {
+            std::lock_guard<std::mutex> lk(warm_mu);
+            auto it = warm_fail.find(warm_key);
+            warm_skip = it != warm_fail.end() && time(nullptr) - it->second < 300;
+        }
+        if (brief.empty() && !warm_skip && !aiBlank(aiPromptLibraryAll())) {
             json bm;
             bm["role"] = "user";
             bm["content"] =
@@ -1527,7 +1536,7 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
             bmsgs.push_back(bm);
             json bdoc;
             std::string berr;
-            if (aiCallModel(endpoint, key, model, bmsgs, json::array(), 900, 0.2, 25, insecure,
+            if (aiCallModel(endpoint, key, model, bmsgs, json::array(), 900, 0.2, 20, insecure,
                             bdoc, berr)) {
                 std::string bt;
                 if (bdoc.contains("choices") && bdoc["choices"].is_array() &&
@@ -1543,6 +1552,8 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
                 }
             } else {
                 logf_("[ai] warmup failed: %s", berr.c_str());
+                std::lock_guard<std::mutex> lk(warm_mu);
+                warm_fail[warm_key] = time(nullptr);
             }
         }
 
@@ -1777,7 +1788,7 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
             return true;
         };
 
-        if (aiBlank(reply)) finalize();
+        if (aiBlank(reply) && rounds > 0) finalize();
 
         // 收尾调用也失败：至少把“已经查了什么”交代清楚，别丢一个空回答
         if (aiBlank(reply) && !used.empty()) {
