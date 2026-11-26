@@ -51,9 +51,35 @@ const h = require('../lib/harness')
   h.check('全屏后统计卡片收起', !(await p.locator('.cards').isVisible()))
   h.check('展开后草稿还在（同一个组件实例）',
     (await p.locator('.ai-chat textarea').inputValue()) === '未发送的草稿')
-  const pos = await p.locator('.ai-chat.full .composer')
+  const cpos = await p.locator('.ai-chat.full .composer')
     .evaluate((el) => getComputedStyle(el).position)
-  h.check('展开后输入框吸底', pos === 'sticky', pos)
+  const hpos = await p.locator('.ai-chat.full .panel-head')
+    .evaluate((el) => getComputedStyle(el).position)
+  h.check('输入框随页面滚动', cpos !== 'sticky' && cpos !== 'fixed', cpos)
+  h.check('头部随页面滚动', hpos !== 'sticky' && hpos !== 'fixed', hpos)
+
+  // 造一段长内容：滚上去后出现“回到底端”，点了直接到页面底端
+  await p.evaluate(() => {
+    const msgs = document.querySelector('.ai-chat .msgs')
+    if (!msgs) return
+    const d = document.createElement('div')
+    d.id = 'ui-tall'
+    d.style.height = '1800px'
+    msgs.appendChild(d)
+    const pg = document.querySelector('.page')
+    pg.scrollTop = 0
+    pg.dispatchEvent(new Event('scroll'))
+  })
+  await p.waitForTimeout(400)
+  h.check('往上翻出现回到底端', await p.locator('.to-bottom').isVisible())
+  await p.locator('.to-bottom').dispatchEvent('click')
+  await p.waitForTimeout(900)
+  const nearEnd = await p.evaluate(() => {
+    const pg = document.querySelector('.page')
+    return pg.scrollHeight - pg.scrollTop - pg.clientHeight < 60
+  })
+  h.check('点回到底端直接到页面底端', nearEnd)
+  await p.evaluate(() => { const d = document.getElementById('ui-tall'); if (d) d.remove() })
 
   // 退出全屏：回到仪表盘，草稿和会话都还在
   await p.locator('.ai-chat .panel-head button').filter({ hasText: '退出全屏' }).first()

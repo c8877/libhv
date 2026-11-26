@@ -139,6 +139,13 @@
       </div>
     </div>
 
+    <!-- 头部和输入框都随页面滚走，往上翻之后用这个直接回到底端 -->
+    <transition name="fade">
+      <el-button v-if="isFull && !atBottom" class="to-bottom" @click="scrollBottom(true)">
+        <span class="to-bottom-arrow">↓</span> 回到底端
+      </el-button>
+    </transition>
+
     <!-- 历史会话：最近 10 个在前，可继续往前翻；记录永久保留，只能主动删除 -->
     <el-drawer v-model="histOpen" :size="compact ? '86%' : '420px'" title="历史会话">
       <div v-loading="histLoading" class="hist">
@@ -227,7 +234,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Api } from '@/shared/api.js'
@@ -407,6 +414,26 @@ function argsText(a) {
   return s.length > 60 ? s.slice(0, 60) + '…' : s
 }
 
+// 主区 .page 是滚动容器：头部/输入框都不吸附，往上翻就跟着走；
+// 只有“回到底端”按钮浮在右下角，离开底部时出现。
+const atBottom = ref(true)
+let pageEl = null
+function onPageScroll() {
+  if (!pageEl) return
+  atBottom.value = pageEl.scrollHeight - pageEl.scrollTop - pageEl.clientHeight < 80
+}
+function bindPageScroll() {
+  const el = root.value && root.value.closest('.page')
+  if (!el || el === pageEl) {
+    if (el) onPageScroll()
+    return
+  }
+  if (pageEl) pageEl.removeEventListener('scroll', onPageScroll)
+  pageEl = el
+  pageEl.addEventListener('scroll', onPageScroll, { passive: true })
+  onPageScroll()
+}
+
 // 页面级滚动：消息是追加到 iflow 里的节点，滚动的是主区 .page，
 // 不是对话内部的小窗口。用户往上翻看历史时不要拽回来。
 async function scrollBottom(force = false) {
@@ -423,6 +450,7 @@ function expand() {
   if (!props.compact) return
   emit('expand')
   nextTick(() => {
+    bindPageScroll()
     scrollBottom(true)
     const ta = root.value && root.value.querySelector('textarea')
     if (ta) ta.focus()
@@ -712,23 +740,26 @@ onMounted(() => {
   loadDevices()
   loadSessions(false)   // 只为按钮上的数量，失败静默
   applyQuery()
+  nextTick(bindPageScroll)
+})
+
+onBeforeUnmount(() => {
+  if (pageEl) pageEl.removeEventListener('scroll', onPageScroll)
+  pageEl = null
 })
 </script>
 
 <style scoped>
 .ai-chat { display: flex; flex-direction: column; min-width: 0; }
 
-/* 展开后原地占满主区：不跳路由、不丢会话。头部与输入框吸附，
-   中间的消息按顺序追加到页面里，滚的是主区（.page），不是内部小窗口。 */
+/* 展开后原地占满主区：不跳路由、不丢会话。头部、消息、输入框都在同一个
+   文档流里，滚的是主区（.page），不是内部小窗口；往上翻时头部/输入框一起走。 */
 .ai-chat.full {
   padding: 0;
   margin-bottom: 0;
   min-height: calc(100vh - 64px - 2 * var(--page-pad));
 }
 .ai-chat.full .panel-head {
-  position: sticky;
-  top: 0;
-  z-index: 6;
   margin: 0;
   padding: 12px 18px;
   background: var(--el-bg-color);
@@ -745,9 +776,6 @@ onMounted(() => {
 .ai-chat.full .msg { width: 100%; max-width: 880px; margin-left: auto; margin-right: auto; }
 .ai-chat.full .empty { width: 100%; max-width: 780px; margin: auto; }
 .ai-chat.full .composer {
-  position: sticky;
-  bottom: 0;
-  z-index: 6;
   margin-top: auto;
   padding: 10px 18px 12px;
   background: var(--el-bg-color);
@@ -759,6 +787,23 @@ onMounted(() => {
   .ai-chat.full .panel-head { padding: 10px 12px; }
   .ai-chat.full .msgs { padding: 12px 12px 6px; }
   .ai-chat.full .composer { padding: 8px 12px 10px; }
+}
+.to-bottom {
+  position: fixed;
+  right: 32px;
+  bottom: 32px;
+  z-index: 30;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 17px;
+  background: var(--el-bg-color);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
+}
+.to-bottom-arrow { margin-right: 4px; font-weight: 700; }
+.fade-enter-active, .fade-leave-active { transition: opacity 0.18s ease, transform 0.18s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; transform: translateY(6px); }
+@media (max-width: 599px) {
+  .to-bottom { right: 14px; bottom: 18px; }
 }
 .mini-title { font-size: 14px; font-weight: 650; }
 .setup { margin: 8px 0 4px; }
