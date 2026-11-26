@@ -55,12 +55,39 @@ class FakeModel(BaseHTTPRequestHandler):
                 last_user = m.get("content", "")
         tool_msgs = [m for m in msgs if m.get("role") == "tool"]
 
+        if "【平台预热】" in last_user:
+            self._send(200, self._resp("内部备忘：平台管已接入 agent 的设备；部署要先装 agent。", model))
+            return
+        # 模拟“一直要调工具、不肯收尾”的模型：用来验证轮次用尽后的强制总结
+        if "死循环" in last_user:
+            if "tools" not in body and "不配合" not in last_user:
+                self._send(200, self._resp("收尾：已按现有数据给出结论。", model))
+                return
+            self._send(200, self._tool_call("list_devices", {}))
+            return
+
+        if "重复" in last_user:
+            self._send(200, self._tool_call("list_devices", {}))
+            return
+
+        if "多轮" in last_user:
+            if len(tool_msgs) < 9:
+                self._send(200, self._tool_call("recent_audit", {"limit": 1 + len(tool_msgs)}))
+            else:
+                self._send(200, self._resp("多轮完成：一共查了 %d 轮" % len(tool_msgs), model))
+            return
+
         if "hello" in last_user:
             self._send(200, self._resp("hi", model))
             return
         if "只回复两个字" in last_user:   # /ai/test 的探针请求
             self._send(200, self._resp("正常", model))
             return
+        if "tools" not in body:
+            # 收尾轮/无工具账号：不再要求调工具，直接给文字
+            self._send(200, self._resp("（无工具）按平台能力回答：能查已接入设备，不能远程装 agent。", model))
+            return
+
         if not tool_msgs:
             # 第一轮：按问题挑一个工具
             if "详情" in last_user or "detail" in last_user:
@@ -128,6 +155,23 @@ class FakeModel(BaseHTTPRequestHandler):
         else:
             text = "工具结果长度 %d" % len(payload)
         self._send(200, self._resp(text, model))
+
+    def _tool_call(self, name, args):
+        return {
+            "model": "fake-model",
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{
+                        "id": "call_loop", "type": "function",
+                        "function": {"name": name, "arguments": json.dumps(args)},
+                    }],
+                },
+                "finish_reason": "tool_calls",
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 3},
+        }
 
     def _resp(self, text, model=""):
         # 真实 OpenAI 兼容服务会在响应里回 model，网关可能改写；这里照做
@@ -288,11 +332,34 @@ def main():
         code, r = call_json(adm, base, "/api/v1/ai/key", {"key": "  sk a  "}, method="PUT")
         e2e.check("ai: 含空白的 key 被拒", code == 400, "code=%d" % code)
 
-        # 7) 普通问答
+        # 7) 普通问答：第一次对话先用完整提示词库做一次预热备忘，再带着手册+实时上下文回答
+        CALLS.clear()
         code, r = call_json(adm, base, "/api/v1/ai/chat",
                             {"messages": [{"role": "user", "content": "hello"}]})
         e2e.check("ai: 普通问答", code == 200 and r.get("reply") == "hi", "code=%d r=%s" % (code, r))
         e2e.check("ai: 普通问答无工具调用", r.get("tools") == [], str(r.get("tools")))
+        e2e.check("ai: 预热带上了完整提示词库",
+                  any("【平台预热】" in c["messages"][-1].get("content", "") for c in CALLS),
+                  "calls=%d" % len(CALLS))
+        sys0 = CALLS[-1]["messages"][0].get("content", "")
+        e2e.check("ai: 系统提示含岗位手册", "【岗位手册" in sys0, sys0[:100])
+        e2e.check("ai: 系统提示含实时上下文", "available_tools" in sys0 and "platform_overview" in sys0,
+                  sys0[:200])
+        e2e.check("ai: 系统提示体量可控", 1500 < len(sys0) < 20000, "len=%d" % len(sys0))
+
+        # 预热备忘按账号缓存：第二次对话不再重复读整份手册
+        n_before = len(CALLS)
+        call_json(adm, base, "/api/v1/ai/chat", {"messages": [{"role": "user", "content": "hello again"}]})
+        e2e.check("ai: 预热备忘会缓存", len(CALLS) == n_before + 1,
+                  "before=%d after=%d" % (n_before, len(CALLS)))
+
+        # 7.1) 检索：问部署要带出部署路径，不是只给一句“能/不能”
+        code, r = call_json(adm, base, "/api/v1/ai/chat",
+                            {"messages": [{"role": "user", "content": "怎么把 agent 部署到内网的新主机"}]})
+        sysdep = CALLS[-1]["messages"][0].get("content", "")
+        e2e.check("ai: 部署问题检索到部署手册",
+                  code == 200 and "把 rtunnel 部署到一台内网主机的正确路径" in sysdep,
+                  sysdep[:160])
 
         # 6.5) 连通性测试：返回耗时与实际模型名
         code, t = call_json(adm, base, "/api/v1/ai/test", {})
@@ -327,7 +394,39 @@ def main():
         e2e.check("ai: 工具执行成功", tools and tools[0].get("ok") is True, str(tools[:1]))
         e2e.check("ai: 回答引用了工具结果", "台设备" in r.get("reply", ""), r.get("reply"))
 
-        # 7.5) 平台级工具：整个管理台都能问，不只是设备
+        # 7.3) 多轮工具：上限不是 4/6 轮，能连续查 9 轮再回答
+        code, r = call_json(adm, base, "/api/v1/ai/chat",
+                            {"messages": [{"role": "user", "content": "多轮查一下审计"}]})
+        e2e.check("ai: 工具轮次不再限制在 4/6 轮",
+                  code == 200 and r.get("rounds", 0) >= 10 and "多轮完成" in r.get("reply", ""),
+                  "rounds=%s reply=%s" % (r.get("rounds"), r.get("reply")))
+
+        # 7.4) 工具轮次用尽/死循环：助手必须自己收尾，不能回“请把问题拆小一点”
+        code, r = call_json(adm, base, "/api/v1/ai/chat",
+                            {"messages": [{"role": "user", "content": "死循环查一下设备"}]})
+        e2e.check("ai: 轮次用尽后仍给出最终回答",
+                  code == 200 and r.get("reply", "").startswith("收尾"),
+                  "code=%d r=%s" % (code, r))
+        e2e.check("ai: 收尾轮不再携带工具", "tools" not in CALLS[-1], str(list(CALLS[-1].keys())))
+        e2e.check("ai: 不再让用户拆问题", "拆小" not in r.get("reply", ""), r.get("reply"))
+
+        # 7.45) 连续重复同一个调用：结果不会变，必须截断并收尾
+        before = len(CALLS)
+        code, r = call_json(adm, base, "/api/v1/ai/chat",
+                            {"messages": [{"role": "user", "content": "重复调用同一个工具看看"}]})
+        e2e.check("ai: 重复调用被截断并收尾",
+                  code == 200 and len(CALLS) - before <= 8 and r.get("reply"),
+                  "calls=%d reply=%s" % (len(CALLS) - before, r.get("reply")))
+
+        # 7.5) 模型连收尾都不配合：也要给可读兜底，而不是空回答
+        code, r = call_json(adm, base, "/api/v1/ai/chat",
+                            {"messages": [{"role": "user", "content": "死循环不配合"}]})
+        rep = r.get("reply", "")
+        e2e.check("ai: 收尾失败也有兜底回答", code == 200 and "没有给出总结" in rep,
+                  "code=%d r=%s" % (code, r))
+        e2e.check("ai: 兜底回答说明查过什么", "list_devices" in rep, rep)
+
+        # 7.6) 平台级工具：整个管理台都能问，不只是设备
         code, cfg2 = call_json(adm, base, "/api/v1/ai/config", None, method="GET")
         e2e.check("ai: 超管拿到全部工具", code == 200 and cfg2.get("tools") == cfg2.get("tools_total")
                   and cfg2.get("tools_total") >= 20,
@@ -400,6 +499,26 @@ def main():
                   code == 200 and tools and tools[0].get("ok") is False and
                   "cert.read" in r.get("reply", ""),
                   "code=%d tools=%s reply=%s" % (code, tools[:1], r.get("reply")))
+
+        # 9.5) 只有 ai.chat、没有 device.view：没有工具也要用手册回答能力问题，不能 403
+        acc_chat = call("POST", "/api/v1/client-accounts", {"username": "ai-chatonly"})
+        call("POST", "/api/v1/permission/groups", {
+            "name": "ai-chat-only", "description": "e2e",
+            "resources": ["ai.chat"], "all_devices": False, "global_scope": True,
+            "devices": [], "ports": "*",
+            "members": [{"type": "client", "id": str(acc_chat["id"])}],
+        })
+        rtk_chat = call("POST", "/api/v1/client-accounts/%d/tokens" % acc_chat["id"],
+                        {"name": "e2e"})["token"]
+        bearer(base, "/api/v1/ai/config", rtk_chat,
+               {"provider": "custom", "endpoint": "http://127.0.0.1:%d/v1" % model_port,
+                "model": "fake-model"}, method="PUT")
+        bearer(base, "/api/v1/ai/key", rtk_chat, {"key": "sk-chatonly-0001"}, method="PUT")
+        code, r = bearer(base, "/api/v1/ai/chat", rtk_chat,
+                         {"messages": [{"role": "user", "content": "你能做什么"}]})
+        e2e.check("ai: 没有查询工具也能回答能力问题",
+                  code == 200 and r.get("tools") == [] and "按平台能力回答" in r.get("reply", ""),
+                  "code=%d r=%s" % (code, r))
 
         # 10) 上游模型报错 → 502
         call_json(adm, base, "/api/v1/ai/config", {"model": "fail-model"}, method="PUT")

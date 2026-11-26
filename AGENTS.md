@@ -160,5 +160,7 @@ GitHub Actions (`.github/workflows/CI.yml`): builds and tests on Linux (with Ope
 - `shared/web/*.js`（`fs-ui` / `svc-ui` / `storage-ui` / `table-ui`）只作为 Vue 卡片/组件内部的渲染内核；不要再基于它们写页面级表格、表单或弹层。
 - AI 对话只有一份实现 `components/AiChat.vue`：首页仪表盘用 `compact` 嵌入，点「全屏」由父页面切 `:compact="false"` **原地展开**（同一个实例，会话不丢），`/assistant` 常驻全屏（`bind-query`）。不要为首页另写一套聊天界面，也不要用路由跳转实现全屏；对话逻辑、模型设置弹窗都留在该组件里。
 - 对话消息用普通 `v-for` 追加节点、滚主区 `.page`，不要再套 `el-scrollbar` 做内部滚动；头部与输入框用 `position: sticky` 吸附。
+- AI 的平台知识写在 `rtunnel/relay/admin/backend/ai/prompt_library.md`（构建期嵌入）：**新增/修改平台能力时必须同步这份手册**，并保持 `## id | 关键词` 结构；内容指纹会自动让预热备忘失效。回答规则不要写回 `api_ai.cpp` 的大段字符串。
+- 助手不允许“问死”：没有查询工具也要能回答能力问题；工具轮次不是固定 4 轮（24 轮 + 180s 预算），无论怎么截断都要有收尾回答，且不能让用户自己拆问题。
 - 顶部品牌区（侧栏 logo、手机页头 `brand-mini`）都要能点回首页，新增布局时别把这条去掉。
 

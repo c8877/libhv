@@ -53,7 +53,11 @@
 
       <div v-for="(m, i) in shownMsgs" :key="m._k || i" class="msg" :class="m.role">
         <div class="bubble">
-          <MarkdownView v-if="m.role === 'assistant'" :source="m.content" dense />
+          <!-- 出错时可能没有正文：把错误显示在气泡里，别让 MarkdownView 只剩“这里还没有内容” -->
+          <MarkdownView v-if="m.role === 'assistant' && m.content" :source="m.content" dense />
+          <div v-else-if="m.role === 'assistant'" class="err">
+            {{ m.error || '这次没有回答内容，可以再问一次。' }}
+          </div>
           <div v-else class="plain">{{ m.content }}</div>
 
           <div v-if="m.actions && m.actions.length" class="acts">
@@ -105,7 +109,7 @@
               <el-tag v-if="!t.ok" size="small" type="danger" effect="plain">失败</el-tag>
             </div>
           </div>
-          <div v-if="m.error" class="err">{{ m.error }}</div>
+          <div v-if="m.error && m.content" class="err">{{ m.error }}</div>
           <div v-if="m.meta" class="muted meta">{{ m.meta }}</div>
         </div>
       </div>

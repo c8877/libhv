@@ -9,6 +9,7 @@
 // - 工具定义与 /api/v1/* 的真实接口一一对应，测试里会比对路径存在，
 //   防止文档/工具漂移。
 #include "admin_server.hpp"
+#include "ai_prompt_library.hpp"
 #include "api_reply.hpp"
 #include "common/logging.hpp"
 #include "cpputil/json.hpp"
@@ -19,12 +20,15 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
+#include <ctime>
+#include <map>
 #include <mutex>
 #include <set>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -34,7 +38,10 @@ namespace {
 
 const size_t kMaxMessages = 40;          // 带上文的条数上限（不含 system）
 const size_t kMaxToolResultBytes = 6000; // 单个工具结果进上下文的字节上限
-const int    kDefaultMaxRounds = 4;      // 工具调用轮次上限
+// 工具轮次不是“问几次就结束”的墙：给足预算让它自己查完，另有时间上限防止跑飞；
+// 无论哪种原因停下，都会再要一次不带工具的收尾回答。
+const int    kMaxToolRounds = 24;
+const int    kToolPhaseBudgetSec = 180;
 
 std::string trimStr(const std::string& s) {
     size_t b = s.find_first_not_of(" \t\r\n");
@@ -1354,6 +1361,59 @@ static bool aiCallModel(const std::string& endpoint, const std::string& key, con
     return true;
 }
 
+namespace {
+
+bool aiBlank(const std::string& s) {
+    return s.find_first_not_of(" \t\r\n") == std::string::npos;
+}
+
+// 按字符边界截断，避免把 UTF-8 中文切坏
+std::string aiClampUtf8(const std::string& s, size_t max_bytes) {
+    if (s.size() <= max_bytes) return s;
+    size_t n = max_bytes;
+    while (n > 0 && ((unsigned char)s[n] & 0xC0) == 0x80) --n;
+    return s.substr(0, n);
+}
+
+// 预热备忘：每个主体一份，和密钥同目录。首行记版本/模型，换了模型或提示词库就重做。
+std::string aiBriefPath(const std::string& db_path, const std::string& subject) {
+    return aiKeyDir(db_path) + "/" + subject + ".brief";
+}
+
+std::string aiReadBrief(const std::string& path, const std::string& libver,
+                        const std::string& model) {
+    FILE* f = fopen(path.c_str(), "r");
+    if (f == nullptr) return std::string();
+    std::string all;
+    char buf[4096];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) all.append(buf, n);
+    fclose(f);
+    size_t nl = all.find('\n');
+    if (nl == std::string::npos) return std::string();
+    std::string head = all.substr(0, nl);
+    if (head != "#rtunnel-brief " + libver + " " + model) return std::string();
+    return trimStr(all.substr(nl + 1));
+}
+
+void aiWriteBrief(const std::string& path, const std::string& libver,
+                  const std::string& model, const std::string& text) {
+    size_t slash = path.find_last_of('/');
+    if (slash != std::string::npos) ensureKeyDir(path.substr(0, slash));
+    int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return;
+    std::string all = "#rtunnel-brief " + libver + " " + model + "\n" + text + "\n";
+    size_t off = 0;
+    while (off < all.size()) {
+        ssize_t w = write(fd, all.data() + off, all.size() - off);
+        if (w <= 0) break;
+        off += (size_t)w;
+    }
+    close(fd);
+}
+
+}  // namespace
+
 void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& role) {
     // 每个账号用自己的配置：换人登录就是换模型/换密钥，不共享
     std::string subject = aiSubject(currentActor());
@@ -1420,7 +1480,7 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
     // 参数固定成一组对运维问答合适的值：这些不是给用户调的东西
     int max_tokens = 2048;
     int timeout_s = 90;
-    int max_rounds = kDefaultMaxRounds;
+    int max_rounds = kMaxToolRounds;
     bool insecure = prof.insecure;
     double temperature = 0.3;
 
@@ -1447,29 +1507,107 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
       };
       try {
         json tools = toolDefsFor(actor);
-        if (tools.empty()) {
-            ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
-            ctx->send("{\"error\":\"当前账号没有可用的查询工具（至少需要 device.view）\"}");
-            return;
+        // 没有工具也要能答：权限不足最多是查不了实时数据，不能连“平台能做什么”都拒绝。
+        std::string libver = aiPromptLibraryVersion();
+
+        // 预热：第一次对话（或换模型/换语料）先让模型读一遍完整手册，压成内部备忘，
+        // 之后同账号直接复用。这一步就是“用自己的模型接口做预训练”，失败不影响主流程。
+        std::string brief;
+        std::string bp = aiBriefPath(cfg_.db_path, subject);
+        brief = aiReadBrief(bp, libver, model);
+        if (brief.empty() && !aiBlank(aiPromptLibraryAll())) {
+            json bm;
+            bm["role"] = "user";
+            bm["content"] =
+                "【平台预热】下面是你需要长期记住的平台能力提示词库。请输出一份不超过 400 字的"
+                "内部备忘，只给后续对话用、不面向用户：1) 平台能做什么、不能做什么；"
+                "2) 常见问题分别该查哪个工具；3) 最容易答错或越界的点。只输出备忘正文。\n\n" +
+                aiPromptLibraryAll();
+            json bmsgs = json::array();
+            bmsgs.push_back(bm);
+            json bdoc;
+            std::string berr;
+            if (aiCallModel(endpoint, key, model, bmsgs, json::array(), 900, 0.2, 25, insecure,
+                            bdoc, berr)) {
+                std::string bt;
+                if (bdoc.contains("choices") && bdoc["choices"].is_array() &&
+                    !bdoc["choices"].empty() && bdoc["choices"][0].contains("message")) {
+                    json bmsg = bdoc["choices"][0]["message"];
+                    if (bmsg.contains("content") && bmsg["content"].is_string())
+                        bt = bmsg["content"].get<std::string>();
+                }
+                bt = trimStr(bt);
+                if (!bt.empty()) {
+                    brief = aiClampUtf8(bt, 1600);
+                    aiWriteBrief(bp, libver, model, brief);
+                }
+            } else {
+                logf_("[ai] warmup failed: %s", berr.c_str());
+            }
         }
+
+        // 实时上下文：身份/范围/可用工具/总览/设备预览一次给全，省掉“先查环境”的轮次。
+        json facts;
+        {
+            time_t now = time(nullptr);
+            char ts[32] = {0};
+            struct tm tmv;
+            localtime_r(&now, &tmv);
+            strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &tmv);
+            facts["now"] = ts;
+            facts["operator"] = actor.label;
+            facts["super"] = actor.super;
+            facts["all_devices"] = actor.all_devices;
+            facts["device_scope"] = actor.all_devices
+                                        ? std::string("全部设备")
+                                        : (std::to_string(actor.devices.size()) + " 台授权设备");
+            if (!devid.empty()) facts["current_devid"] = devid;
+            json tn = json::array();
+            for (auto& t : tools) tn.push_back(t["function"].value("name", std::string()));
+            facts["available_tools"] = tn;
+            std::string out, terr;
+            if (aiRunTool(actor, "platform_overview", json::object(), out, terr)) {
+                json o = json::parse(out, nullptr, false);
+                if (!o.is_discarded()) facts["overview"] = o;
+            }
+            if (aiRunTool(actor, "list_devices", json::object(), out, terr)) {
+                json d = json::parse(out, nullptr, false);
+                if (!d.is_discarded() && d.contains("devices") && d["devices"].is_array()) {
+                    json preview = json::array();
+                    for (size_t i = 0; i < d["devices"].size() && i < 20; ++i)
+                        preview.push_back(d["devices"][i]);
+                    facts["devices_preview"] = preview;
+                    facts["devices_total"] = d.value("total", (int)d["devices"].size());
+                }
+            }
+        }
+
+        // 检索：常驻规则 + 与问题最相关的模块说明（问部署给部署路径，问费用给计费口径）
+        std::string q = user_text;
+        for (size_t i = msgs.size(); i > 0 && i + 3 > msgs.size(); --i)
+            if (msgs[i - 1].value("role", std::string()) == "user")
+                q += "\n" + msgs[i - 1].value("content", std::string());
+        std::string manual = aiPromptContext(q);
+
+        std::string facts_json = facts.dump(-1, ' ', false, json::error_handler_t::replace);
+        // 本地小模型上下文有限：手册+实时数据已经很大时，预热备忘就不塞了
+        if (brief.size() > 0 && manual.size() + facts_json.size() > 12000) brief.clear();
+
         json messages = json::array();
         json sys;
         sys["role"] = "system";
         sys["content"] =
-            "你是 rtunnel 运维平台的管理台助手，可以读取整个平台的状态，不只是设备。"
-            "平台模块与对应工具：平台总览/在线与告警→platform_overview；"
-            "设备→list_devices/device_detail/device_metrics；会话与客户端→list_streams/list_clients；"
-            "升级与分发任务→list_tasks；租户与计费→list_tenants/billing_summary/list_accounts；"
-            "权限→list_users/list_permission_groups；安全与接入→list_certs/list_relays；"
-            "文件仓库→list_files；变更与审计→recent_audit/recent_operations；自愈→list_playbooks。"
-            "用户问什么就选对应模块的工具，不要一律查设备；一个问题涉及多个方面时连续调用多个工具。"
-            "工具列表里没有的工具说明当前账号没有该权限，不要假装能查，也不要把没有权限说成系统故障。"
-            "只能依据工具返回的数据回答，不要编造状态、日志或历史。回答用简体中文，"
-            "先给结论再给依据；涉及数量/时间/版本要写出具体值。"
-            "用户明确要求变更（重启服务、清理磁盘、修复故障）时，先用只读工具确认现状，"
-            "再调用 propose_exec 生成待确认作业，或用 draft_playbook 给出自愈规则草稿；"
-            "这两个工具都不会真正执行。任何情况下都不要说成已经完成，要明确告诉用户还需要在"
-            "对话里确认（风险高的还要另一个账号批准）。";
+            std::string("你是 rtunnel 运维平台的管理台助手。下面是岗位手册与本次实时上下文："
+                        "手册说明平台能力、边界和正确路径；实时上下文是事实来源。"
+                        "工具结果 > 实时上下文 > 手册 > 通用知识，冲突时以工具结果为准。\n\n"
+                        "【岗位手册（按当前问题检索）】\n") +
+            manual +
+            "\n【本次会话实时上下文（JSON）】\n" + facts_json +
+            (brief.empty() ? std::string()
+                           : "\n\n【预热备忘（模型根据完整手册生成，供参考；与手册冲突时以手册为准）】\n" +
+                                 brief) +
+            "\n\n【最后要求】先给结论；查不到就说清差什么并给下一步；"
+            "绝不返回空回答，绝不让用户拆分问题。";
         messages.push_back(sys);
         for (auto& m : msgs) messages.push_back(m);
 
@@ -1480,13 +1618,25 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
         int rounds = 0;
         long long usage_p = 0;
         long long usage_c = 0;
+        auto started = std::chrono::steady_clock::now();
+        std::map<std::string, std::string> seen_calls;   // 同名同参只执行一次
+        std::string last_call;
+        int repeat_streak = 0;
 
         for (int i = 0; i < max_rounds; ++i) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                               std::chrono::steady_clock::now() - started)
+                               .count();
+            if (elapsed > kToolPhaseBudgetSec) {
+                logf_("[ai] tool phase budget reached (%llds)", (long long)elapsed);
+                break;
+            }
             if (devid.empty() && i == 0) {
                 json hint;
                 hint["role"] = "system";
-                hint["content"] = "用户当前没有选定设备；问题涉及设备时先调用 list_devices 确定设备，"
-                                  "涉及平台/账号/任务/证书/费用时用对应模块的工具。";
+                hint["content"] = "用户当前没有选定设备；问题涉及某台设备的状态或操作时才先调用 "
+                                  "list_devices 确定设备，涉及平台/账号/任务/证书/费用时用对应模块的工具。"
+                                  "问的是能力、是否支持、怎么接入/部署这类问题时不需要查设备，直接回答。";
                 messages.push_back(hint);
             }
             json doc;
@@ -1537,7 +1687,18 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
                 }
                 std::string out;
                 std::string terr;
-                bool ok = !fn_name.empty() && aiRunTool(actor, fn_name, args, out, terr);
+                std::string call_key = fn_name + "|" + args.dump();
+                bool cached = false;
+                bool ok = false;
+                auto hit = seen_calls.find(call_key);
+                if (!fn_name.empty() && hit != seen_calls.end()) {
+                    out = hit->second;
+                    ok = true;
+                    cached = true;
+                } else {
+                    ok = !fn_name.empty() && aiRunTool(actor, fn_name, args, out, terr);
+                    if (ok) seen_calls[call_key] = out;
+                }
                 // 提议类工具的结果要单独回给前端渲染成“确认卡片”
                 if (ok && (fn_name == "propose_exec" || fn_name == "draft_playbook")) {
                     json a = json::parse(out, nullptr, false);
@@ -1550,6 +1711,7 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
                 rec["name"] = fn_name;
                 rec["args"] = args;
                 rec["ok"] = ok;
+                if (cached) rec["cached"] = true;
                 if (!ok) {
                     rec["error"] = terr;
                     out = "{\"error\":" + json(terr).dump() + "}";
@@ -1560,12 +1722,79 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
                 t["role"] = "tool";
                 t["tool_call_id"] = cid;
                 t["content"] = ok ? clampResult(out) : out;
+                if (cached)
+                    t["content"] = t["content"].get<std::string>() +
+                                   "\n（同一调用已经执行过，结果相同；不要再重复调用，"
+                                   "请改用其他工具、调整参数，或直接基于已有结果回答）";
                 messages.push_back(t);
+
+                if (call_key == last_call) {
+                    ++repeat_streak;
+                } else {
+                    repeat_streak = 0;
+                    last_call = call_key;
+                }
             }
+
+            // 连续三轮完全相同的调用：结果不会变，强行进入收尾
+            if (repeat_streak >= 2) break;
         }
 
-        if (reply.empty() && err.empty()) {
-            err = "模型在 " + std::to_string(max_rounds) + " 轮内没有给出最终回答，请把问题拆小一点";
+        // 工具阶段结束不等于答不出来：助手自己收尾，再要一次“只总结、不许调工具”的回答。
+        // 不把“请把问题拆小”甩给用户——拆不拆是助手的事，用户只负责问。
+        auto finalize = [&]() -> bool {
+            json stop;
+            stop["role"] = "system";
+            stop["content"] =
+                "工具阶段结束，不要再调用任何工具。请直接基于上面已经拿到的工具结果、实时上下文和"
+                "岗位手册给出最终回答：查到的部分给结论和具体数字；没来得及查的部分明确说还差什么、"
+                "建议怎么继续；如果这个问题本来就不需要工具（能力/可行性问题），直接说清楚能做什么、"
+                "不能做什么。不要让用户自己拆分问题，也不要只回一句“没有内容”。";
+            messages.push_back(stop);
+            json doc;
+            std::string ferr;
+            if (!aiCallModel(endpoint, key, model, messages, json::array(), max_tokens, temperature,
+                             timeout_s, insecure, doc, ferr)) {
+                if (err.empty()) err = ferr;
+                return false;
+            }
+            ++rounds;
+            if (doc.contains("usage") && doc["usage"].is_object()) {
+                usage_p += doc["usage"].value("prompt_tokens", (long long)0);
+                usage_c += doc["usage"].value("completion_tokens", (long long)0);
+            }
+            json msg = doc["choices"][0].contains("message")
+                           ? doc["choices"][0]["message"]
+                           : json::object();
+            // 有的模型会无视“别再调工具”，这里只取文本，不再进工具循环
+            std::string content;
+            if (msg.contains("content") && msg["content"].is_string())
+                content = msg["content"].get<std::string>();
+            content = trimStr(content);
+            if (content.empty()) return false;
+            reply = content;
+            err.clear();
+            return true;
+        };
+
+        if (aiBlank(reply)) finalize();
+
+        // 收尾调用也失败：至少把“已经查了什么”交代清楚，别丢一个空回答
+        if (aiBlank(reply) && !used.empty()) {
+            std::string names;
+            for (auto& u : used) {
+                std::string n = u.value("name", std::string());
+                if (n.empty() || names.find(n) != std::string::npos) continue;
+                names += (names.empty() ? "" : "、") + n;
+            }
+            reply = "这次问了 " + std::to_string(used.size()) + " 项数据（" + names +
+                    "），但模型在收尾时没有给出总结";
+            if (!err.empty()) reply += "：" + err;
+            reply += "。接口本身是通的，稍后重问同一个问题通常就能拿到结论。";
+            err.clear();
+        }
+        if (aiBlank(reply) && err.empty()) {
+            err = "模型没有返回可读的回答（已调用 " + std::to_string(rounds) + " 轮）";
         }
 
         json resp;
@@ -1585,6 +1814,7 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
             ctx->send(resp.dump(-1, ' ', false, json::error_handler_t::replace));
             return;
         }
+        if (!aiBlank(reply)) reply = trimStr(reply);
         resp["reply"] = reply;
         resp["actions"] = actions;
         resp["tools"] = used;

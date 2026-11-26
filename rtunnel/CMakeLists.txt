@@ -61,6 +61,7 @@ set(RTUNNEL_RELAY_SOURCES
                relay/admin/backend/admin_db_ai.cpp
                relay/admin/backend/api_playbooks.cpp
                relay/admin/backend/api_ai.cpp
+               relay/admin/backend/ai_prompt_library.cpp
                relay/admin/backend/admin_db_metrics_minute.cpp
                relay/admin/backend/event_bus.cpp
                relay/admin/backend/api_events.cpp
@@ -159,6 +160,13 @@ set(RTUNNEL_AGENT_HTML "${CMAKE_CURRENT_SOURCE_DIR}/agent/web/index.html")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RTUNNEL_AGENT_HTML}")
 rtunnel_embed_asset("${RTUNNEL_AGENT_HTML}" kAgentWebBlob "${CMAKE_CURRENT_BINARY_DIR}/generated/agent_web_html.hpp" "agent/web/index.html")
 
+# AI 助手的平台能力提示词库：随二进制发布，改 md 重新构建即可生效
+set(RTUNNEL_AI_PROMPT "${CMAKE_CURRENT_SOURCE_DIR}/relay/admin/backend/ai/prompt_library.md")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${RTUNNEL_AI_PROMPT}")
+rtunnel_embed_asset("${RTUNNEL_AI_PROMPT}" kAiPromptBlob
+                    "${CMAKE_CURRENT_BINARY_DIR}/generated/ai_prompt_library_blob.hpp"
+                    "relay/admin/backend/ai/prompt_library.md")
+
 add_executable(rtunnel-agent ${RTUNNEL_AGENT_SOURCES})
 if (RTUNNEL_AGENT_WEB)
     target_sources(rtunnel-agent PRIVATE agent/agent_web.cpp)
@@ -173,7 +181,8 @@ add_executable(rtunnel-client client/main.cpp client/client_app.cpp client/shell
 add_executable(rtnp-codec-test tests/codec_test.cpp)
 add_executable(rtunnel-endpoint-test tests/endpoint_test.cpp)
 
-target_include_directories(rtunnel-relay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/3rd/sqlite3)
+target_include_directories(rtunnel-relay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/3rd/sqlite3
+                            "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(rtunnel-relay  rtnp rtunnel_sqlite rtunnel_gzip)
 
 if (RTUNNEL_ADMIN_WEB)
