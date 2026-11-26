@@ -99,6 +99,7 @@ const active = computed(() => route.path)
 const activeGroup = computed(() => {
   const p = route.path
   for (const g of items.value) {
+    if (g.flat) continue   // 顶级入口没有可展开的分组
     if (g.items.some((n) => p === n.path || p.startsWith(n.path + '/'))) return g.key
   }
   return ''

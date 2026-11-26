@@ -6,7 +6,7 @@ const h = require('../lib/harness')
   const { page: p, errs } = await h.openPage(b, { viewport: { width: 1440, height: 1000 } })
   await h.login(p)
 
-  await p.goto(h.A + '/#/')
+  await p.goto(h.A + '/#/overview')
   await p.waitForSelector('.panel', { timeout: 20000 })
   await p.waitForTimeout(1000)
 

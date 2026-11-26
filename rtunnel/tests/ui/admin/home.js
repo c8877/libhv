@@ -1,67 +1,52 @@
-// 首页仪表盘：内嵌 AI 助手、快捷提问、模型设置入口、点品牌回首页。
+// 首页：AI 助手对话页（参考 deepseek-chat），仪表盘挪到「概览」。
 const h = require('../lib/harness')
 
 ;(async () => {
   const b = await h.launch()
-  const { page: p, errs } = await h.openPage(b)
+  const { page: p, errs } = await h.openPage(b, { viewport: { width: 1440, height: 900 } })
   await h.login(p)
 
-  // 首页就是概览：助手面板在统计卡片下方
+  // 首页就是对话页：没有仪表盘卡片
   await p.goto(h.A + '/#/')
   await p.waitForSelector('.ai-chat', { timeout: 30000 })
   await p.waitForTimeout(800)
+  h.check('首页是 AI 助手', await p.locator('.ai-chat').isVisible())
+  h.check('首页不再有仪表盘卡片', (await p.locator('.cards').count()) === 0)
+  h.check('首页不再是概览卡片页', (await p.locator('.el-descriptions').count()) === 0)
 
-  h.check('首页有 AI 助手面板', await p.locator('.ai-chat').isVisible())
-  h.check('仪表盘统计仍在', (await p.locator('.cards .stat').count()) >= 4)
-  const head = await p.locator('.ai-chat .panel-head').innerText()
-  h.check('助手在首页不是整页', head.includes('AI 助手') && !(await p.locator('.chat-page').count()),
-    head.slice(0, 80))
-
-  // 快捷提问：未配置模型时应提示去配置，而不是发空请求
+  const greeting = await p.locator('.empty-title').innerText()
+  h.check('有对话页问候语', greeting.includes('rtunnel'), greeting)
   const chips = await p.locator('.ai-chat .chip').allInnerTexts()
-  h.check('首页有快捷提问', chips.length >= 3, chips)
+  h.check('有快捷提问', chips.length >= 3, chips)
+  h.check('消息区没有内部滚动容器', (await p.locator('.ai-chat .msgs .el-scrollbar').count()) === 0)
+
+  const head = await p.locator('.ai-chat .panel-head').innerText()
+  h.check('头部有历史/新对话/设置', /历史/.test(head) && /新对话/.test(head) && /模型设置/.test(head),
+    head.slice(0, 120))
+  h.check('首页不再有全屏按钮', !/全屏/.test(head), head.slice(0, 120))
+  h.check('有设备上下文选择', (await p.locator('.panel-head .el-select').count()) >= 1)
+
+  // 未配置模型：点建议填进输入框并引导去配置，而不是发空请求
   await p.locator('.ai-chat .chip').first().click()
   const box = p.locator('.el-message-box, .el-message, .el-dialog')
   await box.first().waitFor({ timeout: 8000 }).catch(() => {})
   const balloon = await p.locator('.el-message, .el-message-box, .el-dialog').first().innerText().catch(() => '')
   h.check('未配置时引导去配置', /模型|服务商|Key/i.test(balloon), balloon.slice(0, 120))
-  // 如果是设置弹窗，关掉它，避免影响后续
   if (await p.locator('.el-dialog:visible').count()) {
     await p.locator('.el-dialog:visible').getByRole('button', { name: '取消' }).click({ force: true })
     await p.waitForTimeout(400)
   }
-
-  // 等提示自己消失，否则会挡住后面的点击
   await p.waitForSelector('.el-message', { state: 'detached', timeout: 8000 }).catch(() => {})
+  h.check('没配置时输入内容还在', (await p.locator('.composer textarea').inputValue()).length > 0)
+  await p.locator('.composer textarea').fill('')
 
-  // 消息区不是内部小滚动条：气泡直接追加在页面里
-  h.check('消息区没有内部滚动容器', (await p.locator('.ai-chat .msgs .el-scrollbar').count()) === 0)
-
-  // 全屏入口：原地展开，不跳路由、不丢会话
-  const full = await p.locator('.ai-chat .panel-head button').filter({ hasText: '全屏' }).count()
-  h.check('首页助手有全屏入口', full === 1)
-
-  const ta = p.locator('.ai-chat textarea')
-  await ta.fill('未发送的草稿')
-  await p.locator('.ai-chat .panel-head button').filter({ hasText: '全屏' }).first()
-    .dispatchEvent('click')
-  await p.waitForTimeout(800)
-  h.check('全屏后仍在首页', !p.url().includes('#/assistant'), p.url())
-  h.check('全屏后占满主区', await p.locator('.ai-chat.full').isVisible())
-  h.check('全屏后统计卡片收起', !(await p.locator('.cards').isVisible()))
-  h.check('展开后草稿还在（同一个组件实例）',
-    (await p.locator('.ai-chat textarea').inputValue()) === '未发送的草稿')
-  const cpos = await p.locator('.ai-chat.full .composer')
-    .evaluate((el) => getComputedStyle(el).position)
-  const hpos = await p.locator('.ai-chat.full .panel-head')
-    .evaluate((el) => getComputedStyle(el).position)
+  // 长对话时头部/输入框随页面滚，离开底部出现“回到底端”
+  const cpos = await p.locator('.ai-chat .composer').evaluate((el) => getComputedStyle(el).position)
+  const hpos = await p.locator('.ai-chat .panel-head').evaluate((el) => getComputedStyle(el).position)
   h.check('输入框随页面滚动', cpos !== 'sticky' && cpos !== 'fixed', cpos)
   h.check('头部随页面滚动', hpos !== 'sticky' && hpos !== 'fixed', hpos)
-
-  // 造一段长内容：滚上去后出现“回到底端”，点了直接到页面底端
   await p.evaluate(() => {
     const msgs = document.querySelector('.ai-chat .msgs')
-    if (!msgs) return
     const d = document.createElement('div')
     d.id = 'ui-tall'
     d.style.height = '1800px'
@@ -81,30 +66,37 @@ const h = require('../lib/harness')
   h.check('点回到底端直接到页面底端', nearEnd)
   await p.evaluate(() => { const d = document.getElementById('ui-tall'); if (d) d.remove() })
 
-  // 退出全屏：回到仪表盘，草稿和会话都还在
-  await p.locator('.ai-chat .panel-head button').filter({ hasText: '退出全屏' }).first()
-    .dispatchEvent('click')
-  await p.waitForTimeout(700)
-  h.check('退出全屏后卡片回来', await p.locator('.cards').isVisible())
-  h.check('退出全屏后仍是首页', !p.url().includes('#/assistant'), p.url())
-  h.check('退出全屏后草稿还在',
-    (await p.locator('.ai-chat textarea').inputValue()) === '未发送的草稿')
-  await p.locator('.ai-chat textarea').fill('')
+  // 仪表盘在「概览」，不再嵌助手
+  await p.goto(h.A + '/#/overview')
+  await p.waitForSelector('.cards', { timeout: 20000 })
+  h.check('概览有统计卡片', (await p.locator('.cards .stat').count()) >= 4)
+  h.check('概览不再嵌助手', (await p.locator('.ai-chat').count()) === 0)
+
+  // 概览的 AI 诊断 → 回首页并带着问题
+  await p.locator('button', { hasText: 'AI 诊断' }).first().click()
+  await p.waitForTimeout(900)
+  h.check('AI 诊断回到首页', !p.url().includes('#/overview') && (await p.locator('.ai-chat').count()) === 1,
+    p.url())
+  h.check('AI 诊断把问题带进输入框',
+    (await p.locator('.composer textarea').inputValue()).includes('平台巡检'),
+    await p.locator('.composer textarea').inputValue())
+  if (await p.locator('.el-dialog:visible').count()) {
+    await p.locator('.el-dialog:visible').getByRole('button', { name: '取消' }).click({ force: true })
+    await p.waitForTimeout(400)
+  }
 
   // 品牌区回首页：侧栏 logo
+  await p.goto(h.A + '/#/usage')
+  await p.waitForTimeout(500)
   await p.locator('aside.side .logo').dispatchEvent('click')
-  await p.waitForTimeout(600)
-  h.check('点侧栏品牌回首页', /#\/(overview)?$/.test(p.url()), p.url())
+  await p.waitForTimeout(700)
+  h.check('点侧栏品牌回对话首页', /#\/$/.test(p.url()) || p.url().endsWith('#/'), p.url())
+  h.check('回到首页看到助手', await p.locator('.ai-chat').isVisible())
 
   // 手机上品牌在页头
   await p.setViewportSize({ width: 420, height: 820 })
   await p.waitForTimeout(400)
   h.check('手机页头有品牌', await p.locator('.topbar .brand-mini').isVisible())
-  await p.goto(h.A + '/#/usage')
-  await p.waitForTimeout(600)
-  await p.locator('.topbar .brand-mini').dispatchEvent('click')
-  await p.waitForTimeout(600)
-  h.check('手机点品牌回首页', !p.url().includes('#/usage'), p.url())
 
   h.check('无 JS 错误', errs.length === 0, errs)
   await b.close()

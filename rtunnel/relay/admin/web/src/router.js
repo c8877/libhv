@@ -5,7 +5,7 @@ import { setUnauthorizedHandler } from './shared/api.js'
 
 const routes = [
   { path: '/login', component: () => import('./pages/login.vue'), meta: { public: true, title: '登录' } },
-  { path: '/', redirect: '/overview' },
+  { path: '/', component: () => import('./pages/home.vue'), meta: { title: 'AI 助手' } },
   { path: '/overview', component: () => import('./pages/overview.vue'), meta: { title: '概览' } },
   { path: '/agents', component: () => import('./pages/agents/index.vue'), meta: { title: '设备 C' } },
   { path: '/agents/:devid', component: () => import('./pages/agents/[devid].vue'), meta: { title: '设备详情' } },
@@ -20,7 +20,7 @@ const routes = [
   { path: '/access/:id', component: () => import('./pages/access/[id].vue'), meta: { title: '接入账号详情' } },
   { path: '/tokens', component: () => import('./pages/tokens.vue'), meta: { title: 'API Token' } },
   { path: '/guide', component: () => import('./pages/guide.vue'), meta: { title: '使用指南' } },
-  { path: '/assistant', component: () => import('./pages/assistant.vue'), meta: { title: 'AI 助手' } },
+  { path: '/assistant', redirect: '/', meta: { title: 'AI 助手' } },
   { path: '/docs', component: () => import('./pages/docs.vue'), meta: { title: '接口文档' } },
   { path: '/streams', component: () => import('./pages/streams.vue'), meta: { title: '会话' } },
   { path: '/certs', component: () => import('./pages/certs.vue'), meta: { title: '证书' } },
@@ -51,7 +51,12 @@ router.beforeEach(async (to) => {
   await ensureBoot()
   if (!to.meta.public && !auth.me) return { path: '/login', replace: true }
   if (to.path === '/login' && auth.me) return { path: '/', replace: true }
-  if (!to.meta.public && auth.me && !canVisit(to.path, can)) return { path: '/overview', replace: true }
+  if (!to.meta.public && auth.me && !canVisit(to.path, can)) {
+    // 没权限时给一个自己一定进得去的页面，避免 /overview 上反复重定向
+    const fallback = to.path === '/overview' ? '/guide' : '/overview'
+    if (to.path === fallback) return { path: '/guide', replace: true }
+    return { path: fallback, replace: true }
+  }
   document.title = (to.meta.title ? to.meta.title + ' · ' : '') + 'rtunnel'
   return true
 })

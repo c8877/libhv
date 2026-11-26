@@ -1,18 +1,12 @@
 <template>
   <div>
-    <div v-show="!aiFull" class="cards">
+    <div class="cards">
       <div v-for="s in stats" :key="s.label" class="stat">
         <div class="num">{{ s.value }}</div>
         <div class="label">{{ s.label }}</div>
       </div>
     </div>
 
-    <!-- AI 助手：整个管理台的入口都在这里问。
-         “全屏”是原地展开（占满主区），不跳路由——会话气泡继续追加，不丢上下文。 -->
-    <AiChat v-if="can('ai.chat')" ref="chat" :compact="!aiFull" :expanded="aiFull"
-            @expand="aiFull = true" @collapse="aiFull = false" />
-
-    <div v-show="!aiFull">
     <div class="panel">
       <div class="panel-head">
         <h2>运行信息</h2>
@@ -54,20 +48,18 @@
         <div v-if="!events.length" class="muted evt-empty">等待事件…（设备上下线、会话、审计、告警、任务）</div>
       </el-scrollbar>
     </div>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Api } from '@/shared/api.js'
 import { can, overview } from '@/shared/store.js'
+import { useRouter } from 'vue-router'
 import { bytes, duration, time } from '@/shared/utils.js'
-import AiChat from '@/components/AiChat.vue'
 
 const o = ref(overview.data)
-// 助手原地展开：占满主区，但仍是首页、会话仍在同一个组件实例里
-const aiFull = ref(false)
+const router = useRouter()
 const stats = computed(() => {
   const d = o.value || {}
   return [
@@ -156,17 +148,13 @@ function connect() {
   }
 }
 
-// 一键巡检：问题直接交给首页的助手，结论就出现在下面，不用跳页
-const chat = ref(null)
+// 一键巡检：跳到首页的助手，带着问题直接发问
 function diagnose() {
   const q = '请做一次平台巡检：1) 平台总览（在线设备/客户端/会话、告警状态）；' +
     '2) 指出离线设备、版本落后或负载/内存偏高的设备；' +
     '3) 汇总失败的分发/OTA 任务、最近的自愈触发与快过期证书；' +
     '4) 按优先级给出下一步排查建议。只依据工具数据，不要猜测。'
-  aiFull.value = true          // 巡检结论比较长，直接展开看
-  nextTick(() => {
-    if (chat.value) chat.value.ask(q)
-  })
+  router.push({ path: '/', query: { q } })
 }
 
 onMounted(() => {

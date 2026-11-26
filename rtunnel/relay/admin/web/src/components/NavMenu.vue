@@ -6,13 +6,22 @@
     </router-link>
     <el-menu ref="menuRef" :default-active="active" :default-openeds="initialOpen"
              :unique-opened="true" router class="menu">
-      <el-sub-menu v-for="g in items" :key="g.key" :index="g.key">
-        <template #title><span class="nav-group-title">{{ g.label }}</span></template>
-        <el-menu-item v-for="n in g.items" :key="n.path" :index="n.path">
-          <el-icon><component :is="iconOf(n.icon)" /></el-icon>
-          <span>{{ n.label || titleOf(n.path) }}</span>
-        </el-menu-item>
-      </el-sub-menu>
+      <template v-for="g in items" :key="g.key">
+        <!-- flat 组：不折叠，直接一个顶级入口（首页 AI 助手） -->
+        <template v-if="g.flat">
+          <el-menu-item v-for="n in g.items" :key="n.path" :index="n.path" class="nav-flat-item">
+            <el-icon><component :is="iconOf(n.icon)" /></el-icon>
+            <span>{{ n.label || titleOf(n.path) }}</span>
+          </el-menu-item>
+        </template>
+        <el-sub-menu v-else :index="g.key">
+          <template #title><span class="nav-group-title">{{ g.label }}</span></template>
+          <el-menu-item v-for="n in g.items" :key="n.path" :index="n.path">
+            <el-icon><component :is="iconOf(n.icon)" /></el-icon>
+            <span>{{ n.label || titleOf(n.path) }}</span>
+          </el-menu-item>
+        </el-sub-menu>
+      </template>
     </el-menu>
     <div class="side-foot">
       <template v-if="ov">
@@ -87,6 +96,7 @@ defineExpose({
   padding: 4px 0;
   overflow-y: auto;
 }
+.nav-flat-item { margin: 4px 8px 6px; border-radius: 8px; }
 .menu :deep(.el-sub-menu__title) {
   height: 34px;
   line-height: 34px;

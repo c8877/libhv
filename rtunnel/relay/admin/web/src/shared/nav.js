@@ -2,6 +2,14 @@
 // 组标题在 AppLayout 中渲染为可折叠的 el-sub-menu，空组由 navFor() 过滤掉。
 export const NAV_GROUPS = [
   {
+    key: 'home',
+    flat: true,
+    label: '',
+    items: [
+      { path: '/', icon: 'ChatDotRound', label: 'AI 助手', perm: 'ai.chat' },
+    ],
+  },
+  {
     key: 'monitor',
     label: '监控',
     items: [
@@ -20,7 +28,6 @@ export const NAV_GROUPS = [
       { path: '/files', icon: 'FolderOpened', perm: 'repo.read' },
       { path: '/distribute', icon: 'Upload', label: '分发', perm: 'dist.write' },
       { path: '/tasks', icon: 'List', perm: 'dist.read' },
-      { path: '/assistant', icon: 'ChatDotRound', label: 'AI 助手', perm: 'ai.chat' },
       { path: '/operations', icon: 'Tickets', label: '作业', perm: 'device.exec' },
       { path: '/playbooks', icon: 'MagicStick', label: '自愈', perm: 'playbook.read' },
       { path: '/ota', icon: 'Refresh', perm: ['dist.write', 'device.view', 'repo.read'] },

@@ -158,7 +158,7 @@ GitHub Actions (`.github/workflows/CI.yml`): builds and tests on Linux (with Ope
 - 表格排序、表单校验、弹层、tab、分页不属于可放行范围。
 - 设备本地页不要另写页面：管理台与本地页共用 `components/DeviceView.vue`，差异只通过 `mode`、API 适配（`src/local/api.js`）和资源权限处理。`npm run build:local` 生成 `rtunnel/agent/web/index.html`，这是构建产物，不要手改。
 - `shared/web/*.js`（`fs-ui` / `svc-ui` / `storage-ui` / `table-ui`）只作为 Vue 卡片/组件内部的渲染内核；不要再基于它们写页面级表格、表单或弹层。
-- AI 对话只有一份实现 `components/AiChat.vue`：首页仪表盘用 `compact` 嵌入，点「全屏」由父页面切 `:compact="false"` **原地展开**（同一个实例，会话不丢），`/assistant` 常驻全屏（`bind-query`）。不要为首页另写一套聊天界面，也不要用路由跳转实现全屏；对话逻辑、模型设置弹窗都留在该组件里。
+- AI 对话只有一份实现 `components/AiChat.vue`，**登录后的首页 `/` 就是对话页**（`pages/home.vue`），仪表盘在 `/overview`，不要再把助手塞回仪表盘。`/assistant` 只是重定向；侧栏「AI 助手」是 flat 顶级项。不要另写聊天界面，对话逻辑、模型设置弹窗都留在该组件里。
 - 对话消息用普通 `v-for` 追加节点、滚主区 `.page`，不要再套 `el-scrollbar` 做内部滚动；头部和输入框都随页面滚，不许 `position: sticky/fixed`。离开底部时显示右下角「回到底端」浮动按钮（`scrollBottom(true)`），不要用吸底输入框。
 - AI 的平台知识写在 `rtunnel/relay/admin/backend/ai/prompt_library.md`（构建期嵌入）：**新增/修改平台能力时必须同步这份手册**，并保持 `## id | 关键词` 结构；内容指纹会自动让预热备忘失效。回答规则不要写回 `api_ai.cpp` 的大段字符串。
 - 助手不允许“问死”：没有查询工具也要能回答能力问题；工具轮次不是固定 4 轮（24 轮 + 180s 预算），无论怎么截断都要有收尾回答，且不能让用户自己拆问题。

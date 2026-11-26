@@ -1,14 +1,13 @@
 <template>
-  <div ref="root" class="panel ai-chat" :class="{ compact, full: isFull }">
+  <div ref="root" class="ai-chat">
     <div class="panel-head">
-      <h2 v-if="isFull">AI 助手</h2>
-      <span v-else class="mini-title">AI 助手</span>
+      <h2>AI 助手</h2>
       <el-tag v-if="cfg" size="small" :type="cfg.ready ? 'success' : 'warning'">
         {{ cfg.ready ? (providerLabel(cfg.provider) + ' · ' + cfg.model) : '未配置' }}
       </el-tag>
       <span class="spacer" />
       <el-select v-model="devid" clearable filterable placeholder="设备上下文（可选）"
-                 :style="{ width: compact ? '170px' : '210px' }" @change="onDevChange">
+                 :style="{ width: '210px' }" @change="onDevChange">
         <el-option v-for="d in devices" :key="d.devid" :label="d.devid" :value="d.devid">
           <span>{{ d.devid }}</span>
           <el-tag v-if="!d.online" size="small" type="info" class="ml6">离线</el-tag>
@@ -16,8 +15,6 @@
       </el-select>
       <el-button text @click="openHistory">历史{{ sessions.length ? '（' + sessions.length + '）' : '' }}</el-button>
       <el-button text :disabled="!msgs.length" @click="reset">新对话</el-button>
-      <el-button v-if="compact" text @click="expand">全屏</el-button>
-      <el-button v-else-if="expanded" text @click="collapse">退出全屏</el-button>
       <el-button text @click="openSetup">模型设置</el-button>
     </div>
 
@@ -34,24 +31,20 @@
 
     <div class="msgs">
       <div v-if="!msgs.length" class="empty">
-        <div class="empty-title">我可以帮你查这套系统里的实际情况</div>
+        <div class="empty-mark">◈</div>
+        <div class="empty-title">我是 rtunnel 助手</div>
+        <div class="muted empty-lead">
+          设备、会话、任务、证书、费用、权限都能查。要改东西时，我会先给你一张待确认作业卡。
+        </div>
         <div class="chips">
           <div v-for="q in suggest" :key="q" class="chip" @click="ask(q)">{{ q }}</div>
         </div>
         <div class="muted empty-tip">
-          设备、会话、任务、租户、费用、权限组、证书、中继、仓库都能查；
-          你要它改东西时，它会生成一张待确认作业卡（不会自己执行）。
+          也可以直接说“重启一下 nginx”“清理 /tmp 旧包”，我会生成作业卡等你要确认。
         </div>
       </div>
 
-      <!-- 紧凑模式只显示最近几条：老消息在历史里，不在这里挤滚动条 -->
-      <div v-if="hiddenCount > 0" class="more-line">
-        <el-button text size="small" @click="expand">
-          还有 {{ hiddenCount }} 条更早的消息，展开查看
-        </el-button>
-      </div>
-
-      <div v-for="(m, i) in shownMsgs" :key="m._k || i" class="msg" :class="m.role">
+      <div v-for="(m, i) in msgs" :key="m._k || i" class="msg" :class="m.role">
         <div class="bubble">
           <!-- 出错时可能没有正文：把错误显示在气泡里，别让 MarkdownView 只剩“这里还没有内容” -->
           <MarkdownView v-if="m.role === 'assistant' && m.content" :source="m.content" dense />
@@ -134,20 +127,20 @@
       </div>
       <div class="muted compose-hint">
         Enter 发送 · Shift + Enter 换行
-        <span v-if="isFull" class="spacer" />
-        <span v-if="isFull">回答由模型生成，数据来自本平台；变更请走「作业」并走审批</span>
+        <span class="spacer" />
+        <span class="compose-note">回答由模型生成，数据来自本平台；变更请走「作业」并走审批</span>
       </div>
     </div>
 
     <!-- 头部和输入框都随页面滚走，往上翻之后用这个直接回到底端 -->
     <transition name="fade">
-      <el-button v-if="isFull && !atBottom" class="to-bottom" @click="scrollBottom(true)">
+      <el-button v-if="!atBottom" class="to-bottom" @click="scrollBottom(true)">
         <span class="to-bottom-arrow">↓</span> 回到底端
       </el-button>
     </transition>
 
     <!-- 历史会话：最近 10 个在前，可继续往前翻；记录永久保留，只能主动删除 -->
-    <el-drawer v-model="histOpen" :size="compact ? '86%' : '420px'" title="历史会话">
+    <el-drawer v-model="histOpen" size="420px" title="历史会话">
       <div v-loading="histLoading" class="hist">
         <div v-if="!sessions.length && !histLoading" class="muted hist-empty">
           还没有历史会话。提问之后会自动保存，关掉页面也不会丢。
@@ -235,23 +228,19 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Api } from '@/shared/api.js'
 import { ago, time } from '@/shared/utils.js'
 import MarkdownView from '@/components/MarkdownView.vue'
 
 const props = defineProps({
-  // 仪表盘里嵌入时用 compact：只显示最近几条、带“全屏”入口
-  compact: { type: Boolean, default: false },
-  // 仪表盘内原地展开：占满主区，但不跳路由、不丢会话
-  expanded: { type: Boolean, default: false },
-  // 从概览“AI 诊断”带过来的初始问题；只有全屏页绑定 query
+  // 从概览“AI 诊断”带过来的初始问题：进页面后直接发问
   bindQuery: { type: Boolean, default: false },
 })
-const emit = defineEmits(['expand', 'collapse'])
 
 const route = useRoute()
+const router = useRouter()
 
 const SUGGEST_FULL = [
   '平台现在有什么异常？离线设备、失败任务、告警一起说',
@@ -261,23 +250,7 @@ const SUGGEST_FULL = [
   '有没有失败的作业或自愈规则触发？',
   '最近 6 小时有没有设备的负载异常升高？',
 ]
-const SUGGEST_COMPACT = [
-  '平台现在有什么异常？',
-  '哪些证书快过期了？',
-  '最近谁改过权限？',
-  '这个月大概多少钱？',
-]
-
-const isFull = computed(() => !props.compact || props.expanded)
-const suggest = computed(() => (isFull.value ? SUGGEST_FULL : SUGGEST_COMPACT))
-
-// 紧凑模式只显示最近 4 条；老消息不在这里挤滚动条，去“历史”或展开看。
-// 展开后所有消息按顺序追加到页面里，由主区（.page）滚动。
-const COMPACT_KEEP = 4
-const shownMsgs = computed(() =>
-  isFull.value ? msgs.value : msgs.value.slice(-COMPACT_KEEP))
-const hiddenCount = computed(() =>
-  isFull.value ? 0 : Math.max(0, msgs.value.length - COMPACT_KEEP))
+const suggest = SUGGEST_FULL
 
 const cfg = ref(null)
 const devices = ref([])
@@ -444,25 +417,6 @@ async function scrollBottom(force = false) {
   if (!box) return
   const near = box.scrollHeight - box.scrollTop - box.clientHeight < 220
   if (force || near) box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' })
-}
-
-function expand() {
-  if (!props.compact) return
-  emit('expand')
-  nextTick(() => {
-    bindPageScroll()
-    scrollBottom(true)
-    const ta = root.value && root.value.querySelector('textarea')
-    if (ta) ta.focus()
-  })
-}
-
-function collapse() {
-  emit('collapse')
-  nextTick(() => {
-    const box = root.value && root.value.closest('.page')
-    if (box) box.scrollTo({ top: 0, behavior: 'smooth' })
-  })
 }
 
 async function loadCfg() {
@@ -729,7 +683,13 @@ function openOps() {
 function applyQuery() {
   if (!props.bindQuery) return
   const q = route.query.q
-  if (q) input.value = String(q)
+  if (!q) return
+  input.value = String(q)
+  // 用掉 query：刷新不会重复发问
+  const rest = { ...route.query }
+  delete rest.q
+  router.replace({ path: route.path, query: rest })
+  nextTick(() => ask(input.value))
 }
 watch(() => route.query.q, applyQuery)
 
@@ -750,43 +710,58 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.ai-chat { display: flex; flex-direction: column; min-width: 0; }
-
-/* 展开后原地占满主区：不跳路由、不丢会话。头部、消息、输入框都在同一个
-   文档流里，滚的是主区（.page），不是内部小窗口；往上翻时头部/输入框一起走。 */
-.ai-chat.full {
-  padding: 0;
-  margin-bottom: 0;
+/* 首页即对话页：不套仪表盘卡片，整块居中，头部/消息/输入框同一文档流 */
+.ai-chat {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  width: 100%;
+  max-width: 920px;
+  margin: 0 auto;
   min-height: calc(100vh - 64px - 2 * var(--page-pad));
 }
-.ai-chat.full .panel-head {
-  margin: 0;
-  padding: 12px 18px;
-  background: var(--el-bg-color);
+.ai-chat .panel-head h2 { white-space: nowrap; }
+.ai-chat .panel-head {
+  margin: 0 0 4px;
+  padding: 4px 0 14px;
   border-bottom: 1px solid var(--el-border-color-lighter);
-  border-radius: var(--app-radius) var(--app-radius) 0 0;
 }
-.ai-chat.full .msgs {
+.ai-chat .msgs {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 16px 18px 8px;
+  padding: 18px 0 8px;
 }
-/* 消息列居中，和常见聊天页一样；空状态在可用高度里居中 */
-.ai-chat.full .msg { width: 100%; max-width: 880px; margin-left: auto; margin-right: auto; }
-.ai-chat.full .empty { width: 100%; max-width: 780px; margin: auto; }
-.ai-chat.full .composer {
-  margin-top: auto;
-  padding: 10px 18px 12px;
-  background: var(--el-bg-color);
-  border-top: 1px solid var(--el-border-color-lighter);
-  border-radius: 0 0 var(--app-radius) var(--app-radius);
+/* 消息列限宽居中；空状态在可用高度里居中 */
+.ai-chat .msg { width: 100%; max-width: 880px; margin-left: auto; margin-right: auto; }
+.ai-chat .empty {
+  width: 100%;
+  max-width: 760px;
+  margin: auto;
+  padding: 24px 8px 48px;
+  text-align: center;
+}
+.empty-mark { font-size: 30px; color: var(--el-color-primary); line-height: 1; }
+.empty-title { font-size: 22px; font-weight: 650; margin: 14px 0 8px; letter-spacing: 0.01em; }
+.empty-lead { font-size: 13.5px; line-height: 1.8; }
+.ai-chat .empty .chips { justify-content: center; margin: 22px 0 12px; }
+.empty-tip { font-size: 12.5px; }
+.ai-chat .composer {
+  width: 100%;
+  max-width: 820px;
+  margin: auto auto 0;
+  padding: 10px 0 12px;
 }
 @media (max-width: 599px) {
-  .ai-chat.full { min-height: calc(100vh - 56px - 2 * var(--page-pad)); }
-  .ai-chat.full .panel-head { padding: 10px 12px; }
-  .ai-chat.full .msgs { padding: 12px 12px 6px; }
-  .ai-chat.full .composer { padding: 8px 12px 10px; }
+  .ai-chat { min-height: calc(100vh - 56px - 2 * var(--page-pad)); }
+  /* 手机上头部两行：标题+按钮一行，设备上下文单独一行 */
+  .ai-chat .panel-head { flex-wrap: wrap; row-gap: 8px; padding: 2px 0 10px; }
+  .ai-chat .panel-head .el-tag, .ai-chat .panel-head .spacer { display: none; }
+  .ai-chat .panel-head .el-select { order: 10; width: 100% !important; }
+  .compose-note { display: none; }
+  .ai-chat .msgs { padding: 12px 0 6px; }
+  .ai-chat .composer { padding: 8px 0 10px; }
+  .empty-title { font-size: 20px; }
 }
 .to-bottom {
   position: fixed;
@@ -805,7 +780,6 @@ onBeforeUnmount(() => {
 @media (max-width: 599px) {
   .to-bottom { right: 14px; bottom: 18px; }
 }
-.mini-title { font-size: 14px; font-weight: 650; }
 .setup { margin: 8px 0 4px; }
 .setup-text { margin: 4px 0 8px; font-size: 12.5px; }
 .opt-model { float: right; font-size: 12px; }
@@ -813,8 +787,6 @@ onBeforeUnmount(() => {
 .hint code { background: var(--el-fill-color); padding: 1px 4px; border-radius: 3px; }
 .test { margin-top: 4px; font-size: 12.5px; color: var(--el-color-success); word-break: break-all; }
 .test.bad { color: var(--el-color-danger); }
-.msgs { padding: 4px 2px 0; }
-.more-line { display: flex; justify-content: center; padding: 2px 0 6px; }
 .hist { display: flex; flex-direction: column; gap: 6px; min-height: 60px; }
 .hist-empty { padding: 12px 2px; font-size: 12.5px; line-height: 1.7; }
 .hist-item {
@@ -871,8 +843,8 @@ onBeforeUnmount(() => {
   background: var(--el-color-primary-light-8);
   border: 1px solid var(--el-color-primary-light-7);
 }
-.ai-chat.full .bubble { max-width: min(860px, 92%); }
-.ai-chat.full .msg.user .bubble { max-width: min(680px, 76%); }
+.ai-chat .bubble { max-width: min(860px, 92%); }
+.ai-chat .msg.user .bubble { max-width: min(680px, 76%); }
 .plain { white-space: pre-wrap; }
 .bubble :deep(.md-code) { margin: 8px 0; }
 .acts { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
