@@ -857,6 +857,17 @@ export const DOCS = [
     resp: `{ "ok": true, "arch": "x86_64", "uid": 0, "systemd": true, "free_kb": 8123456, "installed": "none", "raw": "..." }`,
   },
   {
+    group: 'ops', method: 'POST', path: '/api/v1/deploy/scan', minRole: 'manager',
+    summary: '扫描私有网段里开着 SSH 的主机',
+    note: 'relay 上有 nmap 时用 `nmap -Pn -T4 --open -p<port>`，没有则退回内置 TCP 连接扫描并读 SSH 横幅；' +
+      '只接受私有网段（10/8、172.16/12、192.168/16、127/8、169.254/16、100.64/10），单次最多 1024 个地址，掩码 /16~-32',
+    body: `{ "cidr": "192.168.1.0/24", "port": 22, "timeout_ms": 800 }`,
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H "Content-Type: application/json" \
+  -d '{"cidr":"192.168.1.0/24","port":22}' "$RT/api/v1/deploy/scan"`,
+    resp: `{ "engine": "nmap", "cidr": "192.168.1.0/24", "port": 22, "scanned": 256, "duration_ms": 4310,
+  "items": [{ "host": "192.168.1.20", "port": 22, "service": "ssh", "known": false }] }`,
+  },
+  {
     group: 'ops', method: 'GET', path: '/api/v1/deploy/packages', minRole: 'manager',
     summary: 'deploy/ 目录下的安装包（自动识别组件/版本/架构）',
     note: '包名约定 `rtunnel-<component>[-<variant>]-<version>-<arch>.tar.gz`',

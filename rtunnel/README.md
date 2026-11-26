@@ -132,6 +132,9 @@ build/bin/rtunnel-client --server r1.example.com --server r2.example.com --port 
 「运维 → 部署」是设备接入前的入口：登记一台能 SSH 登录的主机，平台直接把 agent / relay /
 client 装上去，不用先手工 scp。
 
+- **扫描网段**：不知道要装哪台机器时，填一个私有网段（最多 1024 个地址，如 `192.168.1.0/24`），
+  relay 用 nmap（`-Pn`，跳过 ping）扫出开着 SSH 的主机；没装 nmap 的精简镜像退回内置 TCP
+  连接扫描。结果里已登记的主机会标出来，新主机点「登记」直接带地址和端口进表单
 - **主机**：地址 + 端口 + 登录用户 + 密码或私钥，可勾 sudo（非 root 账号）。凭据只存在
   relay 本机 `<admin.db 同目录>/deploy/`（0600），接口只回「有没有存过」，从不回显
 - **测试连接**：返回架构、是否 root、有没有 systemd、`/tmp` 剩余空间、已装版本；

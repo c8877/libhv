@@ -262,6 +262,7 @@ private:
     void handleDeployHostUpdate(const HttpContextPtr& ctx);
     void handleDeployHostDelete(const HttpContextPtr& ctx);
     void handleDeployProbe(const HttpContextPtr& ctx);
+    void handleDeployScan(const HttpContextPtr& ctx);
     void handleDeployPackages(const HttpContextPtr& ctx);
     void handleDeployJobCreate(const HttpContextPtr& ctx);
     void handleDeployJobs(const HttpContextPtr& ctx);

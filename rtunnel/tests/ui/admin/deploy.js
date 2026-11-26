@@ -41,6 +41,20 @@ const JOBS = [
       body: JSON.stringify({ ok: true, arch: 'x86_64', uid: 0, systemd: true, free_kb: 8123456, installed: 'none' }),
     })
   })
+  let scanBody = null
+  await p.route(/\/api\/v1\/deploy\/scan$/, (route) => {
+    scanBody = JSON.parse(route.request().postData() || '{}')
+    route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({
+        engine: 'nmap', cidr: scanBody.cidr, port: scanBody.port, scanned: 256, duration_ms: 4310,
+        items: [
+          { host: '10.0.0.21', port: 22, service: 'ssh', known: true, host_id: 1 },
+          { host: '10.0.0.33', port: 22, service: 'ssh', known: false },
+        ],
+      }),
+    })
+  })
   await p.route(/\/api\/v1\/deploy\/hosts(\?|$)/, (route) => {
     if (route.request().method() === 'GET') {
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: HOSTS }) })
@@ -94,6 +108,31 @@ const JOBS = [
     (await p.locator('.dep-form input').nth(2).inputValue() || '').length > 0)
   h.check('探测到目标架构', (await p.locator('.probe').innerText()).includes('x86_64'))
   h.check('探测到 systemd', (await p.locator('.probe').innerText()).includes('systemd'))
+
+  // 网段扫描：默认用已选主机的 /24，结果里区分已登记/待登记
+  await p.locator('.dep-form button', { hasText: '扫描网段' }).click()
+  await p.waitForTimeout(500)
+  const scanDlg = p.locator('.el-dialog:visible').filter({ hasText: '扫描网段里的 SSH 主机' })
+  h.check('打开发扫描对话框', await scanDlg.count() === 1)
+  const cidrVal = await scanDlg.locator('input').first().inputValue()
+  h.check('默认网段取自已选主机', cidrVal === '10.0.0.0/24', cidrVal)
+  await scanDlg.locator('button', { hasText: '开始扫描' }).click()
+  await p.waitForTimeout(800)
+  h.check('扫描请求带上网段与端口', scanBody && scanBody.cidr === '10.0.0.0/24' && scanBody.port === 22, scanBody)
+  const scanText = await scanDlg.locator('.el-table__body').innerText()
+  h.check('结果里标出已登记主机', scanText.includes('10.0.0.21') && scanText.includes('已登记'), scanText)
+  h.check('结果里列出新主机', scanText.includes('10.0.0.33') && scanText.includes('待登记'), scanText)
+  h.check('显示扫描引擎与耗时', (await scanDlg.innerText()).includes('nmap'), await scanDlg.innerText())
+  // 登记扫到的主机：地址与端口直接带进表单
+  await scanDlg.locator('.el-table__body tr', { hasText: '10.0.0.33' })
+    .locator('button', { hasText: '登记' }).click()
+  await p.waitForTimeout(600)
+  const hostDlg = p.locator('.el-dialog:visible').filter({ hasText: '登记主机' })
+  h.check('扫描后直接打开登记表单', await hostDlg.count() === 1)
+  h.check('扫到的地址已填入', await hostDlg.locator('input').nth(1).inputValue() === '10.0.0.33',
+    await hostDlg.locator('input').nth(1).inputValue())
+  await hostDlg.locator('button', { hasText: '取消' }).click()
+  await p.waitForTimeout(400)
 
   // 切到 relay：只留管理端口/初始令牌
   await p.locator('.el-radio-button', { hasText: 'relay（中继节点）' }).first().click()

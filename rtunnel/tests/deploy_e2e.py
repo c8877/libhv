@@ -194,6 +194,18 @@ def main():
                        {"host": "10.0.0.1", "username": "u;rm -rf /", "secret": "s"})
         e2e.check("deploy: 非法用户名被拒", code == 400, "code=%d r=%s" % (code, r))
 
+        # 扫描参数边界
+        code, r = call(op, base, "/api/v1/deploy/scan", {"cidr": "8.8.8.0/24"})
+        e2e.check("deploy: 扫描公网段被拒", code == 400 and "私有" in str(r),
+                  "code=%d r=%s" % (code, r))
+        code, r = call(op, base, "/api/v1/deploy/scan", {"cidr": "10.0.0.0/16"})
+        e2e.check("deploy: 扫描过大网段被拒", code == 400 and "太大" in str(r),
+                  "code=%d r=%s" % (code, r))
+        code, r = call(op, base, "/api/v1/deploy/scan", {"cidr": "10.0.0.0/33"})
+        e2e.check("deploy: 扫描非法掩码被拒", code == 400, "code=%d r=%s" % (code, r))
+        code, r = call(op, base, "/api/v1/deploy/scan", {"cidr": "not-a-cidr"})
+        e2e.check("deploy: 扫描非法地址被拒", code == 400, "code=%d r=%s" % (code, r))
+
         if use_ssh:
             with open(key_path) as f:
                 keytext = f.read()
@@ -215,6 +227,42 @@ def main():
             e2e.check("deploy: 列表不回显凭据",
                       code == 200 and "secret" not in row and row.get("secret_set") is True,
                       str(row.keys()))
+
+            # 2.5) 网段扫描：私有 sshd 就在 127.0.0.1:<ssh_port>
+            code, sc = call(op, base, "/api/v1/deploy/scan",
+                            {"cidr": "127.0.0.1/32", "port": ssh_port})
+            hit = [i for i in (sc.get("items") or [])
+                   if i.get("host") == "127.0.0.1" and i.get("port") == ssh_port]
+            # 非 22 端口时 nmap 只能报 tcp（服务名来自端口库），SSH 由横幅确认见下面的 TCP 扫描
+            e2e.check("deploy: 扫描到本机 sshd",
+                      code == 200 and len(hit) == 1 and hit[0].get("service") in ("ssh", "tcp"),
+                      "code=%d r=%s" % (code, str(sc)[:300]))
+            e2e.check("deploy: 扫到的主机标为已登记",
+                      bool(hit) and hit[0].get("known") is True and
+                      hit[0].get("host_id") == info["host"], str(hit)[:200])
+
+            # 强制内置 TCP 扫描（没装 nmap 的镜像走的就是这条）
+            code, sc2 = call(op, base, "/api/v1/deploy/scan",
+                             {"cidr": "127.0.0.1/32", "port": ssh_port, "engine": "tcp"})
+            e2e.check("deploy: 内置 TCP 扫描读到 SSH 横幅",
+                      code == 200 and sc2.get("engine") == "tcp" and
+                      any(i["host"] == "127.0.0.1" and i.get("service") == "ssh"
+                          for i in sc2.get("items") or []),
+                      "code=%d r=%s" % (code, str(sc2)[:300]))
+
+            if shutil.which("nmap"):
+                code, sc3 = call(op, base, "/api/v1/deploy/scan",
+                                 {"cidr": "127.0.0.1/32", "port": ssh_port, "engine": "nmap"})
+                e2e.check("deploy: nmap 扫描可用",
+                          code == 200 and sc3.get("engine") == "nmap" and
+                          any(i["host"] == "127.0.0.1" for i in sc3.get("items") or []),
+                          "code=%d r=%s" % (code, str(sc3)[:300]))
+
+            # 关闭的端口：能扫完，但没有结果
+            code, sc4 = call(op, base, "/api/v1/deploy/scan",
+                             {"cidr": "127.0.0.1/32", "port": e2e.free_port()})
+            e2e.check("deploy: 没有 SSH 时返回空列表",
+                      code == 200 and sc4.get("items") == [], "code=%d r=%s" % (code, str(sc4)[:200]))
 
             # 3) 探测
             code, pr = call(op, base, "/api/v1/deploy/hosts/%d/probe" % info["host"], {}, )

@@ -21,6 +21,7 @@
                 </el-option>
               </el-select>
               <el-button @click="openHost()">登记新主机</el-button>
+              <el-button @click="openScan">扫描网段</el-button>
               <el-button :disabled="!form.host_id" :loading="probing" @click="probe">测试连接</el-button>
             </div>
           </el-form-item>
@@ -134,6 +135,7 @@
         <div class="bar">
           <span class="muted">凭据只存在 relay 本机（0600），接口不会回显密码或私钥</span>
           <span class="spacer" />
+          <el-button @click="openScan">扫描网段</el-button>
           <el-button type="primary" @click="openHost()">登记主机</el-button>
         </div>
         <el-table :data="hosts" v-loading="loadingHosts">
@@ -216,6 +218,63 @@
         </el-table>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- 网段扫描 -->
+    <el-dialog v-model="scanDlg" title="扫描网段里的 SSH 主机" width="660px">
+      <el-form inline class="scan-form" @submit.prevent>
+        <el-form-item label="网段">
+          <el-input v-model="scanForm.cidr" placeholder="192.168.1.0/24" class="w240" />
+        </el-form-item>
+        <el-form-item label="端口">
+          <el-input-number v-model="scanForm.port" :min="1" :max="65535"
+                           controls-position="right" class="w120" />
+        </el-form-item>
+        <el-button type="primary" :loading="scanning" @click="doScan">开始扫描</el-button>
+      </el-form>
+      <div class="muted scan-hint">
+        在 relay 主机上跑 nmap（-Pn -T4，只探这一个端口）；没装 nmap 的精简镜像是内置 TCP 连接 +
+        读 SSH 横幅。只允许私有网段，最多 1024 个地址。
+      </div>
+      <el-alert v-if="scanError" :title="scanError" type="error" :closable="false" show-icon />
+      <template v-if="scanResult">
+        <div class="muted scan-sum">
+          {{ scanResult.engine === 'nmap' ? 'nmap' : '内置 TCP' }} ·
+          扫了 {{ scanResult.scanned }} 个地址 · 用时
+          {{ (scanResult.duration_ms / 1000).toFixed(1) }} 秒 ·
+          找到 {{ scanResult.items.length }} 台
+        </div>
+        <el-table :data="scanResult.items" size="small" max-height="320">
+          <el-table-column label="地址" width="150">
+            <template #default="{ row }"><span class="mono">{{ row.host }}</span></template>
+          </el-table-column>
+          <el-table-column label="端口" width="90">
+            <template #default="{ row }"><span class="mono">{{ row.port }}</span></template>
+          </el-table-column>
+          <el-table-column label="服务" width="100">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.service === 'ssh' ? 'success' : 'info'" effect="plain">
+                {{ row.service }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="110">
+            <template #default="{ row }">
+              <span v-if="row.known" class="muted">已登记</span>
+              <span v-else>待登记</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作">
+            <template #default="{ row }">
+              <el-button v-if="row.known" link type="primary" @click="scanDeploy(row)">去部署</el-button>
+              <el-button v-else link type="primary" @click="scanAdd(row)">登记</el-button>
+            </template>
+          </el-table-column>
+          <template #empty>
+            <el-empty description="这个网段没有开着该端口的主机" :image-size="60" />
+          </template>
+        </el-table>
+      </template>
+    </el-dialog>
 
     <!-- 主机表单 -->
     <el-dialog v-model="hostDlg" :title="hostForm.id ? '编辑主机' : '登记主机'" width="560px">
@@ -440,6 +499,62 @@ async function probeHost(row) {
 function deployOn(row) {
   form.host_id = row.id
   tab.value = 'new'
+  onHostChange()
+}
+
+// ---------------------------------------------------------------- 网段扫描
+const scanDlg = ref(false)
+const scanning = ref(false)
+const scanError = ref('')
+const scanResult = ref(null)
+const scanForm = reactive({ cidr: '', port: 22 })
+
+// 用已选主机（或第一台）的 /24 当默认网段，省得手敲
+function guessCidr() {
+  const h = hosts.value.find((x) => x.id === form.host_id) || hosts.value[0]
+  const m = h && /^(\d+\.\d+\.\d+)\.\d+$/.exec(h.host || '')
+  return m ? `${m[1]}.0/24` : ''
+}
+
+function openScan() {
+  scanError.value = ''
+  scanResult.value = null
+  if (!scanForm.cidr) scanForm.cidr = guessCidr()
+  scanDlg.value = true
+}
+
+async function doScan() {
+  const cidr = scanForm.cidr.trim()
+  if (!cidr) {
+    ElMessage.warning('先填要扫的网段')
+    return
+  }
+  scanning.value = true
+  scanError.value = ''
+  scanResult.value = null
+  try {
+    scanResult.value = await Api.post('/api/v1/deploy/scan', { cidr, port: scanForm.port })
+    if (scanResult.value.items.length === 0) ElMessage.info('这个网段没有开着该端口的主机')
+  } catch (e) {
+    scanError.value = e.message
+  } finally {
+    scanning.value = false
+  }
+}
+
+// 扫到的主机直接带进登记表单，省掉再敲一遍地址
+function scanAdd(row) {
+  scanDlg.value = false
+  openHost()
+  hostForm.name = row.host
+  hostForm.host = row.host
+  hostForm.port = row.port
+}
+
+function scanDeploy(row) {
+  scanDlg.value = false
+  tab.value = 'new'
+  form.host_id = row.host_id
   onHostChange()
 }
 
@@ -685,6 +800,10 @@ onBeforeUnmount(stopPoll)
 .job-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .job-meta { margin-bottom: 12px; }
 .job-err { margin-bottom: 10px; }
+.w120 { width: 120px; }
+.scan-form { margin-bottom: 4px; }
+.scan-hint { line-height: 1.7; margin-bottom: 12px; }
+.scan-sum { margin: 4px 0 10px; }
 .log {
   background: var(--el-fill-color-light);
   border-radius: 8px;

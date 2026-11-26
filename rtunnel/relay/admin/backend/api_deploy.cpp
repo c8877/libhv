@@ -9,6 +9,7 @@
 // 密码和私钥都在进程内完成认证，sudo 的密码直接写进通道 stdin。
 #include "admin_server.hpp"
 #include "deploy_ssh.hpp"
+#include "deploy_scan.hpp"
 #include "hash_util.hpp"
 #include "common/logging.hpp"
 #include "cpputil/json.hpp"
@@ -548,6 +549,63 @@ void AdminServer::handleDeployProbe(const HttpContextPtr& ctx) {
     db_.deployHostMark(id, "ok");
     auditEx("deploy.probe", "deploy_host", std::to_string(id), "ok",
             "arch=" + out.value("arch", std::string()));
+    ctx->send(out.dump());
+}
+
+// 扫描网段里开着 SSH 的主机：nmap 优先，没有 nmap 的镜像退回内置 TCP 扫描
+void AdminServer::handleDeployScan(const HttpContextPtr& ctx) {
+    auto req = json::parse(ctx->body(), nullptr, false);
+    if (req.is_discarded() || !req.is_object()) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"bad json\"}");
+        return;
+    }
+    std::string cidr = dTrim(req.value("cidr", std::string()));
+    int port = req.value("port", 22);
+    int timeout_ms = req.value("timeout_ms", 800);
+    std::string engine = req.value("engine", std::string("auto"));
+    if (engine != "nmap" && engine != "tcp") engine = "auto";
+    if (port < 1 || port > 65535) port = 22;
+    auto r = deployScanSubnet(cidr, port, timeout_ms, engine);
+    if (!r.ok) {
+        json out;
+        out["error"] = r.error;
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send(out.dump());
+        return;
+    }
+    // 已经登记过的主机标出来，页面上就不用重复添加
+    std::map<std::string, long long> known;
+    std::string hosts_raw;
+    if (db_.deployHostList(hosts_raw)) {
+        auto hj = json::parse(hosts_raw, nullptr, false);
+        if (hj.is_object() && hj.contains("items")) {
+            for (auto& h : hj["items"]) {
+                known[h.value("host", std::string()) + ":" +
+                      std::to_string(h.value("port", 22))] = h.value("id", (long long)0);
+            }
+        }
+    }
+    json items = json::array();
+    for (auto& h : r.items) {
+        json o;
+        o["host"] = h.host;
+        o["port"] = h.port;
+        o["service"] = h.service;
+        auto it = known.find(h.host + ":" + std::to_string(h.port));
+        o["known"] = (it != known.end());
+        if (it != known.end()) o["host_id"] = it->second;
+        items.push_back(o);
+    }
+    json out;
+    out["engine"] = r.engine;
+    out["cidr"] = cidr;
+    out["port"] = port;
+    out["scanned"] = r.scanned;
+    out["duration_ms"] = r.duration_ms;
+    out["items"] = items;
+    auditEx("deploy.scan", "deploy_host", cidr, "ok",
+            "engine=" + r.engine + " found=" + std::to_string(items.size()));
     ctx->send(out.dump());
 }
 

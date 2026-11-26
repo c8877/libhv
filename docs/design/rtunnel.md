@@ -844,8 +844,16 @@ SSH 地址与凭据，平台直接连过去装 agent/relay/client。
 - **安装包来源**：仓库 `deploy/` 目录。页面可以分片上传（复用 `/api/v1/files` 的分片协议，
   但固定落 `deploy/`，只需要 `deploy.write`），文件名约定
   `rtunnel-<component>[-<variant>]-<version>-<arch>.tar.gz`，列表接口从中解析组件/版本/架构。
+- **网段扫描**（`POST /api/v1/deploy/scan`，`relay/admin/backend/deploy_scan.cpp`）：登记主机前
+  先找出网段里开着 SSH 的机器，扫到的地址直接带进登记表单。relay 上装了 nmap 就用
+  `nmap -Pn -n -p<port> --open -T4 --max-retries 1 --host-timeout 4s -oG -`（`-Pn` 避免屏蔽 ICMP
+  的主机被漏掉；`-n` 不反解 DNS）；没有 nmap 的精简镜像/静态版退回内置的非阻塞 TCP connect
+  扫描（128 并发、读 `SSH-` 横幅判服务），两者结果结构一致，`engine` 字段标明实际用的哪条。
+  只接受私有网段（10/8、172.16/12、192.168/16、127/8、169.254/16、100.64/10），单次最多 1024
+  个地址，拒 /15 及更大；`engine=nmap` 时没有 nmap 直接报错，而不是悄悄换成内置扫描。
+  扫描结果会和已登记的 host:port 比对，回 `known`/`host_id`，避免重复登记。
 
-权限：`deploy.read`（看主机与作业）、`deploy.write`（增删改主机、上传包、提交/取消作业）。
+权限：`deploy.read`（看主机与作业、扫描网段）、`deploy.write`（增删改主机、上传包、提交/取消作业）。
 
 ### 13.10 用量与配额（按量计费底座）
 

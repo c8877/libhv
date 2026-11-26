@@ -61,6 +61,7 @@ void AdminServer::registerRoutes() {
     access("deploy.write", "PUT", "/api/v1/deploy/hosts/:id", &AdminServer::handleDeployHostUpdate);
     access("deploy.write", "DELETE", "/api/v1/deploy/hosts/:id", &AdminServer::handleDeployHostDelete);
     access("deploy.read", "POST", "/api/v1/deploy/hosts/:id/probe", &AdminServer::handleDeployProbe);
+    access("deploy.read", "POST", "/api/v1/deploy/scan", &AdminServer::handleDeployScan);
     access("deploy.read", "GET", "/api/v1/deploy/packages", &AdminServer::handleDeployPackages);
     access("deploy.read", "GET", "/api/v1/deploy/jobs", &AdminServer::handleDeployJobs);
     access("deploy.read", "GET", "/api/v1/deploy/jobs/:id", &AdminServer::handleDeployJobGet);
