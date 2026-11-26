@@ -2,48 +2,68 @@
   <div class="panel">
     <div class="panel-head">
       <h2>部署</h2>
-      <span class="muted">通过 SSH / SCP 把 agent、relay、client 直接装到内网主机</span>
+      <span class="muted">用 SSH / SFTP 把 agent、relay、client 装到内网主机</span>
       <span class="spacer" />
-      <el-button @click="reload">刷新</el-button>
+      <el-button @click="openScan">扫描网段</el-button>
+      <el-button @click="openHost()">登记主机</el-button>
+      <el-button :loading="refreshing" @click="reload">刷新</el-button>
     </div>
 
     <el-tabs v-model="tab" @tab-change="onTab">
-      <!-- ------------------------------------------------ 新建部署 -->
-      <el-tab-pane label="新建部署" name="new">
-        <el-form ref="formRef" :model="form" :rules="rules" label-width="108px" class="dep-form">
-          <el-form-item label="目标主机" prop="host_id">
-            <div class="row">
-              <el-select v-model="form.host_id" placeholder="选择一台已登记的主机" class="w300"
-                         @change="onHostChange">
-                <el-option v-for="h in hosts" :key="h.id" :value="h.id" :label="hostLabel(h)">
-                  <span class="mono">{{ h.username }}@{{ h.host }}:{{ h.port }}</span>
-                  <span class="muted opt-note">{{ h.name }}</span>
-                </el-option>
-              </el-select>
-              <el-button @click="openHost()">登记新主机</el-button>
-              <el-button @click="openScan">扫描网段</el-button>
-              <el-button :disabled="!form.host_id" :loading="probing" @click="probe">测试连接</el-button>
-            </div>
+      <!-- ------------------------------------------------ 部署 -->
+      <el-tab-pane label="部署" name="new">
+        <el-form ref="formRef" :model="form" :rules="rules" label-width="104px" class="dep-form">
+          <div class="sec"><span class="sec-no">1</span>目标主机
+            <span class="muted">选一台登记过的主机，选中会自动探测环境</span>
+          </div>
+
+          <el-form-item label="主机" prop="host_id">
+            <el-select v-model="form.host_id" placeholder="选择主机，或先扫描网段 / 登记新主机"
+                       class="w340" filterable @change="onHostChange">
+              <el-option v-for="h in hosts" :key="h.id" :value="h.id" :label="hostLabel(h)">
+                <span class="dot" :class="hostDot(h)">{{ hostStateText(h) }}</span>
+                <span class="mono">{{ h.name || h.host }}</span>
+                <span class="muted opt-note">{{ h.username }}@{{ h.host }}:{{ h.port }}</span>
+              </el-option>
+            </el-select>
+            <el-button :disabled="!form.host_id" :loading="probing" @click="probe">测试连接</el-button>
           </el-form-item>
 
-          <el-form-item v-if="probeResult" label="目标环境">
+          <el-form-item v-if="form.host_id" label="目标环境">
             <div class="probe">
-              <el-tag v-if="probeResult.ok" type="success" size="small">可连接</el-tag>
-              <el-tag v-else type="danger" size="small">连接失败</el-tag>
-              <template v-if="probeResult.ok">
-                <span class="mono">{{ probeResult.arch || '?' }}</span>
-                <span class="muted">{{ probeResult.systemd ? 'systemd' : '无 systemd' }}</span>
-                <span class="muted">{{ probeResult.uid === 0 ? 'root 登录' : '非 root（需要 sudo）' }}</span>
-                <span class="muted">/tmp 剩余 {{ Math.round((probeResult.free_kb || 0) / 1024) }} MiB</span>
-                <span v-if="probeResult.installed && probeResult.installed !== 'none'" class="muted">
-                  已装：{{ probeResult.agent_status || probeResult.relay_status || probeResult.installed }}
-                </span>
+              <template v-if="probing">
+                <span class="muted">正在连接目标主机…</span>
               </template>
-              <span v-else class="err-text">{{ probeResult.error }}</span>
+              <template v-else-if="probeResult && probeResult.ok">
+                <el-tag type="success" size="small">可连接</el-tag>
+                <span class="mono">{{ probeResult.arch || '架构未知' }}</span>
+                <el-tag size="small" effect="plain" :type="probeResult.systemd ? 'success' : 'info'">
+                  {{ probeResult.systemd ? 'systemd' : '无 systemd' }}
+                </el-tag>
+                <el-tag size="small" effect="plain" :type="probeResult.uid === 0 ? 'success' : 'warning'">
+                  {{ probeResult.uid === 0 ? 'root 登录' : '非 root，需要 sudo' }}
+                </el-tag>
+                <span class="muted">/tmp 剩余 {{ Math.round((probeResult.free_kb || 0) / 1024) }} MiB</span>
+                <el-tag v-if="probeResult.installed && probeResult.installed !== 'none'" size="small" effect="plain">
+                  已装 {{ probeResult.agent_status || probeResult.relay_status || probeResult.installed }}
+                </el-tag>
+              </template>
+              <template v-else-if="probeResult">
+                <el-tag type="danger" size="small">连接失败</el-tag>
+                <span class="err-text">{{ probeResult.error }}</span>
+                <el-button link type="primary" @click="probe">重试</el-button>
+              </template>
+              <template v-else>
+                <span class="muted">还没有探测，点「测试连接」先确认能连上、架构对不对</span>
+              </template>
             </div>
           </el-form-item>
 
-          <el-form-item label="安装组件">
+          <div class="sec"><span class="sec-no">2</span>安装内容
+            <span class="muted">安装包来自文件仓库，和 OTA 用的是同一份</span>
+          </div>
+
+          <el-form-item label="组件">
             <el-radio-group v-model="form.component" @change="onComponent">
               <el-radio-button value="agent">agent（设备接入）</el-radio-button>
               <el-radio-button value="relay">relay（中继节点）</el-radio-button>
@@ -53,11 +73,13 @@
 
           <el-form-item label="安装包" prop="package">
             <div class="row">
-              <el-select v-model="form.package" placeholder="选择安装包" class="w300" filterable>
+              <el-select v-model="form.package" placeholder="选择安装包" class="w340" filterable>
                 <el-option v-for="p in componentPkgs" :key="p.path" :value="p.path"
-                           :label="`${p.version} · ${p.arch}${p.variant ? ' · ' + p.variant : ''}`">
-                  <span class="mono">{{ p.name }}</span>
-                  <span class="muted opt-note">{{ p.path }}</span>
+                           :label="pkgLabel(p)">
+                  <span class="mono">{{ pkgLabel(p) }}</span>
+                  <el-tag v-if="archMismatch(p)" size="small" type="warning" effect="plain" class="ml4">
+                    架构不符
+                  </el-tag>
                 </el-option>
               </el-select>
               <el-upload :show-file-list="false" :http-request="uploadPkg" accept=".tar.gz">
@@ -68,20 +90,26 @@
               </span>
             </div>
             <div v-if="uploadPct > 0 && uploadPct < 100" class="muted">上传中 {{ uploadPct }}%</div>
+            <el-alert v-if="selectedPkg && probeResult && probeResult.ok && selectedPkg.arch !== probeResult.arch"
+                      class="ml0" type="warning" :closable="false" show-icon
+                      :title="`安装包是 ${selectedPkg.arch}，目标机是 ${probeResult.arch}：预检会拒绝，换对应架构的包`" />
           </el-form-item>
 
-          <!-- agent 需要的身份与 relay 地址 -->
+          <div class="sec"><span class="sec-no">3</span>接入参数
+            <span class="muted">按组件不同，只需要填这几项</span>
+          </div>
+
           <template v-if="form.component === 'agent'">
             <el-form-item label="设备 ID" prop="devid">
-              <el-input v-model="form.devid" placeholder="唯一标识，如 board01" class="w300" maxlength="64" />
+              <el-input v-model="form.devid" placeholder="唯一标识，如 board01" class="w340" maxlength="64" />
               <span class="muted unit">接入后设备列表里的名字，不能和已有设备重复</span>
             </el-form-item>
             <el-form-item label="relay 地址" prop="server">
-              <el-input v-model="form.server" placeholder="host:port，如 10.0.0.10:18443" class="w300" />
+              <el-input v-model="form.server" placeholder="host:port，如 10.0.0.10:18443" class="w340" />
               <span class="muted unit">数据面地址，不是管理台端口</span>
             </el-form-item>
             <el-form-item label="允许端口">
-              <el-input v-model="form.allow" placeholder="22,8080 或留空" class="w300" />
+              <el-input v-model="form.allow" placeholder="22,8080 或留空" class="w340" />
               <span class="muted unit">设备侧可被转发的端口，留空表示不开放</span>
             </el-form-item>
             <el-form-item label="变体">
@@ -98,40 +126,47 @@
               <span class="muted unit">管理台 HTTPS 端口，默认 9443（自签证书）</span>
             </el-form-item>
             <el-form-item label="初始令牌">
-              <el-input v-model="form.admin_token" placeholder="留空自动生成" class="w300" />
+              <el-input v-model="form.admin_token" placeholder="留空自动生成" class="w340" />
               <span class="muted unit">登录管理台的初始密码，生成后会写进作业日志</span>
             </el-form-item>
           </template>
 
           <template v-else>
             <el-form-item label="relay 地址">
-              <el-input v-model="form.client_server" placeholder="host:port" class="w300" />
+              <el-input v-model="form.client_server" placeholder="host:port" class="w340" />
               <span class="muted unit">写入 /etc/rtunnel/client.env 的 SERVER</span>
             </el-form-item>
           </template>
 
-          <el-form-item label="安装目录">
-            <el-input v-model="form.prefix" :placeholder="defaultPrefix" class="w300" />
-            <span class="muted unit">留空用默认 {{ defaultPrefix }}</span>
-          </el-form-item>
+          <el-collapse v-model="advanced" class="adv">
+            <el-collapse-item title="高级：安装目录与服务接管" name="adv">
+              <el-form-item label="安装目录">
+                <el-input v-model="form.prefix" :placeholder="defaultPrefix" class="w340" />
+                <span class="muted unit">留空用默认 {{ defaultPrefix }}</span>
+              </el-form-item>
+              <el-form-item label="服务接管">
+                <el-checkbox v-model="form.no_units">只安装文件，不接管 systemd</el-checkbox>
+                <div class="tip muted">容器、临时目录或已有自己的启动方式时用；勾选后不会 enable/start</div>
+              </el-form-item>
+            </el-collapse-item>
+          </el-collapse>
 
-          <el-form-item label="服务接管">
-            <el-checkbox v-model="form.no_units">只安装文件，不接管 systemd</el-checkbox>
-            <span class="muted unit">容器、临时目录或已有自己的启动方式时用；勾选后不会 enable/start 服务</span>
-          </el-form-item>
-
-          <el-form-item>
-            <el-button type="primary" :loading="starting" @click="startDeploy">开始部署</el-button>
-            <span class="muted unit">安装脚本会做版本自检与 sha256 校验，失败会保留日志</span>
-          </el-form-item>
+          <div class="dep-actions">
+            <div class="summary">
+              <div class="muted">{{ summary }}</div>
+              <div class="muted">安装脚本会做版本自检与 sha256 校验，失败会保留日志</div>
+            </div>
+            <el-button type="primary" size="large" :loading="starting" :disabled="!canDeploy"
+                       @click="startDeploy">
+              开始部署
+            </el-button>
+          </div>
         </el-form>
 
         <div class="hint muted">
-          安装包来自文件仓库 packages/&lt;组件&gt;/&lt;版本&gt;/&lt;架构&gt;/，和 OTA 用的是同一份；
-          页面上的「上传安装包」也会按包名落到这个位置。部署过程：预检（连通性/架构/sudo）→
-          上传安装包到 /tmp → 解压 → 写配置 → 执行包内 install.sh → 验证版本与服务状态。
-          整个过程在后台跑，可以在「记录」里看实时日志。
-          SSH/SFTP 由 relay 内置的 libssh2 完成，目标机不需要装 ssh 客户端、sshpass 或 agent。
+          页面上的「上传安装包」会按包名落到文件仓库 packages/&lt;组件&gt;/&lt;版本&gt;/&lt;架构&gt;/。
+          部署在后台执行：预检 → 传包到 /tmp → 解压 → 写配置 → 包内 install.sh → 验证 → 清理，
+          日志在「记录」里实时看。SSH/SFTP 由 relay 内置的 libssh2 完成，目标机不需要 ssh 客户端。
         </div>
       </el-tab-pane>
 
@@ -144,13 +179,13 @@
           <el-button type="primary" @click="openHost()">登记主机</el-button>
         </div>
         <el-table :data="hosts" v-loading="loadingHosts">
-          <el-table-column label="名称" min-width="150">
+          <el-table-column label="名称" width="280">
             <template #default="{ row }">
               <div>{{ row.name || row.host }}</div>
               <div class="muted mono">{{ row.username }}@{{ row.host }}:{{ row.port }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="认证" width="110">
+          <el-table-column label="认证" width="140">
             <template #default="{ row }">
               <el-tag size="small" effect="plain">{{ row.auth === 'key' ? '私钥' : '密码' }}</el-tag>
               <el-tag v-if="row.sudo" size="small" effect="plain" class="ml4">sudo</el-tag>
@@ -165,26 +200,46 @@
               <div v-if="row.last_ms" class="muted">{{ time(row.last_ms) }}</div>
             </template>
           </el-table-column>
-          <el-table-column prop="note" label="备注" min-width="140">
+          <el-table-column prop="note" label="备注" min-width="200">
             <template #default="{ row }">{{ row.note || '—' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="220">
+          <el-table-column label="操作" width="160">
             <template #default="{ row }">
-              <el-button link type="primary" @click="probeHost(row)">测试</el-button>
               <el-button link type="primary" @click="deployOn(row)">部署</el-button>
-              <el-button link type="primary" @click="openHost(row)">编辑</el-button>
-              <el-button link type="danger" @click="removeHost(row)">删除</el-button>
+              <el-dropdown trigger="click" @command="(c) => hostCmd(c, row)">
+                <el-button link type="primary" class="more">更多</el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="probe">测试连接</el-dropdown-item>
+                    <el-dropdown-item command="edit">编辑</el-dropdown-item>
+                    <el-dropdown-item command="del" divided>删除</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </template>
           </el-table-column>
           <template #empty>
-            <el-empty description="还没有登记主机" :image-size="70" />
+            <el-empty description="还没有登记主机：可以扫描网段自动发现，或手动登记一台" :image-size="70">
+              <el-button @click="openScan">扫描网段</el-button>
+              <el-button type="primary" @click="openHost()">登记主机</el-button>
+            </el-empty>
           </template>
         </el-table>
       </el-tab-pane>
 
       <!-- ------------------------------------------------ 记录 -->
-      <el-tab-pane :label="`记录 ${jobs.length}`" name="jobs">
-        <el-table :data="jobs" v-loading="loadingJobs" @row-click="openJob">
+      <el-tab-pane :label="jobsTabLabel" name="jobs">
+        <div class="bar">
+          <el-radio-group v-model="jobsFilter" size="small">
+            <el-radio-button value="all">全部 {{ jobs.length }}</el-radio-button>
+            <el-radio-button value="active">进行中 {{ activeJobs }}</el-radio-button>
+            <el-radio-button value="success">成功 {{ successJobs }}</el-radio-button>
+            <el-radio-button value="failed">失败 {{ failedJobs }}</el-radio-button>
+          </el-radio-group>
+          <span class="spacer" />
+          <span class="muted">点一行看实时日志；进行中的作业会自动刷新</span>
+        </div>
+        <el-table :data="visibleJobs" v-loading="loadingJobs" @row-click="openJob">
           <el-table-column prop="id" label="#" width="70" />
           <el-table-column label="主机" min-width="160">
             <template #default="{ row }">
@@ -218,7 +273,8 @@
             </template>
           </el-table-column>
           <template #empty>
-            <el-empty description="还没有部署记录" :image-size="70" />
+            <el-empty :description="jobsFilter === 'all' ? '还没有部署记录' : '这个状态下没有作业'"
+                      :image-size="70" />
           </template>
         </el-table>
       </el-tab-pane>
@@ -228,7 +284,8 @@
     <el-dialog v-model="scanDlg" title="扫描网段里的 SSH 主机" width="660px">
       <el-form inline class="scan-form" @submit.prevent>
         <el-form-item label="网段">
-          <el-input v-model="scanForm.cidr" placeholder="192.168.1.0/24" class="w240" />
+          <el-input v-model="scanForm.cidr" placeholder="192.168.1.0/24" class="w240"
+                    @keyup.enter="doScan" />
         </el-form-item>
         <el-form-item label="端口">
           <el-input-number v-model="scanForm.port" :min="1" :max="65535"
@@ -328,6 +385,7 @@
           <span class="mono">{{ logJob.component }} {{ logJob.version }}</span>
           <span class="muted">{{ logJob.username }}@{{ logJob.host }}</span>
           <span class="spacer" />
+          <el-button size="small" @click="copyLog">复制日志</el-button>
           <el-button v-if="logJob.status === 'running' || logJob.status === 'queued'"
                      size="small" type="danger" @click="cancelJob(logJob)">取消</el-button>
         </div>
@@ -340,16 +398,16 @@
           <el-descriptions-item label="结束">{{ logJob.finished_ms ? time(logJob.finished_ms) : '—' }}</el-descriptions-item>
         </el-descriptions>
         <div v-if="logJob.error" class="err-text job-err">{{ logJob.error }}</div>
-        <pre class="log mono">{{ logJob.log || '（等待输出）' }}</pre>
+        <pre ref="logEl" class="log mono">{{ logJob.log || '（等待输出）' }}</pre>
       </template>
     </el-drawer>
   </div>
 </template>
 
 <script setup>
-// 运维 → 部署：SSH/SCP 直连目标主机，把安装包装上去并执行包内 install.sh。
+// 运维 → 部署：SSH/SFTP 直连目标主机，把文件仓库里的安装包装上去并执行包内 install.sh。
 // 凭据只在 relay 本机，前端只提交、不回读。
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Api } from '@/shared/api.js'
 import { time } from '@/shared/utils.js'
@@ -360,11 +418,13 @@ const jobs = ref([])
 const pkgs = ref([])
 const loadingHosts = ref(false)
 const loadingJobs = ref(false)
+const refreshing = ref(false)
 const probing = ref(false)
 const probeResult = ref(null)
 const starting = ref(false)
 const uploading = ref(false)
 const uploadPct = ref(0)
+const advanced = ref([])
 const formRef = ref(null)
 
 const form = reactive({
@@ -396,10 +456,80 @@ const defaultPrefix = computed(() => ({
   client: '/opt/rtunnel/client',
 }[form.component]))
 
-const componentPkgs = computed(() => pkgs.value.filter((p) => p.component === form.component))
+// 架构匹配的包排前面，其次是最新上传的（后端已按 mtime 倒序）
+const componentPkgs = computed(() => {
+  const list = pkgs.value.filter((p) => p.component === form.component)
+  const arch = probeResult.value && probeResult.value.ok ? probeResult.value.arch : ''
+  if (!arch) return list
+  return [...list].sort((a, b) => (a.arch === arch ? 0 : 1) - (b.arch === arch ? 0 : 1))
+})
+
+const selectedPkg = computed(() => pkgs.value.find((p) => p.path === form.package) || null)
+
+const canDeploy = computed(() => !!(form.host_id && form.package))
+
+function pkgLabel(p) {
+  let size = ''
+  if (p.size >= 1048576) size = (p.size / 1048576).toFixed(1) + ' MiB'
+  else if (p.size >= 1024) size = Math.round(p.size / 1024) + ' KiB'
+  return [p.version, p.arch, p.variant, size].filter(Boolean).join(' · ')
+}
+
+function archMismatch(p) {
+  return !!(probeResult.value && probeResult.value.ok && probeResult.value.arch &&
+    p.arch !== probeResult.value.arch)
+}
+
+const activeJobs = computed(() =>
+  jobs.value.filter((j) => j.status === 'running' || j.status === 'queued').length)
+
+const jobsTabLabel = computed(() =>
+  activeJobs.value > 0 ? `记录 ${jobs.value.length} · ${activeJobs.value} 运行中`
+    : `记录 ${jobs.value.length}`)
+
+const successJobs = computed(() => jobs.value.filter((j) => j.status === 'success').length)
+const failedJobs = computed(() => jobs.value.filter((j) => j.status === 'failed').length)
+
+const jobsFilter = ref('all')
+const visibleJobs = computed(() => {
+  if (jobsFilter.value === 'all') return jobs.value
+  if (jobsFilter.value === 'active')
+    return jobs.value.filter((j) => j.status === 'running' || j.status === 'queued')
+  if (jobsFilter.value === 'success') return jobs.value.filter((j) => j.status === 'success')
+  return jobs.value.filter((j) => j.status === 'failed')
+})
+
+// 提交前一眼看清“装什么、装到哪、怎么接管”
+const summary = computed(() => {
+  const h = hosts.value.find((x) => x.id === form.host_id)
+  if (!h) return '先选目标主机'
+  const what = selectedPkg.value
+    ? `${selectedPkg.value.component} ${selectedPkg.value.version}（${selectedPkg.value.arch}）`
+    : '未选安装包'
+  const where = form.prefix.trim() || defaultPrefix.value
+  const mode = form.no_units ? '只装文件'
+    : (probeResult.value && probeResult.value.ok && !probeResult.value.systemd
+      ? '目标机没有 systemd，仅装文件' : '安装并接管服务')
+  return `${what} → ${h.username}@${h.host}:${h.port} → ${where} · ${mode}`
+})
+
+function defaultDevid(h) {
+  const fromName = (h.name || '').replace(/[^A-Za-z0-9._-]/g, '').replace(/^[-._]+|[-._]+$/g, '')
+  if (fromName.length >= 3) return fromName.slice(0, 40)
+  return (h.host || 'device').replace(/[^A-Za-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '').slice(0, 40) || 'device'
+}
 
 function hostLabel(h) {
   return `${h.name || h.host}（${h.username}@${h.host}）`
+}
+
+function hostDot(h) {
+  return { ok: 'ok', unreachable: 'bad' }[h.last_status] || 'unknown'
+}
+
+function hostStateText(h) {
+  return { ok: '可连接', unreachable: '连不上' }[h.last_status] || '未测试'
 }
 
 function statusType(s) {
@@ -446,10 +576,13 @@ async function loadJobs() {
   }
 }
 
-function reload() {
-  loadHosts()
-  loadPkgs()
-  loadJobs()
+async function reload() {
+  refreshing.value = true
+  try {
+    await Promise.all([loadHosts(), loadPkgs(), loadJobs()])
+  } finally {
+    refreshing.value = false
+  }
 }
 
 function onTab(name) {
@@ -459,18 +592,18 @@ function onTab(name) {
 }
 
 function onComponent() {
+  // 换组件后包一定不通用，清掉让用户重新选（也避免按旧包的架构误判）
   form.package = ''
-  probeResult.value = null
 }
 
 function onHostChange() {
   probeResult.value = null
   const h = hosts.value.find((x) => x.id === form.host_id)
   if (h && !form.devid) {
-    // 默认拿主机名当设备 ID，用户可改
-    form.devid = (h.name || h.host).replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 40)
+    // 默认拿主机名当设备 ID，名字全是中文就退回主机地址，用户可改
+    form.devid = defaultDevid(h)
   }
-  // 选中就顺带探一下：早发现连不上/架构不符，不用等到点「开始部署」
+  // 选中就顺带探一下：早发现连不上、架构不符、没有 sudo，不用等到点「开始部署」
   if (h && h.secret_set) probe()
 }
 
@@ -495,16 +628,23 @@ async function probe() {
   }
 }
 
-async function probeHost(row) {
+function probeHost(row) {
   form.host_id = row.id
   tab.value = 'new'
-  await probe()
+  onHostChange()
 }
 
 function deployOn(row) {
   form.host_id = row.id
   tab.value = 'new'
+  if (pkgs.value.length === 0) loadPkgs()
   onHostChange()
+}
+
+function hostCmd(cmd, row) {
+  if (cmd === 'probe') probeHost(row)
+  else if (cmd === 'edit') openHost(row)
+  else if (cmd === 'del') removeHost(row)
 }
 
 // ---------------------------------------------------------------- 网段扫描
@@ -558,8 +698,8 @@ function scanAdd(row) {
 
 function scanDeploy(row) {
   scanDlg.value = false
-  tab.value = 'new'
   form.host_id = row.host_id
+  tab.value = 'new'
   onHostChange()
 }
 
@@ -604,16 +744,22 @@ async function saveHost() {
       note: hostForm.note,
     }
     if (hostForm.secret) body.secret = hostForm.secret
+    let newId = 0
     if (hostForm.id) {
       await Api.put(`/api/v1/deploy/hosts/${hostForm.id}`, body)
       ElMessage.success('已保存')
     } else {
       const r = await Api.post('/api/v1/deploy/hosts', body)
-      form.host_id = r.id
+      newId = r.id
       ElMessage.success('已登记')
     }
     hostDlg.value = false
     await loadHosts()
+    if (newId) {
+      // 新登记的主机直接选中并探测，少一步手点
+      form.host_id = newId
+      onHostChange()
+    }
   } catch (e) {
     ElMessage.error('保存失败：' + e.message)
   } finally {
@@ -631,6 +777,10 @@ async function removeHost(row) {
   try {
     await Api.del(`/api/v1/deploy/hosts/${row.id}`)
     ElMessage.success('已删除')
+    if (form.host_id === row.id) {
+      form.host_id = null
+      probeResult.value = null
+    }
     loadHosts()
   } catch (e) {
     ElMessage.error('删除失败：' + e.message)
@@ -696,6 +846,15 @@ async function uploadPkg(opt) {
 async function startDeploy() {
   const ok = await formRef.value.validate().catch(() => false)
   if (!ok) return
+  if (selectedPkg.value && archMismatch(selectedPkg.value)) {
+    try {
+      await ElMessageBox.confirm(
+        `安装包是 ${selectedPkg.value.arch}，目标机是 ${probeResult.value.arch}，预检会拒绝这次部署。仍然提交？`,
+        '架构不匹配', { type: 'warning' })
+    } catch (e) {
+      return
+    }
+  }
   const options = {}
   if (form.component === 'agent') {
     options.devid = form.devid
@@ -722,6 +881,7 @@ async function startDeploy() {
     form.admin_token = ''
     await loadJobs()
     const job = jobs.value.find((j) => j.id === r.id)
+    jobsFilter.value = 'all'
     tab.value = 'jobs'
     if (job) openJob(job)
     startPoll()
@@ -735,11 +895,13 @@ async function startDeploy() {
 // ---------------------------------------------------------------- 作业与日志
 const logDlg = ref(false)
 const logJob = ref(null)
+const logEl = ref(null)
 
-function openJob(row) {
+async function openJob(row) {
   logJob.value = row
   logDlg.value = true
-  refreshJob(row.id)
+  await refreshJob(row.id)
+  scrollLogToEnd()
   startPoll()
 }
 
@@ -748,6 +910,27 @@ async function refreshJob(id) {
     const j = await Api.get('/api/v1/deploy/jobs/' + id)
     logJob.value = j
   } catch (e) { /* 保留上一次内容 */ }
+}
+
+// 日志追加时，如果本来就在底部就跟着滚；用户往上翻过就不打扰
+async function scrollLogToEnd(force) {
+  await nextTick()
+  const el = logEl.value
+  if (!el) return
+  const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+  if (force || near) el.scrollTop = el.scrollHeight
+}
+
+watch(() => (logJob.value ? logJob.value.log : ''), () => scrollLogToEnd(false))
+
+async function copyLog() {
+  const txt = (logJob.value && logJob.value.log) || ''
+  try {
+    await navigator.clipboard.writeText(txt)
+    ElMessage.success('日志已复制')
+  } catch (e) {
+    ElMessage.error('复制失败：' + e.message)
+  }
 }
 
 async function cancelJob(row) {
@@ -772,11 +955,12 @@ function startPoll() {
   if (timer) return
   timer = setInterval(async () => {
     const active = jobs.value.some((j) => j.status === 'running' || j.status === 'queued')
-    if (active || logDlg.value) {
+    // 停在记录页时也刷新，别人发起的作业也能看到进度
+    if (active || logDlg.value || tab.value === 'jobs') {
       await loadJobs()
       if (logDlg.value && logJob.value) await refreshJob(logJob.value.id)
     }
-    if (!active && !logDlg.value) stopPoll()
+    if (!active && !logDlg.value && tab.value !== 'jobs') stopPoll()
   }, 2500)
 }
 function stopPoll() {
@@ -791,22 +975,67 @@ onBeforeUnmount(stopPoll)
 </script>
 
 <style scoped>
-.dep-form { max-width: 900px; }
+.dep-form { max-width: 940px; }
 .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.w240 { width: 240px; }
 .w300 { width: 300px; }
+.w340 { width: 340px; }
+.w120 { width: 120px; }
 .unit { margin-left: 10px; }
 .port { width: 120px; margin-left: 10px; }
+.ml0 { margin-left: 0; }
 .ml4 { margin-left: 4px; }
 .opt-note { margin-left: 12px; }
-.probe { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.tip { flex-basis: 100%; margin-top: 2px; }
+.sec {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 22px 0 12px;
+  font-weight: 600;
+}
+.sec:first-child { margin-top: 0; }
+.sec-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+  font-size: 12px;
+}
+.sec .muted { font-weight: 400; }
+.adv { margin-top: 18px; }
+.dep-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+.summary { flex: 1; line-height: 1.7; word-break: break-all; }
+.probe { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 8px;
+  background: var(--el-text-color-placeholder);
+}
+.dot.ok { background: var(--el-color-success); }
+.dot.bad { background: var(--el-color-danger); }
 .err-text { color: var(--el-color-danger); font-size: 12.5px; word-break: break-all; }
 .bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-.hint { margin-top: 18px; line-height: 1.8; }
+.hint { margin-top: 22px; line-height: 1.8; }
 .ver { margin-left: 8px; }
+.more { margin-left: 8px; }
 .job-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .job-meta { margin-bottom: 12px; }
 .job-err { margin-bottom: 10px; }
-.w120 { width: 120px; }
 .scan-form { margin-bottom: 4px; }
 .scan-hint { line-height: 1.7; margin-bottom: 12px; }
 .scan-sum { margin: 4px 0 10px; }

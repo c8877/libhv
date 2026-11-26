@@ -127,7 +127,7 @@ TCP 连接扫描；结果里已登记的主机会标出来，新主机点「登�
 常见失败：连不上 relay（地址/端口/防火墙）、令牌无效（rtk- 且未停用）、架构不符（manifest 校验失败）、undefined symbol: hv_version（共享库构建只拷了二进制，改用静态构建）、端口占用（client 默认 1080）。
 
 ## deploy-troubleshoot | 部署失败,装不上,连不上主机,认证失败,sudo,密码,私钥,known_hosts,主机密钥,权限不足,架构不匹配
-- 连不上：先看「部署 → 主机 → 测试」的结果。`Connection refused/timeout` 是端口/防火墙；`密码认证失败` 是账号或密码错；`私钥认证失败` 多是私钥格式或没配对应用户。
+- 连不上：先看「主机 → 更多 → 测试连接」的结果。`Connection refused/timeout` 是端口/防火墙；`密码认证失败` 是账号或密码错；`私钥认证失败` 多是私钥格式或没配对应用户。
 - 主机密钥变了：`known_hosts` 里记录的指纹和现在不一致。确认确实是重装/换机后，删掉 relay 的 `<admin.db 同目录>/deploy/known_hosts` 里那一行再试。
 - sudo：非 root 账号必须勾「sudo」；密码登录时平台用 `sudo -S` 喂密码，密钥登录要求该账号已配置免密 sudo。
 - 权限不足写 /opt：登录用户不是 root 且没配 sudo；或目标机 /opt 只读。
