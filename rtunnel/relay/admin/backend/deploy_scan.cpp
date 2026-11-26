@@ -334,10 +334,10 @@ DeployScanResult deployScanSubnet(const std::string& cidr, int port, int timeout
         r.error = err;
         return r;
     }
-    // 先算网段（原始输入，不带规范化），nmap 接受 a.b.c.d/len 与单个地址
-    std::string target = cidr;
-    while (!target.empty() && (target.back() == ' ' || target.back() == '\t')) target.pop_back();
-    if (target.find('/') == std::string::npos) target += "/32";
+    // 只用校验后的网络地址拼 nmap 参数，原始输入不直接进 shell
+    int bits = 32;
+    while (bits > 0 && (1ull << (32 - bits)) < (uint64_t)ips.size()) --bits;
+    std::string target = ips.front() + "/" + std::to_string(bits);
 
     bool want_nmap = (engine == "auto" || engine == "nmap");
     if (want_nmap && hasNmap()) {
