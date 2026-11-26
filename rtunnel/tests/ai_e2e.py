@@ -78,6 +78,18 @@ class FakeModel(BaseHTTPRequestHandler):
                 name, args = "propose_exec", {"devid": "dev1",
                                               "argv": ["rm", "-f", "/tmp/rtunnel-ai/none"],
                                               "reason": "e2e 变更命令"}
+            elif "证书" in last_user:
+                name, args = "list_certs", {}
+            elif "任务" in last_user or "升级到" in last_user:
+                name, args = "list_tasks", {"status": "all", "limit": 5}
+            elif "平台" in last_user:
+                name, args = "platform_overview", {}
+            elif "权限组" in last_user:
+                name, args = "list_permission_groups", {}
+            elif "会话" in last_user:
+                name, args = "list_streams", {}
+            elif "仓库" in last_user:
+                name, args = "list_files", {"dir": "packages"}
             elif "规则" in last_user:
                 name, args = "draft_playbook", {
                     "name": "e2e 自检", "event": "device.online", "devid_glob": "dev*",
@@ -315,6 +327,27 @@ def main():
         e2e.check("ai: 工具执行成功", tools and tools[0].get("ok") is True, str(tools[:1]))
         e2e.check("ai: 回答引用了工具结果", "台设备" in r.get("reply", ""), r.get("reply"))
 
+        # 7.5) 平台级工具：整个管理台都能问，不只是设备
+        code, cfg2 = call_json(adm, base, "/api/v1/ai/config", None, method="GET")
+        e2e.check("ai: 超管拿到全部工具", code == 200 and cfg2.get("tools") == cfg2.get("tools_total")
+                  and cfg2.get("tools_total") >= 20,
+                  "tools=%s total=%s" % (cfg2.get("tools"), cfg2.get("tools_total")))
+
+        for q, want in (
+                ("平台现在有什么异常", "platform_overview"),
+                ("哪些证书快过期", "list_certs"),
+                ("升级任务到哪了", "list_tasks"),
+                ("权限组都给了什么", "list_permission_groups"),
+                ("现在有多少会话", "list_streams"),
+                ("仓库里有没有部署包", "list_files")):
+            code, r = call_json(adm, base, "/api/v1/ai/chat",
+                                {"messages": [{"role": "user", "content": q}]})
+            tools = r.get("tools") or []
+            e2e.check("ai: %s 可用" % want,
+                      code == 200 and tools and tools[0].get("name") == want
+                      and tools[0].get("ok") is True,
+                      "q=%s code=%d tools=%s" % (q, code, tools[:1]))
+
         # 8) 带 devid 的详情
         code, r = call_json(adm, base, "/api/v1/ai/chat",
                             {"devid": "dev1",
@@ -354,6 +387,19 @@ def main():
                          {"messages": [{"role": "user", "content": "dev1 详情"}]})
         e2e.check("ai: 授权内设备可查", code == 200 and (r.get("tools") or [{}])[0].get("ok") is True,
                   "code=%d r=%s" % (code, str(r.get("tools"))[:120]))
+
+        # 工具按权限裁剪：只有 device.view + ai.chat 的账号看不到证书/费用/账号工具
+        code, scfg = bearer(base, "/api/v1/ai/config", rtk_scoped, None, method="GET")
+        e2e.check("ai: 受限账号工具被裁剪",
+                  code == 200 and scfg.get("tools") < scfg.get("tools_total"),
+                  "tools=%s total=%s" % (scfg.get("tools"), scfg.get("tools_total")))
+        code, r = bearer(base, "/api/v1/ai/chat", rtk_scoped,
+                         {"messages": [{"role": "user", "content": "哪些证书快过期"}]})
+        tools = r.get("tools") or []
+        e2e.check("ai: 受限账号调证书工具被拒",
+                  code == 200 and tools and tools[0].get("ok") is False and
+                  "cert.read" in r.get("reply", ""),
+                  "code=%d tools=%s reply=%s" % (code, tools[:1], r.get("reply")))
 
         # 10) 上游模型报错 → 502
         call_json(adm, base, "/api/v1/ai/config", {"model": "fail-model"}, method="PUT")

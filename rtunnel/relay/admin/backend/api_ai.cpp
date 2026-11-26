@@ -13,6 +13,7 @@
 #include "common/logging.hpp"
 #include "cpputil/json.hpp"
 #include "http/client/HttpClient.h"
+#include "hversion.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -264,6 +265,58 @@ json toolDefs() {
     arr.push_back(fn("list_playbooks",
                      "自愈规则及其最近触发记录。回答“有没有自动处理/为什么没自动重启”用。",
                      json::object(), json::array()));
+    // —— 平台自身：任务、租户、费用、账号、权限、证书、中继、文件仓库 ——
+    arr.push_back(fn("platform_overview",
+                     "平台总览：版本、运行时长、mTLS/ACL 状态、在线设备与客户端、活跃会话、"
+                     "累计流量、告警状态。回答“平台现在怎么样/有没有异常”先看它。",
+                     json::object(), json::array()));
+    arr.push_back(fn("list_streams",
+                     "当前活跃会话：设备、接入用户、状态、建立时间。回答“谁正连着设备/有多少会话”。",
+                     {{"devid", {{"type", "string"}, {"description", "只看该设备"}}}}, json::array()));
+    arr.push_back(fn("list_clients",
+                     "当前接入客户端连接：用户名、来源地址、涉及设备、流量。回答“谁在线/谁在连”。",
+                     json::object(), json::array()));
+    arr.push_back(fn("list_tasks",
+                     "分发与 OTA 任务：状态、设备、文件、版本、失败原因、重试次数。"
+                     "回答“升级到哪了/为什么失败/有多少卡住”。",
+                     {{"status", {{"type", "string"},
+                                  {"enum", {"active", "done", "failed_group", "all"}},
+                                  {"description", "active=进行中 done=成功 failed_group=失败超时；默认 all"}}},
+                      {"limit", {{"type", "integer"}, {"description", "1-50，默认 20"}}}},
+                     json::array()));
+    arr.push_back(fn("list_tenants",
+                     "租户及其套餐（设备/并发/月流量上限）与当月用量。"
+                     "回答“有几个客户/谁的额度快满了”。",
+                     json::object(), json::array()));
+    arr.push_back(fn("billing_summary",
+                     "按租户的费用试算（用量×价目，单位 1e-6 元）。回答“这个月大概多少钱”。",
+                     {{"days", {{"type", "integer"}, {"description", "最近天数，1-90，默认 30"}}},
+                      {"tenant_id", {{"type", "integer"}, {"description", "只看该租户，0=全部"}}}},
+                     json::array()));
+    arr.push_back(fn("list_accounts",
+                     "接入账号（客户侧）：用户名、租户、状态、令牌数、最近使用。"
+                     "回答“有哪些客户账号/谁被停用”。",
+                     {{"q", {{"type", "string"}, {"description", "按用户名或展示名搜索"}}}},
+                     json::array()));
+    arr.push_back(fn("list_users",
+                     "管理台账号：用户名、角色、状态、所属权限组。回答“谁有管理台账号/谁是管理员”。",
+                     json::object(), json::array()));
+    arr.push_back(fn("list_permission_groups",
+                     "权限组：勾选的资源键、设备范围、端口范围、成员数。"
+                     "回答“谁能做什么/这个组给了什么权限”。",
+                     json::object(), json::array()));
+    arr.push_back(fn("list_certs",
+                     "证书台账：设备身份、签发/到期时间、状态（valid/expiring/expired/revoked）。"
+                     "回答“哪些证书快过期/有没有被吊销”。",
+                     json::object(), json::array()));
+    arr.push_back(fn("list_relays",
+                     "中继下发列表：地址、名称、优先级顺序。回答“设备会连哪台 relay/故障切换顺序”。",
+                     json::object(), json::array()));
+    arr.push_back(fn("list_files",
+                     "文件仓库某一层的条目（目录/文件、大小）。回答“仓库里有没有某个包/文件”。",
+                     {{"dir", {{"type", "string"},
+                               {"description", "相对仓库根的目录，如 packages/agent；空=根"}}}},
+                     json::array()));
     // 写操作只“提议”：生成一个待确认的 operation，绝不在工具里执行
     arr.push_back(fn(
         "propose_exec",
@@ -291,6 +344,34 @@ json toolDefs() {
     return arr;
 }
 
+// 每个工具要求的资源键。列出来而不是塞进 schema，避免把权限信息发给模型。
+const char* toolPerm(const std::string& name) {
+    if (name == "usage_summary") return "usage.read";
+    if (name == "billing_summary") return "billing.read";
+    if (name == "list_tenants") return "tenant.read";
+    if (name == "list_tasks") return "dist.read";
+    if (name == "list_accounts" || name == "list_users") return "account.read";
+    if (name == "list_permission_groups") return "group.read";
+    if (name == "list_certs") return "cert.read";
+    if (name == "list_relays") return "relay.read";
+    if (name == "list_files") return "repo.read";
+    if (name == "propose_exec") return "device.exec";
+    if (name == "draft_playbook") return "playbook.write";
+    return "device.view";   // 设备/会话/客户端/平台总览/审计/作业/自愈
+}
+
+// 只把当前账号真正能用的工具交给模型：少一个工具就少一次“没权限”的往返，
+// 也不会让模型以为它能碰费率、证书或别人的账号。
+json toolDefsFor(const AiActor& a) {
+    json out = json::array();
+    for (auto& t : toolDefs()) {
+        std::string n = t["function"].value("name", std::string());
+        if (aiCan(a, toolPerm(n))) out.push_back(t);
+    }
+    return out;
+}
+
+
 // 对话跑在独立线程里，actorLabel() 在那里为空；审计必须显式带主体，
 // 否则会写成一堆 anonymous，事后分不清是谁/哪个模型触发的。
 void aiAudit(AuditLog& log, const std::string& actor, const std::string& action,
@@ -315,6 +396,20 @@ std::string clampResult(const std::string& s) {
 
 }  // namespace
 
+AiActor AdminServer::aiSnapshot() {
+    AiActor a;
+    AdminActor cur = currentActor();
+    a.is_client = cur.is_client;
+    a.super = cur.super;
+    a.all_devices = cur.all_devices;
+    a.tenant_id = cur.tenant_id;
+    a.devices = cur.devices;
+    a.perms = cur.perms;
+    a.label = actorLabel();
+    if (a.label.empty()) a.label = "anonymous";
+    return a;
+}
+
 // ---------------------------------------------------------------- 配置接口
 
 void AdminServer::handleAiConfigGet(const HttpContextPtr& ctx) {
@@ -333,7 +428,9 @@ void AdminServer::handleAiConfigGet(const HttpContextPtr& ctx) {
     // 前端只需要知道“能不能直接用”，不用自己拼判断
     j["ready"] = p.ready();
     j["providers"] = providerCatalog();
-    j["tools"] = (int)toolDefs().size();
+    // 当前账号实际可用的工具数（toolDefsFor 会按权限裁剪）
+    j["tools"] = (int)toolDefsFor(aiSnapshot()).size();
+    j["tools_total"] = (int)toolDefs().size();
     ctx->send(j.dump());
 }
 
@@ -470,8 +567,10 @@ void AdminServer::handleAiKeyClear(const HttpContextPtr& ctx, const std::string&
 
 bool AdminServer::aiRunTool(const AiActor& a, const std::string& name, const json& args,
                             std::string& out, std::string& err) {
-    if (!aiCan(a, "device.view")) {
-        err = "当前账号没有 device.view 权限";
+    // 权限按工具逐个判定（toolDefsFor 已经过滤过一次，这里仍然要查：
+    // 模型可以编造工具名，不能指望它只用列表里的）。
+    if (!aiCan(a, toolPerm(name))) {
+        err = std::string("当前账号没有 ") + toolPerm(name) + " 权限，无法使用 " + name;
         return false;
     }
     auto owns = [&](const std::string& devid) {
@@ -680,6 +779,399 @@ bool AdminServer::aiRunTool(const AiActor& a, const std::string& name, const jso
         json fj = json::parse(fires, nullptr, false);
         r["recent_fires"] = fj.is_discarded() ? json::array() : fj.value("items", json::array());
         out = r.dump();
+        return true;
+    }
+
+    if (name == "platform_overview") {
+        // relay 线程只做一次原始快照（不碰 DB），过滤放到管理面线程
+        std::string raw = callRelay([this]() {
+            json j;
+            json agents = json::array();
+            for (RelayConn* c = relay_->agents; c; c = c->reg_next) {
+                int n = 0;
+                for (RelayStream* st = c->streams; st; st = st->next_c) ++n;
+                json x;
+                x["devid"] = c->devid;
+                x["streams"] = n;
+                x["bytes_in"] = (long long)c->bytes_in;
+                x["bytes_out"] = (long long)c->bytes_out;
+                agents.push_back(x);
+            }
+            json clients = json::array();
+            for (RelayConn* c = relay_->conns; c; c = c->next_all) {
+                if (c->role != rtnp::ROLE_CLIENT || !c->authed || c->internal) continue;
+                json dv = json::array();
+                for (RelayStream* st = c->streams; st; st = st->next_c)
+                    if (st->a && st->a->devid[0]) dv.push_back(st->a->devid);
+                json x;
+                x["user"] = c->user;
+                x["devids"] = dv;
+                x["bytes_in"] = (long long)c->bytes_in;
+                x["bytes_out"] = (long long)c->bytes_out;
+                clients.push_back(x);
+            }
+            j["agents"] = agents;
+            j["clients"] = clients;
+            j["uptime_ms"] = (long long)(hloop_now_ms(relay_->loop) - relay_->started_at_ms);
+            j["mtls"] = (bool)relay_->require_mtls;
+            j["allow_all"] = (bool)relay_->allow_all;
+            return j.dump();
+        });
+        json r = json::parse(raw, nullptr, false);
+        if (r.is_discarded()) {
+            err = "查询失败";
+            return false;
+        }
+        bool scoped = !(a.super || a.all_devices);
+        int nagent = 0, nstream = 0, nclient = 0;
+        long long bin = 0, bout = 0;
+        for (auto& x : r["agents"]) {
+            if (!owns(x.value("devid", std::string()))) continue;
+            nagent++;
+            nstream += x.value("streams", 0);
+            bin += x.value("bytes_in", (long long)0);
+            bout += x.value("bytes_out", (long long)0);
+        }
+        for (auto& c : r["clients"]) {
+            bool rel = !scoped;
+            for (auto& d : c["devids"]) {
+                if (d.is_string() && owns(d.get<std::string>())) {
+                    rel = true;
+                    break;
+                }
+            }
+            if (!rel) continue;
+            nclient++;
+            bin += c.value("bytes_in", (long long)0);
+            bout += c.value("bytes_out", (long long)0);
+        }
+        json o;
+        o["version"] = hv_version();
+        o["uptime_ms"] = r.value("uptime_ms", (long long)0);
+        o["mtls"] = r.value("mtls", false);
+        o["allow_all"] = r.value("allow_all", false);
+        o["agents_online"] = nagent;
+        o["clients_online"] = nclient;
+        o["streams"] = nstream;
+        o["bytes_in"] = bin;
+        o["bytes_out"] = bout;
+        o["scoped"] = scoped;
+        json al = json::parse(alertStatusJson(), nullptr, false);
+        if (!al.is_discarded()) o["alerts"] = al;
+        out = o.dump();
+        return true;
+    }
+
+    if (name == "list_streams") {
+        std::string only = args.value("devid", std::string());
+        if (!only.empty() && !owns(only)) {
+            err = "设备不在授权范围内: " + only;
+            return false;
+        }
+        std::string raw = callRelay([this]() {
+            json arr = json::array();
+            for (RelayConn* c = relay_->agents; c; c = c->reg_next) {
+                for (RelayStream* st = c->streams; st; st = st->next_c) {
+                    json x;
+                    x["devid"] = c->devid;
+                    x["user"] = st->a ? st->a->user : "";
+                    x["state"] = !st->opened ? "OPENING"
+                                 : (st->a_closed || st->c_closed) ? "HALF_CLOSED" : "OPEN";
+                    x["opened_at_ms"] = (long long)st->opened_at_ms;
+                    x["bytes_up"] = (long long)st->bytes_up;
+                    x["bytes_down"] = (long long)st->bytes_down;
+                    arr.push_back(x);
+                }
+            }
+            return arr.dump();
+        });
+        json arr = json::parse(raw, nullptr, false);
+        json keep = json::array();
+        if (arr.is_array()) {
+            for (auto& x : arr) {
+                std::string d = x.value("devid", std::string());
+                if (!owns(d)) continue;
+                if (!only.empty() && d != only) continue;
+                keep.push_back(x);
+            }
+        }
+        json o;
+        o["count"] = (int)keep.size();
+        o["streams"] = keep;
+        out = o.dump();
+        return true;
+    }
+
+    if (name == "list_clients") {
+        bool scoped = !(a.super || a.all_devices);
+        std::string raw = callRelay([this]() {
+            json arr = json::array();
+            for (RelayConn* c = relay_->conns; c; c = c->next_all) {
+                if (c->role != rtnp::ROLE_CLIENT || !c->authed || c->internal) continue;
+                json dv = json::array();
+                for (RelayStream* st = c->streams; st; st = st->next_c)
+                    if (st->a && st->a->devid[0]) dv.push_back(st->a->devid);
+                json x;
+                x["user"] = c->user;
+                x["remote_addr"] = c->remote_addr;
+                x["devids"] = dv;
+                x["bytes_in"] = (long long)c->bytes_in;
+                x["bytes_out"] = (long long)c->bytes_out;
+                arr.push_back(x);
+            }
+            return arr.dump();
+        });
+        json arr = json::parse(raw, nullptr, false);
+        json keep = json::array();
+        if (arr.is_array()) {
+            for (auto& x : arr) {
+                bool rel = !scoped;
+                for (auto& d : x["devids"]) {
+                    if (d.is_string() && owns(d.get<std::string>())) {
+                        rel = true;
+                        break;
+                    }
+                }
+                if (!rel) continue;
+                keep.push_back(x);
+            }
+        }
+        json o;
+        o["count"] = (int)keep.size();
+        o["clients"] = keep;
+        out = o.dump();
+        return true;
+    }
+
+    if (name == "list_tasks") {
+        std::string status = args.value("status", std::string("all"));
+        if (status == "all") status.clear();
+        int limit = args.value("limit", 20);
+        if (limit < 1) limit = 1;
+        if (limit > 50) limit = 50;
+        std::string js;
+        int total = 0;
+        if (!db_.distList(status, std::string(), std::string(), std::string(),
+                          std::vector<std::string>(), std::string("created_ms"), -1, 1, limit, js,
+                          total)) {
+            err = "查询失败";
+            return false;
+        }
+        json arr = json::parse(js, nullptr, false);
+        if (arr.is_discarded()) {
+            err = "查询失败";
+            return false;
+        }
+        json keep = json::array();
+        for (auto& x : arr) {
+            if (!owns(x.value("devid", std::string()))) continue;
+            json y;
+            y["id"] = x.value("id", (long long)0);
+            y["batch_id"] = x.value("batch_id", std::string());
+            y["devid"] = x.value("devid", std::string());
+            y["kind"] = x.value("kind", std::string());
+            y["file"] = x.value("file_name", std::string());
+            y["status"] = x.value("status", std::string());
+            y["retry"] = x.value("retry_count", 0);
+            if (x.contains("target_version")) y["target_version"] = x["target_version"];
+            if (x.contains("error") && x["error"].is_string() && !x["error"].get<std::string>().empty())
+                y["error"] = x["error"];
+            y["created_ms"] = x.value("created_ms", (long long)0);
+            keep.push_back(y);
+        }
+        json o;
+        o["total"] = total;
+        o["shown"] = (int)keep.size();
+        o["tasks"] = keep;
+        out = o.dump();
+        return true;
+    }
+
+    if (name == "list_tenants") {
+        std::string js;
+        if (!db_.tenantList(js)) {
+            err = "查询失败";
+            return false;
+        }
+        json doc = json::parse(js, nullptr, false);
+        if (doc.is_discarded()) {
+            err = "查询失败";
+            return false;
+        }
+        json items = doc.value("items", json::array());
+        if (a.is_client) {
+            // 接入令牌只看自己所属的租户（与 /api/v1/tenants 一致）
+            json keep = json::array();
+            for (auto& t : items)
+                if (t.value("id", (long long)0) == a.tenant_id) keep.push_back(t);
+            items = keep;
+        }
+        json o;
+        o["items"] = items;
+        out = o.dump();
+        return true;
+    }
+
+    if (name == "billing_summary") {
+        int days = args.value("days", 30);
+        if (days < 1) days = 1;
+        if (days > 90) days = 90;
+        long long tenant_id = args.value("tenant_id", (long long)0);
+        if (a.is_client) tenant_id = a.tenant_id;
+        char from[16], to[16];
+        time_t now = time(nullptr);
+        struct tm tmv;
+        localtime_r(&now, &tmv);
+        strftime(to, sizeof(to), "%Y-%m-%d", &tmv);
+        time_t back = now - (time_t)(days - 1) * 86400;
+        localtime_r(&back, &tmv);
+        strftime(from, sizeof(from), "%Y-%m-%d", &tmv);
+        std::string js;
+        std::string e;
+        if (!db_.billingSummary(from, to, tenant_id, js, e)) {
+            err = e.empty() ? "查询失败" : e;
+            return false;
+        }
+        out = js;
+        return true;
+    }
+
+    if (name == "list_accounts") {
+        std::string q = args.value("q", std::string());
+        std::string js;
+        if (!db_.clientAccountList(q, js)) {
+            err = "查询失败";
+            return false;
+        }
+        json arr = json::parse(js, nullptr, false);
+        if (arr.is_discarded()) {
+            err = "查询失败";
+            return false;
+        }
+        json keep = json::array();
+        for (auto& x : arr) {
+            if (a.is_client && x.value("tenant_id", (long long)1) != a.tenant_id) continue;
+            json y;
+            y["id"] = x.value("id", (long long)0);
+            y["username"] = x.value("username", std::string());
+            if (x.contains("display_name")) y["display_name"] = x["display_name"];
+            y["status"] = x.value("status", std::string());
+            y["tenant_id"] = x.value("tenant_id", (long long)1);
+            y["tokens"] = x.value("token_count", 0);
+            y["last_used_ms"] = x.value("last_used_ms", (long long)0);
+            keep.push_back(y);
+        }
+        json o;
+        o["count"] = (int)keep.size();
+        o["accounts"] = keep;
+        out = o.dump();
+        return true;
+    }
+
+    if (name == "list_users") {
+        if (a.is_client) {
+            // 控制台账号不对接入令牌暴露（和 /permission/subjects 一致）
+            err = "接入令牌看不到管理台账号";
+            return false;
+        }
+        std::vector<DbUser> users;
+        if (!db_.listUsers(users)) {
+            err = "查询失败";
+            return false;
+        }
+        json arr = json::array();
+        for (const auto& u : users) {
+            json y;
+            y["id"] = u.id;
+            y["username"] = u.username;
+            y["role"] = u.role;
+            y["status"] = u.status;
+            std::vector<long long> gids;
+            if (db_.permGroupsOfUser(u.id, gids)) {
+                y["groups"] = (int)gids.size();
+                y["group_ids"] = gids;
+            }
+            arr.push_back(y);
+        }
+        json o;
+        o["count"] = (int)arr.size();
+        o["users"] = arr;
+        out = o.dump();
+        return true;
+    }
+
+    if (name == "list_permission_groups") {
+        std::string js;
+        if (!db_.permGroups(js)) {
+            err = "查询失败";
+            return false;
+        }
+        json arr = json::parse(js, nullptr, false);
+        if (arr.is_discarded()) {
+            err = "查询失败";
+            return false;
+        }
+        json keep = json::array();
+        for (auto& g : arr) {
+            json y;
+            y["id"] = g.value("id", (long long)0);
+            y["name"] = g.value("name", std::string());
+            y["builtin_key"] = g.value("builtin_key", std::string());
+            y["super"] = g.value("super", false);
+            y["all_devices"] = g.value("all_devices", false);
+            y["ports"] = g.value("ports", std::string());
+            y["members"] = g.value("member_count", 0);
+            y["devices"] = g.value("device_count", 0);
+            y["resources"] = g.value("resources", json::array());
+            keep.push_back(y);
+        }
+        json o;
+        o["count"] = (int)keep.size();
+        o["groups"] = keep;
+        out = o.dump();
+        return true;
+    }
+
+    if (name == "list_certs") {
+        json arr = json::parse(certsJson(), nullptr, false);
+        if (arr.is_discarded()) {
+            err = "查询失败";
+            return false;
+        }
+        // 只保留状态摘要 + 快到期/失效的条目，避免台账把上下文撑满
+        int valid = 0, expiring = 0, expired = 0, revoked = 0;
+        json bad = json::array();
+        for (auto& c : arr) {
+            std::string st = c.value("status", std::string());
+            if (st == "valid") valid++;
+            else if (st == "expiring") expiring++;
+            else if (st == "expired") expired++;
+            else if (st == "revoked") revoked++;
+            if (st != "valid") bad.push_back(c);
+        }
+        json o;
+        o["valid"] = valid;
+        o["expiring"] = expiring;
+        o["expired"] = expired;
+        o["revoked"] = revoked;
+        o["attention"] = bad;
+        out = o.dump();
+        return true;
+    }
+
+    if (name == "list_relays") {
+        std::string js;
+        if (!db_.relayListJson(js)) {
+            err = "查询失败";
+            return false;
+        }
+        out = js;
+        return true;
+    }
+
+    if (name == "list_files") {
+        std::string dir = args.value("dir", std::string());
+        out = repoListJson(dir, 200);
         return true;
     }
 
@@ -929,14 +1421,26 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
     std::thread([this, ctx, msgs, endpoint, model, key, max_tokens, timeout_s, max_rounds,
                  temperature, insecure, devid, actor]() {
       try {
-        json tools = toolDefs();
+        json tools = toolDefsFor(actor);
+        if (tools.empty()) {
+            ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
+            ctx->send("{\"error\":\"当前账号没有可用的查询工具（至少需要 device.view）\"}");
+            return;
+        }
         json messages = json::array();
         json sys;
         sys["role"] = "system";
         sys["content"] =
-            "你是 rtunnel 运维平台的内置助手。只能依据工具返回的数据回答，不要编造设备状态、"
-            "日志或历史。回答用简体中文，先给结论再给依据；涉及数量/时间/版本要写出具体值。"
-            "需要设备信息时先调用工具；工具报错就如实说明缺什么权限或设备是否离线。"
+            "你是 rtunnel 运维平台的管理台助手，可以读取整个平台的状态，不只是设备。"
+            "平台模块与对应工具：平台总览/在线与告警→platform_overview；"
+            "设备→list_devices/device_detail/device_metrics；会话与客户端→list_streams/list_clients；"
+            "升级与分发任务→list_tasks；租户与计费→list_tenants/billing_summary/list_accounts；"
+            "权限→list_users/list_permission_groups；安全与接入→list_certs/list_relays；"
+            "文件仓库→list_files；变更与审计→recent_audit/recent_operations；自愈→list_playbooks。"
+            "用户问什么就选对应模块的工具，不要一律查设备；一个问题涉及多个方面时连续调用多个工具。"
+            "工具列表里没有的工具说明当前账号没有该权限，不要假装能查，也不要把没有权限说成系统故障。"
+            "只能依据工具返回的数据回答，不要编造状态、日志或历史。回答用简体中文，"
+            "先给结论再给依据；涉及数量/时间/版本要写出具体值。"
             "用户明确要求变更（重启服务、清理磁盘、修复故障）时，先用只读工具确认现状，"
             "再调用 propose_exec 生成待确认作业，或用 draft_playbook 给出自愈规则草稿；"
             "这两个工具都不会真正执行。任何情况下都不要说成已经完成，要明确告诉用户还需要在"
@@ -956,7 +1460,8 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
             if (devid.empty() && i == 0) {
                 json hint;
                 hint["role"] = "system";
-                hint["content"] = "用户当前没有选定设备；需要设备上下文时先调用 list_devices。";
+                hint["content"] = "用户当前没有选定设备；问题涉及设备时先调用 list_devices 确定设备，"
+                                  "涉及平台/账号/任务/证书/费用时用对应模块的工具。";
                 messages.push_back(hint);
             }
             json doc;

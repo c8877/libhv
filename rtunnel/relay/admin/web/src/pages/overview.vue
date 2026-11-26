@@ -7,6 +7,9 @@
       </div>
     </div>
 
+    <!-- AI 助手：整个管理台的入口都在这里问，不用先想该点哪个页面 -->
+    <AiChat v-if="can('ai.chat')" ref="chat" compact />
+
     <div class="panel">
       <div class="panel-head">
         <h2>运行信息</h2>
@@ -53,10 +56,10 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { Api } from '@/shared/api.js'
 import { can, overview } from '@/shared/store.js'
 import { bytes, duration, time } from '@/shared/utils.js'
+import AiChat from '@/components/AiChat.vue'
 
 const o = ref(overview.data)
 const stats = computed(() => {
@@ -81,8 +84,6 @@ async function pull() {
 // ---------------------------------------------------------------- 实时事件
 // SSE 用浏览器 Cookie 鉴权（管理台会话），断线由 EventSource 自动重连，
 // 服务端按 Last-Event-ID 续传，不会丢事件。
-const router = useRouter()
-
 const events = ref([])
 const sseState = ref('connecting')
 let es = null
@@ -149,11 +150,14 @@ function connect() {
   }
 }
 
-// 一键诊断：把设备清单与平台状态交给助手，让它按“先结论后依据”给出排查方向
+// 一键巡检：问题直接交给首页的助手，结论就出现在下面，不用跳页
+const chat = ref(null)
 function diagnose() {
-  const q = '请做一次平台巡检：1) 列出设备与在线状态；2) 指出离线设备、版本落后或负载/内存偏高的设备；' +
-    '3) 汇总最近的失败作业与告警；4) 按优先级给出下一步排查建议。只依据工具数据，不要猜测。'
-  router.push({ path: '/assistant', query: { q } })
+  const q = '请做一次平台巡检：1) 平台总览（在线设备/客户端/会话、告警状态）；' +
+    '2) 指出离线设备、版本落后或负载/内存偏高的设备；' +
+    '3) 汇总失败的分发/OTA 任务、最近的自愈触发与快过期证书；' +
+    '4) 按优先级给出下一步排查建议。只依据工具数据，不要猜测。'
+  if (chat.value) chat.value.ask(q)
 }
 
 onMounted(() => {

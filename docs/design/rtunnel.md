@@ -1276,7 +1276,7 @@ alertCheckDevices / alertCheckCerts / notifyTaskFailed
                                               │ std::thread（HttpClient 阻塞，不能占 worker）
                                               ▼
                                     POST {endpoint}/chat/completions
-                                      tools = 7 个只读 + 2 个“提议”工具，tool_choice=auto
+                                      tools = 19 个只读 + 2 个“提议”工具（按权限裁剪），tool_choice=auto
                                               │
                     ┌─────────────────────────┴────────────────────────┐
                     │ 有 tool_calls：本地执行工具 → 结果作为 role=tool 回填 │
@@ -1303,8 +1303,25 @@ alertCheckDevices / alertCheckCerts / notifyTaskFailed
 | `recent_operations` | `operations` | 命令执行与审批结果（含自愈触发） |
 | `usage_summary` | `usage_daily` | 流量/会话/在线时长 |
 | `list_playbooks` | `playbooks` + 触发流水 | 有没有自动处理、为什么没自动 |
+| `platform_overview` | relay 实时计数 + 告警状态 | 平台整体是否正常 |
+| `list_streams` | relay `agents` 上的流 | 谁正连着设备、多少会话 |
+| `list_clients` | relay `conns` 里的 client | 哪些接入账号在线 |
+| `list_tasks` | `distribution_tasks` | 升级/分发到哪了、为什么失败 |
+| `list_tenants` | `tenants` + 当月用量 | 有几个客户、谁的额度快满 |
+| `billing_summary` | `usage_daily` × `price_rules` | 这个月大概多少钱 |
+| `list_accounts` | `client_accounts` | 客户账号与令牌数 |
+| `list_users` | `users` + 成员关系 | 谁有管理台账号、什么角色 |
+| `list_permission_groups` | `perm_groups` + 资源/设备/成员 | 谁能做什么 |
+| `list_certs` | `cert_dir/index.txt` | 证书到期与吊销 |
+| `list_relays` | `relay_list` | 设备会连哪台、切换顺序 |
+| `list_files` | 文件仓库目录 | 仓库里有没有某个包 |
 | `propose_exec` | 生成 `operations` 作业（不执行） | 用户要求变更时给出可确认的命令 |
 | `draft_playbook` | 生成规则草稿（不落库） | 把这次排障固化成自愈规则 |
+
+**工具按权限裁剪**：`toolDefsFor(actor)` 先按 `toolPerm(name)` 过一遍 `aiCan`，只把当前账号
+真正能用的工具交给模型——少一个工具就少一次“没权限”的往返，也不会让模型以为它能碰费率、
+证书或别人的账号。`aiRunTool` 仍然逐工具再判一次（模型可以编造工具名，不能只靠列表）。
+管理台对话页显示的 `tools` 是“本账号可用数”，`tools_total` 是全部。
 
 **权限判定用请求线程的快照**（`AiActor`）：对话跑在独立线程，那里 `tl_actor` 是空的，
 直接 `hasPerm()` 会变成匿名——这跟 P0 修过的 WS 消息鉴权是同一类坑。工具内部再做
@@ -1338,8 +1355,9 @@ alertCheckDevices / alertCheckCerts / notifyTaskFailed
 
 **前端**：对话里的 action 卡片显示 `风险 n`、完整 argv、状态（待批准/待执行/已执行）、
 批准与执行按钮、执行后的 exit code + stdout/stderr；草稿卡显示拟建的规则并可一键创建。
-「概览 → AI 诊断」把设备清单、离线、版本落后、失败作业、告警拼成一条巡检问题，
-带着 `?q=` 跳到助手页——这是“智能化使用管理台”的入口，不用自己想该问什么。
+**入口在首页**：`components/AiChat.vue` 是唯一实现，概览页用 `compact` 嵌入（固定高度、
+带「全屏」），`/assistant` 用同一组件全屏展示——不再维护两份对话界面。「概览 → AI 诊断」
+直接把巡检问题发给首页的助手（`ref.ask()`），结论就地出现在下方，不用跳页。
 
 **输入侧防护**：客户端只能传 `user` / `assistant` 消息，`system` 一律丢弃（否则可以覆盖系统提示）；
 `devid` 先过 `ownsDevid`；单条消息 8 KB、上下文 40 条上限；工具结果进上下文前裁到 6 KB。
@@ -1357,7 +1375,7 @@ API 挂了也能打开——这恰好是最需要查文档的时候。
 - 助手不能直接执行变更：它只能生成作业，执行/批准由人点，风险 ≥ 2 还要另一个身份批准
 - 提议的作业与自愈草稿都复用现有闸门（配额、变更窗口、审批），没有为 AI 单开旁路
 - 不做多会话持久化：刷新即清空，避免把对话内容（含设备信息）留在库里
-- 工具集是硬编码的 9 个，不是从 OpenAPI 自动生成：自动生成会把 100+ 个写接口带进来，
+- 工具集是硬编码的 21 个，不是从 OpenAPI 自动生成：自动生成会把 150+ 个写接口带进来，
   需要额外的“哪些该给模型”策略。当前选择是显式列出，接口变更时由 e2e 兜住
 
 ## 14. 备选方案与取舍

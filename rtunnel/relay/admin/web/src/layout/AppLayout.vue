@@ -15,6 +15,11 @@
         <el-button text class="hamburger" aria-label="菜单" @click="navOpen = !navOpen">
           <el-icon :size="18"><Fold /></el-icon>
         </el-button>
+        <!-- 手机上没有侧栏，把品牌放到页头；点它回首页 -->
+        <router-link class="brand-mini" to="/" title="回到首页" aria-label="回到首页">
+          <span class="mark">◈</span>
+          <span class="bname">{{ title }}</span>
+        </router-link>
         <span class="crumb">{{ crumb }}</span>
         <span class="spacer" />
         <span v-if="ov" class="relay-info">v{{ ov.version }} · uptime {{ duration(ov.uptime_ms) }}</span>
@@ -205,6 +210,33 @@ html.dark .side {
   border-bottom: 1px solid var(--el-border-color-lighter);
 }
 .hamburger { display: none; }
+.brand-mini {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  color: inherit;
+  flex: none;
+}
+.brand-mini .mark {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 14px;
+  background: linear-gradient(135deg, var(--el-color-primary), color-mix(in srgb, var(--el-color-primary) 55%, #7c3aed));
+}
+.brand-mini .bname {
+  font-size: 15px;
+  font-weight: 650;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .crumb { font-size: 16px; font-weight: 650; letter-spacing: 0.01em; }
 .spacer { flex: 1; }
 .relay-info {
@@ -264,11 +296,12 @@ html.dark .side {
 @media (max-width: 959px) {
   .side { display: none; }
   .hamburger { display: inline-flex; }
+  .brand-mini { display: inline-flex; }
   .page { --page-pad: 16px; padding: var(--page-pad); }
 }
 @media (max-width: 599px) {
   .topbar { padding: 0 14px; gap: 8px; height: 56px; }
-  .relay-info, .uname { display: none; }
+  .relay-info, .uname, .brand-mini .bname { display: none; }
   .page { --page-pad: 12px; padding: var(--page-pad); }
 }
 </style>

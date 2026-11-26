@@ -270,6 +270,11 @@ private:
     // 读工具直接查；写工具只“提议”，落一个 operation 等人确认。
     bool aiRunTool(const AiActor& a, const std::string& name, const nlohmann::json& args,
                    std::string& out, std::string& err);
+    // 请求线程里抓一份身份快照（对话线程里 tl_actor 为空，不能直接读）
+    AiActor aiSnapshot();
+    // 证书台账 / 文件仓库列表：分别给 /certs、/files 与 AI 工具共用
+    std::string certsJson();
+    std::string repoListJson(const std::string& dir, int limit);
     // 内部路径（AI/自愈）创建 exec 作业：与 /operations/plan 共用风险分级、
     // plan_hash 与审批阈值，避免两处各算一套。
     // 命令风险分级（1 只读 / 2 改状态 / 3 破坏性）：plan 与自愈规则草稿共用

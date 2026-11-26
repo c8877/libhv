@@ -214,8 +214,9 @@ static bool validSan(const std::string& s) {
     return true;
 }
 
-void AdminServer::handleCerts(const HttpContextPtr& ctx) {
-    std::string body = callRelay([this]() {
+// 台账快照：/certs 与 AI 工具共用同一份，避免两处各读一遍 index.txt
+std::string AdminServer::certsJson() {
+    return callRelay([this]() {
         json arr = json::array();
         uint64_t now = hloop_now_ms(relay_->loop);
         FILE* fp = fopen((relay_->cert_dir + "/index.txt").c_str(), "r");
@@ -241,7 +242,10 @@ void AdminServer::handleCerts(const HttpContextPtr& ctx) {
         }
         return arr.dump();
     });
-    ctx->send(body);
+}
+
+void AdminServer::handleCerts(const HttpContextPtr& ctx) {
+    ctx->send(certsJson());
 }
 
 void AdminServer::handleCertIssue(const HttpContextPtr& ctx, const std::string& role) {

@@ -74,6 +74,34 @@ static bool listDir(const std::string& dir, const std::string& rel, std::vector<
     return true;
 }
 
+// 仓库某一层的条目（不含 sha，给 AI 看目录用）；dir 为空表示仓库根
+std::string AdminServer::repoListJson(const std::string& dir, int limit) {
+    json arr = json::array();
+    if (cfg_.file_dir.empty()) return arr.dump();
+    std::string rel, path;
+    if (!adminRepoPath(cfg_.file_dir, dir, rel)) return arr.dump();
+    path = rel.empty() ? cfg_.file_dir : rel;
+    std::vector<FileEnt> files;
+    if (!listDir(path, rel, files)) return arr.dump();
+    std::sort(files.begin(), files.end(), [](const FileEnt& a, const FileEnt& b) {
+        if (a.dir != b.dir) return a.dir;   // 目录在前
+        return a.name < b.name;
+    });
+    for (const auto& f : files) {
+        if ((int)arr.size() >= limit) break;
+        json j;
+        j["name"] = f.name;
+        j["path"] = "/" + f.rel;
+        j["type"] = f.dir ? "dir" : "file";
+        if (!f.dir) {
+            j["size"] = f.size;
+            j["mtime_ms"] = f.mtime_ms;
+        }
+        arr.push_back(j);
+    }
+    return arr.dump();
+}
+
 void AdminServer::handleFiles(const HttpContextPtr& ctx) {
     if (cfg_.file_dir.empty()) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;

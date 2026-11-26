@@ -1,9 +1,9 @@
 <template>
   <div class="nav-inner">
-    <div class="logo">
+    <router-link class="logo" to="/" title="回到首页" aria-label="回到首页">
       <span class="mark">◈</span>
       <span class="name">{{ title }}</span>
-    </div>
+    </router-link>
     <el-menu ref="menuRef" :default-active="active" :default-openeds="initialOpen"
              :unique-opened="true" router class="menu">
       <el-sub-menu v-for="g in items" :key="g.key" :index="g.key">
@@ -55,7 +55,12 @@ defineExpose({
   font-weight: 700;
   letter-spacing: 0.01em;
   flex: none;
+  text-decoration: none;
+  border-radius: 10px;
+  transition: opacity 0.15s ease;
 }
+.logo:hover { opacity: 0.85; }
+.logo:hover .mark { box-shadow: 0 8px 22px -8px var(--el-color-primary); }
 .logo .mark {
   width: 30px;
   height: 30px;

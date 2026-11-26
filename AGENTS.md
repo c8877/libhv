@@ -158,4 +158,6 @@ GitHub Actions (`.github/workflows/CI.yml`): builds and tests on Linux (with Ope
 - 表格排序、表单校验、弹层、tab、分页不属于可放行范围。
 - 设备本地页不要另写页面：管理台与本地页共用 `components/DeviceView.vue`，差异只通过 `mode`、API 适配（`src/local/api.js`）和资源权限处理。`npm run build:local` 生成 `rtunnel/agent/web/index.html`，这是构建产物，不要手改。
 - `shared/web/*.js`（`fs-ui` / `svc-ui` / `storage-ui` / `table-ui`）只作为 Vue 卡片/组件内部的渲染内核；不要再基于它们写页面级表格、表单或弹层。
+- AI 对话只有一份实现 `components/AiChat.vue`：首页仪表盘用 `compact` 嵌入，`/assistant` 全屏用同一个组件（`bind-query`）。不要为首页另写一套聊天界面；对话逻辑、模型设置弹窗都留在该组件里。
+- 顶部品牌区（侧栏 logo、手机页头 `brand-mini`）都要能点回首页，新增布局时别把这条去掉。
 

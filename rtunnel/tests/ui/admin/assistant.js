@@ -7,7 +7,7 @@ const h = require('../lib/harness')
   await h.login(p)
 
   await p.goto(h.A + '/#/assistant')
-  await p.waitForSelector('.chat-panel', { timeout: 20000 })
+  await p.waitForSelector('.ai-chat', { timeout: 20000 })
   await p.waitForTimeout(600)
   h.check('页面标题', (await p.locator('.panel-head h2').first().innerText()) === 'AI 助手')
 
