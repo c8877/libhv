@@ -57,6 +57,8 @@ set(RTUNNEL_RELAY_SOURCES
                relay/admin/backend/admin_db_accounts.cpp
                relay/admin/backend/admin_db_usage.cpp
                relay/admin/backend/admin_db_ops.cpp
+               relay/admin/backend/admin_db_playbook.cpp
+               relay/admin/backend/api_playbooks.cpp
                relay/admin/backend/admin_db_metrics_minute.cpp
                relay/admin/backend/event_bus.cpp
                relay/admin/backend/api_events.cpp

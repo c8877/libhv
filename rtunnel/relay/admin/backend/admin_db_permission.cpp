@@ -209,6 +209,7 @@ bool permIsGlobalKey(const std::string& key) {
         "settings.read", "settings.write", "system.shutdown",
         "repo.read", "repo.write", "repo.delete",
         "op.approve",
+        "playbook.read", "playbook.write",
     };
     for (const char* k : kGlobal)
         if (key == k) return true;
@@ -504,6 +505,8 @@ const PermResDef kPermRes[] = {
 
     {"audit.read", "审计", "查看审计", "管理台操作审计日志"},
     {"op.approve", "运营", "审批操作作业", "批准或拒绝 risk ≥ 2 的设备写操作（不能批自己发起的）"},
+    {"playbook.read", "运营", "查看自愈规则", "告警触发的自动应答规则与执行流水"},
+    {"playbook.write", "运营", "管理自愈规则", "新建/修改/启停/删除自愈规则并手动触发"},
     {"usage.read", "运营", "查看用量", "隧道流量、会话与设备在线用量报表（全局）"},
     {"tenant.read", "运营", "查看租户", "租户列表与设备/账号归属"},
     {"tenant.write", "运营", "管理租户", "新建、改名、启停租户"},

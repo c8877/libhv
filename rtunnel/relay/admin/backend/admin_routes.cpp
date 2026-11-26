@@ -193,6 +193,46 @@ void AdminServer::registerRoutes() {
         return 200;
     });
     access("device.view", "GET", "/api/v1/operations", &AdminServer::handleOpsList);
+
+    // 自愈规则：fires 必须注册在 /:id 之前，否则 "fires" 会被当成 id
+    access("playbook.read", "GET", "/api/v1/playbooks/fires", &AdminServer::handlePlaybookFires);
+    access("playbook.read", "GET", "/api/v1/playbooks", &AdminServer::handlePlaybooksList);
+    access("playbook.read", "GET", "/api/v1/playbooks/:id", &AdminServer::handlePlaybookGet);
+    service_.Handle("POST", "/api/v1/playbooks", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "playbook.write", role);
+        if (rc) return rc;
+        handlePlaybookSave(ctx, role);
+        return 200;
+    });
+    service_.Handle("PUT", "/api/v1/playbooks/:id", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "playbook.write", role);
+        if (rc) return rc;
+        handlePlaybookSave(ctx, role);
+        return 200;
+    });
+    service_.Handle("DELETE", "/api/v1/playbooks/:id", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "playbook.write", role);
+        if (rc) return rc;
+        handlePlaybookDelete(ctx, role);
+        return 200;
+    });
+    service_.Handle("POST", "/api/v1/playbooks/:id/enable", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "playbook.write", role);
+        if (rc) return rc;
+        handlePlaybookEnable(ctx, role);
+        return 200;
+    });
+    service_.Handle("POST", "/api/v1/playbooks/:id/run", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "playbook.write", role);
+        if (rc) return rc;
+        handlePlaybookRun(ctx, role);
+        return 200;
+    });
     service_.Handle("GET", "/api/v1/agents/:devid/storage", [this](const HttpContextPtr& ctx) {
         std::string role;
         int rc = requirePerm(ctx, "device.view", role);

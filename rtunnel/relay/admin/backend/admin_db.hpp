@@ -274,6 +274,24 @@ public:
                                    std::string& json_out, std::string& err);
     bool billingStatementCsv(long long id, std::string& csv_out, std::string& err);
 
+    // 自愈规则（playbook）：告警匹配后生成 operation
+    bool playbookList(std::string& json_out);
+    bool playbookGet(long long id, std::string& json_out);
+    // id=0 新建，否则更新；name 唯一
+    bool playbookSave(long long id, const std::string& name, const std::string& event,
+                      const std::string& devid_glob, const std::string& argv_json,
+                      const std::string& verify_json, int risk, bool auto_apply, int cooldown_s,
+                      int max_per_hour, const std::string& note, bool enabled, long long& out_id,
+                      std::string& err);
+    bool playbookDelete(long long id);
+    bool playbookSetEnabled(long long id, bool enabled);
+    // 某规则在 since_ms 之后真正执行过的次数（含 failed，防止故障时反复重试）
+    long long playbookCountRecent(long long id, long long since_ms);
+    // 全规则合计：全局每小时上限用
+    long long playbookCountRecentAll(long long since_ms);
+    // 自愈触发的作业流水（actor_type=playbook），最近的在前
+    bool playbookFires(int limit, std::string& json_out);
+
     // 分钟级设备指标：relay 每分钟一条，按 (devid,ts_min) 去重
     bool metricsAppend(const std::string& json_in, int& rows, std::string& err);
     bool metricsQuery(const std::string& devid, long long from_ms, long long to_ms,

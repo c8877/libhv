@@ -159,6 +159,95 @@ export const DOCS = [
     resp: `{ "items": [{ "id": 7, "kind": "exec", "target_id": "mp135", "status": "applied", "risk": 2 }] }`,
   },
   {
+    group: 'device', method: 'GET', path: '/api/v1/playbooks', minRole: 'manager',
+    summary: '自愈规则列表',
+    note: '需要 playbook.read（接入令牌不生效）。规则只做一件事：告警匹配后生成一个 operation，'
+      + '是否自动执行由规则开关 + playbook.auto_apply_max_risk 共同决定。',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/playbooks"`,
+    resp: `{ "items": [{ "id": 1, "name": "上线自检", "event": "device.online", "devid_glob": "dev*", "argv": ["uptime"], "verify_argv": ["uptime"], "risk": 1, "auto_apply": true, "cooldown_s": 300, "max_per_hour": 6, "enabled": true }] }`,
+  },
+  {
+    group: 'device', method: 'GET', path: '/api/v1/playbooks/:id', minRole: 'manager',
+    summary: '自愈规则详情',
+    params: [{ name: 'id', in: 'path', desc: '规则 ID' }],
+    note: '需要 playbook.read',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/playbooks/1"`,
+    resp: `{ "id": 1, "name": "上线自检", "event": "device.online", "argv": ["uptime"], "risk": 1 }`,
+  },
+  {
+    group: 'device', method: 'POST', path: '/api/v1/playbooks', minRole: 'manager',
+    summary: '新建自愈规则',
+    params: [
+      { name: 'name', in: 'body', desc: '唯一名称，1-64 字节' },
+      { name: 'event', in: 'body', desc: 'device.online | device.offline | task.failed | cert.expiring | *' },
+      { name: 'devid_glob', in: 'body', desc: '设备 glob（* ?），默认 *' },
+      { name: 'argv', in: 'body', desc: '命令 argv 数组（不经过 shell，需在 agent 白名单内）' },
+      { name: 'verify_argv', in: 'body', desc: '可选复核 argv，exit_code=0 才算自愈成功' },
+      { name: 'auto_apply', in: 'body', desc: '是否自动执行（仍受全局风险上限约束）' },
+      { name: 'cooldown_s', in: 'body', desc: '同规则冷却秒数，默认 300' },
+      { name: 'max_per_hour', in: 'body', desc: '每规则每小时上限，默认 6' },
+    ],
+    note: '需要 playbook.write。risk 由服务端按 argv 计算，客户端传 risk 会被忽略——'
+      + '否则可以把「重启服务」标成只读来绕过审批',
+    body: `{ "name": "上线自检", "event": "device.online", "devid_glob": "dev*", "argv": ["uptime"], "auto_apply": true }`,
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n     -d '{"name":"上线自检","event":"device.online","argv":["uptime"],"auto_apply":true}' "$RT/api/v1/playbooks"`,
+    resp: `{ "id": 1, "name": "上线自检", "risk": 1, "auto_apply": true, "enabled": true }`,
+  },
+  {
+    group: 'device', method: 'PUT', path: '/api/v1/playbooks/:id', minRole: 'manager',
+    summary: '修改自愈规则',
+    params: [
+      { name: 'id', in: 'path', desc: '规则 ID' },
+      { name: 'argv', in: 'body', desc: '新的 argv（risk 重新计算）' },
+    ],
+    note: '需要 playbook.write。字段与新建相同，未传的用默认值（不是部分更新）',
+    body: `{ "name": "上线自检", "event": "device.online", "argv": ["uptime"], "auto_apply": false }`,
+    curl: `curl -sS -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n     -d '{"name":"上线自检","event":"device.online","argv":["uptime"],"auto_apply":false}' "$RT/api/v1/playbooks/1"`,
+    resp: `{ "id": 1, "auto_apply": false }`,
+  },
+  {
+    group: 'device', method: 'DELETE', path: '/api/v1/playbooks/:id', minRole: 'manager',
+    summary: '删除自愈规则',
+    params: [{ name: 'id', in: 'path', desc: '规则 ID' }],
+    note: '需要 playbook.write。只删规则，历史触发记录（operations）保留',
+    curl: `curl -sS -X DELETE -H "Authorization: Bearer $ATK" "$RT/api/v1/playbooks/1"`,
+    resp: `{ "ok": true }`,
+  },
+  {
+    group: 'device', method: 'POST', path: '/api/v1/playbooks/:id/enable', minRole: 'manager',
+    summary: '启用 / 停用自愈规则',
+    params: [
+      { name: 'id', in: 'path', desc: '规则 ID' },
+      { name: 'enabled', in: 'body', desc: 'true 启用，false 停用' },
+    ],
+    note: '需要 playbook.write',
+    body: `{ "enabled": false }`,
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n     -d '{"enabled":false}' "$RT/api/v1/playbooks/1/enable"`,
+    resp: `{ "id": 1, "enabled": false }`,
+  },
+  {
+    group: 'device', method: 'POST', path: '/api/v1/playbooks/:id/run', minRole: 'manager',
+    summary: '按规则给指定设备生成作业',
+    params: [
+      { name: 'id', in: 'path', desc: '规则 ID' },
+      { name: 'devid', in: 'body', desc: '目标设备（必须在授权范围内）' },
+    ],
+    note: '需要 playbook.write。与自动触发走同一路径：auto_apply 且风险不超上限才直接执行，'
+      + '否则生成待审批作业',
+    body: `{ "devid": "mp135" }`,
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n     -d '{"devid":"mp135"}' "$RT/api/v1/playbooks/1/run"`,
+    resp: `{ "id": 12, "actor": "playbook:1:上线自检", "status": "verified", "risk": 1 }`,
+  },
+  {
+    group: 'device', method: 'GET', path: '/api/v1/playbooks/fires', minRole: 'manager',
+    summary: '自愈触发记录',
+    params: [{ name: 'limit', in: 'query', desc: '默认 50，最大 500' }],
+    note: '需要 playbook.read。受限账号只看得到授权设备上的记录；记录来自 operations 里 '
+      + 'actor_type=playbook 的作业',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/playbooks/fires?limit=20"`,
+    resp: `{ "items": [{ "op_id": 12, "playbook_id": 1, "playbook": "上线自检", "devid": "mp135", "status": "verified", "created_ms": 1764136800000 }] }`,
+  },
+  {
     group: 'device', method: 'GET', path: '/api/v1/agents/:devid/metrics/history', minRole: 'viewer',
     summary: '分钟级指标历史（relay 采样）',
     params: [

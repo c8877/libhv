@@ -103,6 +103,8 @@ void AdminServer::alertEnqueue(const AlertEvent& ev) {
         }
     }
     bus_.publish("alert", j.dump());
+    // 自愈：同一条告警驱动规则匹配（匹配失败不影响告警本身）
+    playbookOnAlert(ev);
 }
 
 void AdminServer::notifyTaskFailed(long long id, const std::string& devid,
@@ -376,7 +378,9 @@ void AdminServer::alertLoop() {
     long long last_cert_check = 0;
     while (!waitStop(500)) {
         long long now = wallMs();
-        bool enabled = settingInt("alert.enabled", 0) != 0;
+        // 采集与「是否发 webhook」解耦：自愈规则和事件流都要靠它产生上下线事件，
+        // 没配 webhook 的用户也应该能收到 device.offline 并触发规则。
+        bool enabled = settingInt("alert.enabled", 0) != 0 || settingInt("playbook.enabled", 1) != 0;
         if (enabled && now - last_check >= 5000) {
             last_check = now;
             alertCheckDevices(now);

@@ -38,7 +38,7 @@ const Def kDefs[] = {
     {"alert.webhook_url",    "",    0, 0,        "Webhook 地址",   "",    "告警", "http(s):// 完整地址，留空则不发送"},
     {"alert.webhook_secret", "",    0, 0,        "签名密钥",       "",    "告警", "可选：钉钉加签或通用 HMAC-SHA256"},
     {"alert.device_offline", "1",   0, 1,        "设备离线",       "",    "告警", "设备断开超过阈值时通知"},
-    {"alert.offline_after_s","120", 30, 3600,    "离线判定",       "秒",  "告警", "断开多久判定为离线"},
+    {"alert.offline_after_s","120", 5, 3600,     "离线判定",       "秒",  "告警", "断开多久判定为离线（检测周期 5s，最小 5s）"},
     {"alert.cert_warn_days", "30",  1, 365,      "证书预警",       "天",  "告警", "剩余多少天开始提醒"},
     {"alert.cert_crit_days", "7",   1, 90,       "证书紧急",       "天",  "告警", "剩余多少天升级为严重"},
     {"alert.task_fail",      "1",   0, 1,        "分发失败",       "",    "告警", "分发任务最终失败或超时时通知"},
@@ -48,6 +48,9 @@ const Def kDefs[] = {
     {"ops.max_per_hour_device","0", 0, 1000,     "单设备每小时上限","个", "操作作业", "同一设备每小时最多执行的作业数，0=不限"},
     {"ops.window",           "",    0, 0,        "执行窗口",       "",    "操作作业", "HH:MM-HH:MM，空=全天；不在时段内拒绝执行写操作"},
     {"metrics.retention_days","7",  1, 90,       "指标保留",       "天",  "监控", "分钟级设备指标保留天数（每小时清理一次）"},
+    {"playbook.enabled",     "1",   0, 1,        "启用自愈",       "",    "自愈", "总开关：关闭后所有规则只记录匹配、不生成作业"},
+    {"playbook.auto_apply_max_risk","1",1,3,     "自动执行上限",   "",    "自愈", "命令风险不超过该值才自动执行（1只读 2改状态 3破坏性）；其余进待批"},
+    {"playbook.max_per_hour","30",  0, 1000,     "自愈频率上限",   "次/时","自愈", "所有规则合计每小时最多触发次数，0=不限"},
 };
 
 // 字符串类配置的最大长度（默认 64）
@@ -78,6 +81,13 @@ bool validate(const std::string& key, const std::string& val, std::string& err) 
             val != "generic" && val != "wecom" && val != "dingtalk" && val != "feishu") {
             err = "kind must be generic/wecom/dingtalk/feishu";
             return false;
+        }
+        if (key == "playbook.auto_apply_max_risk") {
+            int v = atoi(val.c_str());
+            if (v < 1 || v > 3) {
+                err = "auto_apply_max_risk must be 1..3";
+                return false;
+            }
         }
         if (key == "alert.webhook_url" && !val.empty() &&
             val.rfind("http://", 0) != 0 && val.rfind("https://", 0) != 0) {

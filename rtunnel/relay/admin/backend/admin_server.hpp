@@ -184,6 +184,13 @@ private:
     void handleOpsPlan(const HttpContextPtr& ctx, const std::string& role);
     void handleOpsApply(const HttpContextPtr& ctx, const std::string& role);
     void handleOpsVerify(const HttpContextPtr& ctx, const std::string& role);
+    void handlePlaybooksList(const HttpContextPtr& ctx);
+    void handlePlaybookGet(const HttpContextPtr& ctx);
+    void handlePlaybookSave(const HttpContextPtr& ctx, const std::string& role);
+    void handlePlaybookDelete(const HttpContextPtr& ctx, const std::string& role);
+    void handlePlaybookEnable(const HttpContextPtr& ctx, const std::string& role);
+    void handlePlaybookRun(const HttpContextPtr& ctx, const std::string& role);
+    void handlePlaybookFires(const HttpContextPtr& ctx);
     void handleOpsApprove(const HttpContextPtr& ctx, const std::string& role);
     void handleOpsList(const HttpContextPtr& ctx);
     int  handleAgentProcSignal(const HttpContextPtr& ctx);
@@ -234,6 +241,11 @@ private:
     // api_alerts.cpp + alert_notifier.cpp
     void alertLoop();
     void alertEnqueue(const AlertEvent& ev);
+    // 自愈：告警匹配 → 生成 operation →（可选）自动执行 → verify
+    void playbookOnAlert(const AlertEvent& ev);
+    void playbookWorker();
+    bool playbookEnqueueOp(long long op_id);
+    void playbookRunOp(long long op_id);
     void alertCheckDevices(long long now_ms);
     void alertCheckCerts(long long now_ms);
     bool alertSend(const AlertEvent& ev);
@@ -422,6 +434,11 @@ public:
 
 private:
     // 告警状态（notifier 线程 + 采集共用，全部走 alert_mu_）
+    // 自愈规则：告警线程匹配后入队，单个 worker 串行执行
+    std::mutex                      playbook_mu_;
+    std::deque<long long>           playbook_jobs_;
+    std::map<long long, long long>  playbook_last_fire_ms_;
+    uint64_t                        playbook_dropped_ = 0;
     std::deque<AlertEvent>          alert_q_;
     std::mutex                      alert_mu_;
     std::map<std::string, long long> alert_last_sent_;    // key -> ms

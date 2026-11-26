@@ -321,7 +321,8 @@ namespace {
 // 运营商侧资源：权限组/字典/中继/证书/系统设置/atk 管理属于平台自身运维，
 // 接入令牌（客户）即使被误授也不能用，避免跨租户看到别人的设备与配置。
 bool permIsOperatorKey(const std::string& k) {
-    static const char* kPrefix[] = {"group.", "dict.", "relay.", "cert.", "settings.", "token."};
+    static const char* kPrefix[] = {"group.", "dict.",   "relay.",  "cert.",
+                                    "settings.", "token.", "playbook."};
     for (const char* p : kPrefix)
         if (k.rfind(p, 0) == 0) return true;
     // 价目与审批是运营方动作：接入令牌可以看本租户费用，但不能改单价或放行设备写操作
@@ -812,6 +813,9 @@ int AdminServer::start(const AdminConfig& cfg) {
     spawnWorker([this]() { relaySyncLoop(); });
     // Token 用量：relay 只保留内存计数，这里按周期拉快照落库；
     // 同时取走用量事件（流量增量/会话/在线时长）写入流水与日聚合。
+    // 自愈 worker：与告警线程解耦，串行执行规则生成的作业
+    spawnWorker([this]() { playbookWorker(); });
+
     // 事件流与分钟级指标：500ms 从 relay 取一次，事件进总线广播，指标写库。
     // 采样本身是 60s 一条，这里只是把 relay 线程的队列搬进 SQLite/SSE。
     spawnWorker([this]() {

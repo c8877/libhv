@@ -21,6 +21,7 @@ export const NAV_GROUPS = [
       { path: '/distribute', icon: 'Upload', label: '分发', perm: 'dist.write' },
       { path: '/tasks', icon: 'List', perm: 'dist.read' },
       { path: '/operations', icon: 'Tickets', label: '作业', perm: 'device.exec' },
+      { path: '/playbooks', icon: 'MagicStick', label: '自愈', perm: 'playbook.read' },
       { path: '/ota', icon: 'Refresh', perm: ['dist.write', 'device.view', 'repo.read'] },
       { path: '/relay-list', icon: 'Connection', perm: 'relay.read' },
     ],

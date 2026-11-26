@@ -641,6 +641,7 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 | GET/POST | `/api/v1/distributions[/{id}]` | 文件分发任务与重试/取消/延长/校验 |
 | GET | `/api/v1/audit` | 审计（登录、OPEN、踢、证书、文件、终端、权限变更） |
 | GET | `/api/v1/events` | SSE 事件流（设备/会话/审计/告警/任务），支持 Last-Event-ID，见 §13.14 |
+| GET/POST/PUT/DELETE | `/api/v1/playbooks[/{id}]`、`/{id}/run`、`/fires` | 自愈规则与触发记录，见 §13.16 |
 | GET | `/api/v1/agents/{devid}/metrics/history` | 分钟级指标（cpu/内存/负载/网卡），见 §13.14 |
 | GET | `/api/v1/usage` | 用量报表（日聚合）：流量/会话/设备在线，可按 `tenant_id` 过滤，见 §13.10 |
 | GET/POST/PUT | `/api/v1/tenants[/{id}]` | 租户列表/新建/改名启停，见 §13.11 |
@@ -1188,6 +1189,56 @@ MCP 这一层的价值是把「哪些接口该给模型」变成显式配置（�
 
 **仍未做**：工具级的调用配额（目前靠 `ops.max_per_minute` 与令牌频率限制）、
 多模型路由、把 `operations` 的审批嵌进 MCP 的交互式确认（现在要另开页面批）。
+
+### 13.16 自愈规则（playbook）
+
+前四层解决「模型能看、能动手、能感知、有工具契约」，这一层把「告警 → 动作」固化成规则，
+不依赖模型在环。规则本身没有执行能力，它只做一件事：**匹配到告警就生成一个 operation**。
+
+```
+alertCheckDevices / alertCheckCerts / notifyTaskFailed
+        │  AlertEvent{event,details{devid}}
+        ▼
+   playbookOnAlert()  ── 匹配 event + devid_glob ──▶ 冷却 / 每小时上限
+        │
+        ├── auto_apply=1 且 risk ≤ playbook.auto_apply_max_risk ──▶ 入队 ▶ 执行 ▶ verify
+        └── 否则 status=planned / pending_approval（等人批）
+```
+
+**三把锁**（全满足才自动执行）：规则 `auto_apply=1`、`risk ≤ playbook.auto_apply_max_risk`、全局
+`playbook.enabled=1`。默认上限是 1（只读命令），所以「重启服务」默认仍然要人批——想把自愈用在
+写操作上，必须由能改系统设置的人显式把上限提到 2。这是刻意的：一条能自动重启服务的规则，
+爆炸半径和给模型 `systemctl` 权限一样大。
+
+| 字段 | 说明 |
+|---|---|
+| `event` | `device.online` / `device.offline` / `task.failed` / `cert.expiring` / `*` |
+| `devid_glob` | `*` `?` 通配，只看告警里带的 devid |
+| `argv` / `verify_argv` | 命令与复核探针，都是 argv 数组、不经过 shell，需在 agent `--allow-exec` 内 |
+| `risk` | **服务端按 argv 算**，不接受客户端传入（否则能把重启标成只读绕过审批） |
+| `cooldown_s` | 同规则冷却，内存记最近触发；重启后由每小时上限兜底 |
+| `max_per_hour` | 每规则每小时上限；另有全局 `playbook.max_per_hour`（默认 30） |
+
+**防抖与防雪崩**
+
+- 冷却 + 每小时上限 + 全局上限三层，故障时不会一台设备刷出几十条作业
+- 执行是**单 worker 串行**：同一时刻只有一个自愈动作在跑。故障往往是成片的，
+  并发重启会把 relay 与目标网络打满；串行慢一点，但可预测
+- 作业 actor 是 `playbook:<id>:<name>`：审计一眼能看出是规则触发，`operations` 不用加列，
+  按 `actor LIKE 'playbook:7:%'` 就能统计频率
+- 告警来源标记 `source=playbook` 会被忽略，规则动作再触发告警也不会自激
+
+**采集与 webhook 解耦**：`alertCheckDevices` 现在在 `alert.enabled=1` **或** `playbook.enabled=1` 时都跑。
+没配 webhook 的用户也要能拿到 `device.offline` 事件并驱动规则；`alertSend` 自己仍然按
+`alert.enabled` 早退，不会因为开了自愈就突然推消息。
+
+**接口与页面**：`/api/v1/playbooks`（列表/新建/改/删/启停）、`/api/v1/playbooks/:id/run`（按规则给设备
+生成作业，走同一套审批与 auto_apply 判定）、`/api/v1/playbooks/fires`（触发流水）。资源键
+`playbook.read` / `playbook.write`，接入令牌不继承。管理台「运维 → 自愈」列出规则、触发记录，
+可新建/编辑/启停/删除/立即执行。
+
+**边界**：规则只能跑 agent 白名单内的 argv（没有 exec 的设备用不了）；只支持单设备动作，
+没有「一批设备一起做」；没有跨步骤编排（多步要么写成一个脚本交给白名单，要么用分发任务）。
 
 ## 14. 备选方案与取舍
 

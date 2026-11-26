@@ -179,6 +179,7 @@ python3 rtunnel/tests/admin_embedded_e2e.py  # 内嵌前端：无 docroot 出页
 python3 rtunnel/tests/packages_e2e.py    # 部署包：打包→发布→client 自举安装→篡改拒绝→回滚
 python3 rtunnel/tests/exec_e2e.py        # 受控执行：白名单、分流、超时截断、作业 plan/apply/verify
 python3 rtunnel/tests/events_e2e.py      # 事件流 SSE 与分钟级指标：上下线/会话/审计/续传/隔离
+python3 rtunnel/tests/playbook_e2e.py    # 自愈规则：自动执行/超限转审批/冷却/总开关/越权
 python3 rtunnel/tests/mcp_e2e.py         # OpenAPI 与 MCP：工具清单、只读默认、前缀过滤、审计标记
 python3 rtunnel/tests/compat_e2e.py      # HELLO 版本区间、低版本拒绝、高版本向前兼容
 python3 rtunnel/tests/protocol_doc_test.py  # 协议文档覆盖率（帧类型/常量）
@@ -226,6 +227,11 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
 - **分钟级指标**：relay 每分钟给在线设备要一份增量 sysinfo，落 `metrics_minute`（cpu/内存/负载/网卡），
   `GET /api/v1/agents/:devid/metrics/history?from=&to=&step=` 查趋势，默认留 7 天。
   「设备 → 采样曲线」里有「近 6 小时」曲线。
+- **自愈规则（playbook）**：把「告警 → 命令」固化成规则。规则只生成 `operations` 作业，
+  自动执行需要三把锁同时成立：规则开了 `auto_apply`、命令风险 ≤ 系统设置
+  `playbook.auto_apply_max_risk`（默认 1，只读）、全局 `playbook.enabled` 打开。
+  另有规则冷却、每规则/全局每小时上限，执行单线程串行。管理台「运维 → 自愈」可配规则、
+  看触发流水、立即执行。命令风险由服务端算，客户端改不了。
 - **AI 接入（OpenAPI + MCP）**：`GET /api/v1/openapi.json` 在构建前端时从接口文档生成
   （文档由 `check:docs` 强制与路由表对表），接口变了它跟着变。`rtunnel/deploy/rt-mcp.py`
   把这份 schema 变成 MCP 工具，**默认只暴露只读接口**，写操作要 `--allow-write`，
