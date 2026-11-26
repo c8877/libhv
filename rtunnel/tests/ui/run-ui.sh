@@ -31,6 +31,7 @@ SUITES=(
   admin/operations
   admin/playbooks
   admin/assistant
+  admin/ai-empty
   admin/ai-session
   admin/guide
   admin/events
