@@ -27,6 +27,7 @@ SUITES=(
   admin/relay-list
   admin/usage
   admin/tenants
+  admin/operations
   admin/billing
   admin/terminal
   local/page

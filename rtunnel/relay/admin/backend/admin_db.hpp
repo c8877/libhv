@@ -233,17 +233,28 @@ public:
     // 清理早于 before_ms 的流水（日聚合保留）
     bool usagePrune(long long before_ms, int& n);
 
-    // 操作作业：plan 冻结 → apply 执行 → verify 复核。
+    // 操作作业：plan 冻结 →（必要时审批）→ apply 执行 → verify 复核。
     // idem_key 非空时 (actor,idem_key) 唯一，重复提交返回已有作业。
+    // need_approval 决定初始状态是 planned 还是 pending_approval。
     bool opsCreate(const std::string& actor, const std::string& actor_type, const std::string& kind,
                    const std::string& target_type, const std::string& target_id,
                    const std::string& plan_json, const std::string& plan_hash, int risk,
-                   const std::string& idem_key, long long& out_id, std::string& err);
+                   bool need_approval, const std::string& idem_key, long long& out_id,
+                   std::string& err);
     bool opsGet(long long id, std::string& json_out);
-    bool opsList(const std::string& devid, int limit, std::string& json_out);
+    bool opsList(const std::string& devid, const std::string& status, int limit, std::string& json_out);
     bool opsSetStatus(long long id, const std::string& status, const std::string& result,
                       const std::string& error);
     bool opsFindByIdem(const std::string& actor, const std::string& idem_key, std::string& json_out);
+    // 审批：只允许 pending_approval → approved/rejected，且 approver 由调用方保证不是发起人
+    bool opsSetApproval(long long id, const std::string& status, const std::string& approver,
+                        const std::string& note, std::string& err);
+    // 最近 since_ms 以来已执行（含 running）的作业数，用于配额；actor/devid 为空表示不限维度
+    long long opsCountRecent(const std::string& actor, const std::string& devid, long long since_ms);
+
+    // 授权对象是否存在：user/atk/rtk/client 的 id 都是数字串，写进组之前必须校验，
+    // 否则传用户名之类会静默写入一条永远匹配不上的成员，管理员以为授权生效了。
+    bool permSubjectExists(const std::string& type, const std::string& id);
 
     // 价目与费用试算：用量 × 单价（金额单位 1e-6 元）
     bool billingPrices(std::string& json_out);

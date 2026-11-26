@@ -26,6 +26,7 @@ const routes = [
   { path: '/files', component: () => import('./pages/files.vue'), meta: { title: '文件' } },
   { path: '/distribute', component: () => import('./pages/distribute.vue'), meta: { title: '分发文件' } },
   { path: '/tasks', component: () => import('./pages/tasks/index.vue'), meta: { title: '任务' } },
+  { path: '/operations', component: () => import('./pages/operations.vue'), meta: { title: '操作作业' } },
   { path: '/tasks/:id', component: () => import('./pages/tasks/[id].vue'), meta: { title: '任务详情' } },
   { path: '/ota', component: () => import('./pages/ota.vue'), meta: { title: 'Agent 升级' } },
   { path: '/relay-list', component: () => import('./pages/relay-list.vue'), meta: { title: '中继列表' } },

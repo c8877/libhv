@@ -216,7 +216,9 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
   防止单用户打满出口；管理台在「接入账号 → Token」里按 Mbps 填。
 - **受控执行**：agent 用 `--allow-exec` 配白名单后，`POST /api/v1/agents/:devid/exec` 可执行
   argv（不经过 shell），stdout/stderr 分流、超时强杀、超字节截断；写审计 `device.exec`。
-  写动作还可用 `operations` 走 plan→apply→verify，带 `plan_hash` 防 TOCTOU、`Idempotency-Key` 防重放。
+- **操作作业**：写动作走 `operations` 的 plan→apply→verify，`plan_hash` 防 TOCTOU、
+  `Idempotency-Key` 防重放。risk ≥ 2 默认进入待审批，**必须由另一个账号批准**（自己批自己 403）；
+  另有每分钟/每设备配额与 `HH:MM-HH:MM` 执行窗口。管理台「运维 → 作业」可批准/拒绝/执行/看详情。
 - **费用试算**：`price_rules` 存每个指标的计价单位与单价（金额 1e-6 元），
   `GET /api/v1/billing/summary` 把日聚合用量乘单价、按租户汇总；「监控 → 费用」可改价目
   （`billing.write`，默认只有超管）。

@@ -208,6 +208,7 @@ bool permIsGlobalKey(const std::string& key) {
         "billing.read", "billing.write",
         "settings.read", "settings.write", "system.shutdown",
         "repo.read", "repo.write", "repo.delete",
+        "op.approve",
     };
     for (const char* k : kGlobal)
         if (key == k) return true;
@@ -502,6 +503,7 @@ const PermResDef kPermRes[] = {
     {"cert.write", "证书", "签发证书", "签发、吊销、签署证书"},
 
     {"audit.read", "审计", "查看审计", "管理台操作审计日志"},
+    {"op.approve", "运营", "审批操作作业", "批准或拒绝 risk ≥ 2 的设备写操作（不能批自己发起的）"},
     {"usage.read", "运营", "查看用量", "隧道流量、会话与设备在线用量报表（全局）"},
     {"tenant.read", "运营", "查看租户", "租户列表与设备/账号归属"},
     {"tenant.write", "运营", "管理租户", "新建、改名、启停租户"},
@@ -2303,4 +2305,25 @@ bool AdminDb::resDevicesMarkOffline(const std::vector<std::string>& online) {
     bool ok = sqlite3_step(st) == SQLITE_DONE;
     sqlite3_finalize(st);
     return ok;
+}
+
+bool AdminDb::permSubjectExists(const std::string& type, const std::string& id) {
+    // 只接受数字串：组表里 user/atk/rtk/client 的 subject_id 都是主键，不接受用户名
+    if (id.empty() || id.size() > 20) return false;
+    for (char c : id)
+        if (c < '0' || c > '9') return false;
+    const char* table = nullptr;
+    if (type == "user") table = "users";
+    else if (type == "atk") table = "admin_tokens";
+    else if (type == "rtk") table = "client_tokens";
+    else if (type == "client") table = "client_accounts";
+    else return false;
+    std::lock_guard<std::mutex> lk(mu_);
+    std::string sql = std::string("SELECT 1 FROM ") + table + " WHERE id=?";
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_int64(st, 1, atoll(id.c_str()));
+    bool found = sqlite3_step(st) == SQLITE_ROW;
+    sqlite3_finalize(st);
+    return found;
 }

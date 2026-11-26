@@ -1,4 +1,4 @@
-// 操作作业 API：plan → apply → verify。
+// 操作作业 API：plan →（审批）→ apply → verify。
 //
 // 为什么要有 plan：AI/脚本先拿到一份“将要做什么”的确定性摘要与 plan_hash，
 // apply 必须回传同一个 hash。设备状态在这期间变了（例如 argv 被替换、
@@ -6,6 +6,12 @@
 //
 // 幂等：apply 可带 Idempotency-Key。同 actor 同 key 的作业已执行过就直接返回
 // 原结果，重试不会把 systemctl restart 跑两遍。
+//
+// 审批：risk >= ops.require_approval_risk（默认 2）的作业落库即 pending_approval，
+// 必须由**另一个** actor 批准才能 apply。审批闸门只拦“执行”，不拦“提议”。
+//
+// 配额：ops.max_per_minute（每 actor）、ops.max_per_hour_device（每设备）默认 0 不限；
+// ops.window 形如 "08:00-20:00"，为空表示全天可执行（权限仍按组求值）。
 #include "admin_server.hpp"
 #include "api_reply.hpp"
 #include "cpputil/json.hpp"
@@ -18,7 +24,7 @@ using nlohmann::json;
 
 namespace {
 
-// 风险分级只用于提示与后续审批，P0 不阻断。
+// 风险分级决定要不要审批，阈值见 ops.require_approval_risk。
 //   1 = 只读（查看类命令）
 //   2 = 修改运行状态（重启服务、发信号、动文件）
 //   3 = 破坏性/难以恢复（格式化、关机、改系统文件）
@@ -54,6 +60,38 @@ int argvRisk(const std::vector<std::string>& argv) {
     // sh/bash -c 这种拿不准的一律按可写算
     if (cmd == "sh" || cmd == "bash" || cmd == "su" || cmd == "sudo") return 2;
     return 2;
+}
+
+// "08:00-20:00" 形式的执行窗口；跨零点（"22:00-06:00"）也正确处理。
+// 空字符串或格式不合法一律视为不限，避免配置写错把系统锁死。
+bool inExecWindow(const std::string& win, int now_min) {
+    if (win.size() != 11 || win[2] != ':' || win[5] != '-' || win[8] != ':') return true;
+    auto toMin = [](const std::string& s, size_t off) {
+        int h = atoi(s.substr(off, 2).c_str());
+        int m = atoi(s.substr(off + 3, 2).c_str());
+        if (h < 0 || h > 23 || m < 0 || m > 59) return -1;
+        return h * 60 + m;
+    };
+    int a = toMin(win, 0), b = toMin(win, 6);
+    if (a < 0 || b < 0) return true;
+    if (a <= b) return now_min >= a && now_min <= b;
+    return now_min >= a || now_min <= b;
+}
+
+std::string localHHMM() {
+    time_t t = time(nullptr);
+    struct tm tmv;
+    localtime_r(&t, &tmv);
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%02d:%02d", tmv.tm_hour, tmv.tm_min);
+    return buf;
+}
+
+int localMinutes() {
+    time_t t = time(nullptr);
+    struct tm tmv;
+    localtime_r(&t, &tmv);
+    return tmv.tm_hour * 60 + tmv.tm_min;
 }
 
 std::string planHash(const json& plan) {
@@ -113,6 +151,9 @@ void AdminServer::handleOpsPlan(const HttpContextPtr& ctx, const std::string& ro
     plan["max_bytes"] = max_bytes;
     if (req.contains("cwd") && req["cwd"].is_string()) plan["cwd"] = req["cwd"];
     int risk = argvRisk(argv);
+    int threshold = settingInt("ops.require_approval_risk", 2);
+    if (threshold < 1) threshold = 1;   // 0 也当 1：只读命令不需要审批
+    bool need_approval = risk >= threshold;
 
     std::string who = actorLabel();
     if (who.empty()) who = "anonymous";
@@ -122,8 +163,8 @@ void AdminServer::handleOpsPlan(const HttpContextPtr& ctx, const std::string& ro
 
     long long id = 0;
     std::string err;
-    if (!db_.opsCreate(who, actor_type, kind, "device", devid, plan.dump(), planHash(plan), risk, idem,
-                       id, err)) {
+    if (!db_.opsCreate(who, actor_type, kind, "device", devid, plan.dump(), planHash(plan), risk,
+                       need_approval, idem, id, err)) {
         apiBad(ctx, err.empty() ? "db error" : err);
         return;
     }
@@ -172,11 +213,20 @@ void AdminServer::handleOpsApply(const HttpContextPtr& ctx, const std::string& r
         }
     }
 
-    if (status == "applied") {
+    if (status == "applied" || status == "verified") {
         ctx->send(cur);   // 已经执行过：重放不会重复执行
         return;
     }
-    if (status != "planned") {
+    if (status == "pending_approval") {
+        apiError(ctx, HTTP_STATUS_CONFLICT,
+                 "作业待审批（risk=" + std::to_string(op.value("risk", 0)) + "），先由其他账号批准");
+        return;
+    }
+    if (status == "rejected") {
+        apiError(ctx, HTTP_STATUS_CONFLICT, "作业已被拒绝，需要重新 plan");
+        return;
+    }
+    if (status != "planned" && status != "approved") {
         apiError(ctx, HTTP_STATUS_CONFLICT, "操作状态不允许执行: " + status);
         return;
     }
@@ -186,6 +236,34 @@ void AdminServer::handleOpsApply(const HttpContextPtr& ctx, const std::string& r
     if (want_hash.empty() || want_hash != op.value("plan_hash", std::string())) {
         apiError(ctx, HTTP_STATUS_CONFLICT, "plan_hash 不匹配，请重新 plan");
         return;
+    }
+
+    // 变更窗口：配置了 ops.window 就只在时段内允许执行写操作
+    std::string win = settingStr("ops.window", std::string());
+    if (!win.empty() && !inExecWindow(win, localMinutes())) {
+        apiError(ctx, HTTP_STATUS_FORBIDDEN, "当前不在允许执行的时段（" + win + "），现在 " + localHHMM());
+        return;
+    }
+
+    // 配额：只统计真正执行过的（running/applied/verified/failed），plan 不占额度
+    long long now_ms = AdminDb::nowMs();
+    int per_min = settingInt("ops.max_per_minute", 0);
+    if (per_min > 0) {
+        long long n = db_.opsCountRecent(who, std::string(), now_ms - 60 * 1000);
+        if (n >= per_min) {
+            apiError(ctx, HTTP_STATUS_TOO_MANY_REQUESTS,
+                     "每分钟最多执行 " + std::to_string(per_min) + " 个作业，稍后再试");
+            return;
+        }
+    }
+    int per_hour_dev = settingInt("ops.max_per_hour_device", 0);
+    if (per_hour_dev > 0) {
+        long long n = db_.opsCountRecent(std::string(), devid, now_ms - 3600LL * 1000);
+        if (n >= per_hour_dev) {
+            apiError(ctx, HTTP_STATUS_TOO_MANY_REQUESTS,
+                     "该设备每小时最多执行 " + std::to_string(per_hour_dev) + " 个作业");
+            return;
+        }
     }
 
     json plan = op.value("plan", json::object());
@@ -340,10 +418,11 @@ void AdminServer::handleOpsVerify(const HttpContextPtr& ctx, const std::string& 
 }
 
 void AdminServer::handleOpsList(const HttpContextPtr& ctx) {
-    std::string devid;
+    std::string devid, status;
     int limit = 50;
     for (const auto& kv : ctx->request->query_params) {
         if (kv.first == "devid") devid = kv.second;
+        else if (kv.first == "status") status = kv.second;
         else if (kv.first == "limit") limit = atoi(kv.second.c_str());
     }
     // 接入令牌与受限账号只看自己范围内的设备
@@ -352,7 +431,7 @@ void AdminServer::handleOpsList(const HttpContextPtr& ctx) {
         return;
     }
     std::string out;
-    if (!db_.opsList(devid, limit, out)) {
+    if (!db_.opsList(devid, status, limit, out)) {
         apiError(ctx, HTTP_STATUS_INTERNAL_SERVER_ERROR, "db error");
         return;
     }
@@ -375,4 +454,71 @@ void AdminServer::handleOpsList(const HttpContextPtr& ctx) {
     json resp;
     resp["items"] = keep;
     ctx->send(resp.dump());
+}
+
+// 审批：只有 pending_approval 能批，且不能自己批自己。
+// 审批人除此之外还必须能管到目标设备——否则拿一个只读账号就能给任意设备放行。
+void AdminServer::handleOpsApprove(const HttpContextPtr& ctx, const std::string& role) {
+    (void)role;
+    long long id = atoll(ctx->param("id").c_str());
+    std::string cur;
+    if (id <= 0 || !db_.opsGet(id, cur)) {
+        apiNotFound(ctx, "操作不存在");
+        return;
+    }
+    json op = json::parse(cur, nullptr, false);
+    if (op.is_discarded()) {
+        apiError(ctx, HTTP_STATUS_INTERNAL_SERVER_ERROR, "db error");
+        return;
+    }
+    std::string devid = op.value("target_id", std::string());
+    if (!ownsDevid(devid)) {
+        apiError(ctx, HTTP_STATUS_FORBIDDEN, "设备不在授权范围内");
+        return;
+    }
+    if (op.value("status", std::string()) != "pending_approval") {
+        apiError(ctx, HTTP_STATUS_CONFLICT, "只有待审批的作业可以批准或拒绝");
+        return;
+    }
+    std::string who = actorLabel();
+    if (who.empty()) who = "anonymous";
+    std::string proposer = op.value("actor", std::string());
+    if (who == proposer) {
+        apiError(ctx, HTTP_STATUS_FORBIDDEN, "不能批准自己发起的作业，需要另一个账号");
+        return;
+    }
+
+    json body = json::parse(ctx->body(), nullptr, false);
+    std::string decision = body.is_object() ? body.value("decision", std::string("approve"))
+                                            : std::string("approve");
+    std::string note = body.is_object() ? body.value("note", std::string()) : std::string();
+    if (note.size() > 300) note = note.substr(0, 300);
+    if (decision != "approve" && decision != "reject") {
+        apiBad(ctx, "decision 只能是 approve 或 reject");
+        return;
+    }
+
+    std::string err;
+    if (!db_.opsSetApproval(id, decision == "approve" ? "approved" : "rejected", who, note, err)) {
+        apiError(ctx, HTTP_STATUS_CONFLICT, err.empty() ? "db error" : err);
+        return;
+    }
+
+    AuditEntry ae;
+    ae.actor = who;
+    ae.action = decision == "approve" ? "operation.approve" : "operation.reject";
+    ae.target_type = "device";
+    ae.target_id = devid;
+    ae.result = "ok";
+    ae.detail = "op=" + std::to_string(id) + " proposer=" + proposer +
+                (note.empty() ? std::string() : " note=" + note);
+    ae.op_id = std::to_string(id);
+    audit_.writeEntry(ae);
+
+    std::string out;
+    if (!db_.opsGet(id, out)) {
+        apiError(ctx, HTTP_STATUS_INTERNAL_SERVER_ERROR, "db error");
+        return;
+    }
+    ctx->send(out);
 }

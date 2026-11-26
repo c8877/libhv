@@ -463,11 +463,15 @@ bool AdminDb::migrate(std::string& err) {
         " risk INTEGER NOT NULL DEFAULT 1,"
         " idem_key TEXT NOT NULL DEFAULT '',"
         " status TEXT NOT NULL,"
+        " approver TEXT NOT NULL DEFAULT '',"
+        " approval_note TEXT NOT NULL DEFAULT '',"
+        " approved_ms INTEGER NOT NULL DEFAULT 0,"
         " result TEXT NOT NULL DEFAULT '',"
         " error TEXT NOT NULL DEFAULT '',"
         " created_ms INTEGER NOT NULL,"
         " updated_ms INTEGER NOT NULL);"
         "CREATE INDEX IF NOT EXISTS idx_operations_target ON operations(target_id,created_ms);"
+        "CREATE INDEX IF NOT EXISTS idx_operations_status ON operations(status,risk);"
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_operations_idem ON operations(actor,idem_key)"
         " WHERE idem_key<>'';"
         // relay 地址字典 + 有序下发列表 + 同步任务（逐设备行复用 distribution_tasks）
@@ -616,6 +620,15 @@ bool AdminDb::migrate(std::string& err) {
     if (!hasColumn("usage_daily", "tenant_id")) {
         if (!exec("ALTER TABLE usage_daily ADD COLUMN tenant_id INTEGER NOT NULL DEFAULT 0", err)) return false;
         exec("CREATE INDEX IF NOT EXISTS idx_usage_daily_tenant ON usage_daily(tenant_id,day)", err);
+    }
+    // 审批闸门：老库里已完成/执行中的作业不需要审批，只有 planned 的需要补状态
+    if (!hasColumn("operations", "approver")) {
+        if (!exec("ALTER TABLE operations ADD COLUMN approver TEXT NOT NULL DEFAULT ''", err)) return false;
+        if (!exec("ALTER TABLE operations ADD COLUMN approval_note TEXT NOT NULL DEFAULT ''", err))
+            return false;
+        if (!exec("ALTER TABLE operations ADD COLUMN approved_ms INTEGER NOT NULL DEFAULT 0", err))
+            return false;
+        exec("CREATE INDEX IF NOT EXISTS idx_operations_status ON operations(status,risk)", err);
     }
     return true;
 }

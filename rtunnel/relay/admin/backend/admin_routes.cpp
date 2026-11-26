@@ -181,6 +181,13 @@ void AdminServer::registerRoutes() {
         handleOpsVerify(ctx, role);
         return HTTP_STATUS_NEXT;
     });
+    service_.Handle("POST", "/api/v1/operations/:id/approve", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "op.approve", role);
+        if (rc) return rc;
+        handleOpsApprove(ctx, role);
+        return 200;
+    });
     access("device.view", "GET", "/api/v1/operations", &AdminServer::handleOpsList);
     service_.Handle("GET", "/api/v1/agents/:devid/storage", [this](const HttpContextPtr& ctx) {
         std::string role;

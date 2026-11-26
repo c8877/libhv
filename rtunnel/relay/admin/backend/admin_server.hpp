@@ -181,6 +181,7 @@ private:
     void handleOpsPlan(const HttpContextPtr& ctx, const std::string& role);
     void handleOpsApply(const HttpContextPtr& ctx, const std::string& role);
     void handleOpsVerify(const HttpContextPtr& ctx, const std::string& role);
+    void handleOpsApprove(const HttpContextPtr& ctx, const std::string& role);
     void handleOpsList(const HttpContextPtr& ctx);
     int  handleAgentProcSignal(const HttpContextPtr& ctx);
     int  proxyAgentProc(const HttpContextPtr& ctx, const std::string& devid, const nlohmann::json& req);

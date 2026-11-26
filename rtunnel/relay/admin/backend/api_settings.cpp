@@ -43,6 +43,10 @@ const Def kDefs[] = {
     {"alert.cert_crit_days", "7",   1, 90,       "证书紧急",       "天",  "告警", "剩余多少天升级为严重"},
     {"alert.task_fail",      "1",   0, 1,        "分发失败",       "",    "告警", "分发任务最终失败或超时时通知"},
     {"alert.cooldown_s",     "300", 10, 86400,   "同类冷却",       "秒",  "告警", "同一事件的最小发送间隔"},
+    {"ops.require_approval_risk", "2", 1, 3,     "审批阈值",       "级",  "操作作业", "风险达到该级别需另一账号批准（1=都批 2=改状态起 3=仅破坏性）"},
+    {"ops.max_per_minute",   "0",   0, 600,      "每分钟执行上限", "个",  "操作作业", "每个账号每分钟最多执行的作业数，0=不限"},
+    {"ops.max_per_hour_device","0", 0, 1000,     "单设备每小时上限","个", "操作作业", "同一设备每小时最多执行的作业数，0=不限"},
+    {"ops.window",           "",    0, 0,        "执行窗口",       "",    "操作作业", "HH:MM-HH:MM，空=全天；不在时段内拒绝执行写操作"},
 };
 
 // 字符串类配置的最大长度（默认 64）
@@ -78,6 +82,22 @@ bool validate(const std::string& key, const std::string& val, std::string& err) 
             val.rfind("http://", 0) != 0 && val.rfind("https://", 0) != 0) {
             err = "webhook_url must start with http:// or https://";
             return false;
+        }
+        // 执行窗口必须是 HH:MM-HH:MM；写错会让写操作全被拦，宁可直接拒绝保存
+        if (key == "ops.window" && !val.empty()) {
+            if (val.size() != 11 || val[2] != ':' || val[5] != '-' || val[8] != ':') {
+                err = "window must be HH:MM-HH:MM";
+                return false;
+            }
+            for (size_t i : {0u, 1u, 3u, 4u, 6u, 7u, 9u, 10u}) {
+                if (val[i] < '0' || val[i] > '9') { err = "window must be HH:MM-HH:MM"; return false; }
+            }
+            int h1 = atoi(val.substr(0, 2).c_str()), m1 = atoi(val.substr(3, 2).c_str());
+            int h2 = atoi(val.substr(6, 2).c_str()), m2 = atoi(val.substr(9, 2).c_str());
+            if (h1 > 23 || h2 > 23 || m1 > 59 || m2 > 59) {
+                err = "window hour/minute out of range";
+                return false;
+            }
         }
         return true;
     }

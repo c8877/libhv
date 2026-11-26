@@ -165,6 +165,13 @@ void AdminServer::handlePermGroupSave(const HttpContextPtr& ctx, const std::stri
                 sid = std::to_string(v["id"].get<long long>());
             if (!ty.empty() && !sid.empty()) members.emplace_back(ty, sid);
         }
+        // 传错形态（例如用户名而不是 id）会写入永不匹配的成员，直接拒绝
+        for (const auto& m : members) {
+            if (!db_.permSubjectExists(m.first, m.second)) {
+                apiBad(ctx, "成员 " + m.first + "/" + m.second + " 不存在（user/atk/rtk/client 都要用数字 id）");
+                return;
+            }
+        }
     }
     int all_devices = req.value("all_devices", false) ? 1 : 0;
     int global_scope = req.value("global_scope", false) ? 1 : 0;
@@ -578,6 +585,10 @@ void AdminServer::handleSubjectGroupsSave(const HttpContextPtr& ctx, const std::
     }
     if (type != "user" && type != "atk" && type != "client" && type != "rtk") {
         apiBad(ctx, "bad subject type");
+        return;
+    }
+    if (!db_.permSubjectExists(type, id)) {
+        apiNotFound(ctx, "授权对象不存在");
         return;
     }
     std::vector<long long> ids;

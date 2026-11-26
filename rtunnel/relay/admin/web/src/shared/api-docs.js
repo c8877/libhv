@@ -136,6 +136,20 @@ export const DOCS = [
     resp: `{ "id": 7, "verified": true, "probe": { "ok": true, "exit_code": 0, "stdout": "active\n" } }`,
   },
   {
+    group: 'device', method: 'POST', path: '/api/v1/operations/:id/approve', minRole: 'manager',
+    summary: '批准或拒绝待审批的作业',
+    params: [
+      { name: 'id', in: 'path', desc: '作业 id' },
+      { name: 'decision', in: 'body', desc: 'approve 或 reject' },
+      { name: 'note', in: 'body', desc: '备注 / 拒绝原因，可选（≤300 字）' },
+    ],
+    note: '需要 op.approve（接入令牌不生效）。risk ≥ ops.require_approval_risk 的作业落库即待审批，'
+      + '必须由另一个账号批准：自己批自己返回 403。批准后 status=approved，可继续 apply',
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\\
+     -d '{"decision":"approve","note":"已确认"}' "$RT/api/v1/operations/7/approve"`,
+    resp: `{ "id": 7, "status": "approved", "approver": "ops#2/manager/10.0.0.9", "approved_ms": 1764192000000 }`,
+  },
+  {
     group: 'device', method: 'GET', path: '/api/v1/operations', minRole: 'viewer',
     summary: '操作作业列表',
     params: [

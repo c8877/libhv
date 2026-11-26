@@ -1032,9 +1032,33 @@ verify → 可带探针 argv；探针 exit_code=0 才算通过
 
 - `plan_hash` 是规范化 plan JSON 的 sha256，apply 时比对，拦住 TOCTOU
 - `Idempotency-Key`：`(actor,key)` 唯一，重复 apply 返回首次结果，不会重跑命令
-- 状态：`planned → running → applied | failed → verified`；已 applied 的重复 apply 直接回原结果
-- `risk`：1 只读、2 改运行状态、3 破坏性（当前只用于展示，P1 接审批闸门）
+- `risk`：1 只读、2 改运行状态、3 破坏性，按 argv 分级
 - 目前只有 `kind=exec`；svc/ota 后续复用同一张表与同一套状态机
+
+**审批闸门**
+
+```
+risk < 阈值  planned ──apply──▶ running ──▶ applied / failed
+risk ≥ 阈值  pending_approval ──另一账号批准──▶ approved ──apply──▶ running
+                              └──拒绝──▶ rejected（不能执行，需重新 plan）
+```
+
+- 阈值 `ops.require_approval_risk`（默认 2）：`plan` 落库时按 risk 直接决定初始状态
+- 批准需要 `op.approve`；**批准人必须不是发起人**（自己批自己返回 403），
+  并且仍要能管到目标设备（`ownsDevid`），否则一个只读账号就能给任意设备放行
+- 接入令牌不继承 `op.approve`（运营商侧动作），即使被误授也不生效
+- 批准/拒绝写审计 `operation.approve` / `operation.reject`，记发起人
+
+**执行配额与变更窗口**
+
+| 设置 | 默认 | 作用 |
+|---|---|---|
+| `ops.max_per_minute` | 0 | 每账号每分钟可执行的作业数（0 不限），只统计真正执行的 |
+| `ops.max_per_hour_device` | 0 | 同一设备每小时可执行的作业数 |
+| `ops.window` | 空 | `HH:MM-HH:MM`，不在时段内拒绝 apply；跨零点（`22:00-06:00`）支持 |
+
+配额与窗口只在 `apply` 检查，`plan` 不占额度也不受窗口限制——这样可以在非变更窗口
+先把变更准备好、留给人审。
 
 #### 结构化审计
 
@@ -1055,7 +1079,8 @@ JSONL 字段：`at / actor_type / actor / action / target_type / target_id / res
 
 #### 边界（当前不做）
 
-- 没有带宽/时长维度的执行配额、没有审批闸门（P1）、没有事件流与分钟级指标（P2）
+- 配额只有“次数”维度（每分钟/每设备每小时），没有带宽或执行时长维度
+- 没有事件流与分钟级指标（P2）；没有 playbook/自愈策略（P4）
 - 不给模型“万能 exec”：没有白名单就不可用，也不提供 shell 模式
 - 模型只能提议动作，授权仍由权限组判定；不因“是 AI”而放宽资源键
 
