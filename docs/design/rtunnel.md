@@ -1240,6 +1240,74 @@ alertCheckDevices / alertCheckCerts / notifyTaskFailed
 **边界**：规则只能跑 agent 白名单内的 argv（没有 exec 的设备用不了）；只支持单设备动作，
 没有「一批设备一起做」；没有跨步骤编排（多步要么写成一个脚本交给白名单，要么用分发任务）。
 
+### 13.17 内置 AI 助手与使用指南
+
+前几层把能力做出来了，这一层解决“人怎么用起来”：管理台里有对话入口、模型配置、以及一份
+按顺序走的操作指南。
+
+#### 配置与密钥
+
+| 项 | 位置 | 说明 |
+|---|---|---|
+| `ai.enabled` / `endpoint` / `model` / `max_tokens` / `temperature` / `timeout_s` / `max_rounds` / `insecure` | `settings` 表（`/api/v1/ai/config`） | 非敏感项，随其它设置一起下发与审计 |
+| API 密钥 | `<admin.db 同目录>/ai.key`（0600） | **不进数据库、不进任何接口响应**；`GET /ai/config` 只回 `key_set` 与路径 |
+
+- 接口：`GET/PUT /api/v1/ai/config`、`PUT/DELETE /api/v1/ai/key`、`POST /api/v1/ai/chat`
+- 资源键：`ai.chat`（可用助手）、`ai.config`（改配置与密钥）；`ai.config` 属运营商侧，接入令牌不继承
+- 密钥写临时文件再 `rename`，权限 `0600`；审计只记前后各几位
+
+```
+浏览器 ──POST /ai/chat {messages, devid}──▶ admin（hv worker）
+                                              │ std::thread（HttpClient 阻塞，不能占 worker）
+                                              ▼
+                                    POST {endpoint}/chat/completions
+                                      tools = 7 个只读工具，tool_choice=auto
+                                              │
+                    ┌─────────────────────────┴────────────────────────┐
+                    │ 有 tool_calls：本地执行工具 → 结果作为 role=tool 回填 │
+                    │ 无 tool_calls：content 即回答（最多 max_rounds 轮）   │
+                    └─────────────────────────┬────────────────────────┘
+                                              ▼
+                                    {reply, tools[], rounds, usage}
+```
+
+**为什么不用流式**：libhv 的 `HttpClient::send` 是同步收完整响应，逐字流式要另写一个 HTTP 客户端。
+运维问答的回答通常在 2–10 秒内，非流式 + 「正在查数据…」占位够用；要流式再单独立项。
+
+#### 只读工具集
+
+| 工具 | 数据来源 | 回答什么 |
+|---|---|---|
+| `list_devices` | `res_devices` + relay 在线表 + caps | 有哪些设备、哪台离线、版本/架构 |
+| `device_detail` | relay `findAgent` + `sysinfo_last` + caps | 单机负载/内存/流/端口/能力 |
+| `device_metrics` | `metrics_minute` | 过去几小时 CPU/内存/负载趋势 |
+| `recent_audit` | `audit.log` 环形缓冲 | 谁改了什么、谁连过设备 |
+| `recent_operations` | `operations` | 命令执行与审批结果（含自愈触发） |
+| `usage_summary` | `usage_daily` | 流量/会话/在线时长 |
+| `list_playbooks` | `playbooks` + 触发流水 | 有没有自动处理、为什么没自动 |
+
+**权限判定用请求线程的快照**（`AiActor`）：对话跑在独立线程，那里 `tl_actor` 是空的，
+直接 `hasPerm()` 会变成匿名——这跟 P0 修过的 WS 消息鉴权是同一类坑。工具内部再做
+`ownsDevid` 收窄，所以受限账号问别人的设备会被工具拒绝，和页面上点不开一致。
+
+**输入侧防护**：客户端只能传 `user` / `assistant` 消息，`system` 一律丢弃（否则可以覆盖系统提示）；
+`devid` 先过 `ownsDevid`；单条消息 8 KB、上下文 40 条上限；工具结果进上下文前裁到 6 KB。
+上游 4xx/超时/连不上统一转 502 并带可读原因；线程整体 `try/catch`，模型返回奇怪 JSON 不会带崩 relay。
+
+#### 使用指南页
+
+`/guide` 是纯前端静态页，按「认识系统 → 部署 relay → 接入设备 → 账号与权限 → 日常运维 →
+接入大模型 → 常见问题」组织，每条命令可一键复制，并链到对应页面。它不查后端，所以
+API 挂了也能打开——这恰好是最需要查文档的时候。
+
+#### 已知取舍
+
+- 非流式：长回答要等完整生成
+- 只读：助手不能替你执行变更；要动手走「作业」的 plan→apply→verify 与审批
+- 不做多会话持久化：刷新即清空，避免把对话内容（含设备信息）留在库里
+- 工具集是硬编码的 7 个，不是从 OpenAPI 自动生成：自动生成会把 100+ 个写接口带进来，
+  需要额外的“哪些该给模型”策略。当前选择是显式列出，接口变更时由 e2e 兜住
+
 ## 14. 备选方案与取舍
 
 | 方案 | 优点 | 缺点 | 结论 |

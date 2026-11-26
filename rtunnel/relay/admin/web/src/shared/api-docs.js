@@ -248,6 +248,62 @@ export const DOCS = [
     resp: `{ "items": [{ "op_id": 12, "playbook_id": 1, "playbook": "上线自检", "devid": "mp135", "status": "verified", "created_ms": 1764136800000 }] }`,
   },
   {
+    group: 'sys', method: 'GET', path: '/api/v1/ai/config', minRole: 'operator',
+    summary: 'AI 模型配置（不含密钥内容）',
+    note: '需要 ai.chat。返回 endpoint/模型/参数与 key_set；密钥只存在 <admin.db 同目录>/ai.key（0600），'
+      + '不会通过任何接口回显',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/ai/config"`,
+    resp: `{ "enabled": true, "endpoint": "https://api.deepseek.com/v1", "model": "deepseek-chat", "max_tokens": 2048, "temperature": 0.3, "timeout_s": 60, "max_rounds": 4, "insecure": false, "key_set": true, "key_updated_ms": 1764136800000, "key_path": "/var/lib/rtunnel/ai.key", "tools": 7 }`,
+  },
+  {
+    group: 'sys', method: 'PUT', path: '/api/v1/ai/config', minRole: 'admin',
+    summary: '修改模型配置',
+    params: [
+      { name: 'endpoint', in: 'body', desc: 'OpenAI 兼容前缀，必须以 http(s):// 开头' },
+      { name: 'model', in: 'body', desc: '模型名，例如 deepseek-chat / gpt-4o-mini' },
+      { name: 'enabled', in: 'body', desc: '是否启用助手' },
+      { name: 'max_tokens / temperature / timeout_s / max_rounds', in: 'body', desc: '采样与轮次参数' },
+      { name: 'insecure', in: 'body', desc: '跳过 TLS 证书校验（仅内网自签）' },
+    ],
+    note: '需要 ai.config（接入令牌不生效）。保存后立即生效，返回最新配置',
+    body: `{ "enabled": true, "endpoint": "https://api.deepseek.com/v1", "model": "deepseek-chat" }`,
+    curl: `curl -sS -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \
+     -d '{"enabled":true,"model":"deepseek-chat"}' "$RT/api/v1/ai/config"`,
+    resp: `{ "enabled": true, "model": "deepseek-chat", "key_set": true }`,
+  },
+  {
+    group: 'sys', method: 'PUT', path: '/api/v1/ai/key', minRole: 'admin',
+    summary: '保存（或替换）模型 API 密钥',
+    params: [{ name: 'key', in: 'body', desc: '密钥明文，1-512 字节' }],
+    note: '需要 ai.config。密钥写到 relay 本机文件（0600），不进数据库、不回显；审计只记前后各几位',
+    body: `{ "key": "sk-..." }`,
+    curl: `curl -sS -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \
+     -d '{"key":"sk-..."}' "$RT/api/v1/ai/key"`,
+    resp: `{ "key_set": true, "key_updated_ms": 1764136800000 }`,
+  },
+  {
+    group: 'sys', method: 'DELETE', path: '/api/v1/ai/key', minRole: 'admin',
+    summary: '清除模型密钥',
+    note: '需要 ai.config。清除后 /ai/chat 返回 503，模型与参数配置保留',
+    curl: `curl -sS -X DELETE -H "Authorization: Bearer $ATK" "$RT/api/v1/ai/key"`,
+    resp: `{ "key_set": false }`,
+  },
+  {
+    group: 'sys', method: 'POST', path: '/api/v1/ai/chat', minRole: 'operator',
+    summary: '与模型对话（只读工具，OpenAI 兼容 function calling）',
+    params: [
+      { name: 'messages', in: 'body', desc: '[{role: user|assistant, content}]，只接受这两种角色' },
+      { name: 'devid', in: 'body', desc: '可选：当前设备上下文，必须在授权范围内' },
+    ],
+    note: '需要 ai.chat。模型只能调用只读工具（设备/指标/审计/作业/用量/自愈），'
+      + '工具内部按调用者的资源权限与设备范围收窄。客户端传的 system 消息会被丢弃；'
+      + '上游错误统一转 502，响应不返回模型密钥',
+    body: `{ "messages": [{ "role": "user", "content": "现在有哪些设备在线？" }] }`,
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \
+     -d '{"messages":[{"role":"user","content":"现在有哪些设备在线？"}]}' "$RT/api/v1/ai/chat"`,
+    resp: `{ "reply": "共 3 台设备，在线 2 台……", "tools": [{ "name": "list_devices", "args": {}, "ok": true }], "rounds": 2, "usage": { "prompt_tokens": 820, "completion_tokens": 96 } }`,
+  },
+  {
     group: 'device', method: 'GET', path: '/api/v1/agents/:devid/metrics/history', minRole: 'viewer',
     summary: '分钟级指标历史（relay 采样）',
     params: [

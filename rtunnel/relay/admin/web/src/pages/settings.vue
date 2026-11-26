@@ -17,6 +17,21 @@
         <span class="spacer" />
         <el-button size="small" :loading="testing" @click="sendTest">发送测试</el-button>
       </div>
+      <div v-if="g.name === 'AI 模型'" class="key-bar">
+        <div class="key-state">
+          <el-tag size="small" :type="aiCfg && aiCfg.key_set ? 'success' : 'info'">
+            {{ aiCfg && aiCfg.key_set ? '密钥已配置' : '密钥未配置' }}
+          </el-tag>
+          <span class="muted">{{ aiKeyHint }}</span>
+        </div>
+        <template v-if="canSettingsWrite">
+          <el-input v-model="newKey" type="password" show-password placeholder="sk-…" class="key-input"
+                    maxlength="512" @keyup.enter="saveKey" />
+          <el-button :loading="keySaving" @click="saveKey">保存密钥</el-button>
+          <el-button v-if="aiCfg && aiCfg.key_set" :loading="keySaving" @click="clearKey">清除</el-button>
+        </template>
+        <span v-else class="muted">需要 settings.write 才能修改</span>
+      </div>
     </div>
 
     <el-dialog v-model="dlg" :title="'编辑 ' + (group ? group.name : '')" width="520px">
@@ -147,6 +162,60 @@ async function load() {
     ElMessage.error('加载失败：' + e.message)
   }
   loadAlertStatus()
+  loadAi()
+}
+
+// ---------------------------------------------------------------- AI 密钥
+// 密钥不在 settings 表里：单独的 GET/PUT/DELETE /api/v1/ai/key，
+// 响应只回 key_set 与文件路径，永远不回内容。
+const aiCfg = ref(null)
+const newKey = ref('')
+const keySaving = ref(false)
+const aiKeyHint = computed(() => {
+  const c = aiCfg.value
+  if (!c) return '状态未知'
+  if (!c.key_set) return '保存后才能使用「AI 助手」'
+  const t = c.key_updated_ms ? new Date(c.key_updated_ms).toLocaleString() : ''
+  return (c.key_path || '') + (t ? ' · ' + t : '')
+})
+
+async function loadAi() {
+  if (!can('ai.chat')) return
+  try {
+    aiCfg.value = await Api.get('/api/v1/ai/config')
+  } catch (e) {
+    aiCfg.value = null
+  }
+}
+
+async function saveKey() {
+  const k = newKey.value.trim()
+  if (!k) {
+    ElMessage.warning('请输入密钥')
+    return
+  }
+  keySaving.value = true
+  try {
+    aiCfg.value = await Api.put('/api/v1/ai/key', { key: k })
+    newKey.value = ''
+    ElMessage.success('密钥已保存（仅写入本机文件，不回显）')
+  } catch (e) {
+    ElMessage.error('保存失败：' + e.message)
+  } finally {
+    keySaving.value = false
+  }
+}
+
+async function clearKey() {
+  keySaving.value = true
+  try {
+    aiCfg.value = await Api.del('/api/v1/ai/key')
+    ElMessage.success('密钥已清除')
+  } catch (e) {
+    ElMessage.error('清除失败：' + e.message)
+  } finally {
+    keySaving.value = false
+  }
 }
 
 onMounted(load)
@@ -155,4 +224,7 @@ onMounted(load)
 <style scoped>
 .unit { margin-left: 6px; color: var(--el-text-color-secondary); font-size: 12px; }
 .alert-bar { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.key-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.key-state { display: flex; align-items: center; gap: 8px; }
+.key-input { width: 280px; }
 </style>

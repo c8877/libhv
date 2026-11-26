@@ -1,4 +1,5 @@
 #include "event_bus.hpp"
+#include "cpputil/json.hpp"
 
 #include <chrono>
 
@@ -13,10 +14,23 @@ long long nowMs() {
 }  // namespace
 
 long long EventBus::publish(const std::string& type, const std::string& data_json) {
+    // 时间戳优先用事件自己带的 ts：事件从 relay 线程搬到总线有最长 500ms 的延迟，
+    // 用搬运时刻会让「连接建立前发生的旧事件」看起来像新事件（受限账号会收到别人的审计）。
+    long long ts = 0;
+    if (!data_json.empty()) {
+        auto j = nlohmann::json::parse(data_json, nullptr, false);
+        if (!j.is_discarded() && j.contains("ts") && j["ts"].is_number()) {
+            ts = j["ts"].get<long long>();
+            // 兼容秒级时间戳
+            if (ts > 0 && ts < 100000000000LL) ts *= 1000;
+        }
+    }
+    if (ts <= 0) ts = nowMs();
+
     std::lock_guard<std::mutex> lk(mu_);
     EventEntry e;
     e.seq = ++seq_;
-    e.ts_ms = nowMs();
+    e.ts_ms = ts;
     e.type = type;
     e.data = data_json;
     buf_.push_back(std::move(e));

@@ -69,6 +69,17 @@ struct AdminActor {
     std::string ai_actor;            // X-Actor: ai:...（模型调用的标记，只影响审计标签）
 };
 
+// AI 对话的权限快照：对话跑在独立线程，tl_actor 在那里是空的
+struct AiActor {
+    bool is_client = false;
+    bool super = false;
+    bool all_devices = false;
+    long long tenant_id = 0;
+    std::set<std::string> devices;
+    std::set<std::string> perms;
+    std::string label;
+};
+
 // 一条待发告警：由采集线程入队，通知线程发送
 struct AlertEvent {
     std::string key;        // 去重键（同键在冷却期内只发一次）
@@ -191,6 +202,12 @@ private:
     void handlePlaybookEnable(const HttpContextPtr& ctx, const std::string& role);
     void handlePlaybookRun(const HttpContextPtr& ctx, const std::string& role);
     void handlePlaybookFires(const HttpContextPtr& ctx);
+    // AI 助手：配置、密钥、对话
+    void handleAiConfigGet(const HttpContextPtr& ctx);
+    void handleAiConfigSet(const HttpContextPtr& ctx, const std::string& role);
+    void handleAiKeySet(const HttpContextPtr& ctx, const std::string& role);
+    void handleAiKeyClear(const HttpContextPtr& ctx, const std::string& role);
+    void handleAiChat(const HttpContextPtr& ctx, const std::string& role);
     void handleOpsApprove(const HttpContextPtr& ctx, const std::string& role);
     void handleOpsList(const HttpContextPtr& ctx);
     int  handleAgentProcSignal(const HttpContextPtr& ctx);
@@ -234,6 +251,8 @@ private:
     void relaySyncTick();
     // api_settings.cpp
     void loadSettings();
+    // 写库 + 同步内存缓存：所有运行期改设置的地方都走它，否则 settingStr 读不到新值
+    bool setSettingCached(const std::string& key, const std::string& val, const std::string& by);
     int  settingInt(const std::string& key, int def);
     std::string settingStr(const std::string& key, const std::string& def);
     void handleSettingsGet(const HttpContextPtr& ctx);
@@ -246,6 +265,9 @@ private:
     void playbookWorker();
     bool playbookEnqueueOp(long long op_id);
     void playbookRunOp(long long op_id);
+    // AI 工具执行（只读）：按请求线程快照的权限判定，不读 tl_actor
+    bool aiRunTool(const AiActor& a, const std::string& name, const nlohmann::json& args,
+                   std::string& out, std::string& err);
     void alertCheckDevices(long long now_ms);
     void alertCheckCerts(long long now_ms);
     bool alertSend(const AlertEvent& ev);

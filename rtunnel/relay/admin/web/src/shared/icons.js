@@ -1,14 +1,14 @@
 import {
   ArrowDown, Avatar, Collection, Connection, Document, Fold, FolderOpened, Key, List, Loading, Lock,
-  MagicStick, Monitor, Moon, MoreFilled, Odometer, OfficeBuilding, Postcard, Refresh, Search, Setting, Sort,
-  Sunny, Tickets, TrendCharts, Upload, User, UserFilled, Wallet,
+  ChatDotRound, MagicStick, Monitor, Moon, MoreFilled, Odometer, OfficeBuilding, Postcard, Refresh, Search, Setting, Sort,
+  Reading, Sunny, Tickets, TrendCharts, Upload, User, UserFilled, Wallet,
 } from '@element-plus/icons-vue'
 
 // 全局注册的图标；新增菜单图标时在这里补一项（nav.js 只写名字）
 export const ICONS = {
   ArrowDown, Avatar, Collection, Connection, Document, Fold, FolderOpened, Key, List, Loading, Lock,
-  MagicStick, Monitor, Moon, MoreFilled, Odometer, OfficeBuilding, Postcard, Refresh, Search, Setting, Sort,
-  Sunny, Tickets, TrendCharts, Upload, User, UserFilled, Wallet,
+  ChatDotRound, MagicStick, Monitor, Moon, MoreFilled, Odometer, OfficeBuilding, Postcard, Refresh, Search, Setting, Sort,
+  Reading, Sunny, Tickets, TrendCharts, Upload, User, UserFilled, Wallet,
 }
 
 const warned = new Set()

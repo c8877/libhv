@@ -325,8 +325,10 @@ bool permIsOperatorKey(const std::string& k) {
                                     "settings.", "token.", "playbook."};
     for (const char* p : kPrefix)
         if (k.rfind(p, 0) == 0) return true;
-    // 价目与审批是运营方动作：接入令牌可以看本租户费用，但不能改单价或放行设备写操作
-    return k == "system.shutdown" || k == "billing.write" || k == "op.approve";
+    // 价目、审批、模型密钥是运营方动作：接入令牌可以看本租户费用、也能用只读的 AI 助手，
+    // 但不能改单价、放行设备写操作或更换模型密钥。
+    return k == "system.shutdown" || k == "billing.write" || k == "op.approve" ||
+           k == "ai.config";
 }
 }  // namespace
 
@@ -469,6 +471,7 @@ void AdminServer::audit(const std::string& role, const std::string& action, cons
     nlohmann::json j;
     j["actor"] = who;
     j["action"] = action;
+    j["ts"] = AdminDb::nowMs();   // 事件发生时刻，SSE 用它过滤「连接前」的旧事件
     if (!detail.empty()) {
         j["detail"] = detail.size() > 200 ? detail.substr(0, 200) + "…" : detail;
     }
@@ -501,6 +504,7 @@ void AdminServer::auditEx(const std::string& action, const std::string& target_t
     j["target_type"] = e.target_type;
     j["target_id"] = e.target_id;
     j["result"] = e.result;
+    j["ts"] = AdminDb::nowMs();
     if (!e.detail.empty()) j["detail"] = e.detail;
     if (!e.op_id.empty()) j["op_id"] = e.op_id;
     bus_.publish("audit", j.dump());

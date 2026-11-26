@@ -20,6 +20,7 @@ export const NAV_GROUPS = [
       { path: '/files', icon: 'FolderOpened', perm: 'repo.read' },
       { path: '/distribute', icon: 'Upload', label: '分发', perm: 'dist.write' },
       { path: '/tasks', icon: 'List', perm: 'dist.read' },
+      { path: '/assistant', icon: 'ChatDotRound', label: 'AI 助手', perm: 'ai.chat' },
       { path: '/operations', icon: 'Tickets', label: '作业', perm: 'device.exec' },
       { path: '/playbooks', icon: 'MagicStick', label: '自愈', perm: 'playbook.read' },
       { path: '/ota', icon: 'Refresh', perm: ['dist.write', 'device.view', 'repo.read'] },
@@ -44,6 +45,7 @@ export const NAV_GROUPS = [
     items: [
       { path: '/tokens', icon: 'Postcard', perm: 'token.read' },
       { path: '/docs', icon: 'Document', perm: 'auth' },
+      { path: '/guide', icon: 'Reading', label: '使用指南', perm: 'auth' },
     ],
   },
   {

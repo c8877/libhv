@@ -48,6 +48,7 @@ rtunnel_test:
 	python3 rtunnel/tests/exec_e2e.py
 	python3 rtunnel/tests/events_e2e.py
 	python3 rtunnel/tests/playbook_e2e.py
+	python3 rtunnel/tests/ai_e2e.py
 	python3 rtunnel/tests/mcp_e2e.py
 	python3 rtunnel/tests/compat_e2e.py
 	python3 rtunnel/tests/protocol_doc_test.py

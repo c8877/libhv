@@ -180,6 +180,7 @@ python3 rtunnel/tests/packages_e2e.py    # 部署包：打包→发布→client 
 python3 rtunnel/tests/exec_e2e.py        # 受控执行：白名单、分流、超时截断、作业 plan/apply/verify
 python3 rtunnel/tests/events_e2e.py      # 事件流 SSE 与分钟级指标：上下线/会话/审计/续传/隔离
 python3 rtunnel/tests/playbook_e2e.py    # 自愈规则：自动执行/超限转审批/冷却/总开关/越权
+python3 rtunnel/tests/ai_e2e.py          # AI 助手：配置、密钥落盘、工具调用、越权、上游报错
 python3 rtunnel/tests/mcp_e2e.py         # OpenAPI 与 MCP：工具清单、只读默认、前缀过滤、审计标记
 python3 rtunnel/tests/compat_e2e.py      # HELLO 版本区间、低版本拒绝、高版本向前兼容
 python3 rtunnel/tests/protocol_doc_test.py  # 协议文档覆盖率（帧类型/常量）
@@ -227,6 +228,12 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
 - **分钟级指标**：relay 每分钟给在线设备要一份增量 sysinfo，落 `metrics_minute`（cpu/内存/负载/网卡），
   `GET /api/v1/agents/:devid/metrics/history?from=&to=&step=` 查趋势，默认留 7 天。
   「设备 → 采样曲线」里有「近 6 小时」曲线。
+- **AI 助手**：管理台「运维 → AI 助手」可直接问设备状态、历史指标、谁改了什么、最近的作业与自愈。
+  模型只能调用 **7 个只读工具**，工具内部按调用者的资源权限与设备范围收窄。模型 endpoint / 型号在
+  「系统设置 → AI 模型」配置，**API 密钥只写到 relay 本机文件（`<admin.db 同目录>/ai.key`，0600）**，
+  不进数据库、不回显。支持任意 OpenAI 兼容接口（DeepSeek / OpenAI / 通义 / vLLM / Ollama）。
+- **使用指南**：「开放接口 → 使用指南」按「部署 → 接设备 → 权限 → 日常运维 → 接 AI」走一遍，
+  命令可复制，纯前端页面（API 挂了也能看）。
 - **自愈规则（playbook）**：把「告警 → 命令」固化成规则。规则只生成 `operations` 作业，
   自动执行需要三把锁同时成立：规则开了 `auto_apply`、命令风险 ≤ 系统设置
   `playbook.auto_apply_max_risk`（默认 1，只读）、全局 `playbook.enabled` 打开。

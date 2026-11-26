@@ -31,6 +31,12 @@ struct SseConn {
     hloop_t*   loop = nullptr;
     htimer_t*  timer = nullptr;
     long long  cursor = 0;
+    // 无 Last-Event-ID 时只推「连接之后发生的事」：relay 队列到总线最多有 500ms 搬运延迟，
+    // 光靠 cursor 会把连接前产生的旧事件当成新的推出去（受限账号会看到别人的审计）。
+    long long  since_ms = 0;
+    // 客户端断开后 hv 会回收 io 并把同一块内存给下一个连接；指针不变但 id 会变。
+    // 不认这个就会把旧连接的事件写到新连接的 socket 上（串流）。
+    uint32_t   io_id = 0;
     uint64_t   last_beat = 0;
     uint64_t   opened_at = 0;
     bool       restricted = false;      // 受限账号：只推自己设备的设备类事件
@@ -116,8 +122,8 @@ std::string sseFrame(long long seq, const char* type, const std::string& data) {
 void AdminServer::sseTickCb(htimer_t* t) {
     SseConn* c = (SseConn*)hevent_userdata(t);
     if (c == nullptr) return;
-    if (c->io == nullptr || hio_is_closed(c->io)) {
-        sseFree(c);
+    if (c->io == nullptr || hio_is_closed(c->io) || (c->io_id != 0 && hio_id(c->io) != c->io_id)) {
+        sseFree(c);   // 连接已关闭，或 io 结构体已被回收复用
         return;
     }
     uint64_t now = hloop_now_ms(c->loop);
@@ -140,6 +146,9 @@ void AdminServer::sseTickCb(htimer_t* t) {
         }
     }
     for (const auto& e : evs) {
+        // 续传（带 Last-Event-ID）要历史；新连接只要连接之后的事件，
+        // 留 1s 容差吸收同毫秒与时序抖动。
+        if (c->since_ms > 0 && e.ts_ms > 0 && e.ts_ms < c->since_ms - 1000) continue;
         json data = json::parse(e.data, nullptr, false);
         if (data.is_discarded()) data = json::object();
         if (!sseAllow(c, e.type, data, &c->srv->db_)) continue;
@@ -180,6 +189,7 @@ void AdminServer::handleEvents(const HttpContextPtr& ctx) {
     c->srv = this;
     c->writer = ctx->writer.get();
     c->io = ctx->writer->io();
+    c->io_id = c->io ? hio_id(c->io) : 0;
     c->loop = c->io ? hevent_loop(c->io) : nullptr;
     if (c->loop == nullptr) {
         sseFree(c);
@@ -201,7 +211,10 @@ void AdminServer::handleEvents(const HttpContextPtr& ctx) {
     std::string le = ctx->header("Last-Event-ID");
     if (le.empty()) le = ctx->param("last");
     if (!le.empty()) cursor = atoll(le.c_str());
-    if (cursor <= 0) cursor = bus_.head();
+    if (cursor <= 0) {
+        cursor = bus_.head();
+        c->since_ms = AdminDb::nowMs();   // 新连接：只要这之后产生的
+    }
     c->cursor = cursor;
 
     ctx->response->headers["Cache-Control"] = "no-cache";

@@ -103,7 +103,9 @@ def wait_offline(base, timeout=25):
     return False
 
 
-def wait_fires(base, n, timeout=25):
+def wait_fires(base, n, timeout=40, settled=False):
+    """settled=True 时额外要求这批都跑完了（不再是 running/applied），
+    否则刚入队就返回会让“verify 通过”这类断言读到中间状态。"""
     adm, call = e2e.admin_client(base)
     end = time.time() + timeout
     items = []
@@ -112,7 +114,11 @@ def wait_fires(base, n, timeout=25):
             r = call("GET", "/api/v1/playbooks/fires?limit=50")
             items = r.get("items", []) if isinstance(r, dict) else []
             if len(items) >= n:
-                return items
+                if not settled:
+                    return items
+                pending = [x for x in items if x.get("status") in ("running", "applied", "planned", "pending_approval")]
+                if not pending:
+                    return items
         except Exception:
             pass
         time.sleep(0.5)
@@ -190,7 +196,7 @@ def main():
         procs.append(agent)
         e2e.check("pb: dev1 重新上线", wait_online(base))
 
-        fires = wait_fires(base, 2)
+        fires = wait_fires(base, 2, settled=True)
         by_pb = {}
         for f in fires:
             by_pb.setdefault(f.get("playbook"), []).append(f)

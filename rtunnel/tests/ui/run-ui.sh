@@ -29,6 +29,8 @@ SUITES=(
   admin/tenants
   admin/operations
   admin/playbooks
+  admin/assistant
+  admin/guide
   admin/events
   admin/billing
   admin/terminal
