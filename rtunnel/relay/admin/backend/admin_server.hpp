@@ -264,6 +264,7 @@ private:
     void handleDeployProbe(const HttpContextPtr& ctx);
     void handleDeployScan(const HttpContextPtr& ctx);
     void handleDeployPackages(const HttpContextPtr& ctx);
+    void handleDeployPackageUpload(const HttpContextPtr& ctx, const std::string& role);
     void handleDeployJobCreate(const HttpContextPtr& ctx);
     void handleDeployJobs(const HttpContextPtr& ctx);
     void handleDeployJobGet(const HttpContextPtr& ctx);

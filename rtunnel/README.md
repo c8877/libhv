@@ -139,8 +139,9 @@ client 装上去，不用先手工 scp。
   relay 本机 `<admin.db 同目录>/deploy/`（0600），接口只回「有没有存过」，从不回显
 - **测试连接**：返回架构、是否 root、有没有 systemd、`/tmp` 剩余空间、已装版本；
   首次连接会把主机密钥指纹记进 `deploy/known_hosts`，之后指纹变了直接拒绝
-- **安装包**：放在仓库 `deploy/` 目录，页面可直接分片上传。文件名约定
-  `rtunnel-<component>[-<variant>]-<version>-<arch>.tar.gz`，列表会自动识别组件/版本/架构
+- **安装包**：直接用文件仓库 `packages/<组件>/<版本>/<架构>/` 下的包，和 OTA 分发同一份。
+  文件名约定 `rtunnel-<component>[-<variant>]-<version>-<arch>.tar.gz`，列表会自动识别
+  组件/版本/架构；页面上的「上传安装包」会按包名落到同样位置，不用先去别的页面传
 - **安装**：预检（架构必须与包一致）→ 传包到 `/tmp/rtunnel-deploy-<id>` → 解压 → 写配置
   （agent 的 `--devid/--server/--allow`、relay 的 `--admin` 与初始令牌、client 的 relay 地址）
   → 执行包内 `install.sh` → 验证版本与服务状态 → 清理临时目录

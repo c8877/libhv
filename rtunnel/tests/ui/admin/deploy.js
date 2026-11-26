@@ -13,8 +13,8 @@ const HOSTS = [
   },
 ]
 const PKGS = [
-  { name: 'rtunnel-agent-web-1.4.151-x86_64.tar.gz', component: 'agent', version: '1.4.151', arch: 'x86_64', variant: 'web', size: 4212345, mtime_ms: Date.now() },
-  { name: 'rtunnel-client-1.4.151-x86_64.tar.gz', component: 'client', version: '1.4.151', arch: 'x86_64', variant: '', size: 3212345, mtime_ms: Date.now() - 1000 },
+  { name: 'rtunnel-agent-web-1.4.151-x86_64.tar.gz', path: 'packages/agent/1.4.151/x86_64/rtunnel-agent-web-1.4.151-x86_64.tar.gz', component: 'agent', version: '1.4.151', arch: 'x86_64', variant: 'web', size: 4212345, mtime_ms: Date.now() },
+  { name: 'rtunnel-client-1.4.151-x86_64.tar.gz', path: 'packages/client/1.4.151/x86_64/rtunnel-client-1.4.151-x86_64.tar.gz', component: 'client', version: '1.4.151', arch: 'x86_64', variant: '', size: 3212345, mtime_ms: Date.now() - 1000 },
 ]
 const JOBS = [
   {
@@ -93,6 +93,7 @@ const JOBS = [
 
   h.check('部署页可打开', await p.locator('.panel-head h2').first().innerText() === '部署')
   const tabs = await p.locator('.el-tabs__item').allInnerTexts()
+  h.check('安装包来自文件仓库', (await p.locator('.panel').innerText()).includes('文件仓库'))
   h.check('有三个页签', tabs.join('|').includes('新建部署') && tabs.join('|').includes('主机') &&
     tabs.join('|').includes('记录'), tabs)
 
@@ -154,7 +155,7 @@ const JOBS = [
   await p.locator('button', { hasText: '开始部署' }).click()
   await p.waitForTimeout(1200)
   h.check('提交了部署作业', posted && posted.component === 'agent' &&
-    posted.package === PKGS[0].name && posted.host_id === 1, posted)
+    posted.package === PKGS[0].path && posted.host_id === 1, posted)
   h.check('作业参数带上 devid/server',
     posted && posted.options && posted.options.devid && posted.options.server, posted && posted.options)
   h.check('打开作业日志抽屉', (await p.locator('.el-drawer:visible').count()) >= 1 &&

@@ -83,7 +83,7 @@ LogLevel ERROR
 
 
 def make_package(repo, ver):
-    """用真实 client 二进制打一个部署包，放进 relay 的仓库 deploy/ 目录。"""
+    """用真实 client 二进制打一个部署包，按仓库布局放到 packages/client/<版本>/<架构>/。"""
     binp = os.path.join(ROOT, "build", "deploy", "agent", "bin", "rtunnel-client")
     if not os.path.exists(binp):
         return None
@@ -105,9 +105,9 @@ def make_package(repo, ver):
         json.dump({"name": "rtunnel-client", "version": ver, "arch": "x86_64"}, f)
     sh("cd %s && find . -type f ! -name SHA256SUMS -printf '%%P\\n' | sort | xargs sha256sum > SHA256SUMS"
        % stage)
-    outdir = os.path.join(repo, "deploy")
-    os.makedirs(outdir, exist_ok=True)
     name = "rtunnel-client-%s-x86_64" % ver
+    outdir = os.path.join(repo, "packages", "client", ver, "x86_64")
+    os.makedirs(outdir, exist_ok=True)
     sh("tar --format=ustar -C %s -czf %s/%s.tar.gz %s" % (os.path.dirname(stage), outdir, name, name))
     return name + ".tar.gz"
 
@@ -181,10 +181,37 @@ def main():
         # 1) 包列表：从文件名解析组件/版本/架构
         code, pk = call(op, base, "/api/v1/deploy/packages", method="GET")
         items = pk.get("items") or []
+        hit = [i for i in items if i["name"] == pkg][0] if any(i["name"] == pkg for i in items) else {}
         e2e.check("deploy: 识别安装包",
-                  code == 200 and any(i["name"] == pkg and i["component"] == "client" and
-                                      i["version"] == pkg_ver and i["arch"] == "x86_64"
-                                      for i in items), str(items)[:200])
+                  code == 200 and hit.get("component") == "client" and
+                  hit.get("version") == pkg_ver and hit.get("arch") == "x86_64",
+                  str(items)[:200])
+        e2e.check("deploy: 安装包来自文件仓库",
+                  hit.get("path") == "packages/client/%s/x86_64/%s" % (pkg_ver, pkg), hit.get("path"))
+        pkg_path = hit.get("path") or pkg
+
+        # 1.5) 页面上传：按包名自动落到 packages/<组件>/<版本>/<架构>/（目录可能还不存在）
+        up_name = "rtunnel-relay-%s-x86_64.tar.gz" % pkg_ver
+        with open(os.path.join(repo, "packages", "client", pkg_ver, "x86_64", pkg), "rb") as f:
+            blob = f.read()
+        req = urllib.request.Request(base + "/api/v1/deploy/packages/" + up_name,
+                                     data=blob, method="POST")
+        try:
+            with op.open(req, timeout=30) as r:
+                up = json.loads(r.read().decode() or "{}")
+            up_code = r.status
+        except urllib.error.HTTPError as e:
+            up, up_code = {}, e.code
+        e2e.check("deploy: 上传安装包落到文件仓库",
+                  up_code == 200 and up.get("size") == len(blob), "code=%d r=%s" % (up_code, up))
+        e2e.check("deploy: 上传后按仓库布局建了目录",
+                  os.path.exists(os.path.join(repo, "packages", "relay", pkg_ver, "x86_64", up_name)),
+                  up_name)
+        code, pk2 = call(op, base, "/api/v1/deploy/packages", method="GET")
+        up_hit = [i for i in (pk2.get("items") or []) if i["name"] == up_name]
+        e2e.check("deploy: 上传的包出现在列表里",
+                  bool(up_hit) and up_hit[0]["path"] ==
+                  "packages/relay/%s/x86_64/%s" % (pkg_ver, up_name), str(up_hit)[:200])
 
         # 2) 参数校验
         code, r = call(op, base, "/api/v1/deploy/hosts",
@@ -273,7 +300,7 @@ def main():
             # 4) 部署 client 到临时前缀（只装文件）
             prefix = os.path.join(WORK, "inst")
             code, job = call(op, base, "/api/v1/deploy/jobs",
-                             {"host_id": info["host"], "component": "client", "package": pkg,
+                             {"host_id": info["host"], "component": "client", "package": pkg_path,
                               "prefix": prefix, "no_units": True,
                               "options": {"server": "127.0.0.1:18443"}})
             e2e.check("deploy: 提交作业", code == 200 and job.get("id"), "code=%d r=%s" % (code, job))
@@ -340,12 +367,12 @@ def main():
         e2e.check("deploy: 登记不可达主机", code == 200 and h2.get("id"), str(h2))
         if h2.get("id"):
             code, j2 = call(op, base, "/api/v1/deploy/jobs",
-                            {"host_id": h2["id"], "component": "agent", "package": pkg,
+                            {"host_id": h2["id"], "component": "agent", "package": pkg_path,
                              "prefix": "/tmp/nope",
                              "options": {"devid": "d1", "server": "1.2.3.4:18443"}})
             e2e.check("deploy: 包与组件不匹配被拒", code in (400, 404), "code=%d r=%s" % (code, j2))
             code, j2 = call(op, base, "/api/v1/deploy/jobs",
-                            {"host_id": h2["id"], "component": "client", "package": pkg,
+                            {"host_id": h2["id"], "component": "client", "package": pkg_path,
                              "prefix": "/tmp/nope", "no_units": True, "options": {}})
             if code == 200:
                 d2 = wait_job(op, base, j2["id"], 60)
@@ -358,6 +385,14 @@ def main():
                        {"host_id": 1, "component": "client", "package": "rtunnel-client-9.9.9-x86_64.tar.gz",
                         "options": {}})
         e2e.check("deploy: 不存在的包被拒", code in (400, 404), "code=%d r=%s" % (code, r))
+        code, r = call(op, base, "/api/v1/deploy/jobs",
+                       {"host_id": 1, "component": "client",
+                        "package": "../../etc/passwd"})
+        e2e.check("deploy: 仓库外的包路径被拒", code in (400, 404), "code=%d r=%s" % (code, r))
+        code, r = call(op, base, "/api/v1/deploy/jobs",
+                       {"host_id": 1, "component": "client",
+                        "package": "packages/../deploy/" + pkg})
+        e2e.check("deploy: 带 .. 的包路径被拒", code in (400, 404), "code=%d r=%s" % (code, r))
 
         # 8) 权限：只读账号看不到写接口
         code, _ = call(op, base, "/api/v1/deploy/hosts", method="GET")

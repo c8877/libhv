@@ -841,9 +841,13 @@ SSH 地址与凭据，平台直接连过去装 agent/relay/client。
   绝对路径且不含 `..`，端口白名单只允许数字和逗号；远端 shell 串一律单引号包裹，避免命令注入。
 - **只装文件**：`no_units=true` 走 `install.sh --no-units` 且不传 `--start`，用于容器/临时前缀；
   验证只比对版本，不要求服务在跑。
-- **安装包来源**：仓库 `deploy/` 目录。页面可以分片上传（复用 `/api/v1/files` 的分片协议，
-  但固定落 `deploy/`，只需要 `deploy.write`），文件名约定
-  `rtunnel-<component>[-<variant>]-<version>-<arch>.tar.gz`，列表接口从中解析组件/版本/架构。
+- **安装包来源是文件仓库**：直接用 `packages/<component>/<version>/<arch>/` 下的包，
+  和 OTA 分发同一份，不另建 `deploy/` 包目录。列表接口递归扫 `packages/`，按
+  `rtunnel-<component>[-<variant>]-<version>-<arch>.tar.gz` 解析组件/版本/架构，回 `path`
+  （如 `packages/agent/1.4.156/x86_64/…tar.gz`），创建作业时把 `path` 当 `package` 传；
+  只接受列表里存在的包，仓库外的路径和 `..` 一律拒绝。页面上的「上传安装包」复用
+  `/api/v1/files` 的分片协议，但落点按包名自动建成 `packages/<组件>/<版本>/<架构>/`
+  （目录不存在就逐级创建），只需要 `deploy.write`，上传完 OTA 也能直接用。
 - **网段扫描**（`POST /api/v1/deploy/scan`，`relay/admin/backend/deploy_scan.cpp`）：登记主机前
   先找出网段里开着 SSH 的机器，扫到的地址直接带进登记表单。relay 上装了 nmap 就用
   `nmap -Pn -n -p<port> --open -T4 --max-retries 1 --host-timeout 4s -oG -`（`-Pn` 避免屏蔽 ICMP

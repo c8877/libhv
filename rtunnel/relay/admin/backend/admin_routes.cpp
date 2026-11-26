@@ -67,12 +67,12 @@ void AdminServer::registerRoutes() {
     access("deploy.read", "GET", "/api/v1/deploy/jobs/:id", &AdminServer::handleDeployJobGet);
     access("deploy.write", "POST", "/api/v1/deploy/jobs", &AdminServer::handleDeployJobCreate);
     access("deploy.write", "POST", "/api/v1/deploy/jobs/:id/cancel", &AdminServer::handleDeployJobCancel);
-    // 安装包上传：复用仓库分片上传，固定落到 deploy/，只需要 deploy.write
+    // 安装包上传：复用仓库分片上传，落到 packages/<组件>/<版本>/<架构>/，只需要 deploy.write
     service_.Handle("POST", "/api/v1/deploy/packages/:name", [this](const HttpContextPtr& ctx) {
         std::string role;
         int rc = requirePerm(ctx, "deploy.write", role);
         if (rc) return rc;
-        handleFileUpload(ctx, role, "deploy");
+        handleDeployPackageUpload(ctx, role);
         return 200;
     });
     // viewer：概览 + 设备列表

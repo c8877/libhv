@@ -54,14 +54,17 @@
           <el-form-item label="安装包" prop="package">
             <div class="row">
               <el-select v-model="form.package" placeholder="选择安装包" class="w300" filterable>
-                <el-option v-for="p in componentPkgs" :key="p.name" :value="p.name"
-                           :label="`${p.name}（${p.version} ${p.arch}）`" />
+                <el-option v-for="p in componentPkgs" :key="p.path" :value="p.path"
+                           :label="`${p.version} · ${p.arch}${p.variant ? ' · ' + p.variant : ''}`">
+                  <span class="mono">{{ p.name }}</span>
+                  <span class="muted opt-note">{{ p.path }}</span>
+                </el-option>
               </el-select>
               <el-upload :show-file-list="false" :http-request="uploadPkg" accept=".tar.gz">
                 <el-button :loading="uploading">上传安装包</el-button>
               </el-upload>
               <span v-if="componentPkgs.length === 0" class="muted">
-                还没有 {{ form.component }} 安装包，先上传
+                文件仓库 packages/ 下还没有 {{ form.component }} 安装包，先上传
               </span>
             </div>
             <div v-if="uploadPct > 0 && uploadPct < 100" class="muted">上传中 {{ uploadPct }}%</div>
@@ -124,8 +127,10 @@
         </el-form>
 
         <div class="hint muted">
-          部署过程：预检（连通性/架构/sudo）→ 上传安装包到 /tmp → 解压 → 写配置 → 执行包内
-          install.sh → 验证版本与服务状态。整个过程在后台跑，可以在「记录」里看实时日志。
+          安装包来自文件仓库 packages/&lt;组件&gt;/&lt;版本&gt;/&lt;架构&gt;/，和 OTA 用的是同一份；
+          页面上的「上传安装包」也会按包名落到这个位置。部署过程：预检（连通性/架构/sudo）→
+          上传安装包到 /tmp → 解压 → 写配置 → 执行包内 install.sh → 验证版本与服务状态。
+          整个过程在后台跑，可以在「记录」里看实时日志。
           SSH/SFTP 由 relay 内置的 libssh2 完成，目标机不需要装 ssh 客户端、sshpass 或 agent。
         </div>
       </el-tab-pane>
@@ -676,7 +681,8 @@ async function uploadPkg(opt) {
       uploadPct.value = 100
     }
     await loadPkgs()
-    form.package = file.name
+    const hit = pkgs.value.find((p) => p.name === file.name)
+    form.package = hit ? hit.path : file.name
     ElMessage.success('已上传 ' + file.name)
   } catch (e) {
     ElMessage.error('上传失败：' + e.message)

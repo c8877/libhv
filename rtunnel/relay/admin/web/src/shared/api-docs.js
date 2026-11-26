@@ -869,15 +869,17 @@ export const DOCS = [
   },
   {
     group: 'ops', method: 'GET', path: '/api/v1/deploy/packages', minRole: 'manager',
-    summary: 'deploy/ 目录下的安装包（自动识别组件/版本/架构）',
-    note: '包名约定 `rtunnel-<component>[-<variant>]-<version>-<arch>.tar.gz`',
+    summary: '文件仓库里的安装包（packages/，与 OTA 同一份）',
+    note: '递归扫 `packages/` 下的 `rtunnel-<component>[-<variant>]-<version>-<arch>.tar.gz`，' +
+      '`path` 就是创建作业时要传的 `package`',
     curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/deploy/packages"`,
-    resp: `{ "items": [{ "name": "rtunnel-agent-web-1.4.151-x86_64.tar.gz", "component": "agent", "version": "1.4.151", "arch": "x86_64", "variant": "web", "size": 4212345 }] }`,
+    resp: `{ "items": [{ "name": "rtunnel-agent-web-1.4.151-x86_64.tar.gz", "path": "packages/agent/1.4.151/x86_64/rtunnel-agent-web-1.4.151-x86_64.tar.gz", "component": "agent", "version": "1.4.151", "arch": "x86_64", "variant": "web", "size": 4212345 }] }`,
   },
   {
     group: 'ops', method: 'POST', path: '/api/v1/deploy/packages/:name', minRole: 'manager',
-    summary: '上传安装包（分片，固定落到仓库 deploy/）',
-    note: '与 `/api/v1/files` 相同的分片协议：`?append=1&upload=ID&offset=N` 追加，`?finalize=1&upload=ID` 落盘；单包上限见 `file.max_upload_mb`',
+    summary: '上传安装包（分片，按包名落到 packages/<组件>/<版本>/<架构>/）',
+    note: '与 `/api/v1/files` 相同的分片协议：`?append=1&upload=ID&offset=N` 追加，`?finalize=1&upload=ID` 落盘；' +
+      '目录按包名自动创建，和 `publish.sh` 的布局一致，OTA 能直接看到；单包上限见 `file.max_upload_mb`',
     params: [{ name: 'name', in: 'path', desc: '包文件名（.tar.gz）' }],
     curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" --data-binary @rtunnel-agent-web-1.4.151-x86_64.tar.gz \\\n  "$RT/api/v1/deploy/packages/rtunnel-agent-web-1.4.151-x86_64.tar.gz"`,
     resp: `{ "name": "rtunnel-agent-web-1.4.151-x86_64.tar.gz", "size": 4212345, "sha256": "..." }`,
@@ -885,8 +887,9 @@ export const DOCS = [
   {
     group: 'ops', method: 'POST', path: '/api/v1/deploy/jobs', minRole: 'manager',
     summary: '创建部署作业（后台执行 ssh/scp/install.sh）',
-    note: '同一主机同时只允许一个未结束的作业；agent 必须给 `options.devid` 与 `options.server`',
-    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"host_id":1,"component":"agent","package":"rtunnel-agent-web-1.4.151-x86_64.tar.gz","variant":"web","options":{"devid":"board01","server":"10.0.0.10:18443","allow":"22"}}' \\\n  "$RT/api/v1/deploy/jobs"`,
+    note: '同一主机同时只允许一个未结束的作业；agent 必须给 `options.devid` 与 `options.server`；' +
+      '`package` 传 `/api/v1/deploy/packages` 返回的 `path`（也接受文件名，按仓库解析），包里必须有 install.sh',
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"host_id":1,"component":"agent","package":"packages/agent/1.4.151/x86_64/rtunnel-agent-web-1.4.151-x86_64.tar.gz","variant":"web","options":{"devid":"board01","server":"10.0.0.10:18443","allow":"22"}}' \\\n  "$RT/api/v1/deploy/jobs"`,
     resp: `{ "id": 12 }`,
   },
   {

@@ -9,6 +9,7 @@
 // 密码和私钥都在进程内完成认证，sudo 的密码直接写进通道 stdin。
 #include "admin_server.hpp"
 #include "deploy_ssh.hpp"
+#include "proxy_util.hpp"
 #include "deploy_scan.hpp"
 #include "hash_util.hpp"
 #include "common/logging.hpp"
@@ -268,6 +269,7 @@ StepOut dUpload(DeployConn& c, const std::string& local, const std::string& remo
 
 struct PkgInfo {
     std::string name;       // 文件名
+    std::string path;       // 文件仓库里的相对路径：packages/<组件>/<版本>/<架构>/<文件名>
     std::string component;  // agent / relay / client
     std::string version;
     std::string arch;
@@ -302,25 +304,66 @@ bool dParsePkg(const std::string& name, PkgInfo& p) {
     return true;
 }
 
-bool dListPackages(const std::string& repo_root, std::vector<PkgInfo>& out) {
-    std::string dir = repo_root + "/deploy";
+// 递归找 packages/ 下的安装包（布局与 publish.sh 一致，多深几层也能认出来）
+void dWalkPackages(const std::string& dir, const std::string& rel, int depth,
+                   std::vector<PkgInfo>& out) {
+    if (depth > 3) return;
     DIR* d = opendir(dir.c_str());
-    if (!d) return false;
+    if (!d) return;
     struct dirent* de;
     while ((de = readdir(d)) != nullptr) {
         if (de->d_name[0] == '.') continue;
-        PkgInfo p;
-        if (!dParsePkg(de->d_name, p)) continue;
-        std::string path = dir + "/" + de->d_name;
+        std::string name = de->d_name;
+        std::string child_rel = rel.empty() ? name : (rel + "/" + name);
+        std::string full = dir + "/" + name;
         struct stat st{};
-        if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) continue;
+        if (lstat(full.c_str(), &st) != 0) continue;
+        if (S_ISDIR(st.st_mode)) {
+            dWalkPackages(full, child_rel, depth + 1, out);
+            continue;
+        }
+        if (!S_ISREG(st.st_mode)) continue;
+        PkgInfo p;
+        if (!dParsePkg(name, p)) continue;
+        p.path = "packages/" + child_rel;
         p.size = (long long)st.st_size;
         p.mtime_ms = (long long)st.st_mtime * 1000;
         out.push_back(p);
     }
     closedir(d);
+}
+
+bool dListPackages(const std::string& file_dir, std::vector<PkgInfo>& out) {
+    std::string root = file_dir + "/packages";
+    struct stat st{};
+    if (stat(root.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) return false;
+    dWalkPackages(root, std::string(), 0, out);
     std::sort(out.begin(), out.end(),
               [](const PkgInfo& a, const PkgInfo& b) { return a.mtime_ms > b.mtime_ms; });
+    return true;
+}
+
+// 逐级建目录（上传时 packages/<组件>/<版本>/<架构> 可能还不存在）
+bool dMkdirP(const std::string& path) {
+    if (path.empty()) return false;
+    std::string cur;
+    size_t i = 0;
+    if (path[0] == '/') {
+        cur = "/";
+        i = 1;
+    }
+    while (i <= path.size()) {
+        size_t slash = path.find('/', i);
+        std::string part = path.substr(i, (slash == std::string::npos ? path.size() : slash) - i);
+        if (!part.empty()) {
+            if (cur.empty()) cur = part;
+            else if (cur == "/") cur += part;
+            else cur += "/" + part;
+            if (!dEnsureDir(cur)) return false;
+        }
+        if (slash == std::string::npos) break;
+        i = slash + 1;
+    }
     return true;
 }
 
@@ -615,13 +658,14 @@ void AdminServer::handleDeployPackages(const HttpContextPtr& ctx) {
     std::vector<PkgInfo> pkgs;
     if (cfg_.file_dir.empty() || !dListPackages(cfg_.file_dir, pkgs)) {
         out["items"] = items;
-        out["hint"] = "仓库目录未配置或 deploy/ 下还没有安装包";
+        out["hint"] = "文件仓库没配置，或 packages/ 下还没有安装包";
         ctx->send(out.dump());
         return;
     }
     for (auto& p : pkgs) {
         json j;
         j["name"] = p.name;
+        j["path"] = p.path;
         j["component"] = p.component;
         j["version"] = p.version;
         j["arch"] = p.arch;
@@ -632,6 +676,31 @@ void AdminServer::handleDeployPackages(const HttpContextPtr& ctx) {
     }
     out["items"] = items;
     ctx->send(out.dump());
+}
+
+// 上传安装包：和 publish.sh 一样落到 packages/<组件>/<版本>/<架构>/，
+// 这样页面上传的包 OTA 也能直接用，不用维护第二个包目录。
+void AdminServer::handleDeployPackageUpload(const HttpContextPtr& ctx, const std::string& role) {
+    std::string name = urlDecode(ctx->param("name"));
+    PkgInfo p;
+    if (!dParsePkg(name, p)) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"文件名要按 rtunnel-<组件>[-<变体>]-<版本>-<架构>.tar.gz\"}");
+        return;
+    }
+    if (cfg_.file_dir.empty()) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"没有配置文件仓库（--admin-file-dir）\"}");
+        return;
+    }
+    std::string dir = "packages/" + p.component + "/" + p.version + "/" + p.arch;
+    std::string abs;
+    if (!adminRepoPath(cfg_.file_dir, dir, abs) || !dMkdirP(abs)) {
+        ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+        ctx->send("{\"error\":\"建仓库目录失败\"}");
+        return;
+    }
+    handleFileUpload(ctx, role, dir);
 }
 
 void AdminServer::handleDeployJobCreate(const HttpContextPtr& ctx) {
@@ -655,19 +724,37 @@ void AdminServer::handleDeployJobCreate(const HttpContextPtr& ctx) {
         ctx->send("{\"error\":\"component 只能是 agent/relay/client\"}");
         return;
     }
-    std::string pkg = req.value("package", std::string());
+    // 安装包只从文件仓库取：package 传列表里的 path（也接受文件名，按仓库解析）
+    std::string pkg_arg = dTrim(req.value("package", std::string()));
     PkgInfo pi;
-    if (!dParsePkg(pkg, pi) || pi.component != component) {
-        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
-        ctx->send("{\"error\":\"安装包名不合法或与组件不匹配\"}");
+    bool found = false;
+    std::vector<PkgInfo> pkgs;
+    if (!pkg_arg.empty() && !cfg_.file_dir.empty() && dListPackages(cfg_.file_dir, pkgs)) {
+        for (auto& p : pkgs) {
+            if (p.path == pkg_arg || (pkg_arg.find('/') == std::string::npos && p.name == pkg_arg)) {
+                pi = p;
+                found = true;
+                break;
+            }
+        }
+    }
+    if (!found) {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"文件仓库里没有这个安装包（packages/<组件>/<版本>/<架构>/）\"}");
         return;
     }
+    if (pi.component != component) {
+        ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
+        ctx->send("{\"error\":\"安装包是 " + pi.component + "，和选的组件 " + component + " 不匹配\"}");
+        return;
+    }
+    std::string pkg = pi.name;
     std::string path;
     struct stat st{};
-    if (cfg_.file_dir.empty() || !adminRepoPath(cfg_.file_dir, "deploy/" + pkg, path) ||
-        stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0) {
+    if (!adminRepoPath(cfg_.file_dir, pi.path, path) || stat(path.c_str(), &st) != 0 ||
+        !S_ISREG(st.st_mode) || st.st_size <= 0) {
         ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
-        ctx->send("{\"error\":\"安装包不存在，先上传到 deploy/ 目录\"}");
+        ctx->send("{\"error\":\"安装包文件读不到，可能在扫描后又被删掉了\"}");
         return;
     }
     std::string variant = req.value("variant", pi.variant);
@@ -696,6 +783,7 @@ void AdminServer::handleDeployJobCreate(const HttpContextPtr& ctx) {
     }
     bool no_units = req.value("no_units", false);
     options["no_units"] = no_units;
+    options["pkg_path"] = pi.path;
     // 组件参数校验（这些值会被拼进远端命令，先卡死字符集）
     if (component == "agent") {
         std::string devid = options.value("devid", std::string());
@@ -909,7 +997,12 @@ void AdminServer::deployRunJob(long long job_id) {
 
     // 2. 传包
     std::string remote_dir = "/tmp/rtunnel-deploy-" + std::to_string(job_id);
-    std::string local_pkg = cfg_.file_dir + "/deploy/" + pkg;
+    std::string pkg_rel = options.value("pkg_path", std::string());
+    std::string local_pkg;
+    if (pkg_rel.empty() || !adminRepoPath(cfg_.file_dir, pkg_rel, local_pkg)) {
+        fail("上传", "安装包路径不合法：" + pkg_rel);
+        return;
+    }
     dLog(db_, job_id, "上传", "传输 " + pkg);
     auto mk = dRemote(conn, "mkdir -p " + dQuote(remote_dir), 20, job_id);
     if (!mk.ok) {
