@@ -28,6 +28,10 @@ add_library(rtunnel_sqlite STATIC 3rd/sqlite3/sqlite3.c)
 target_compile_definitions(rtunnel_sqlite PRIVATE SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION=1)
 set_target_properties(rtunnel_sqlite PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+# 部署用的 SSH/SFTP：libssh2 裁剪源码，加密后端复用 OpenSSL（relay 已经依赖它）
+find_package(OpenSSL REQUIRED)
+add_subdirectory(3rd/libssh2 EXCLUDE_FROM_ALL)
+
 set(RTUNNEL_RELAY_SOURCES
                relay/main.cpp relay/relay_server.cpp relay/audit_log.cpp
                relay/usage_meter.cpp
@@ -61,6 +65,9 @@ set(RTUNNEL_RELAY_SOURCES
                relay/admin/backend/admin_db_ai.cpp
                relay/admin/backend/api_playbooks.cpp
                relay/admin/backend/api_ai.cpp
+               relay/admin/backend/api_deploy.cpp
+               relay/admin/backend/deploy_ssh.cpp
+               relay/admin/backend/admin_db_deploy.cpp
                relay/admin/backend/ai_prompt_library.cpp
                relay/admin/backend/admin_db_metrics_minute.cpp
                relay/admin/backend/event_bus.cpp
@@ -183,7 +190,7 @@ add_executable(rtunnel-endpoint-test tests/endpoint_test.cpp)
 
 target_include_directories(rtunnel-relay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/3rd/sqlite3
                             "${CMAKE_CURRENT_BINARY_DIR}/generated")
-target_link_libraries(rtunnel-relay  rtnp rtunnel_sqlite rtunnel_gzip)
+target_link_libraries(rtunnel-relay  rtnp rtunnel_sqlite rtunnel_gzip rtunnel_ssh2 OpenSSL::Crypto)
 
 if (RTUNNEL_ADMIN_WEB)
     set(RTUNNEL_ADMIN_DIST "${CMAKE_CURRENT_SOURCE_DIR}/relay/admin/web/dist")
@@ -210,7 +217,8 @@ if (RTUNNEL_ADMIN_WEB)
         target_include_directories(rtunnel-relay-embedded PRIVATE
                                    ${CMAKE_CURRENT_SOURCE_DIR}/3rd/sqlite3
                                    "${CMAKE_CURRENT_BINARY_DIR}/generated")
-        target_link_libraries(rtunnel-relay-embedded rtnp rtunnel_sqlite rtunnel_gzip)
+        target_link_libraries(rtunnel-relay-embedded rtnp rtunnel_sqlite rtunnel_gzip
+                              rtunnel_ssh2 OpenSSL::Crypto)
     endif()
 endif()
 

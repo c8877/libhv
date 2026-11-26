@@ -814,6 +814,39 @@ relay 在 agent `AUTH_OK` 之后、以及同步任务下发时发送 `RELAY_LIST
 - 取消会把已发出的 `running` 行一并置为 `cancelled`；暂停期间不释放、不补发，
   恢复后继续当前批次，下一批由调度器按批间隔释放
 
+### 13.9.1 部署：从管理台把组件装到内网主机
+
+目标：设备/中继接入前的那一步不该只能手工敲命令。运维在「运维 → 部署」登记目标主机的
+SSH 地址与凭据，平台直接连过去装 agent/relay/client。
+
+实现要点：
+
+- **SSH 用 libssh2，不再调用外部 ssh/scp**：`relay/admin/backend/deploy_ssh.cpp` 封装连接、
+  密码/私钥认证、命令执行、SFTP 上传，`3rd/libssh2` 是裁剪后的 1.11.1（OpenSSL 后端）。
+  好处是 relay 主机不需要装 ssh 客户端/sshpass，也不需要目标机预装 agent；密码认证不依赖
+  `SSH_ASKPASS` 这类 tty 技巧，sudo 密码直接写进通道 stdin（`sudo -S`）。
+- **主机密钥 accept-new**：首次连接把 `sha256:<base64>` 记到 `<admin.db 同目录>/deploy/known_hosts`，
+  之后指纹不一致直接拒绝，提示删掉对应行（防中间人）。
+- **凭据不入库**：密码与私钥在 `<admin.db 同目录>/deploy/<host_id>.secret|.key`（0600），
+  `deploy_hosts.secret_set` 只表示有没有存过；所有接口只回 `secret_set`。
+- **作业模型**：`deploy_hosts` + `deploy_jobs`。一台主机同时只允许一个未结束作业；
+  作业在后台 worker 里执行，逐步写 `step` 与 `log`（保留尾部 128KB），页面轮询
+  `/api/v1/deploy/jobs/:id` 出实时日志；取消只置标志，SSH 读循环看到后断开通道。
+- **步骤**：预检（连通性、`uname -m` 与包架构比对、是否 root、有无 systemd）→ SFTP 传包到
+  `/tmp/rtunnel-deploy-<id>` → `tar --strip-components=1` 解包 → 写配置（agent 的
+  `/opt/data/etc/rtunnel-agent.args`、relay 的 `/etc/rtunnel/relay.env`、client 的
+  `/etc/rtunnel/client.env`，都在 `install.sh --start` 之前）→ 执行包内 `install.sh` →
+  验证（版本、`systemctl is-active`、relay 额外探 `https://127.0.0.1:<admin>/`）→ 清理临时目录。
+- **参数由服务端校验后再拼命令**：主机/用户名/设备 ID 限 `[A-Za-z0-9._-]`，安装目录必须是
+  绝对路径且不含 `..`，端口白名单只允许数字和逗号；远端 shell 串一律单引号包裹，避免命令注入。
+- **只装文件**：`no_units=true` 走 `install.sh --no-units` 且不传 `--start`，用于容器/临时前缀；
+  验证只比对版本，不要求服务在跑。
+- **安装包来源**：仓库 `deploy/` 目录。页面可以分片上传（复用 `/api/v1/files` 的分片协议，
+  但固定落 `deploy/`，只需要 `deploy.write`），文件名约定
+  `rtunnel-<component>[-<variant>]-<version>-<arch>.tar.gz`，列表接口从中解析组件/版本/架构。
+
+权限：`deploy.read`（看主机与作业）、`deploy.write`（增删改主机、上传包、提交/取消作业）。
+
 ### 13.10 用量与配额（按量计费底座）
 
 目标：把“用了多少”记全，且记账口径与配额执行一致，后续加价目/账单只读这张表。

@@ -372,6 +372,27 @@ public:
     bool dictBatchDelete(const std::string& kind, const std::vector<long long>& ids,
                          std::string& json_out);
 
+    // ---- 部署（SSH 到目标主机装 agent/relay/client） ----
+    // 凭据不入库：secret 文件在 <db 同目录>/deploy/<id>.secret，0600
+    bool deployHostList(std::string& json_out);
+    bool deployHostGet(long long id, std::string& json_out);
+    bool deployHostSave(long long id, const std::string& name, const std::string& host, int port,
+                        const std::string& user, const std::string& auth, bool sudo,
+                        const std::string& note, long long& out_id, std::string& err);
+    bool deployHostSetSecret(long long id, bool set);
+    bool deployHostDelete(long long id);
+    bool deployHostMark(long long id, const std::string& status);
+    bool deployJobCreate(long long host_id, const std::string& host, const std::string& user,
+                         const std::string& component, const std::string& version,
+                         const std::string& arch, const std::string& variant, const std::string& pkg,
+                         const std::string& prefix, const std::string& options,
+                         const std::string& actor, long long& out_id, std::string& err);
+    bool deployJobUpdate(long long id, const std::string& status, const std::string& step,
+                         const std::string& error, const std::string& log_add);
+    bool deployJobRunningForHost(long long host_id);
+    bool deployJobGet(long long id, std::string& json_out);
+    bool deployJobList(int limit, std::string& json_out);
+
     // ---- relay 地址字典与下发列表 ----
     bool relayDictPage(const std::string& q, int page, int page_size, std::string& json_out, int& total);
     bool relayDictAdd(const std::string& host, int port, const std::string& name,

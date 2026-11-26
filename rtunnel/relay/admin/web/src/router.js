@@ -26,6 +26,7 @@ const routes = [
   { path: '/certs', component: () => import('./pages/certs.vue'), meta: { title: '证书' } },
   { path: '/accounts', component: () => import('./pages/accounts.vue'), meta: { title: '账号' } },
   { path: '/files', component: () => import('./pages/files.vue'), meta: { title: '文件' } },
+  { path: '/deploy', component: () => import('./pages/deploy.vue'), meta: { title: '部署' } },
   { path: '/distribute', component: () => import('./pages/distribute.vue'), meta: { title: '分发文件' } },
   { path: '/tasks', component: () => import('./pages/tasks/index.vue'), meta: { title: '任务' } },
   { path: '/operations', component: () => import('./pages/operations.vue'), meta: { title: '操作作业' } },

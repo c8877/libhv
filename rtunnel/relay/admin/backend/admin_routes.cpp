@@ -55,6 +55,25 @@ void AdminServer::registerRoutes() {
             return 200;
         });
     };
+    // 运维 → 部署：SSH/SCP 直连目标主机（凭据只在 relay 本地，接口不回显）
+    access("deploy.read", "GET", "/api/v1/deploy/hosts", &AdminServer::handleDeployHosts);
+    access("deploy.write", "POST", "/api/v1/deploy/hosts", &AdminServer::handleDeployHostCreate);
+    access("deploy.write", "PUT", "/api/v1/deploy/hosts/:id", &AdminServer::handleDeployHostUpdate);
+    access("deploy.write", "DELETE", "/api/v1/deploy/hosts/:id", &AdminServer::handleDeployHostDelete);
+    access("deploy.read", "POST", "/api/v1/deploy/hosts/:id/probe", &AdminServer::handleDeployProbe);
+    access("deploy.read", "GET", "/api/v1/deploy/packages", &AdminServer::handleDeployPackages);
+    access("deploy.read", "GET", "/api/v1/deploy/jobs", &AdminServer::handleDeployJobs);
+    access("deploy.read", "GET", "/api/v1/deploy/jobs/:id", &AdminServer::handleDeployJobGet);
+    access("deploy.write", "POST", "/api/v1/deploy/jobs", &AdminServer::handleDeployJobCreate);
+    access("deploy.write", "POST", "/api/v1/deploy/jobs/:id/cancel", &AdminServer::handleDeployJobCancel);
+    // 安装包上传：复用仓库分片上传，固定落到 deploy/，只需要 deploy.write
+    service_.Handle("POST", "/api/v1/deploy/packages/:name", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "deploy.write", role);
+        if (rc) return rc;
+        handleFileUpload(ctx, role, "deploy");
+        return 200;
+    });
     // viewer：概览 + 设备列表
     access("device.view", "GET", "/api/v1/overview", &AdminServer::handleOverview);
     access("device.view", "GET", "/api/v1/agents", &AdminServer::handleAgents);

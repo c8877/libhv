@@ -821,6 +821,83 @@ export const DOCS = [
     curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/metrics"`,
   },
 
+  // ---------------------------------------------------------------- 部署
+  {
+    group: 'ops', method: 'GET', path: '/api/v1/deploy/hosts', minRole: 'manager',
+    summary: '部署目标主机列表（不回显密码/私钥）',
+    note: '凭据只在 relay 本机 `<admin.db 同目录>/deploy/`（0600）；`secret_set` 只表示有没有存过',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/deploy/hosts"`,
+    resp: `{ "items": [{ "id": 1, "name": "车间-01", "host": "10.0.0.21", "port": 22, "username": "root", "auth": "password", "sudo": false, "secret_set": true, "last_status": "ok" }] }`,
+  },
+  {
+    group: 'ops', method: 'POST', path: '/api/v1/deploy/hosts', minRole: 'manager',
+    summary: '登记一台可 SSH 登录的目标主机',
+    note: '`auth` 取 password 或 key；`secret` 是密码或私钥全文，只写不读',
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"name":"车间-01","host":"10.0.0.21","port":22,"username":"root","auth":"password","secret":"******"}' \\\n  "$RT/api/v1/deploy/hosts"`,
+    resp: `{ "id": 1 }`,
+  },
+  {
+    group: 'ops', method: 'PUT', path: '/api/v1/deploy/hosts/:id', minRole: 'manager',
+    summary: '修改主机信息（secret 留空表示不改凭据）',
+    params: [{ name: 'id', in: 'path', desc: '主机 ID' }],
+    curl: `curl -sS -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"name":"车间-01","host":"10.0.0.21","port":22,"username":"root","auth":"key","secret":"-----BEGIN OPENSSH PRIVATE KEY-----"}' \\\n  "$RT/api/v1/deploy/hosts/1"`,
+  },
+  {
+    group: 'ops', method: 'DELETE', path: '/api/v1/deploy/hosts/:id', minRole: 'manager',
+    summary: '删除主机与凭据（有执行中的作业时 409）',
+    params: [{ name: 'id', in: 'path', desc: '主机 ID' }],
+    curl: `curl -sS -X DELETE -H "Authorization: Bearer $ATK" "$RT/api/v1/deploy/hosts/1"`,
+  },
+  {
+    group: 'ops', method: 'POST', path: '/api/v1/deploy/hosts/:id/probe', minRole: 'manager',
+    summary: 'SSH 连通性测试 + 环境探测',
+    note: '返回架构、是否 root、是否 systemd、/tmp 剩余空间与已安装版本；失败返回 502 与原因',
+    params: [{ name: 'id', in: 'path', desc: '主机 ID' }],
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" "$RT/api/v1/deploy/hosts/1/probe"`,
+    resp: `{ "ok": true, "arch": "x86_64", "uid": 0, "systemd": true, "free_kb": 8123456, "installed": "none", "raw": "..." }`,
+  },
+  {
+    group: 'ops', method: 'GET', path: '/api/v1/deploy/packages', minRole: 'manager',
+    summary: 'deploy/ 目录下的安装包（自动识别组件/版本/架构）',
+    note: '包名约定 `rtunnel-<component>[-<variant>]-<version>-<arch>.tar.gz`',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/deploy/packages"`,
+    resp: `{ "items": [{ "name": "rtunnel-agent-web-1.4.151-x86_64.tar.gz", "component": "agent", "version": "1.4.151", "arch": "x86_64", "variant": "web", "size": 4212345 }] }`,
+  },
+  {
+    group: 'ops', method: 'POST', path: '/api/v1/deploy/packages/:name', minRole: 'manager',
+    summary: '上传安装包（分片，固定落到仓库 deploy/）',
+    note: '与 `/api/v1/files` 相同的分片协议：`?append=1&upload=ID&offset=N` 追加，`?finalize=1&upload=ID` 落盘；单包上限见 `file.max_upload_mb`',
+    params: [{ name: 'name', in: 'path', desc: '包文件名（.tar.gz）' }],
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" --data-binary @rtunnel-agent-web-1.4.151-x86_64.tar.gz \\\n  "$RT/api/v1/deploy/packages/rtunnel-agent-web-1.4.151-x86_64.tar.gz"`,
+    resp: `{ "name": "rtunnel-agent-web-1.4.151-x86_64.tar.gz", "size": 4212345, "sha256": "..." }`,
+  },
+  {
+    group: 'ops', method: 'POST', path: '/api/v1/deploy/jobs', minRole: 'manager',
+    summary: '创建部署作业（后台执行 ssh/scp/install.sh）',
+    note: '同一主机同时只允许一个未结束的作业；agent 必须给 `options.devid` 与 `options.server`',
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"host_id":1,"component":"agent","package":"rtunnel-agent-web-1.4.151-x86_64.tar.gz","variant":"web","options":{"devid":"board01","server":"10.0.0.10:18443","allow":"22"}}' \\\n  "$RT/api/v1/deploy/jobs"`,
+    resp: `{ "id": 12 }`,
+  },
+  {
+    group: 'ops', method: 'GET', path: '/api/v1/deploy/jobs', minRole: 'manager',
+    summary: '部署作业列表（不含日志正文）',
+    params: [{ name: 'limit', in: 'query', desc: '条数，默认 30，最大 200' }],
+    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/deploy/jobs?limit=20"`,
+  },
+  {
+    group: 'ops', method: 'GET', path: '/api/v1/deploy/jobs/:id', minRole: 'manager',
+    summary: '单个作业详情（含实时日志，轮询这个接口）',
+    params: [{ name: 'id', in: 'path', desc: '作业 ID' }],
+    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/deploy/jobs/12"`,
+    resp: `{ "id": 12, "component": "agent", "status": "running", "step": "安装", "log": "[...] 执行包内 install.sh" }`,
+  },
+  {
+    group: 'ops', method: 'POST', path: '/api/v1/deploy/jobs/:id/cancel', minRole: 'manager',
+    summary: '取消部署（终止 ssh 子进程）',
+    params: [{ name: 'id', in: 'path', desc: '作业 ID' }],
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" "$RT/api/v1/deploy/jobs/12/cancel"`,
+  },
+
   // ---------------------------------------------------------------- 中继列表
   {
     group: 'ops', method: 'GET', path: '/api/v1/relay-dict', minRole: 'manager',

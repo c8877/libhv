@@ -12,7 +12,8 @@
 
 using nlohmann::json;
 
-void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string& role) {
+void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string& role,
+                                   const std::string& forced_dir) {
     std::string name = urlDecode(ctx->param("name"));
     if (cfg_.file_dir.empty() || !adminValidFileName(name)) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;
@@ -21,7 +22,7 @@ void AdminServer::handleFileUpload(const HttpContextPtr& ctx, const std::string&
     }
     size_t max_ul = (size_t)settingInt("file.max_upload_mb", 32) * 1024 * 1024;
     mkdir(cfg_.file_dir.c_str(), 0700);
-    std::string dir = urlDecode(ctx->param("dir"));
+    std::string dir = forced_dir.empty() ? urlDecode(ctx->param("dir")) : forced_dir;
     std::string base;
     if (!adminRepoPath(cfg_.file_dir, dir, base)) {
         ctx->response->status_code = HTTP_STATUS_BAD_REQUEST;

@@ -19,6 +19,7 @@ DIST=${RTUNNEL_ADMIN_DIST:-$ROOT/rtunnel/relay/admin/web/dist}
 SUITES=(
   admin/smoke
   admin/home
+  admin/deploy
   admin/tables
   admin/proc-net
   admin/files

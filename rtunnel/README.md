@@ -127,6 +127,30 @@ build/bin/rtunnel-client --server r1.example.com --server r2.example.com --port 
   （有序列表 + 各设备 ACK）、`/api/v1/relay-sync/tasks`（创建/详情/暂停/继续/取消/重试），
   权限 `relay.read` / `relay.write`
 
+### 由管理台把组件装到内网主机
+
+「运维 → 部署」是设备接入前的入口：登记一台能 SSH 登录的主机，平台直接把 agent / relay /
+client 装上去，不用先手工 scp。
+
+- **主机**：地址 + 端口 + 登录用户 + 密码或私钥，可勾 sudo（非 root 账号）。凭据只存在
+  relay 本机 `<admin.db 同目录>/deploy/`（0600），接口只回「有没有存过」，从不回显
+- **测试连接**：返回架构、是否 root、有没有 systemd、`/tmp` 剩余空间、已装版本；
+  首次连接会把主机密钥指纹记进 `deploy/known_hosts`，之后指纹变了直接拒绝
+- **安装包**：放在仓库 `deploy/` 目录，页面可直接分片上传。文件名约定
+  `rtunnel-<component>[-<variant>]-<version>-<arch>.tar.gz`，列表会自动识别组件/版本/架构
+- **安装**：预检（架构必须与包一致）→ 传包到 `/tmp/rtunnel-deploy-<id>` → 解压 → 写配置
+  （agent 的 `--devid/--server/--allow`、relay 的 `--admin` 与初始令牌、client 的 relay 地址）
+  → 执行包内 `install.sh` → 验证版本与服务状态 → 清理临时目录
+- **agent 必填**：设备 ID（字母数字和 `. _ -`）、relay 地址 `host:port`（数据面端口，不是管理台）；
+  端口白名单留空表示不开放转发
+- **relay**：填管理端口（默认 9443，自签证书）和初始令牌；令牌留空自动生成并写进作业日志
+- **只装文件**：容器或临时目录里勾上，会走 `install.sh --no-units` 且不启动服务
+- 一台主机同时只允许一个未结束作业；日志实时追加，可取消；记录保留在「记录」tab
+- SSH/SFTP 由内置 libssh2 完成（`3rd/libssh2`，OpenSSL 后端），relay 主机不需要装
+  ssh/scp/sshpass，目标机也不需要预装任何东西
+- 接口：`/api/v1/deploy/hosts`、`/api/v1/deploy/packages`、`/api/v1/deploy/jobs`，
+  权限 `deploy.read` / `deploy.write`
+
 ### 管理边界：多 relay 只做链路冗余，不是管理高可用
 
 每个 relay 都是**独立管理域**。`--admin-db` 指向本机 SQLite，账号、权限组、API Token、

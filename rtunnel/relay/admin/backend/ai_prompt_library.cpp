@@ -181,12 +181,13 @@ std::string aiPromptContext(const std::string& query, size_t max_sections) {
             }
         }
     }
-    // 手册部分控制在 ~9KB：小模型/本地模型的上下文也能放下；超了就不再追加次要章节
-    const size_t kManualBudget = 9000;
+    // 手册部分控制在 ~14KB：常驻段 + 4 个相关章节，小模型/本地模型也放得下
+    const size_t kManualBudget = 14000;
     std::string out = always;
     if (out.size() > kManualBudget) out = aiClampUtf8Local(out, kManualBudget);
     for (size_t i = 0; i < hits.size() && i < max_sections; ++i) {
-        if (out.size() + hits[i].s->body.size() > kManualBudget) break;
+        // 放不下就跳过这一节，后面的短章节仍然有机会进来
+        if (out.size() + hits[i].s->body.size() > kManualBudget) continue;
         out += hits[i].s->body;
         out += "\n\n";
     }

@@ -62,6 +62,22 @@ rtunnel-agent --server relay.example.com --port 18443 --devid box-001
 --allow-exec "uptime;df -h;systemctl status *"   # 受控命令白名单（不配则 exec 不可用）
 ```
 
+### 不用命令行也能装：运维 → 部署
+
+如果这台主机还能 SSH 登录，可以交给「运维 → 部署」直接装，不用先手工传包：
+
+1. 「主机」页签登记地址、端口、登录用户和密码/私钥（非 root 勾上 sudo）。凭据只存在 relay
+   本机，页面不会回显；选中主机会自动测一次连通性，给出架构、systemd、`/tmp` 剩余空间。
+2. 安装包放到仓库 `deploy/` 目录，页面也能直接上传。文件名按
+   `rtunnel-<组件>[-变体]-<版本>-<架构>.tar.gz` 放，列表会自动识别。
+3. 「新建部署」选组件（agent / relay / client）和包；agent 要填设备 ID、relay 地址
+   （数据面 `host:port`）和端口白名单，relay 填管理端口和初始令牌（留空自动生成）。
+4. 点「开始部署」，后台会预检 → 传包 → 解压 → 写配置 → 执行包内 `install.sh` → 验证服务和版本。
+   日志实时追加，可取消；装完设备就会出现在「设备」列表里。
+
+> SSH/SFTP 用的是 relay 内置的 libssh2，目标机不需要装 ssh 客户端、sshpass 或任何 agent。
+> 容器/临时目录里可以勾「只安装文件，不接管 systemd」。
+
 ### 批量升级
 
 文件仓库上传包后，在「OTA」页选包、按架构过滤设备、灰度下发。失败会按失败率闸门停止，

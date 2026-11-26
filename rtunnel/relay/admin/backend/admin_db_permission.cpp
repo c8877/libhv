@@ -481,6 +481,9 @@ const PermResDef kPermRes[] = {
     {"repo.write", "文件", "写入仓库", "向仓库上传、编辑、移动，直推设备（全局）"},
     {"repo.delete", "文件", "删除仓库", "删除仓库文件或目录（全局）"},
 
+    {"deploy.read", "部署", "查看部署", "目标主机列表、部署作业与执行日志"},
+    {"deploy.write", "部署", "执行部署", "维护主机凭据，通过 SSH/SCP 安装 agent/relay/client"},
+
     {"dist.read", "分发", "查看任务", "分发与 OTA 任务列表、详情"},
     {"dist.write", "分发", "创建与调度", "创建、重试、取消、延长分发任务"},
 

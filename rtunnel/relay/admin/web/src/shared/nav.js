@@ -25,6 +25,7 @@ export const NAV_GROUPS = [
     key: 'ops',
     label: '运维',
     items: [
+      { path: '/deploy', icon: 'UploadFilled', label: '部署', perm: 'deploy.read' },
       { path: '/files', icon: 'FolderOpened', perm: 'repo.read' },
       { path: '/distribute', icon: 'Upload', label: '分发', perm: 'dist.write' },
       { path: '/tasks', icon: 'List', perm: 'dist.read' },

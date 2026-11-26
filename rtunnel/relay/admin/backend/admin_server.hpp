@@ -256,6 +256,18 @@ private:
     bool relayListSpec(std::string& servers);   // DB 有序列表 → "h:p,..."（启动与保存后应用）
     void relaySyncLoop();
     void relaySyncTick();
+    // api_deploy.cpp：通过 SSH/SCP 向目标主机装 agent/relay/client
+    void handleDeployHosts(const HttpContextPtr& ctx);
+    void handleDeployHostCreate(const HttpContextPtr& ctx);
+    void handleDeployHostUpdate(const HttpContextPtr& ctx);
+    void handleDeployHostDelete(const HttpContextPtr& ctx);
+    void handleDeployProbe(const HttpContextPtr& ctx);
+    void handleDeployPackages(const HttpContextPtr& ctx);
+    void handleDeployJobCreate(const HttpContextPtr& ctx);
+    void handleDeployJobs(const HttpContextPtr& ctx);
+    void handleDeployJobGet(const HttpContextPtr& ctx);
+    void handleDeployJobCancel(const HttpContextPtr& ctx);
+    void deployRunJob(long long job_id);          // 后台 worker
     // api_settings.cpp
     void loadSettings();
     // 写库 + 同步内存缓存：所有运行期改设置的地方都走它，否则 settingStr 读不到新值
@@ -413,7 +425,9 @@ private:
     // api_files.cpp
     void handleFiles(const HttpContextPtr& ctx);
     void handleFileDownload(const HttpContextPtr& ctx);
-    void handleFileUpload(const HttpContextPtr& ctx, const std::string& role);
+    // forced_dir 非空时忽略请求里的 dir（部署包固定落 deploy/）
+    void handleFileUpload(const HttpContextPtr& ctx, const std::string& role,
+                          const std::string& forced_dir = std::string());
     void handleFileMkdir(const HttpContextPtr& ctx, const std::string& role);
     void handleFileMove(const HttpContextPtr& ctx, const std::string& role);
     void handleFilePut(const HttpContextPtr& ctx, const std::string& role);
