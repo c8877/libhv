@@ -7,11 +7,10 @@
       </div>
       <div class="token-meta">
         <el-tag size="small" type="info">{{ token.username }}</el-tag>
-        <el-tag size="small">{{ roleName }}</el-tag>
         <el-tag v-if="token.group_count > 0" size="small" type="warning">
           {{ token.group_count }} 个权限组
         </el-tag>
-        <el-tag v-else size="small" type="info">继承账号设备范围</el-tag>
+        <el-tag v-else size="small" type="info">未绑定权限组 = 无权限</el-tag>
       </div>
     </div>
 
@@ -35,7 +34,7 @@
           <pre class="code">{{ verifySnippet }}</pre>
           <el-button size="small" text class="copy" @click="copy(verifySnippet)">复制</el-button>
         </div>
-        <div class="muted">返回 200 表示 Token 可用；401 检查是否停用/过期，403 检查角色和设备范围。</div>
+        <div class="muted">返回 200 表示 Token 可用；401 检查是否停用/过期，403 检查资源权限与设备范围（权限只来自权限组）。</div>
 
         <div class="sec-title">③ 常见用法</div>
         <div class="recipes">
@@ -48,7 +47,18 @@
           </div>
         </div>
 
-        <div class="sec-title">④ WebSocket（文件/服务/终端）</div>
+        <div class="sec-title">④ 给 AI / 自动化用（OpenAPI + MCP）</div>
+        <div class="code-wrap">
+          <pre class="code">{{ aiSnippet }}</pre>
+          <el-button size="small" text class="copy" @click="copy(aiSnippet)">复制</el-button>
+        </div>
+        <div class="muted">
+          <code>/api/v1/openapi.json</code> 由接口文档生成（与路由表对表），接口变了它自动变。
+          <code>rt-mcp.py</code> 默认只把 GET 暴露成工具；写操作要显式 <code>--allow-write</code>，
+          真执行仍需令牌的资源权限，并可通过 <code>operations</code> 走审批。
+        </div>
+
+        <div class="sec-title">⑤ WebSocket（文件/服务/终端）</div>
         <div class="code-wrap">
           <pre class="code">{{ wsSnippet }}</pre>
           <el-button size="small" text class="copy" @click="copy(wsSnippet)">复制</el-button>
@@ -73,8 +83,8 @@
           <el-input v-model="q" placeholder="搜索路径 / 说明 / 分组" clearable class="search">
             <template #prefix><el-icon><Search /></el-icon></template>
           </el-input>
-          <el-checkbox v-model="onlyMine">只显示我可调用</el-checkbox>
-          <span class="muted hidden-tip" v-if="hiddenCount">隐藏 {{ hiddenCount }} 条</span>
+          <el-checkbox v-model="onlyRead">只看只读接口</el-checkbox>
+          <span class="muted hidden-tip" v-if="readOnlyCount">只读 {{ readOnlyCount }} 条</span>
         </div>
 
         <div v-if="!visible.length" class="muted empty">没有匹配的接口</div>
@@ -91,7 +101,9 @@
                 <span class="method" :class="d.method.toLowerCase()">{{ d.method }}</span>
                 <span class="path mono">{{ d.path }}</span>
                 <span class="spacer" />
-                <el-tag size="small" :type="roleTagType(d.minRole)" class="role-tag">{{ d.minRole }}</el-tag>
+                <el-tag size="small" :type="d.method === 'GET' ? 'info' : 'warning'" class="role-tag">
+                  {{ d.method === 'GET' ? '只读' : '写' }}
+                </el-tag>
                 <el-icon class="chev sm" :class="{ open: isOpen(d) }"><ArrowRight /></el-icon>
               </div>
               <div class="ep-summary">{{ d.summary }}</div>
@@ -121,33 +133,35 @@
 
       <!-- ---------------------------------------------------------- 权限范围 -->
       <el-tab-pane label="权限范围" name="scope">
-        <div class="sec-title">角色能力</div>
-        <div class="role-table">
-          <div v-for="r in roleRows" :key="r.role" class="role-row" :class="{ me: r.role === role }">
-            <div class="role-name">
-              <el-tag size="small" :type="roleTagType(r.role)">{{ r.role }}</el-tag>
-              <span class="muted">{{ r.label }}</span>
-              <span v-if="r.role === role" class="me-tag">当前</span>
-            </div>
-            <div class="muted role-desc">{{ r.desc }}</div>
-          </div>
+        <div class="sec-title">权限只来自权限组</div>
+        <div class="muted scope-text">
+          每个接口要求一个资源键（<code>device.view</code>、<code>device.exec</code>、
+          <code>fs.read</code>、<code>repo.write</code>…）。账号/Token 能调什么，取决于它所在的权限组
+          勾了哪些键；<b>账号角色本身不授予任何权限</b>，只用于账号管理页的层级（不能操作比自己高的角色）。
+          未分组的账号没有任何资源权限。
+        </div>
+        <div class="muted scope-text">
+          权限组还要给「设备范围」：没勾「全部设备」时，设备类接口只能看到并操作组内设备。
+          这也是接入令牌（<code>rtk-</code>）能被收窄到单台设备的方式。
         </div>
 
         <div class="sec-title">设备范围</div>
         <div class="muted scope-text">
           <template v-if="token && token.group_count > 0">
-            该 Token 绑定 {{ token.group_count }} 个权限组（{{ token.groups || '—' }}），
-            设备相关接口只能看到并操作组内设备，即使归属账号是 admin。
+            该 Token 直接绑定了 {{ token.group_count }} 个权限组（{{ token.groups || '—' }}）；
+            <b>有令牌级分组时只认这些组</b>，不再继承归属账号的其它分组。
           </template>
           <template v-else>
-            未绑定分组，继承归属账号：admin / manager 可见全部设备；operator / viewer 只看得到权限组里授权的设备。
+            该 Token 未单独绑定分组，继承归属账号所在分组的并集。
           </template>
+          无论哪种，设备类接口都只返回授权范围内的设备；设备不在范围内时返回 403。
         </div>
 
         <div class="sec-title">API Token 不能做的事</div>
         <ul class="limits">
           <li v-for="l in ATK_UNAVAILABLE" :key="l">{{ l }}</li>
-          <li>Token 等同账号身份：可读取设置（脱敏）、审计，manager 及以上还能重置下级密码，请按最小权限发放。</li>
+          <li>接入令牌（<code>rtk-</code>）不继承运营商侧资源（权限组/字典/中继/证书/设置/atk 管理/审批），
+            即使被误授也不生效；只看得到本租户设备。</li>
         </ul>
       </el-tab-pane>
     </el-tabs>
@@ -158,29 +172,24 @@
 import { computed, ref } from 'vue'
 import { ArrowRight, Search } from '@element-plus/icons-vue'
 import { copyText } from '@/shared/utils.js'
-import { ROLE_NAMES } from '@/shared/store.js'
-import {
-  ATK_UNAVAILABLE, DOCS, ERRORS, GROUPS, docsForRole,
-} from '@/shared/api-docs.js'
+import { ATK_UNAVAILABLE, DOCS, ERRORS, GROUPS } from '@/shared/api-docs.js'
 
 const props = defineProps({
-  role: { type: String, default: 'viewer' },
   token: { type: Object, default: null },
   compact: { type: Boolean, default: false },
 })
 
 const tab = ref('start')
 const q = ref('')
-const onlyMine = ref(true)
+const onlyRead = ref(false)
 const openGroups = ref(new Set(['device']))
 const expanded = ref(new Set())
 
-const roleName = computed(() => `${props.role} · ${ROLE_NAMES[props.role] || ''}`)
+const readOnlyCount = computed(() => DOCS.filter((d) => d.method === 'GET').length)
 
+// 不再按角色过滤：能否调用由权限组决定，文档对所有账号完整展示
 const baseDocs = computed(() =>
-  onlyMine.value ? docsForRole(props.role) : DOCS.slice())
-
-const hiddenCount = computed(() => DOCS.length - docsForRole(props.role).length)
+  onlyRead.value ? DOCS.filter((d) => d.method === 'GET') : DOCS.slice())
 
 const visible = computed(() => {
   const k = q.value.trim().toLowerCase()
@@ -219,16 +228,14 @@ const recipes = [
   { name: '查审计', curl: `curl -k -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/audit"` },
 ]
 
-const roleRows = [
-  { role: 'viewer', label: '浏览者', desc: '概览、设备列表/详情、sysinfo、指标、串口列表、个人偏好' },
-  { role: 'operator', label: '操作员', desc: '在只读基础上增加：会话、客户端、文件列表/下载/上传、设备 HTTP 反代、ACL 读' },
-  { role: 'manager', label: '管理员', desc: '增加：设备能力/串口/指标配置、文件写删、分发/OTA、权限与接入账号写、账号管理、审计、证书列表' },
-  { role: 'admin', label: '超级管理员', desc: '增加：系统设置、告警、证书签发、ACL 导入、关机；shell 能力仅 admin 可开' },
-]
-
-function roleTagType(r) {
-  return { viewer: 'info', operator: '', manager: 'success', admin: 'danger' }[r] || 'info'
-}
+const aiSnippet = computed(() =>
+  `# 1) 生成物：OpenAPI（由本页接口文档生成，与路由表对表）\n` +
+  `curl -k -sS ${location.origin}/api/v1/openapi.json | head\n\n` +
+  `# 2) MCP server（只读；写操作加 --allow-write）\n` +
+  `python3 rt-mcp.py --rt ${location.origin} --atk-file /etc/rtunnel/atk --insecure\n\n` +
+  `# 客户端配置（Claude Desktop 等）\n` +
+  `{"mcpServers":{"rtunnel":{"command":"python3","args":["/opt/rtunnel/deploy/rt-mcp.py",\n` +
+  `  "--rt","${location.origin}","--atk-file","/etc/rtunnel/atk","--insecure"]}}}`)
 
 function isOpen(d) {
   return expanded.value.has(d.path + d.method)

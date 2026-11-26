@@ -4,11 +4,12 @@
   "type": "module",
   "scripts": {
     "dev": "npm run check:ui && npm run build:editor && vite",
-    "build": "npm run check:ui && npm run build:editor && vite build && node scripts/precompress.mjs dist",
+    "build": "npm run check:ui && npm run check:docs && npm run build:editor && vite build && node scripts/gen-openapi.mjs && node scripts/precompress.mjs dist",
     "build:editor": "vite build --config vite.editor.config.js",
     "preview": "vite preview",
     "precompress": "node scripts/precompress.mjs dist",
     "check:docs": "node scripts/check-api-docs.mjs",
+    "gen:openapi": "node scripts/gen-openapi.mjs",
     "check:ui": "node scripts/check-ui-rules.mjs",
     "build:local": "npm run check:ui && npm run build:editor && vite build --config vite.local.config.js && node scripts/inline-local-page.mjs"
   },

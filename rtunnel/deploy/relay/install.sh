@@ -220,6 +220,12 @@ if [ -f "$PKG_DIR/bin/restart.sh" ]; then
     cp "$PKG_DIR/bin/restart.sh" "$PREFIX/restart.sh"
     chmod 0755 "$PREFIX/restart.sh"
 fi
+# MCP server：把管理 API 暴露成 AI 工具（默认只读）
+if [ -f "$PKG_DIR/bin/rt-mcp.py" ]; then
+    mkdir -p "$PREFIX/deploy"
+    cp "$PKG_DIR/bin/rt-mcp.py" "$PREFIX/deploy/rt-mcp.py"
+    chmod 0755 "$PREFIX/deploy/rt-mcp.py"
+fi
 # 无 systemd 环境的开机自启（crontab @reboot + 存活看护）
 if [ -f "$PKG_DIR/bin/install-boot.sh" ]; then
     cp "$PKG_DIR/bin/install-boot.sh" "$PREFIX/install-boot.sh"

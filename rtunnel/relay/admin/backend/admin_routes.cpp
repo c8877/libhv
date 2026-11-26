@@ -658,6 +658,16 @@ void AdminServer::registerRoutes() {
     service_.Handle("OPTIONS", "/device/*", devproxy);
     service_.Handle("HEAD", "/device/*", devproxy);
 
+    // OpenAPI：构建前端时由 api-docs.js 生成（dist/openapi.json），此处只负责按来源提供。
+    // MCP / 其它工具靠它拿到工具清单，不另写一份 schema。
+    // 不鉴权：与管理台首页同级；真正调接口仍需 atk 与权限组。
+    service_.Handle("GET", "/api/v1/openapi.json", [this](const HttpContextPtr& ctx) {
+        int rc = serveFrontend(ctx, "openapi.json", "application/json", kAdminWebDiskOnly);
+        if (rc == HTTP_STATUS_NOT_FOUND)
+            rc = serveFrontend(ctx, "openapi.json", "application/json", kAdminWebEmbeddedOnly);
+        return rc;
+    });
+
     service_.GET("/", [this](const HttpContextPtr& ctx) {
         // 两个名字都要在同一来源里找完，再换下一个来源，避免内嵌 admin.html
         // 抢在磁盘 index.html 前面

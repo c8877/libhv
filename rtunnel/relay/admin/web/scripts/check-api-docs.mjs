@@ -18,6 +18,7 @@ const ignore = (method, path) =>
   path.startsWith('/api/v1/setup') ||
   path === '/api/v1/login' ||
   path === '/api/v1/logout' ||
+  path === '/api/v1/openapi.json' ||
   path.startsWith('/api/v1/admin-tokens') ||
   path.startsWith('/device/')
 

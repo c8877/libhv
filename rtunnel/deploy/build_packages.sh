@@ -92,6 +92,9 @@ build_relay() {
     # 无 systemd 环境（容器、/tmp 手工部署）用它重启
     cp "$ROOT/rtunnel/deploy/relay/restart.sh" "$d/bin/restart.sh"
     chmod 0755 "$d/bin/restart.sh"
+    # MCP server：把管理 API 暴露成工具（只读优先），装在 relay 侧最顺手
+    cp "$ROOT/rtunnel/deploy/rt-mcp.py" "$d/bin/rt-mcp.py"
+    chmod 0755 "$d/bin/rt-mcp.py"
     # 无 systemd 环境的开机自启（crontab）
     cp "$ROOT/rtunnel/deploy/relay/install-boot.sh" "$d/bin/install-boot.sh"
     chmod 0755 "$d/bin/install-boot.sh"

@@ -2,8 +2,6 @@
 // 唯一数据源：/docs 页面与「API Token · 用法」抽屉都读这里。
 // 新增路由时必须同步本文件，scripts/check-api-docs.mjs 会对表 admin_routes.cpp。
 
-const ROLE_WEIGHT = { viewer: 1, operator: 2, manager: 3, admin: 4 }
-
 export const GROUPS = [
   { key: 'device', label: '设备与监控' },
   { key: 'fs', label: '文件仓库' },
@@ -1085,20 +1083,10 @@ export const ATK_UNAVAILABLE = [
 
 export const ERRORS = [
   ['401', '未认证 / Token 停用、吊销、过期 / 归属账号停用'],
-  ['403', '角色不足，或设备不在 Token 绑定的分组内'],
+  ['403', '缺少对应资源权限，或设备不在授权范围内'],
   ['404', '设备离线、文件不存在、任务不存在'],
   ['409', '分片 offset 不匹配、目标文件冲突'],
   ['413', '超过 file.max_upload_mb / file.max_edit_mb'],
   ['504', '设备未在超时时间内应答'],
 ]
 
-function roleWeight(role) {
-  return ROLE_WEIGHT[role] || 0
-}
-
-// 按角色过滤：atk 与账号会话一致；admin-tokens 永远不出现
-export function docsForRole(role) {
-  const w = roleWeight(role)
-  if (!w) return []
-  return DOCS.filter((d) => roleWeight(d.minRole) <= w)
-}

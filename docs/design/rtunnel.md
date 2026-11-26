@@ -1140,6 +1140,55 @@ admin worker（500ms）→ metrics_minute 表（按 devid+分钟去重）
 - 「设备 → 采样曲线」新增「relay 分钟采样 · 近 6 小时」：读 `metrics/history`，
   不依赖 agent 环形缓冲，关掉页面/重连后历史仍在
 
+### 13.15 OpenAPI 与 MCP（AI 的工具契约）
+
+前三层让模型「能看、能动手、能感知」，这一层解决**工具清单从哪来**：手写 schema 一定会和接口
+漂移，所以整条链只有一个数据源。
+
+```
+admin_routes.cpp ──(check:docs 强制对表)──▶ api-docs.js
+                                              │ 构建期 node scripts/gen-openapi.mjs
+                                              ▼
+                                        dist/openapi.json
+                                              │ 运行期 GET /api/v1/openapi.json
+                                              ▼
+                                     rt-mcp.py ──▶ MCP tools/list + tools/call
+```
+
+**对表**：`scripts/check-api-docs.mjs` 解析 `admin_routes.cpp` 里的
+`access(...)` 与 `service_.Handle(...)`，缺一条或多一条都让 `npm run build` 失败。
+所以 `api-docs.js` 不是「另一份文档」，而是被强制同步的接口清单。
+
+**OpenAPI**：`/api/v1/openapi.json` 由 `serveFrontend` 按来源提供（docroot 优先、内嵌兜底），
+和首页同级不鉴权——它只描述接口形状，真正调用仍要令牌。
+每个操作带：
+
+| 字段 | 用途 |
+|---|---|
+| `operationId` | 稳定 id（`get_agents_devid`），MCP 工具名就用它 |
+| `summary` / `description` | 工具描述；`description` 放前置条件与错误语义 |
+| `x-rtunnel-read-only` | `true` 才默认暴露成工具 |
+| `x-rtunnel-group` | 分组，用于给工具打标签 |
+| `x-rtunnel-min-role` | 历史元数据，**不参与授权**（权限只来自权限组） |
+
+写操作即使文档没列字段表，也会生成一个 `additionalProperties` 的请求体占位，
+示例从文档里的 `curl -d` 提取——否则工具根本发不出 body。
+
+**MCP server**（`rtunnel/deploy/rt-mcp.py`，随 relay 包装到 `$PREFIX/deploy/`）：
+
+- 纯 stdio JSON-RPC，无第三方依赖：`initialize` / `tools/list` / `tools/call` / `ping`
+- 默认只暴露 GET；`--allow-write` 打开写操作，`--allow-prefix` 可再收窄（例如只给 `/api/v1/operations`）
+- 令牌只从 `--atk-file`（0600）或 `ATK` 读；`RT_ACTOR` 覆盖审计标签，默认 `ai:rt-mcp`
+- 结果超过 200 KB 截断；HTTP ≥400 与连接失败都返回 `isError=true`，不假装成功
+- **不缓存、不放大权限**：每次调用都是一次真实的 API 请求，授权仍由 relay 判定
+
+**为什么不给模型直接持令牌调 REST**：可以，但那样没有工具边界的约束。
+MCP 这一层的价值是把「哪些接口该给模型」变成显式配置（只读默认、前缀白名单），
+而不是把 138 个接口一股脑塞进上下文。
+
+**仍未做**：工具级的调用配额（目前靠 `ops.max_per_minute` 与令牌频率限制）、
+多模型路由、把 `operations` 的审批嵌进 MCP 的交互式确认（现在要另开页面批）。
+
 ## 14. 备选方案与取舍
 
 | 方案 | 优点 | 缺点 | 结论 |

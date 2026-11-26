@@ -179,6 +179,7 @@ python3 rtunnel/tests/admin_embedded_e2e.py  # 内嵌前端：无 docroot 出页
 python3 rtunnel/tests/packages_e2e.py    # 部署包：打包→发布→client 自举安装→篡改拒绝→回滚
 python3 rtunnel/tests/exec_e2e.py        # 受控执行：白名单、分流、超时截断、作业 plan/apply/verify
 python3 rtunnel/tests/events_e2e.py      # 事件流 SSE 与分钟级指标：上下线/会话/审计/续传/隔离
+python3 rtunnel/tests/mcp_e2e.py         # OpenAPI 与 MCP：工具清单、只读默认、前缀过滤、审计标记
 python3 rtunnel/tests/compat_e2e.py      # HELLO 版本区间、低版本拒绝、高版本向前兼容
 python3 rtunnel/tests/protocol_doc_test.py  # 协议文档覆盖率（帧类型/常量）
 build/bin/rtunnel-endpoint-test          # --server 地址解析单测
@@ -225,6 +226,10 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
 - **分钟级指标**：relay 每分钟给在线设备要一份增量 sysinfo，落 `metrics_minute`（cpu/内存/负载/网卡），
   `GET /api/v1/agents/:devid/metrics/history?from=&to=&step=` 查趋势，默认留 7 天。
   「设备 → 采样曲线」里有「近 6 小时」曲线。
+- **AI 接入（OpenAPI + MCP）**：`GET /api/v1/openapi.json` 在构建前端时从接口文档生成
+  （文档由 `check:docs` 强制与路由表对表），接口变了它跟着变。`rtunnel/deploy/rt-mcp.py`
+  把这份 schema 变成 MCP 工具，**默认只暴露只读接口**，写操作要 `--allow-write`，
+  调用带 `X-Actor: ai:…` 进审计。用法见下节。
 - **费用试算**：`price_rules` 存每个指标的计价单位与单价（金额 1e-6 元），
   `GET /api/v1/billing/summary` 把日聚合用量乘单价、按租户汇总；「监控 → 费用」可改价目
   （`billing.write`，默认只有超管）。
@@ -531,6 +536,41 @@ RT=https://relay:9443 ATK_FILE=/etc/rtunnel/atk \
 `install.sh` 只做文件操作：先校验 `manifest.json`、`--version` 与 `SHA256SUMS`，再原子切换软链；
 `--start/--restart` 才动 systemd，重启失败自动回滚一次；无 systemd 时改调 `restart.sh`，
 不会再“假装启动成功”。
+
+## AI 接入（OpenAPI / MCP）
+
+```bash
+# 1) OpenAPI：不需要令牌，和首页同级
+curl -k -sS https://relay:9443/api/v1/openapi.json | jq '.info, (.paths|length)'
+
+# 2) 工具清单（默认只读）
+python3 rtunnel/deploy/rt-mcp.py --rt https://relay:9443 \
+  --atk-file /etc/rtunnel/atk --insecure --list-tools
+
+# 3) 作为 MCP server 挂在客户端下（Claude Desktop / 自研 agent 都是这个形状）
+python3 rtunnel/deploy/rt-mcp.py --rt https://relay:9443 \
+  --atk-file /etc/rtunnel/atk --insecure
+```
+
+客户端配置：
+
+```json
+{"mcpServers": {"rtunnel": {"command": "python3", "args": [
+  "/opt/rtunnel/relay/deploy/rt-mcp.py",
+  "--rt", "https://relay:9443",
+  "--atk-file", "/etc/rtunnel/atk", "--insecure"]}}}
+```
+
+约束与约定：
+
+- **schema 单源**：`api-docs.js` →（构建期）`dist/openapi.json` →（运行期）MCP 工具。
+  不手写第二份，接口变了工具自动跟上。
+- **默认只读**：只有 GET 变成工具；`--allow-write` 才暴露写接口，`--allow-prefix` 可再收窄。
+- **不绕过授权**：工具只是 API 的包装，能不能调仍由令牌的资源键与设备范围决定；
+  写操作建议走 `operations` 的 plan→apply→verify（可配审批），不要把 `exec` 当万能口子。
+- **审计可区分**：MCP 发出的请求自动带 `X-Actor: ai:rt-mcp`（可用 `RT_ACTOR` 覆盖），
+  审计里显示成 `ai:rt-mcp|账号#id/…`，事后能分清人和模型。
+- **令牌只从文件/环境读**：`--atk-file`（0600）或 `ATK`，不接受命令行明文。
 
 ## Agent OTA 升级
 

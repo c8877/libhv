@@ -156,7 +156,7 @@
 
   <!-- 用法抽屉：按该 Token 的角色裁剪接口清单 -->
   <el-drawer v-model="usageDlg" :title="usageTitle" :size="isPhone ? '100%' : '720px'" destroy-on-close>
-    <ApiDocPanel v-if="usageRow" :role="usageRow.role || 'viewer'" :token="usageRow" compact />
+    <ApiDocPanel v-if="usageRow" :token="usageRow" compact />
   </el-drawer>
 </template>
 
