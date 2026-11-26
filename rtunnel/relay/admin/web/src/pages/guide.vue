@@ -198,26 +198,37 @@ rtunnel-agent --server relay.example.com --port 18443 --devid box-001
     blocks: [
       {
         h: '① 配置模型与密钥',
-        p: '在「系统设置 → AI 模型」填 OpenAI 兼容的 endpoint（<code>…/v1</code>）与模型名，' +
-          '保存密钥。密钥只写到 relay 本机文件（<code>&lt;admin.db 同目录&gt;/ai.key</code>，0600），' +
-          '不进数据库、不进接口响应。',
+        p: '在「系统设置 → AI 模型」直接填接口地址与模型名（如 <code>deepseek-v4.1-flash</code>），' +
+          '保存密钥，然后点<b>测试连接</b>：它用当前配置发一次最小请求，回来说明耗时、实际路由到的模型名，' +
+          '或上游的原始错误（<code>/v1</code> 写错、模型名不对、令牌没权限都能看出来）。' +
+          '密钥只写到 relay 本机文件（<code>&lt;admin.db 同目录&gt;/ai.key</code>，0600），不进数据库、不回显。',
         code: `# 也可以用接口
-curl -k -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\
-  -d '{"endpoint":"https://api.deepseek.com/v1","model":"deepseek-chat","enabled":true}' \\
+curl -k -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \
+  -d '{"endpoint":"https://api.deepseek.com/v1","model":"deepseek-v4.1-flash","enabled":true}' \
   https://relay:9443/api/v1/ai/config
-curl -k -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\
-  -d '{"key":"sk-..."}' https://relay:9443/api/v1/ai/key`,
+curl -k -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \
+  -d '{"key":"sk-..."}' https://relay:9443/api/v1/ai/key
+curl -k -X POST -H "Authorization: Bearer $ATK" https://relay:9443/api/v1/ai/test`,
         links: [{ to: '/settings', label: '去配置' }],
       },
       {
-        h: '② 在管理台对话',
+        h: '② 用对话查现状',
         p: '「AI 助手」里可以直接问设备状态、历史指标、谁改了什么、最近的作业与告警。' +
           '模型只能调用<b>只读工具</b>，且工具内部按你自己的权限与设备范围收窄——' +
-          '问别人的设备会被拒，和你在页面上点不开是一样的。',
-        links: [{ to: '/assistant', label: 'AI 助手' }],
+          '问别人的设备会被拒，和你在页面上点不开是一样的。' +
+          '「概览 → AI 诊断」会一次性把离线设备、版本落后、失败作业和告警汇总成排查建议。',
+        links: [{ to: '/assistant', label: 'AI 助手' }, { to: '/', label: '概览' }],
       },
       {
-        h: '③ 给外部 agent / 脚本用',
+        h: '③ 让它动手，但要你点头',
+        p: '直接说“把 nginx 重启一下”“清理 /tmp 下的旧包”，模型会先生成一张<b>作业确认卡</b>：' +
+          '显示完整命令、风险级别、以及是否需要审批。它<b>不会自己执行</b>——低风险（只读命令）' +
+          '点“执行”即可；改状态或破坏性命令要先“批准”，还要走配额与变更窗口。' +
+          '也可以让它把这次处理写成<b>自愈规则草稿</b>，创建出来默认停用，你确认后再启用。',
+        links: [{ to: '/operations', label: '作业' }, { to: '/playbooks', label: '自愈' }],
+      },
+      {
+        h: '④ 给外部 agent / 脚本用',
         p: '把接口暴露成 MCP 工具：默认只读，写操作要显式开启；调用带 <code>X-Actor</code> 标记进审计。',
         code: `# OpenAPI（构建期从接口文档生成，与路由表对表）
 curl -k -sS https://relay:9443/api/v1/openapi.json | head

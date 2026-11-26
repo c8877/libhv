@@ -19,18 +19,43 @@
       </div>
       <div v-if="g.name === 'AI 模型'" class="key-bar">
         <div class="key-state">
-          <el-tag size="small" :type="aiCfg && aiCfg.key_set ? 'success' : 'info'">
+          <el-tag size="small" :type="aiCfg && aiCfg.enabled ? 'success' : 'info'">
+            {{ aiCfg && aiCfg.enabled ? '已启用' : '未启用' }}
+          </el-tag>
+          <el-tag size="small" :type="aiCfg && aiCfg.key_set ? 'success' : 'warning'">
             {{ aiCfg && aiCfg.key_set ? '密钥已配置' : '密钥未配置' }}
           </el-tag>
           <span class="muted">{{ aiKeyHint }}</span>
         </div>
-        <template v-if="canSettingsWrite">
-          <el-input v-model="newKey" type="password" show-password placeholder="sk-…" class="key-input"
-                    maxlength="512" @keyup.enter="saveKey" />
-          <el-button :loading="keySaving" @click="saveKey">保存密钥</el-button>
-          <el-button v-if="aiCfg && aiCfg.key_set" :loading="keySaving" @click="clearKey">清除</el-button>
-        </template>
-        <span v-else class="muted">需要 settings.write 才能修改</span>
+        <div class="ai-row">
+          <el-input v-model="aiEndpoint" placeholder="接口地址，如 https://api.deepseek.com/v1"
+                    :disabled="!canAiConfig" class="ai-ep" />
+          <el-input v-model="aiModel" placeholder="模型名，如 deepseek-v4.1-flash"
+                    :disabled="!canAiConfig" class="ai-model" />
+          <el-button v-if="canAiConfig" :loading="aiSaving" @click="saveAiCfg">保存</el-button>
+          <el-button :loading="aiTesting" @click="testAi">测试连接</el-button>
+        </div>
+        <div class="muted ai-tip">
+          接口要兼容 OpenAI（<code>/chat/completions</code>）。官方 DeepSeek 用
+          <code>https://api.deepseek.com/v1</code> + <code>deepseek-chat</code>；
+          自建网关填它的 <code>/v1</code> 地址和模型名（如 <code>deepseek-v4.1-flash</code>）。
+        </div>
+        <div v-if="aiTest" class="ai-test" :class="{ bad: !aiTest.ok }">
+          <template v-if="aiTest.ok">
+            连接正常 · {{ aiTest.latency_ms }}ms · 实际模型 {{ aiTest.served_model || aiTest.model }} ·
+            回复「{{ aiTest.reply }}」
+          </template>
+          <template v-else>{{ aiTest.error }}</template>
+        </div>
+        <div class="ai-row">
+          <template v-if="canAiConfig">
+            <el-input v-model="newKey" type="password" show-password placeholder="sk-… / 网关令牌"
+                      class="key-input" maxlength="512" @keyup.enter="saveKey" />
+            <el-button :loading="keySaving" @click="saveKey">保存密钥</el-button>
+            <el-button v-if="aiCfg && aiCfg.key_set" :loading="keySaving" @click="clearKey">清除</el-button>
+          </template>
+          <span v-else class="muted">需要 ai.config 权限才能改模型与密钥</span>
+        </div>
       </div>
     </div>
 
@@ -171,6 +196,12 @@ async function load() {
 const aiCfg = ref(null)
 const newKey = ref('')
 const keySaving = ref(false)
+const aiEndpoint = ref('')
+const aiModel = ref('')
+const aiSaving = ref(false)
+const aiTesting = ref(false)
+const aiTest = ref(null)
+const canAiConfig = computed(() => can('ai.config'))
 const aiKeyHint = computed(() => {
   const c = aiCfg.value
   if (!c) return '状态未知'
@@ -183,8 +214,37 @@ async function loadAi() {
   if (!can('ai.chat')) return
   try {
     aiCfg.value = await Api.get('/api/v1/ai/config')
+    aiEndpoint.value = aiCfg.value.endpoint || ''
+    aiModel.value = aiCfg.value.model || ''
   } catch (e) {
     aiCfg.value = null
+  }
+}
+
+async function saveAiCfg() {
+  aiSaving.value = true
+  try {
+    aiCfg.value = await Api.put('/api/v1/ai/config', {
+      endpoint: (aiEndpoint.value || '').trim(),
+      model: (aiModel.value || '').trim(),
+    })
+    ElMessage.success('模型配置已保存，立即生效')
+  } catch (e) {
+    ElMessage.error('保存失败：' + e.message)
+  } finally {
+    aiSaving.value = false
+  }
+}
+
+async function testAi() {
+  aiTesting.value = true
+  aiTest.value = null
+  try {
+    aiTest.value = await Api.post('/api/v1/ai/test', {})
+  } catch (e) {
+    aiTest.value = { ok: false, error: e.message || '测试失败' }
+  } finally {
+    aiTesting.value = false
   }
 }
 
@@ -224,6 +284,14 @@ onMounted(load)
 <style scoped>
 .unit { margin-left: 6px; color: var(--el-text-color-secondary); font-size: 12px; }
 .alert-bar { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.ai-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.ai-ep { width: 320px; }
+.ai-model { width: 220px; }
+.key-input { width: 260px; }
+.ai-tip { margin-top: 6px; font-size: 12.5px; }
+.ai-tip code { background: var(--el-fill-color); padding: 1px 4px; border-radius: 3px; }
+.ai-test { margin-top: 6px; font-size: 12.5px; color: var(--el-color-success); word-break: break-all; }
+.ai-test.bad { color: var(--el-color-danger); }
 .key-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .key-state { display: flex; align-items: center; gap: 8px; }
 .key-input { width: 280px; }

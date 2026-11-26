@@ -15,6 +15,7 @@
 #include "http/client/HttpClient.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <mutex>
 #include <set>
@@ -137,7 +138,47 @@ json toolDefs() {
     arr.push_back(fn("list_playbooks",
                      "自愈规则及其最近触发记录。回答“有没有自动处理/为什么没自动重启”用。",
                      json::object(), json::array()));
+    // 写操作只“提议”：生成一个待确认的 operation，绝不在工具里执行
+    arr.push_back(fn(
+        "propose_exec",
+        "当用户明确要求对设备做变更（重启服务、清理文件、跑修复/巡检命令）时调用。"
+        "只会生成一个待用户确认的作业，不会执行；返回 id/风险/是否需要审批。",
+        {{"devid", {{"type", "string"}, {"description", "目标设备 ID"}}},
+         {"argv", {{"type", "array"}, {"items", {{"type", "string"}}},
+                    {"description", "命令参数数组，不经过 shell；例如 [\"systemctl\",\"restart\",\"nginx\"]"}}},
+         {"reason", {{"type", "string"}, {"description", "为什么要这么做，一句话，会显示给用户"}}},
+         {"timeout_ms", {{"type", "integer"}, {"description", "1000-30000，默认 30000"}}},
+         {"max_bytes", {{"type", "integer"}, {"description", "输出上限，默认 65536"}}}},
+        json::array({"devid", "argv"})));
+    arr.push_back(fn(
+        "draft_playbook",
+        "把排障结论固化成自愈规则草稿（不落库、不启用）：什么事件、哪类设备、执行什么、怎么复核。"
+        "用户确认后由页面创建为停用规则。",
+        {{"name", {{"type", "string"}, {"description", "规则名，例如 磁盘告警清理"}}},
+         {"event", {{"type", "string"}, {"enum", {"device.online", "device.offline", "task.failed", "cert.expiring"}}}},
+         {"devid_glob", {{"type", "string"}, {"description", "设备通配，默认 *"}}},
+         {"argv", {{"type", "array"}, {"items", {{"type", "string"}}}, {"description", "触发后执行的命令"}}},
+         {"verify_argv", {{"type", "array"}, {"items", {{"type", "string"}}},
+                          {"description", "复核命令，exit 0 视为成功，可空"}}},
+         {"reason", {{"type", "string"}, {"description", "适用场景，一句话"}}}},
+        json::array({"name", "event", "argv"})));
     return arr;
+}
+
+// 对话跑在独立线程里，actorLabel() 在那里为空；审计必须显式带主体，
+// 否则会写成一堆 anonymous，事后分不清是谁/哪个模型触发的。
+void aiAudit(AuditLog& log, const std::string& actor, const std::string& action,
+             const std::string& target_type, const std::string& target_id,
+             const std::string& result, const std::string& detail, const std::string& op_id) {
+    AuditEntry e;
+    e.actor = actor.empty() ? "ai:assistant" : actor;
+    e.action = action;
+    e.target_type = target_type;
+    e.target_id = target_id;
+    e.result = result.empty() ? "ok" : result;
+    e.detail = detail;
+    e.op_id = op_id;
+    log.writeEntry(e);
 }
 
 // 把工具结果裁到上下文可接受的大小
@@ -480,6 +521,123 @@ bool AdminServer::aiRunTool(const AiActor& a, const std::string& name, const jso
         return true;
     }
 
+    if (name == "propose_exec") {
+        if (!aiCan(a, "device.exec")) {
+            err = "当前账号没有 device.exec 权限，不能生成变更作业";
+            return false;
+        }
+        std::string devid = args.value("devid", std::string());
+        if (devid.empty()) {
+            err = "缺少 devid";
+            return false;
+        }
+        if (!owns(devid)) {
+            err = "设备不在授权范围内: " + devid;
+            return false;
+        }
+        std::vector<std::string> argv;
+        if (args.contains("argv") && args["argv"].is_array()) {
+            for (auto& v : args["argv"]) {
+                if (!v.is_string()) {
+                    err = "argv 必须是字符串数组";
+                    return false;
+                }
+                argv.push_back(v.get<std::string>());
+            }
+        }
+        if (argv.empty()) {
+            err = "argv 不能为空";
+            return false;
+        }
+        // 设备没开受控执行时，作业发下去必然失败；提前说清楚比让用户点两下更好
+        std::string caps = callRelay(
+            [this, &devid]() { return std::to_string(relay_->agentExecCap(devid.c_str())); });
+        int cap = atoi(caps.c_str());
+        if (cap != 1) {
+            err = "设备 " + devid +
+                  " 未启用受控执行（agent 需要配置 --allow-exec），无法生成可执行作业";
+            return false;
+        }
+        long long id = 0;
+        std::string opjs, e2;
+        std::string actor = "ai:assistant|" + a.label;
+        if (!opsCreateExecPlan(actor, "ai", devid, argv, std::string(),
+                               args.value("timeout_ms", 30000),
+                               args.value("max_bytes", (long long)65536), std::string(), id, opjs,
+                               e2)) {
+            err = e2.empty() ? "生成作业失败" : e2;
+            return false;
+        }
+        json op = json::parse(opjs, nullptr, false);
+        int risk = op.is_discarded() ? 2 : op.value("risk", 2);
+        json r;
+        r["id"] = id;
+        r["devid"] = devid;
+        r["argv"] = argv;
+        r["risk"] = risk;
+        r["status"] = op.is_discarded() ? std::string("planned")
+                                        : op.value("status", std::string("planned"));
+        r["plan_hash"] = op.is_discarded() ? std::string()
+                                           : op.value("plan_hash", std::string());
+        r["need_approval"] = r["status"] == "pending_approval";
+        r["reason"] = args.value("reason", std::string());
+        r["hint"] = "作业已生成，尚未执行：需要用户在对话里点确认（必要时还要另一账号批准）";
+        aiAudit(audit_, actor, "ai.propose", "device", devid, "ok",
+                "op=" + std::to_string(id) + " risk=" + std::to_string(risk) + " cmd=" +
+                    (argv.empty() ? std::string() : argv[0]),
+                std::to_string(id));
+        out = r.dump();
+        return true;
+    }
+
+    if (name == "draft_playbook") {
+        if (!aiCan(a, "playbook.write")) {
+            err = "当前账号没有 playbook.write 权限，不能创建规则草稿";
+            return false;
+        }
+        std::string ev = args.value("event", std::string());
+        static const char* kEvents[] = {"device.online", "device.offline", "task.failed",
+                                        "cert.expiring"};
+        bool ok_ev = false;
+        for (const char* k : kEvents)
+            if (ev == k) ok_ev = true;
+        if (!ok_ev) {
+            err = "event 只能是 device.online / device.offline / task.failed / cert.expiring";
+            return false;
+        }
+        std::vector<std::string> argv;
+        if (args.contains("argv") && args["argv"].is_array()) {
+            for (auto& v : args["argv"])
+                if (v.is_string()) argv.push_back(v.get<std::string>());
+        }
+        if (argv.empty()) {
+            err = "argv 不能为空";
+            return false;
+        }
+        std::vector<std::string> verify;
+        if (args.contains("verify_argv") && args["verify_argv"].is_array()) {
+            for (auto& v : args["verify_argv"])
+                if (v.is_string()) verify.push_back(v.get<std::string>());
+        }
+        std::string nm = args.value("name", std::string("AI 规则"));
+        if (nm.size() > 64) nm = nm.substr(0, 64);
+        std::string glob = args.value("devid_glob", std::string("*"));
+        if (glob.empty() || glob.size() > 128) glob = "*";
+        json d;
+        d["name"] = nm;
+        d["event"] = ev;
+        d["devid_glob"] = glob;
+        d["argv"] = argv;
+        d["verify_argv"] = verify;
+        d["note"] = args.value("reason", std::string("由 AI 助手生成"));
+        json r;
+        r["draft"] = d;
+        r["risk"] = opsArgvRisk(argv);
+        r["hint"] = "草稿不会自动生效：用户在页面上创建后默认停用，需要显式启用";
+        out = r.dump();
+        return true;
+    }
+
     err = "未知工具: " + name;
     return false;
 }
@@ -621,11 +779,15 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
             "你是 rtunnel 运维平台的内置助手。只能依据工具返回的数据回答，不要编造设备状态、"
             "日志或历史。回答用简体中文，先给结论再给依据；涉及数量/时间/版本要写出具体值。"
             "需要设备信息时先调用工具；工具报错就如实说明缺什么权限或设备是否离线。"
-            "你不能执行任何写操作，也不要把建议说成已经完成。";
+            "用户明确要求变更（重启服务、清理磁盘、修复故障）时，先用只读工具确认现状，"
+            "再调用 propose_exec 生成待确认作业，或用 draft_playbook 给出自愈规则草稿；"
+            "这两个工具都不会真正执行。任何情况下都不要说成已经完成，要明确告诉用户还需要在"
+            "对话里确认（风险高的还要另一个账号批准）。";
         messages.push_back(sys);
         for (auto& m : msgs) messages.push_back(m);
 
         json used = json::array();
+        json actions = json::array();
         std::string reply;
         std::string err;
         int rounds = 0;
@@ -688,6 +850,14 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
                 std::string out;
                 std::string terr;
                 bool ok = !fn_name.empty() && aiRunTool(actor, fn_name, args, out, terr);
+                // 提议类工具的结果要单独回给前端渲染成“确认卡片”
+                if (ok && (fn_name == "propose_exec" || fn_name == "draft_playbook")) {
+                    json a = json::parse(out, nullptr, false);
+                    if (!a.is_discarded() && a.is_object()) {
+                        a["type"] = fn_name;
+                        actions.push_back(a);
+                    }
+                }
                 json rec;
                 rec["name"] = fn_name;
                 rec["args"] = args;
@@ -713,20 +883,23 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
         json resp;
         if (!err.empty()) {
             resp["error"] = err;
+            resp["actions"] = actions;
             resp["tools"] = used;
-            auditEx("ai.chat", "ai", "", "error",
-                    actor.label + " " + (devid.empty() ? "-" : devid) + " err=" + err.substr(0, 160));
+            aiAudit(audit_, "ai:assistant|" + actor.label, "ai.chat", "ai", devid, "error",
+                    (devid.empty() ? "-" : devid) + " err=" + err.substr(0, 160), std::string());
             ctx->response->status_code = HTTP_STATUS_BAD_GATEWAY;
             ctx->send(resp.dump(-1, ' ', false, json::error_handler_t::replace));
             return;
         }
         resp["reply"] = reply;
+        resp["actions"] = actions;
         resp["tools"] = used;
         resp["rounds"] = rounds;
         resp["usage"] = {{"prompt_tokens", usage_p}, {"completion_tokens", usage_c}};
-        auditEx("ai.chat", "device", devid, "ok",
-                actor.label + " tools=" + std::to_string(used.size()) + " rounds=" +
-                    std::to_string(rounds) + (devid.empty() ? "" : " devid=" + devid));
+        aiAudit(audit_, "ai:assistant|" + actor.label, "ai.chat", "device", devid, "ok",
+                "tools=" + std::to_string(used.size()) + " actions=" + std::to_string(actions.size()) +
+                    " rounds=" + std::to_string(rounds) +
+                    (devid.empty() ? "" : " devid=" + devid), std::string());
         ctx->send(resp.dump(-1, ' ', false, json::error_handler_t::replace));
       } catch (const std::exception& e) {
         logf_("[ai] chat exception: %s", e.what());
@@ -742,4 +915,59 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
     }).detach();
 
     // 线程已接管响应；路由层返回 HTTP_STATUS_NEXT 表示不要收尾
+}
+
+// ---------------------------------------------------------------- 连通性测试
+
+// 用当前配置发一次最小请求：不写业务数据、不带工具，只回答“配置是否能用”。
+// 运维最容易出问题的是 endpoint 多了/少了 /v1、模型名写错、密钥没权限，
+// 这里把真实错误原文回给页面，比让人猜日志快。
+void AdminServer::handleAiTest(const HttpContextPtr& ctx) {
+    std::string endpoint = trimStr(settingStr("ai.endpoint", ""));
+    std::string model = trimStr(settingStr("ai.model", ""));
+    std::string key = readAiKey(aiKeyPath(cfg_.db_path));
+    if (endpoint.empty() || model.empty() || key.empty()) {
+        apiError(ctx, HTTP_STATUS_SERVICE_UNAVAILABLE,
+                 "模型配置不完整（endpoint / model / key），请先补全");
+        return;
+    }
+    bool insecure = settingInt("ai.insecure", 0) != 0;
+    int timeout_s = settingInt("ai.timeout_s", 60);
+    std::thread([this, ctx, endpoint, model, key, insecure, timeout_s]() {
+        json messages = json::array();
+        json m;
+        m["role"] = "user";
+        m["content"] = "只回复两个字：正常";
+        messages.push_back(m);
+        auto t0 = std::chrono::steady_clock::now();
+        json doc;
+        std::string err;
+        bool ok = aiCallModel(endpoint, key, model, messages, json::array(), 32, 0, timeout_s,
+                              insecure, doc, err);
+        long long ms = (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - t0)
+                           .count();
+        json resp;
+        resp["ok"] = ok;
+        resp["endpoint"] = endpoint;
+        resp["model"] = model;
+        resp["latency_ms"] = ms;
+        if (!ok) {
+            resp["error"] = err;
+            ctx->send(resp.dump(-1, ' ', false, json::error_handler_t::replace));
+            return;
+        }
+        std::string reply;
+        if (doc.contains("choices") && doc["choices"].is_array() && !doc["choices"].empty()) {
+            json msg = doc["choices"][0].contains("message") ? doc["choices"][0]["message"]
+                                                            : json::object();
+            if (msg.contains("content") && msg["content"].is_string())
+                reply = msg["content"].get<std::string>();
+        }
+        resp["reply"] = reply;
+        // 网关可能把请求路由到别的模型；把它回的实际 model 带回来，便于确认
+        if (doc.contains("model") && doc["model"].is_string())
+            resp["served_model"] = doc["model"].get<std::string>();
+        ctx->send(resp.dump(-1, ' ', false, json::error_handler_t::replace));
+    }).detach();
 }

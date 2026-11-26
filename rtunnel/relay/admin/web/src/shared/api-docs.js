@@ -297,11 +297,20 @@ export const DOCS = [
     ],
     note: '需要 ai.chat。模型只能调用只读工具（设备/指标/审计/作业/用量/自愈），'
       + '工具内部按调用者的资源权限与设备范围收窄。客户端传的 system 消息会被丢弃；'
-      + '上游错误统一转 502，响应不返回模型密钥',
+      + '写操作不会被直接执行：模型用 propose_exec 生成待确认作业、draft_playbook 生成规则草稿，'
+      + '在 actions 里返回，由页面渲染成确认卡片。上游错误统一转 502，响应不返回模型密钥',
     body: `{ "messages": [{ "role": "user", "content": "现在有哪些设备在线？" }] }`,
     curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \
      -d '{"messages":[{"role":"user","content":"现在有哪些设备在线？"}]}' "$RT/api/v1/ai/chat"`,
-    resp: `{ "reply": "共 3 台设备，在线 2 台……", "tools": [{ "name": "list_devices", "args": {}, "ok": true }], "rounds": 2, "usage": { "prompt_tokens": 820, "completion_tokens": 96 } }`,
+    resp: `{ "reply": "共 3 台设备，在线 2 台……已生成一条待确认作业，请在卡片上批准/执行。", "actions": [{ "type": "propose_exec", "id": 21, "devid": "mp135", "risk": 2, "status": "pending_approval", "plan_hash": "7c1e…" }], "tools": [{ "name": "list_devices", "args": {}, "ok": true }], "rounds": 2, "usage": { "prompt_tokens": 820, "completion_tokens": 96 } }`,
+  },
+  {
+    group: 'sys', method: 'POST', path: '/api/v1/ai/test', minRole: 'operator',
+    summary: '测试模型连通性（发一次最小请求）',
+    note: '需要 ai.chat。用当前 endpoint / model / 密钥发一次最小 completion，'
+      + '返回耗时与实际模型名；上游错误原文一并返回，便于排查 /v1 前缀、模型名、令牌权限',
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" "$RT/api/v1/ai/test"`,
+    resp: `{ "ok": true, "endpoint": "https://api.deepseek.com/v1", "model": "deepseek-v4.1-flash", "latency_ms": 860, "reply": "正常", "served_model": "deepseek-v4.1-flash" }`,
   },
   {
     group: 'device', method: 'GET', path: '/api/v1/agents/:devid/metrics/history', minRole: 'viewer',

@@ -11,6 +11,7 @@
       <div class="panel-head">
         <h2>运行信息</h2>
         <span class="spacer" />
+        <el-button v-if="can('ai.chat')" size="small" @click="diagnose">AI 诊断</el-button>
         <span class="muted">5s 自动刷新</span>
       </div>
       <el-descriptions v-if="o" :column="2" border>
@@ -52,8 +53,9 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { Api } from '@/shared/api.js'
-import { overview } from '@/shared/store.js'
+import { can, overview } from '@/shared/store.js'
 import { bytes, duration, time } from '@/shared/utils.js'
 
 const o = ref(overview.data)
@@ -79,6 +81,8 @@ async function pull() {
 // ---------------------------------------------------------------- 实时事件
 // SSE 用浏览器 Cookie 鉴权（管理台会话），断线由 EventSource 自动重连，
 // 服务端按 Last-Event-ID 续传，不会丢事件。
+const router = useRouter()
+
 const events = ref([])
 const sseState = ref('connecting')
 let es = null
@@ -143,6 +147,13 @@ function connect() {
   for (const t of Object.keys(LABELS)) {
     es.addEventListener(t, onEvent)
   }
+}
+
+// 一键诊断：把设备清单与平台状态交给助手，让它按“先结论后依据”给出排查方向
+function diagnose() {
+  const q = '请做一次平台巡检：1) 列出设备与在线状态；2) 指出离线设备、版本落后或负载/内存偏高的设备；' +
+    '3) 汇总最近的失败作业与告警；4) 按优先级给出下一步排查建议。只依据工具数据，不要猜测。'
+  router.push({ path: '/assistant', query: { q } })
 }
 
 onMounted(() => {

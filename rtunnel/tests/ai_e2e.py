@@ -54,7 +54,10 @@ class FakeModel(BaseHTTPRequestHandler):
         tool_msgs = [m for m in msgs if m.get("role") == "tool"]
 
         if "hello" in last_user:
-            self._send(200, self._resp("hi"))
+            self._send(200, self._resp("hi", model))
+            return
+        if "只回复两个字" in last_user:   # /ai/test 的探针请求
+            self._send(200, self._resp("正常", model))
             return
         if not tool_msgs:
             # 第一轮：按问题挑一个工具
@@ -66,6 +69,18 @@ class FakeModel(BaseHTTPRequestHandler):
                 name, args = "device_metrics", {"devid": "dev1", "hours": 2}
             elif "审计" in last_user:
                 name, args = "recent_audit", {"limit": 5}
+            elif "回声" in last_user:
+                name, args = "propose_exec", {"devid": "dev1", "argv": ["echo", "ai-ok"],
+                                              "reason": "e2e 只读命令"}
+            elif "清理" in last_user:
+                name, args = "propose_exec", {"devid": "dev1",
+                                              "argv": ["rm", "-f", "/tmp/rtunnel-ai/none"],
+                                              "reason": "e2e 变更命令"}
+            elif "规则" in last_user:
+                name, args = "draft_playbook", {
+                    "name": "e2e 自检", "event": "device.online", "devid_glob": "dev*",
+                    "argv": ["echo", "check"], "verify_argv": ["echo", "check"],
+                    "reason": "e2e 草稿"}
             else:
                 name, args = "list_devices", {}
             self._send(200, {
@@ -98,10 +113,12 @@ class FakeModel(BaseHTTPRequestHandler):
             text = "设备 %s 在线=%s" % (parsed["devid"], parsed.get("online"))
         else:
             text = "工具结果长度 %d" % len(payload)
-        self._send(200, self._resp(text))
+        self._send(200, self._resp(text, model))
 
-    def _resp(self, text):
+    def _resp(self, text, model=""):
+        # 真实 OpenAI 兼容服务会在响应里回 model，网关可能改写；这里照做
         return {
+            "model": model,
             "choices": [{"message": {"role": "assistant", "content": text},
                          "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 20, "completion_tokens": 8},
@@ -167,6 +184,7 @@ def main():
     env = dict(os.environ)
     env["LD_LIBRARY_PATH"] = LIB + ":" + env.get("LD_LIBRARY_PATH", "")
     rlog = open(os.path.join(LOG, "relay.log"), "w")
+    agent = None
     relay = subprocess.Popen(
         [os.path.join(BIN, "rtunnel-relay"), "--host", "127.0.0.1", "--port", str(relay_port),
          "--admin", "127.0.0.1:%d" % admin_port, "--admin-token", "admintok",
@@ -227,9 +245,31 @@ def main():
         e2e.check("ai: 普通问答", code == 200 and r.get("reply") == "hi", "code=%d r=%s" % (code, r))
         e2e.check("ai: 普通问答无工具调用", r.get("tools") == [], str(r.get("tools")))
 
+        # 6.5) 连通性测试：返回耗时与实际模型名
+        code, t = call_json(adm, base, "/api/v1/ai/test", {})
+        e2e.check("ai: 测试连接成功", code == 200 and t.get("ok") is True and t.get("latency_ms") >= 0,
+                  "code=%d r=%s" % (code, t))
+        e2e.check("ai: 测试连接回显实际模型", t.get("served_model") == "fake-model",
+                  str(t.get("served_model")))
+
         # 7) 工具轮：先建两台设备（不需要在线）
         for d in ("dev1", "dev2"):
             call("PUT", "/api/v1/permission/devices/" + d, {"name": "盒子 " + d, "enabled": True})
+        # 起一个带受控执行的 agent：propose_exec 要求 caps.exec=1，否则工具会提前拒绝
+        agent = subprocess.Popen(
+            [os.path.join(BIN, "rtunnel-agent"), "--server", "127.0.0.1", "--port", str(relay_port),
+             "--devid", "dev1", "--allow-exec", "echo *;rm *",
+             "--config-file", os.path.join(LOG, "agent1.json")],
+            stdout=open(os.path.join(LOG, "agent1.log"), "w"), stderr=subprocess.STDOUT, env=env)
+        online = False
+        for _ in range(50):
+            items = call("GET", "/api/v1/agents")
+            items = items if isinstance(items, list) else items.get("items", [])
+            if any(d.get("devid") == "dev1" and d.get("online") for d in items):
+                online = True
+                break
+            time.sleep(0.2)
+        e2e.check("ai: 测试 agent 上线", online, "dev1 offline")
         code, r = call_json(adm, base, "/api/v1/ai/chat",
                             {"messages": [{"role": "user", "content": "列出所有设备"}]})
         tools = r.get("tools") or []
@@ -317,6 +357,61 @@ def main():
         e2e.check("ai: 对话写审计", "ai.chat" in acts, str(acts[:6]))
         e2e.check("ai: 审计记了密钥更新", "ai.key.set" in acts, str(acts[:8]))
 
+        # 14.5) 提议类工具：只生成作业，不执行
+        code, r = call_json(adm, base, "/api/v1/ai/chat",
+                            {"messages": [{"role": "user", "content": "回声一下"}]})
+        acts = r.get("actions") or []
+        ro = acts[0] if acts else {}
+        e2e.check("ai: propose_exec 生成作业卡",
+                  code == 200 and ro.get("type") == "propose_exec" and ro.get("id"),
+                  "code=%d acts=%s" % (code, str(acts)[:160]))
+        e2e.check("ai: 只读命令风险 1 且可直接执行", ro.get("risk") == 1 and ro.get("need_approval") is False,
+                  str(ro)[:160])
+        code, ap = call_json(adm, base, "/api/v1/operations/%d/apply" % ro.get("id", 0),
+                             {"plan_hash": ro.get("plan_hash", "")})
+        e2e.check("ai: 提议的只读作业可执行", code == 200 and ap.get("status") == "applied",
+                  "code=%d r=%s" % (code, str(ap)[:160]))
+
+        code, r = call_json(adm, base, "/api/v1/ai/chat",
+                            {"messages": [{"role": "user", "content": "清理一下临时文件"}]})
+        rw = (r.get("actions") or [{}])[0]
+        e2e.check("ai: 变更命令风险 2 且待批准",
+                  rw.get("type") == "propose_exec" and rw.get("risk") == 2 and
+                  rw.get("need_approval") is True and rw.get("status") == "pending_approval",
+                  str(rw)[:200])
+        code, _ = call_json(adm, base, "/api/v1/operations/%d/apply" % rw.get("id", 0),
+                            {"plan_hash": rw.get("plan_hash", "")})
+        e2e.check("ai: 待批准时执行被拒", code == 409, "code=%d" % code)
+        # 提议人是 ai:assistant|...，所以同一个人可以批准（不是自批自）
+        code, apr = call_json(adm, base, "/api/v1/operations/%d/approve" % rw.get("id", 0),
+                              {"decision": "approve", "note": "e2e"})
+        e2e.check("ai: 人工确认后批准成功", code == 200 and apr.get("status") == "approved",
+                  "code=%d r=%s" % (code, str(apr)[:140]))
+        code, ap = call_json(adm, base, "/api/v1/operations/%d/apply" % rw.get("id", 0),
+                             {"plan_hash": rw.get("plan_hash", "")})
+        e2e.check("ai: 批准后可执行", code == 200 and ap.get("status") in ("applied", "failed"),
+                  "code=%d r=%s" % (code, str(ap)[:160]))
+        # 审计能看出是 AI 提议的，且与人工执行分开
+        rows = call("GET", "/api/v1/audit")
+        acts2 = [x.get("action") for x in rows if isinstance(x, dict)]
+        e2e.check("ai: 提议写审计 ai.propose", "ai.propose" in acts2, str(acts2[:8]))
+
+        code, r = call_json(adm, base, "/api/v1/ai/chat",
+                            {"messages": [{"role": "user", "content": "把刚才的处理做成规则"}]})
+        dr = (r.get("actions") or [{}])[0]
+        e2e.check("ai: draft_playbook 返回草稿",
+                  dr.get("type") == "draft_playbook" and (dr.get("draft") or {}).get("argv"),
+                  str(dr)[:200])
+        d = dr.get("draft") or {}
+        rule = call("POST", "/api/v1/playbooks", {
+            "name": d.get("name", "e2e"), "event": d.get("event", "device.online"),
+            "devid_glob": d.get("devid_glob", "*"), "argv": d.get("argv", ["echo"]),
+            "verify_argv": d.get("verify_argv", []), "note": d.get("note", ""),
+            "auto_apply": False, "enabled": False,
+        })
+        e2e.check("ai: 草稿可落成停用规则", rule.get("id") and rule.get("enabled") is False,
+                  str(rule)[:140])
+
         # 15) 清密钥
         code, cfg = call_json(adm, base, "/api/v1/ai/key", None, method="DELETE")
         e2e.check("ai: 清除密钥", code == 200 and cfg.get("key_set") is False, "code=%d" % code)
@@ -334,6 +429,15 @@ def main():
         # 17) relay 仍活着（线程里异常没有把进程带崩）
         e2e.check("ai: relay 未崩溃", relay.poll() is None, "exit=%s" % relay.poll())
     finally:
+        try:
+            if agent is not None:
+                agent.send_signal(15)
+                agent.wait(timeout=5)
+        except Exception:
+            try:
+                agent.kill()
+            except Exception:
+                pass
         relay.send_signal(15)
         try:
             relay.wait(timeout=5)

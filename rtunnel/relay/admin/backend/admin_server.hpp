@@ -208,6 +208,7 @@ private:
     void handleAiKeySet(const HttpContextPtr& ctx, const std::string& role);
     void handleAiKeyClear(const HttpContextPtr& ctx, const std::string& role);
     void handleAiChat(const HttpContextPtr& ctx, const std::string& role);
+    void handleAiTest(const HttpContextPtr& ctx);
     void handleOpsApprove(const HttpContextPtr& ctx, const std::string& role);
     void handleOpsList(const HttpContextPtr& ctx);
     int  handleAgentProcSignal(const HttpContextPtr& ctx);
@@ -265,9 +266,19 @@ private:
     void playbookWorker();
     bool playbookEnqueueOp(long long op_id);
     void playbookRunOp(long long op_id);
-    // AI 工具执行（只读）：按请求线程快照的权限判定，不读 tl_actor
+    // AI 工具执行：按请求线程快照的权限判定，不读 tl_actor。
+    // 读工具直接查；写工具只“提议”，落一个 operation 等人确认。
     bool aiRunTool(const AiActor& a, const std::string& name, const nlohmann::json& args,
                    std::string& out, std::string& err);
+    // 内部路径（AI/自愈）创建 exec 作业：与 /operations/plan 共用风险分级、
+    // plan_hash 与审批阈值，避免两处各算一套。
+    // 命令风险分级（1 只读 / 2 改状态 / 3 破坏性）：plan 与自愈规则草稿共用
+    int  opsArgvRisk(const std::vector<std::string>& argv);
+    bool opsCreateExecPlan(const std::string& actor, const std::string& actor_type,
+                           const std::string& devid, const std::vector<std::string>& argv,
+                           const std::string& cwd, int timeout_ms, long long max_bytes,
+                           const std::string& idem, long long& out_id, std::string& out_json,
+                           std::string& err);
     void alertCheckDevices(long long now_ms);
     void alertCheckCerts(long long now_ms);
     bool alertSend(const AlertEvent& ev);

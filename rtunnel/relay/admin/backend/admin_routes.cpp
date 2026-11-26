@@ -225,6 +225,14 @@ void AdminServer::registerRoutes() {
         handleAiChat(ctx, role);
         return HTTP_STATUS_NEXT;
     });
+    // 连通性测试：发一次最小请求，把上游错误原文带回来
+    service_.Handle("POST", "/api/v1/ai/test", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "ai.chat", role);
+        if (rc) return rc;
+        handleAiTest(ctx);
+        return HTTP_STATUS_NEXT;
+    });
 
     access("playbook.read", "GET", "/api/v1/playbooks/fires", &AdminServer::handlePlaybookFires);
     access("playbook.read", "GET", "/api/v1/playbooks", &AdminServer::handlePlaybooksList);

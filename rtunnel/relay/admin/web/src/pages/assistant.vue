@@ -39,7 +39,7 @@
             <div v-for="q in SUGGEST" :key="q" class="chip" @click="ask(q)">{{ q }}</div>
           </div>
           <div class="muted empty-tip">
-            只会调用只读工具（设备/指标/审计/作业/用量/自愈），不会执行任何写操作。
+            读数据用只读工具；你要它改东西时，它会生成一张待确认作业卡（不会自己执行）。
           </div>
         </div>
 
@@ -47,6 +47,46 @@
           <div class="bubble">
             <div v-if="m.role === 'assistant'" class="md" v-html="render(m.content)" />
             <div v-else class="plain">{{ m.content }}</div>
+
+            <div v-if="m.actions && m.actions.length" class="acts">
+              <div v-for="(a, k) in m.actions" :key="k" class="act">
+                <div class="act-head">
+                  <el-tag size="small" :type="riskType(a.risk)" effect="plain">风险 {{ a.risk }}</el-tag>
+                  <span class="act-title">{{ a.type === 'propose_exec' ? '建议执行' : '建议自愈规则' }}</span>
+                  <span class="muted">{{ a.type === 'propose_exec' ? a.devid : (a.draft || {}).devid_glob }}</span>
+                  <span class="spacer" />
+                  <el-tag v-if="a.type === 'propose_exec'" size="small"
+                          :type="a.status === 'applied' || a.status === 'verified' ? 'success' : (a.need_approval ? 'warning' : 'info')">
+                    {{ opText(a) }}
+                  </el-tag>
+                  <el-tag v-else size="small" type="info">草稿</el-tag>
+                </div>
+                <div class="act-cmd">
+                  <code>{{ cmdText(a) }}</code>
+                </div>
+                <div v-if="a.reason || (a.draft && a.draft.note)" class="muted act-reason">
+                  {{ a.reason || a.draft.note }}
+                </div>
+                <div class="act-ops">
+                  <template v-if="a.type === 'propose_exec'">
+                    <el-button v-if="a.need_approval" size="small" :loading="a._busy" @click="approveOp(a)">
+                      批准
+                    </el-button>
+                    <el-button size="small" type="primary" :loading="a._busy"
+                               :disabled="a.need_approval || a.status === 'applied' || a.status === 'verified'"
+                               @click="runOp(a)">执行</el-button>
+                    <el-button size="small" text @click="openOps">去作业页</el-button>
+                  </template>
+                  <template v-else>
+                    <el-button size="small" type="primary" :loading="a._busy" @click="createRule(a)">
+                      创建为停用规则
+                    </el-button>
+                    <el-button size="small" text @click="$router.push('/playbooks')">去自愈页</el-button>
+                  </template>
+                </div>
+                <pre v-if="a._result" class="act-result">{{ a._result }}</pre>
+              </div>
+            </div>
 
             <div v-if="m.tools && m.tools.length" class="tools">
               <div v-for="(t, j) in m.tools" :key="j" class="tool">
@@ -85,9 +125,12 @@
 
 <script setup>
 import { computed, nextTick, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Api } from '@/shared/api.js'
 import { can } from '@/shared/store.js'
+
+const route = useRoute()
 
 const SUGGEST = [
   '现在有哪些设备在线，哪台离线了？',
@@ -190,6 +233,7 @@ async function send() {
     msgs.value.push({
       role: 'assistant',
       content: r.reply || '',
+      actions: r.actions || [],
       tools: r.tools || [],
       meta: meta.join(' · '),
     })
@@ -205,9 +249,84 @@ async function send() {
   }
 }
 
+// ---------------------------------------------------------------- 提议的作业/规则
+// 模型只提议，执行必须人点：高风险作业先“批准”（另一个身份）再“执行”。
+function riskType(r) {
+  return r >= 3 ? 'danger' : (r === 2 ? 'warning' : 'info')
+}
+function opText(a) {
+  if (a.status === 'applied' || a.status === 'verified') return '已执行'
+  if (a.status === 'pending_approval') return '待批准'
+  if (a.status === 'approved') return '已批准'
+  if (a.status === 'rejected') return '已拒绝'
+  return '待执行'
+}
+function cmdText(a) {
+  if (a.type === 'propose_exec') return (a.argv || []).join(' ')
+  const d = a.draft || {}
+  const v = (d.verify_argv || []).length ? ' → 复核 ' + d.verify_argv.join(' ') : ''
+  return (d.argv || []).join(' ') + v
+}
+
+async function runOp(a) {
+  a._busy = true
+  a._result = ''
+  try {
+    const r = await Api.post('/api/v1/operations/' + a.id + '/apply', { plan_hash: a.plan_hash })
+    a.status = r.status || 'applied'
+    a.need_approval = false
+    const res = r.result || {}
+    a._result = 'exit=' + (res.exit_code == null ? '?' : res.exit_code) +
+      (res.stdout ? '\n' + res.stdout : '') + (res.stderr ? '\n[stderr] ' + res.stderr : '')
+  } catch (e) {
+    a._result = e.message || '执行失败'
+  } finally {
+    a._busy = false
+  }
+}
+
+async function approveOp(a) {
+  a._busy = true
+  try {
+    const r = await Api.post('/api/v1/operations/' + a.id + '/approve',
+      { decision: 'approve', note: 'AI 助手内确认' })
+    a.status = r.status || 'approved'
+    a.need_approval = false
+    a._result = '已批准，可以执行'
+  } catch (e) {
+    a._result = e.message || '批准失败（需要 op.approve 权限，且不能批准自己的提议）'
+  } finally {
+    a._busy = false
+  }
+}
+
+async function createRule(a) {
+  a._busy = true
+  try {
+    const d = a.draft || {}
+    const r = await Api.post('/api/v1/playbooks', {
+      name: d.name, event: d.event, devid_glob: d.devid_glob,
+      argv: d.argv, verify_argv: d.verify_argv || [], note: d.note || '',
+      auto_apply: false, enabled: false,
+    })
+    a._result = '已创建规则 #' + (r.id || '?') + '（默认停用），到「自愈」页确认后启用'
+  } catch (e) {
+    a._result = e.message || '创建失败'
+  } finally {
+    a._busy = false
+  }
+}
+
+function openOps() {
+  window.location.hash = '#/operations'
+}
+
 onMounted(() => {
   loadCfg()
   loadDevices()
+  // 概览页的“AI 诊断”会带 ?q= 过来
+  const q = route.query.q
+  if (q) input.value = String(q)
 })
 </script>
 
@@ -247,6 +366,35 @@ onMounted(() => {
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 12.5px;
+}
+.acts { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+.act {
+  border: 1px solid var(--el-border-color);
+  border-left: 3px solid var(--el-color-primary);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: var(--el-bg-color);
+}
+.act-head { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.act-title { font-weight: 600; }
+.act-cmd { margin-top: 6px; font-size: 12.5px; word-break: break-all; }
+.act-cmd code {
+  background: var(--el-fill-color);
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-family: var(--el-font-family-mono, monospace);
+}
+.act-reason { margin-top: 4px; font-size: 12px; }
+.act-ops { margin-top: 8px; display: flex; align-items: center; gap: 6px; }
+.act-result {
+  margin: 8px 0 0;
+  padding: 6px 8px;
+  background: var(--el-fill-color-light);
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow: auto;
 }
 .tools { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
 .tool { display: flex; align-items: center; gap: 6px; font-size: 12px; }

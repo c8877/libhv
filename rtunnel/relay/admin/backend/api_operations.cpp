@@ -101,6 +101,55 @@ std::string planHash(const json& plan) {
 
 } // namespace
 
+int AdminServer::opsArgvRisk(const std::vector<std::string>& argv) {
+    return argvRisk(argv);
+}
+
+bool AdminServer::opsCreateExecPlan(const std::string& actor, const std::string& actor_type,
+                                   const std::string& devid, const std::vector<std::string>& argv,
+                                   const std::string& cwd, int timeout_ms, long long max_bytes,
+                                   const std::string& idem, long long& out_id, std::string& out_json,
+                                   std::string& err) {
+    out_id = 0;
+    if (devid.empty()) {
+        err = "缺少 devid";
+        return false;
+    }
+    if (argv.empty() || argv.size() > 64) {
+        err = "argv 不能为空且最多 64 段";
+        return false;
+    }
+    if (timeout_ms < 1000) timeout_ms = 1000;
+    if (timeout_ms > 30000) timeout_ms = 30000;
+    if (max_bytes < 1024) max_bytes = 1024;
+    if (max_bytes > 1048576) max_bytes = 1048576;
+
+    json plan;
+    plan["kind"] = "exec";
+    plan["devid"] = devid;
+    plan["argv"] = argv;
+    plan["timeout_ms"] = timeout_ms;
+    plan["max_bytes"] = max_bytes;
+    if (!cwd.empty()) plan["cwd"] = cwd;
+
+    int risk = argvRisk(argv);
+    int threshold = settingInt("ops.require_approval_risk", 2);
+    if (threshold < 1) threshold = 1;   // 0 也当 1：只读命令不需要审批
+    bool need_approval = risk >= threshold;
+
+    std::string who = actor.empty() ? std::string("anonymous") : actor;
+    std::string type = actor_type.empty() ? (who.rfind("ai:", 0) == 0 ? "ai" : "user") : actor_type;
+    if (!db_.opsCreate(who, type, "exec", "device", devid, plan.dump(), planHash(plan), risk,
+                       need_approval, idem, out_id, err)) {
+        return false;
+    }
+    if (!db_.opsGet(out_id, out_json)) {
+        err = "db error";
+        return false;
+    }
+    return true;
+}
+
 void AdminServer::handleOpsPlan(const HttpContextPtr& ctx, const std::string& role) {
     (void)role;
     json req = json::parse(ctx->body(), nullptr, false);
@@ -114,10 +163,6 @@ void AdminServer::handleOpsPlan(const HttpContextPtr& ctx, const std::string& ro
         return;
     }
     std::string devid = req.value("devid", std::string());
-    if (devid.empty()) {
-        apiBad(ctx, "缺少 devid");
-        return;
-    }
     if (!ownsDevid(devid)) {
         apiError(ctx, HTTP_STATUS_FORBIDDEN, "设备不在授权范围内");
         return;
@@ -132,45 +177,18 @@ void AdminServer::handleOpsPlan(const HttpContextPtr& ctx, const std::string& ro
             argv.push_back(v.get<std::string>());
         }
     }
-    if (argv.empty() || argv.size() > 64) {
-        apiBad(ctx, "argv 不能为空且最多 64 段");
-        return;
-    }
-    int timeout_ms = req.value("timeout_ms", 30000);
-    if (timeout_ms < 1000) timeout_ms = 1000;
-    if (timeout_ms > 30000) timeout_ms = 30000;
-    long long max_bytes = req.value("max_bytes", (long long)65536);
-    if (max_bytes < 1024) max_bytes = 1024;
-    if (max_bytes > 1048576) max_bytes = 1048576;
-
-    json plan;
-    plan["kind"] = kind;
-    plan["devid"] = devid;
-    plan["argv"] = argv;
-    plan["timeout_ms"] = timeout_ms;
-    plan["max_bytes"] = max_bytes;
-    if (req.contains("cwd") && req["cwd"].is_string()) plan["cwd"] = req["cwd"];
-    int risk = argvRisk(argv);
-    int threshold = settingInt("ops.require_approval_risk", 2);
-    if (threshold < 1) threshold = 1;   // 0 也当 1：只读命令不需要审批
-    bool need_approval = risk >= threshold;
-
-    std::string who = actorLabel();
-    if (who.empty()) who = "anonymous";
-    std::string actor_type = who.rfind("ai:", 0) == 0 ? "ai" : "user";
     std::string idem = ctx->header("Idempotency-Key");
     if (idem.size() > 128) idem = idem.substr(0, 128);
+    std::string cwd = req.contains("cwd") && req["cwd"].is_string()
+                          ? req["cwd"].get<std::string>()
+                          : std::string();
 
     long long id = 0;
-    std::string err;
-    if (!db_.opsCreate(who, actor_type, kind, "device", devid, plan.dump(), planHash(plan), risk,
-                       need_approval, idem, id, err)) {
+    std::string out, err;
+    if (!opsCreateExecPlan(actorLabel(), std::string(), devid, argv, cwd,
+                           req.value("timeout_ms", 30000), req.value("max_bytes", (long long)65536),
+                           idem, id, out, err)) {
         apiBad(ctx, err.empty() ? "db error" : err);
-        return;
-    }
-    std::string out;
-    if (!db_.opsGet(id, out)) {
-        apiError(ctx, HTTP_STATUS_INTERNAL_SERVER_ERROR, "db error");
         return;
     }
     ctx->send(out);

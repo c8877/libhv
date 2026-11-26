@@ -1252,8 +1252,13 @@ alertCheckDevices / alertCheckCerts / notifyTaskFailed
 | `ai.enabled` / `endpoint` / `model` / `max_tokens` / `temperature` / `timeout_s` / `max_rounds` / `insecure` | `settings` 表（`/api/v1/ai/config`） | 非敏感项，随其它设置一起下发与审计 |
 | API 密钥 | `<admin.db 同目录>/ai.key`（0600） | **不进数据库、不进任何接口响应**；`GET /ai/config` 只回 `key_set` 与路径 |
 
-- 接口：`GET/PUT /api/v1/ai/config`、`PUT/DELETE /api/v1/ai/key`、`POST /api/v1/ai/chat`
-- 资源键：`ai.chat`（可用助手）、`ai.config`（改配置与密钥）；`ai.config` 属运营商侧，接入令牌不继承
+- 接口：`GET/PUT /api/v1/ai/config`、`PUT/DELETE /api/v1/ai/key`、`POST /api/v1/ai/chat`、
+  `POST /api/v1/ai/test`
+- `ai/test` 用当前配置发一次最小 completion（32 token、无工具），返回 `latency_ms` 与上游
+  实际返回的 `served_model`，失败时带上游错误原文——运维最常见的问题是 `/v1` 前缀、模型名、
+  网关令牌，这些只有把原始错误摊开才查得快
+- 资源键：`ai.chat`（可用助手与测试）、`ai.config`（改配置与密钥）；`ai.config` 属运营商侧，
+  接入令牌不继承（但可以被授予 `ai.chat`，用于客户侧自助问答）
 - 密钥写临时文件再 `rename`，权限 `0600`；审计只记前后各几位
 
 ```
@@ -1261,15 +1266,18 @@ alertCheckDevices / alertCheckCerts / notifyTaskFailed
                                               │ std::thread（HttpClient 阻塞，不能占 worker）
                                               ▼
                                     POST {endpoint}/chat/completions
-                                      tools = 7 个只读工具，tool_choice=auto
+                                      tools = 7 个只读 + 2 个“提议”工具，tool_choice=auto
                                               │
                     ┌─────────────────────────┴────────────────────────┐
                     │ 有 tool_calls：本地执行工具 → 结果作为 role=tool 回填 │
                     │ 无 tool_calls：content 即回答（最多 max_rounds 轮）   │
                     └─────────────────────────┬────────────────────────┘
                                               ▼
-                                    {reply, tools[], rounds, usage}
+                                    {reply, actions[], tools[], rounds, usage}
 ```
+
+`actions[]` 是“提议”类工具的结果：模型不能执行变更，只能生成作业或规则草稿，
+由前端渲染成确认卡片（见下节）。
 
 **为什么不用流式**：libhv 的 `HttpClient::send` 是同步收完整响应，逐字流式要另写一个 HTTP 客户端。
 运维问答的回答通常在 2–10 秒内，非流式 + 「正在查数据…」占位够用；要流式再单独立项。
@@ -1285,10 +1293,43 @@ alertCheckDevices / alertCheckCerts / notifyTaskFailed
 | `recent_operations` | `operations` | 命令执行与审批结果（含自愈触发） |
 | `usage_summary` | `usage_daily` | 流量/会话/在线时长 |
 | `list_playbooks` | `playbooks` + 触发流水 | 有没有自动处理、为什么没自动 |
+| `propose_exec` | 生成 `operations` 作业（不执行） | 用户要求变更时给出可确认的命令 |
+| `draft_playbook` | 生成规则草稿（不落库） | 把这次排障固化成自愈规则 |
 
 **权限判定用请求线程的快照**（`AiActor`）：对话跑在独立线程，那里 `tl_actor` 是空的，
 直接 `hasPerm()` 会变成匿名——这跟 P0 修过的 WS 消息鉴权是同一类坑。工具内部再做
 `ownsDevid` 收窄，所以受限账号问别人的设备会被工具拒绝，和页面上点不开一致。
+审计同理：线程里 `actorLabel()` 为空，AI 的审计主体显式写成 `ai:assistant|<账号标签>`，
+不用 `auditEx`（否则会落成 `anonymous`）。
+
+#### 从“能查”到“能动手”：提议 + 确认
+
+```
+用户: 把 nginx 重启一下
+  │
+  ▼ propose_exec(devid, argv)        ← 需要 device.exec，设备必须开着 --allow-exec
+  ▼ opsCreateExecPlan()              ← 与 /operations/plan 共用风险分级、plan_hash、审批阈值
+  ▼ operations 行: actor=ai:assistant|ops#1/..., status=pending_approval
+  │
+  ▼ 前端渲染确认卡（命令、风险、状态）
+      ├── risk 1（只读）      [执行] ──▶ apply(plan_hash) ──▶ 结果回填卡片
+      └── risk ≥ 2            [批准] ──▶ approve ──▶ [执行] ──▶ 结果回填卡片
+```
+
+- **模型永远拿不到执行权**：`propose_exec` 只落库不调用 relay；`apply` / `approve` 是页面
+  用**人的**身份发的，模型看不到也发不了
+- **提议人写成 AI 身份**：作业 `actor = ai:assistant|<账号标签>`、`actor_type=ai`。这样
+  “自己批自己”的闸门仍然成立——批准的是人，不是提议的模型；同时审批页能看出这是 AI 提的
+- **风险由服务端算**：`opsArgvRisk` 在 `api_operations.cpp` 一处实现，`plan`、AI、自愈规则
+  草稿共用；客户端/模型传的 risk 一律忽略
+- **设备没开 exec 提前说**：`caps.exec != 1` 时工具直接报错，不生成注定失败的作业
+- `draft_playbook` 只返回草稿，页面“创建为停用规则”再落库（`enabled=false`），避免模型
+  一次性把自愈规则开起来
+
+**前端**：对话里的 action 卡片显示 `风险 n`、完整 argv、状态（待批准/待执行/已执行）、
+批准与执行按钮、执行后的 exit code + stdout/stderr；草稿卡显示拟建的规则并可一键创建。
+「概览 → AI 诊断」把设备清单、离线、版本落后、失败作业、告警拼成一条巡检问题，
+带着 `?q=` 跳到助手页——这是“智能化使用管理台”的入口，不用自己想该问什么。
 
 **输入侧防护**：客户端只能传 `user` / `assistant` 消息，`system` 一律丢弃（否则可以覆盖系统提示）；
 `devid` 先过 `ownsDevid`；单条消息 8 KB、上下文 40 条上限；工具结果进上下文前裁到 6 KB。
@@ -1303,9 +1344,10 @@ API 挂了也能打开——这恰好是最需要查文档的时候。
 #### 已知取舍
 
 - 非流式：长回答要等完整生成
-- 只读：助手不能替你执行变更；要动手走「作业」的 plan→apply→verify 与审批
+- 助手不能直接执行变更：它只能生成作业，执行/批准由人点，风险 ≥ 2 还要另一个身份批准
+- 提议的作业与自愈草稿都复用现有闸门（配额、变更窗口、审批），没有为 AI 单开旁路
 - 不做多会话持久化：刷新即清空，避免把对话内容（含设备信息）留在库里
-- 工具集是硬编码的 7 个，不是从 OpenAPI 自动生成：自动生成会把 100+ 个写接口带进来，
+- 工具集是硬编码的 9 个，不是从 OpenAPI 自动生成：自动生成会把 100+ 个写接口带进来，
   需要额外的“哪些该给模型”策略。当前选择是显式列出，接口变更时由 e2e 兜住
 
 ## 14. 备选方案与取舍
