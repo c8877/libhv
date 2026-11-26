@@ -178,6 +178,7 @@ python3 rtunnel/tests/billing_e2e.py     # 费用：价目、金额、按租户�
 python3 rtunnel/tests/admin_embedded_e2e.py  # 内嵌前端：无 docroot 出页面、gzip、回退与优先级
 python3 rtunnel/tests/packages_e2e.py    # 部署包：打包→发布→client 自举安装→篡改拒绝→回滚
 python3 rtunnel/tests/exec_e2e.py        # 受控执行：白名单、分流、超时截断、作业 plan/apply/verify
+python3 rtunnel/tests/events_e2e.py      # 事件流 SSE 与分钟级指标：上下线/会话/审计/续传/隔离
 python3 rtunnel/tests/compat_e2e.py      # HELLO 版本区间、低版本拒绝、高版本向前兼容
 python3 rtunnel/tests/protocol_doc_test.py  # 协议文档覆盖率（帧类型/常量）
 build/bin/rtunnel-endpoint-test          # --server 地址解析单测
@@ -219,6 +220,11 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
 - **操作作业**：写动作走 `operations` 的 plan→apply→verify，`plan_hash` 防 TOCTOU、
   `Idempotency-Key` 防重放。risk ≥ 2 默认进入待审批，**必须由另一个账号批准**（自己批自己 403）；
   另有每分钟/每设备配额与 `HH:MM-HH:MM` 执行窗口。管理台「运维 → 作业」可批准/拒绝/执行/看详情。
+- **事件流**：`GET /api/v1/events`（SSE）推设备上下线、会话建立/结束、审计、告警、任务状态，
+  带 `id`（seq）支持 `Last-Event-ID` 续传；受限账号只收自己设备的事件。「概览」有实时事件面板。
+- **分钟级指标**：relay 每分钟给在线设备要一份增量 sysinfo，落 `metrics_minute`（cpu/内存/负载/网卡），
+  `GET /api/v1/agents/:devid/metrics/history?from=&to=&step=` 查趋势，默认留 7 天。
+  「设备 → 采样曲线」里有「近 6 小时」曲线。
 - **费用试算**：`price_rules` 存每个指标的计价单位与单价（金额 1e-6 元），
   `GET /api/v1/billing/summary` 把日聚合用量乘单价、按租户汇总；「监控 → 费用」可改价目
   （`billing.write`，默认只有超管）。

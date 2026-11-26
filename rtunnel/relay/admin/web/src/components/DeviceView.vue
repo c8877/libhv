@@ -784,6 +784,30 @@
           <div v-else-if="enabledCfg.length" class="series-tip">
             本地页只读：取消 chip 只隐藏曲线，采样配置请在管理台修改
           </div>
+          <div v-if="!isLocal" class="chart-box hist-box">
+            <div class="chart-title">
+              relay 分钟采样 · 近 6 小时
+              <span class="spacer" />
+              <span v-if="histErr" class="muted">{{ histErr }}</span>
+              <span v-else-if="histPoints.length" class="muted">{{ histPoints.length }} 点</span>
+              <el-button size="small" text @click="pullHistory">刷新</el-button>
+            </div>
+            <svg viewBox="0 0 600 120" preserveAspectRatio="none" role="img"
+                 aria-label="近 6 小时 CPU 与内存">
+              <line x1="0" y1="110" x2="600" y2="110" class="ov-axis" />
+              <polyline v-if="histMemPath" :points="histMemPath" class="ov-line mem" />
+              <polyline v-if="histCpuPath" :points="histCpuPath" class="ov-line cpu" />
+            </svg>
+            <div v-if="!histPoints.length" class="muted chart-empty">
+              还没有分钟级采样（relay 每分钟采一次，保留 7 天）
+            </div>
+            <div v-else class="muted hist-sum">
+              CPU 峰值 {{ histPeak.cpu }}% · 内存峰值 {{ histPeak.memPct }}%
+              <span class="spacer" />
+              <span class="ov-legend"><i class="dot cpu" />CPU</span>
+              <span class="ov-legend"><i class="dot mem" />内存</span>
+            </div>
+          </div>
           <div v-if="!enabledCfg.length" class="muted">该设备还没有启用的采样指标，可在「采样配置」中添加</div>
           <template v-else>
             <div v-show="hasUnit('percent')" class="chart-box">
@@ -2097,6 +2121,59 @@ function sparkPoints(name) {
 const ovCpuPath = computed(() => sparkPoints('cpu'))
 const ovMemPath = computed(() => sparkPoints('mem'))
 
+// ---------------------------------------------------------------- relay 分钟采样
+// 与上面的 ov-* 不同：这里读的是 relay 落库的分钟点（近 6 小时，最多 7 天），
+// 不依赖 agent 的环形缓冲，所以关掉页面/重连后也能看历史。
+const histPoints = ref([])
+const histErr = ref('')
+let histAt = 0
+
+function histPath(key) {
+  const pts = histPoints.value
+  if (!pts.length) return ''
+  const t0 = Number(pts[0].ts) || 0
+  const t1 = Number(pts[pts.length - 1].ts) || 0
+  const span = Math.max(1, t1 - t0)
+  const out = []
+  for (const p of pts) {
+    const x = ((Number(p.ts) - t0) / span) * 600
+    let v
+    if (key === 'cpu') v = Number(p.cpu) || 0
+    else v = p.mem_total > 0 ? (Number(p.mem) / Number(p.mem_total)) * 100 : 0
+    v = Math.max(0, Math.min(100, v))
+    out.push(x.toFixed(1) + ',' + (110 - v).toFixed(1))
+  }
+  return out.join(' ')
+}
+const histCpuPath = computed(() => histPath('cpu'))
+const histMemPath = computed(() => histPath('mem'))
+const histPeak = computed(() => {
+  let cpu = 0
+  let mem = 0
+  for (const p of histPoints.value) {
+    cpu = Math.max(cpu, Number(p.cpu) || 0)
+    if (p.mem_total > 0) mem = Math.max(mem, (Number(p.mem) / Number(p.mem_total)) * 100)
+  }
+  return { cpu: cpu.toFixed(1), memPct: mem.toFixed(1) }
+})
+
+async function pullHistory(force = false) {
+  if (isLocal.value || !devid.value) return
+  const now = Date.now()
+  if (!force && now - histAt < 60000) return   // 分钟级数据，一分钟内不重复拉
+  histAt = now
+  try {
+    const to = now
+    const from = to - 6 * 3600 * 1000
+    const r = await Api.get('/api/v1/agents/' + encodeURIComponent(devid.value) +
+      '/metrics/history?from=' + from + '&to=' + to + '&step=60')
+    histPoints.value = (r && r.points) || []
+    histErr.value = ''
+  } catch (e) {
+    histErr.value = '历史数据不可用'
+  }
+}
+
 // ---------------------------------------------------------------- 主 tab
 function isFeatTab(name) {
   return name === 'storage' || name === 'file' || name === 'service' || name === 'proc' || name === 'caps'
@@ -2126,6 +2203,7 @@ function applyTab(name) {
   if (name === 'overview') {
     loadProcs(true, true)
     pullSeries(false)
+    pullHistory()
     return
   }
   if (isFeatTab(name)) {
@@ -2922,7 +3000,10 @@ function refreshSeriesView() {
 
 function onObsTab(name) {
   // 切回曲线时 canvas 可能刚从 display:none 恢复，尺寸为 0，需要重画
-  if (name === 'series') refreshSeriesView()
+  if (name === 'series') {
+    refreshSeriesView()
+    pullHistory()
+  }
 }
 
 function addAllowTty() {

@@ -59,8 +59,16 @@ void AdminServer::distTick() {
             final_status = "failed";
         }
         if (final_status) {
-            notifyTaskFailed(id, j.value("devid", std::string()), final_status, err,
-                             j.value("kind", std::string("file")));
+            std::string devid = j.value("devid", std::string());
+            std::string kind = j.value("kind", std::string("file"));
+            notifyTaskFailed(id, devid, final_status, err, kind);
+            json ev;
+            ev["task_id"] = id;
+            ev["devid"] = devid;
+            ev["kind"] = kind;
+            ev["status"] = final_status;
+            if (!err.empty()) ev["error"] = err;
+            emitEvent("task.failed", ev.dump());
         }
     };
 
@@ -123,6 +131,14 @@ void AdminServer::distTick() {
                         dist_active.erase(id);
                         dist_busy_dev.erase(devid);
                         running--;
+                        {
+                            json ev;
+                            ev["task_id"] = id;
+                            ev["devid"] = devid;
+                            ev["kind"] = j.value("kind", std::string("file"));
+                            ev["status"] = "success";
+                            emitEvent("task.success", ev.dump());
+                        }
                         continue;
                     }
                     std::string err = pg.value("error", std::string("transfer failed"));
@@ -197,6 +213,15 @@ void AdminServer::distTick() {
                                j.value("retry_count", 0));
                 dist_active.erase(id);
                 dist_busy_dev.erase(devid);
+                {
+                    json ev;
+                    ev["task_id"] = id;
+                    ev["devid"] = devid;
+                    ev["kind"] = j.value("kind", std::string("file"));
+                    ev["status"] = "success";
+                    if (!version.empty()) ev["version"] = version;
+                    emitEvent("task.success", ev.dump());
+                }
                 continue;
             }
             if (started > 0 && now - started > apply_timeout_ms) {

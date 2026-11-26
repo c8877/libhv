@@ -24,6 +24,7 @@
 #include "relay/relay_server.hpp"
 #include "relay/audit_log.hpp"
 #include "admin_db.hpp"
+#include "event_bus.hpp"
 
 struct TerminalSession;
 
@@ -142,6 +143,8 @@ private:
         audit_.write(who, action, detail);
     }
     std::string actorLabel() const;
+    // 发布一条事件（线程安全）：写审计的地方顺手发，AI 与页面都从这里订阅
+    void emitEvent(const std::string& type, const std::string& data_json);
     // 撤权联动：关闭接入账号的在线会话（token_id>0 时只关该令牌）。
     // 令牌吊销/轮换、账号停用/删除、权限组变更都会调用，避免旧会话继续用已撤销的权限。
     int         kickClients(const std::vector<std::string>& users, long long token_id, const char* reason);
@@ -279,6 +282,9 @@ private:
 
     void handleAudit(const HttpContextPtr& ctx);
     // api_usage.cpp：用量流水日聚合查询
+    void handleEvents(const HttpContextPtr& ctx);          // SSE 事件流
+    void handleMetricsHistory(const HttpContextPtr& ctx);  // 分钟级指标
+    static void sseTickCb(htimer_t* t);
     void handleUsage(const HttpContextPtr& ctx);
     void handleTenants(const HttpContextPtr& ctx);
     void handleTenantCreate(const HttpContextPtr& ctx, const std::string& role);
@@ -364,6 +370,7 @@ private:
     AdminConfig     cfg_;
     AdminDb          db_;
     AuditLog        audit_;
+    EventBus        bus_;        // SSE 事件流：审计/设备上下线/会话/任务/告警
     std::map<std::string, std::string> settings_;
     std::mutex settings_mu_;
     std::map<long long, uint32_t> dist_active;   // task id -> relay tid

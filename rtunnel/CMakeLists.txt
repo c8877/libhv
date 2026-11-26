@@ -31,6 +31,7 @@ set_target_properties(rtunnel_sqlite PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set(RTUNNEL_RELAY_SOURCES
                relay/main.cpp relay/relay_server.cpp relay/audit_log.cpp
                relay/usage_meter.cpp
+               relay/telemetry.cpp
                common/endpoint.cpp
                common/sha256.cpp common/token_util.cpp
                relay/admin/backend/admin_server.cpp
@@ -56,6 +57,9 @@ set(RTUNNEL_RELAY_SOURCES
                relay/admin/backend/admin_db_accounts.cpp
                relay/admin/backend/admin_db_usage.cpp
                relay/admin/backend/admin_db_ops.cpp
+               relay/admin/backend/admin_db_metrics_minute.cpp
+               relay/admin/backend/event_bus.cpp
+               relay/admin/backend/api_events.cpp
                relay/admin/backend/api_operations.cpp
                relay/admin/backend/admin_db_tenant.cpp
                relay/admin/backend/admin_db_billing.cpp

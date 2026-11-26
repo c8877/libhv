@@ -474,6 +474,19 @@ bool AdminDb::migrate(std::string& err) {
         "CREATE INDEX IF NOT EXISTS idx_operations_status ON operations(status,risk);"
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_operations_idem ON operations(actor,idem_key)"
         " WHERE idem_key<>'';"
+        // 分钟级设备指标（relay 每分钟采一条）：趋势、异常检测与容量预测的数据源。
+        // 只留分钟点，原始采样不落库；默认保留 7 天（metrics.retention_days）。
+        "CREATE TABLE IF NOT EXISTS metrics_minute("
+        " devid TEXT NOT NULL,"
+        " ts_min INTEGER NOT NULL,"
+        " cpu REAL NOT NULL DEFAULT 0,"
+        " mem INTEGER NOT NULL DEFAULT 0,"
+        " mem_total INTEGER NOT NULL DEFAULT 0,"
+        " load1 REAL NOT NULL DEFAULT 0,"
+        " rx INTEGER NOT NULL DEFAULT 0,"
+        " tx INTEGER NOT NULL DEFAULT 0,"
+        " PRIMARY KEY(devid,ts_min));"
+        "CREATE INDEX IF NOT EXISTS idx_metrics_minute_ts ON metrics_minute(ts_min);"
         // relay 地址字典 + 有序下发列表 + 同步任务（逐设备行复用 distribution_tasks）
         "CREATE TABLE IF NOT EXISTS relay_dict("
         " id INTEGER PRIMARY KEY AUTOINCREMENT,"

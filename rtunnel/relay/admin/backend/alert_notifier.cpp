@@ -85,9 +85,24 @@ std::string relayName() {
 // ---------------------------------------------------------------- 采集
 
 void AdminServer::alertEnqueue(const AlertEvent& ev) {
-    std::lock_guard<std::mutex> lk(alert_mu_);
-    if (alert_q_.size() >= 256) alert_q_.pop_front();   // 队列有界，避免内存涨
-    alert_q_.push_back(ev);
+    {
+        std::lock_guard<std::mutex> lk(alert_mu_);
+        if (alert_q_.size() >= 256) alert_q_.pop_front();   // 队列有界，避免内存涨
+        alert_q_.push_back(ev);
+    }
+    // 事件流：告警本身与 webhook 无关（webhook 关掉也要能订阅）
+    json j;
+    j["event"] = ev.event;
+    j["level"] = ev.level;
+    j["title"] = ev.title;
+    j["text"] = ev.text;
+    if (!ev.details.empty()) {
+        json d = json::parse(ev.details, nullptr, false);
+        if (!d.is_discarded() && d.is_object()) {
+            for (auto it = d.begin(); it != d.end(); ++it) j[it.key()] = it.value();
+        }
+    }
+    bus_.publish("alert", j.dump());
 }
 
 void AdminServer::notifyTaskFailed(long long id, const std::string& devid,

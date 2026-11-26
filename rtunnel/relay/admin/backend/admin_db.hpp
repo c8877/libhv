@@ -274,6 +274,12 @@ public:
                                    std::string& json_out, std::string& err);
     bool billingStatementCsv(long long id, std::string& csv_out, std::string& err);
 
+    // 分钟级设备指标：relay 每分钟一条，按 (devid,ts_min) 去重
+    bool metricsAppend(const std::string& json_in, int& rows, std::string& err);
+    bool metricsQuery(const std::string& devid, long long from_ms, long long to_ms,
+                      int step_sec, std::string& json_out, std::string& err);
+    bool metricsPrune(long long before_ms, int& n);
+
     // 租户：计费与设备归属边界（默认租户 id=1）
     bool tenantList(std::string& json_out);
     bool tenantCreate(const std::string& name, const std::string& note, const std::string& by,

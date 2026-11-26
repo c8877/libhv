@@ -27,6 +27,26 @@
       </el-descriptions>
       <el-skeleton v-else :rows="2" animated />
     </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>实时事件</h2>
+        <el-tag size="small" :type="sseState === 'open' ? 'success' : (sseState === 'connecting' ? 'info' : 'warning')">
+          {{ sseText }}
+        </el-tag>
+        <span class="spacer" />
+        <span class="muted">新事件在上</span>
+        <el-button text size="small" @click="events = []">清空</el-button>
+      </div>
+      <el-scrollbar height="300px">
+        <div v-for="e in events" :key="e.seq" class="evt">
+          <span class="evt-time">{{ time(e.ts) }}</span>
+          <el-tag size="small" :type="tagType(e.type)" effect="plain">{{ label(e.type) }}</el-tag>
+          <span class="evt-text">{{ text(e) }}</span>
+        </div>
+        <div v-if="!events.length" class="muted evt-empty">等待事件…（设备上下线、会话、审计、告警、任务）</div>
+      </el-scrollbar>
+    </div>
   </div>
 </template>
 
@@ -34,7 +54,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Api } from '@/shared/api.js'
 import { overview } from '@/shared/store.js'
-import { bytes, duration } from '@/shared/utils.js'
+import { bytes, duration, time } from '@/shared/utils.js'
 
 const o = ref(overview.data)
 const stats = computed(() => {
@@ -56,11 +76,84 @@ async function pull() {
   } catch (e) { /* 保留上次数据 */ }
 }
 
+// ---------------------------------------------------------------- 实时事件
+// SSE 用浏览器 Cookie 鉴权（管理台会话），断线由 EventSource 自动重连，
+// 服务端按 Last-Event-ID 续传，不会丢事件。
+const events = ref([])
+const sseState = ref('connecting')
+let es = null
+
+const sseText = computed(() => ({
+  open: '已连接', connecting: '连接中', error: '已断开，重试中',
+}[sseState.value] || sseState.value))
+
+const LABELS = {
+  'device.online': '上线', 'device.offline': '离线',
+  'stream.open': '会话建立', 'stream.close': '会话结束',
+  audit: '审计', alert: '告警',
+  'task.success': '任务成功', 'task.failed': '任务失败',
+  'bus.dropped': '事件丢弃', 'bus.lost': '事件空洞',
+}
+function label(t) { return LABELS[t] || t }
+function tagType(t) {
+  if (t === 'device.offline' || t === 'task.failed' || t === 'alert') return 'danger'
+  if (t === 'device.online' || t === 'task.success') return 'success'
+  if (t === 'stream.open') return 'primary'
+  return 'info'
+}
+function text(e) {
+  const d = e.data || {}
+  if (e.type === 'stream.open' || e.type === 'stream.close') {
+    const parts = [d.devid, d.kind, d.port ? ':' + d.port : '']
+    if (e.type === 'stream.close') {
+      if (d.bytes_down != null) parts.push('↓' + bytes(d.bytes_down))
+      if (d.duration_ms != null) parts.push(duration(d.duration_ms))
+    }
+    return parts.filter(Boolean).join(' ')
+  }
+  if (e.type === 'audit') {
+    return [d.actor, d.action, d.target_id, d.detail].filter(Boolean).join(' · ')
+  }
+  if (e.type === 'alert') return [d.level, d.title, d.text].filter(Boolean).join(' · ')
+  if (e.type.startsWith('task.')) {
+    return ['任务#' + d.task_id, d.devid, d.kind, d.status, d.error].filter(Boolean).join(' ')
+  }
+  if (d.devid) return [d.devid, d.version, d.error].filter(Boolean).join(' ')
+  return JSON.stringify(d)
+}
+
+function onEvent(ev) {
+  let data = {}
+  try { data = JSON.parse(ev.data || '{}') } catch (e) { data = {} }
+  events.value.unshift({
+    seq: ev.lastEventId ? Number(ev.lastEventId) : Date.now(),
+    type: ev.type,
+    ts: data.ts || Date.now(),
+    data,
+  })
+  if (events.value.length > 100) events.value.length = 100
+}
+
+function connect() {
+  if (typeof EventSource === 'undefined') { sseState.value = 'error'; return }
+  es = new EventSource('/api/v1/events')
+  es.onopen = () => { sseState.value = 'open' }
+  es.onerror = () => { sseState.value = 'error' }   // 浏览器会自己重连
+  es.addEventListener('hello', () => { sseState.value = 'open' })   // hello 只用来确认连通
+  for (const t of Object.keys(LABELS)) {
+    es.addEventListener(t, onEvent)
+  }
+}
+
 onMounted(() => {
   pull()
   timer = setInterval(pull, 5000)
+  connect()
 })
-onBeforeUnmount(() => { if (timer) clearInterval(timer) })
+onBeforeUnmount(() => {
+  if (timer) clearInterval(timer)
+  if (es) { es.close(); es = null }
+})
 </script>
 
 <style scoped>
@@ -107,4 +200,15 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
   font-size: 12px;
   color: var(--el-text-color-secondary);
 }
+.evt {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 2px;
+  border-bottom: 1px dashed var(--el-border-color-lighter);
+  font-size: 12.5px;
+}
+.evt-time { color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums; }
+.evt-text { word-break: break-all; }
+.evt-empty { padding: 14px 2px; }
 </style>

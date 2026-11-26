@@ -640,6 +640,8 @@ B 内置管理台（libhv HttpService + WebSocket），**独立 worker 线程**�
 | GET/PUT | `/api/v1/settings` | 运行参数（上传上限、会话、锁定时长等） |
 | GET/POST | `/api/v1/distributions[/{id}]` | 文件分发任务与重试/取消/延长/校验 |
 | GET | `/api/v1/audit` | 审计（登录、OPEN、踢、证书、文件、终端、权限变更） |
+| GET | `/api/v1/events` | SSE 事件流（设备/会话/审计/告警/任务），支持 Last-Event-ID，见 §13.14 |
+| GET | `/api/v1/agents/{devid}/metrics/history` | 分钟级指标（cpu/内存/负载/网卡），见 §13.14 |
 | GET | `/api/v1/usage` | 用量报表（日聚合）：流量/会话/设备在线，可按 `tenant_id` 过滤，见 §13.10 |
 | GET/POST/PUT | `/api/v1/tenants[/{id}]` | 租户列表/新建/改名启停，见 §13.11 |
 | GET/PUT | `/api/v1/billing/prices[/{metric}]`、`/billing/summary` | 价目与费用试算，见 §13.12 |
@@ -1080,9 +1082,63 @@ JSONL 字段：`at / actor_type / actor / action / target_type / target_id / res
 #### 边界（当前不做）
 
 - 配额只有“次数”维度（每分钟/每设备每小时），没有带宽或执行时长维度
-- 没有事件流与分钟级指标（P2）；没有 playbook/自愈策略（P4）
+- 没有 playbook/自愈策略（P4）
 - 不给模型“万能 exec”：没有白名单就不可用，也不提供 shell 模式
 - 模型只能提议动作，授权仍由权限组判定；不因“是 AI”而放宽资源键
+
+### 13.14 事件流与分钟级指标（AI 的“感知面”）
+
+执行面解决“能动手”，这一层解决“不用轮询也知道发生了什么、过去怎么走的”。
+
+#### 事件流 `GET /api/v1/events`（SSE）
+
+```
+client ──GET /api/v1/events (Cookie 或 Bearer)──▶ admin
+       ◀── event: hello   data: {"cursor":42,"restricted":false}
+       ◀── id: 43  event: device.online  data: {...}
+       ◀── : ping                      （15s 心跳注释）
+       ◀── id: 44  event: stream.open   data: {...}
+```
+
+- 事件来自进程内 `EventBus`（环形缓冲 2000 条，seq 单调递增），**seq 就是 SSE 的 `id`**，
+  客户端断线重连带 `Last-Event-ID` 即可续传；游标被挤掉时收到 `bus.lost` 并跳到最旧一条
+- 产生点：`device.online` / `device.offline`（relay 认证与断开）、`stream.open` / `stream.close`
+  （OPEN_OK 与流释放，带 kind/port/字节/时长）、`audit`（所有审计，带 actor/action/target）、
+  `alert`（告警入队）、`task.success` / `task.failed`（分发与 OTA）
+- 实现要点：**不跨线程写 hio**。每个连接在自己的 loop 上起 1s 定时器拉增量再写回自己的 io；
+  连接数上限 32，单连接最长 6 小时（客户端重连即可）
+- 权限：需要 `device.view`；连接**打开时**快照身份（`super/all_devices/devices/tenant`），
+  定时器里绝不读 `tl_actor`（会被同线程其它请求覆盖）。受限账号只收自己设备的事件，
+  审计事件按 `target_type=device` 过滤，其余一律不下发
+
+#### 分钟级指标 `GET /api/v1/agents/:devid/metrics/history`
+
+```
+relay（30s tick）── SYSINFO_REQ(mode=1) ──▶ agent
+relay ◀── SYSINFO（增量：cpu/负载/内存/网卡）── agent
+relay: sampleMetrics() 按 60s 节流 → metric_pending
+admin worker（500ms）→ metrics_minute 表（按 devid+分钟去重）
+```
+
+| 列 | 含义 |
+|---|---|
+| `cpu` | CPU 使用率（%） |
+| `mem` / `mem_total` | 已用 / 总内存（KB，`mem = total - available`） |
+| `load1` | 1 分钟负载 |
+| `rx` / `tx` | 全部网卡累计收/发字节（单调计数，分桶取最大值） |
+
+- 采样来自 relay 已缓存的 sysinfo：管理台看页面时也会触发采样，但 60s 节流保证不会多写
+- 保留 `metrics.retention_days`（默认 7 天，1–90），管理 worker 每小时清理一次
+- 查询支持 `from/to/step`：`step` 按 60 对齐，`step>60` 时按桶平均（rx/tx 取最大值），
+  单次区间最大 31 天；`from` 默认 `to-6h`
+- 这是趋势、异常检测与容量预测的数据源；`usage_daily` 只覆盖计费口径，两者不重叠
+
+#### 前端
+
+- 「概览」新增「实时事件」面板：`EventSource('/api/v1/events')`，新事件在上、最多 100 条，
+  断线由浏览器自动重连并带 `Last-Event-ID`
+- 「设备 → 采样曲线」新增「relay 分钟采样 · 近 6 小时」：读 `metrics/history`，
+  不依赖 agent 环形缓冲，关掉页面/重连后历史仍在
 
 ## 14. 备选方案与取舍
 

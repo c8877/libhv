@@ -57,6 +57,7 @@ struct RelayStream {
     int          opened = 0;             // OPEN_OK 经过 relay 时置位
     int          a_readonly = 0;         // 只读串口流：丢弃 client 方向的 DATA（兼容旧 agent）
     uint16_t     port = 0;               // OPEN 目标端口，用量上报用
+    const char*  kind = nullptr;         // shell/tty/fs/svc/port，事件用
     uint64_t     opened_at_ms = 0;       // 建流时间（管理台展示）
     uint64_t     last_active_ms = 0;     // 最近一次转发帧，空闲回收用
     uint64_t     bytes_up = 0;           // A→C 载荷字节（用量）
@@ -199,6 +200,12 @@ public:
     // 取走待落库的用量事件（relay 线程），JSON 数组；含 token 字节增量与设备在线时长
     std::string takeUsageEvents();
 
+    // 事件流与分钟级指标 sampling（都在 relay 线程）
+    // 事件：一行一条 JSON {"type":..,"ts":..,...}，管理面取走后广播给 SSE 并与审计合并
+    std::string takeEvents();
+    // 指标采样：{"ts","devid","cpu","mem","mem_total","load1","rx","tx"}
+    std::string takeMetricSamples();
+
     // 更新下发给 agent 的地址列表（relay 线程）。servers 为空表示停用下发。
     // 内容变化时更新 rev 并清空旧 ACK；只改期望状态，设备上线在 AUTH_OK 后自动对齐。
     bool setRelayList(const std::string& servers, bool allow_leave, std::string& err);
@@ -229,6 +236,12 @@ public:
     std::unordered_map<std::string, int> caps_net;                 // devid -> 支持 NET_REQ
     std::unordered_map<std::string, int> caps_proc;                // devid -> 支持 PROC_REQ
     std::unordered_map<std::string, int> caps_exec;                // devid -> 支持 EXEC_REQ
+    // 事件与分钟级指标：relay 线程写，管理面 worker 通过 takeXxx 取走（同一线程执行）
+    std::vector<std::string> event_pending;
+    std::vector<std::string> metric_pending;
+    std::unordered_map<std::string, uint64_t> metric_sampled_ms;
+    uint64_t event_dropped = 0;
+    uint64_t metric_dropped = 0;
     std::string admin_proxy_secret;   // 进程内生成的随机密钥，仅供 AdminServer 代理连接 relay
     std::unordered_map<std::string, std::string> agent_versions;
     std::unordered_map<std::string, uint64_t> agent_boot_ms;   // devid -> 系统开机时间（epoch ms）
@@ -406,6 +419,9 @@ private:
     bool         tokenRateAllow(RelayConn* c, uint32_t* retry_after_ms);
     void         tokenDropConnections(long long token_id, uint16_t code, const char* msg);
     void         tokenApplyCuts();
+    void         pushEvent(const char* type, const std::string& extra_json);
+    void         metricsTick();                  // 30s：给到点的在线设备要一次 sysinfo
+    void         sampleMetrics(const char* devid);   // sysinfo 更新后按 60s 节流落一条
     int          tenantSessions(long long tenant_id) const;
     void         tokenSessionAdd(RelayConn* c);
     void         tokenSessionRemove(RelayConn* c);

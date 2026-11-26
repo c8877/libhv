@@ -28,6 +28,7 @@ SUITES=(
   admin/usage
   admin/tenants
   admin/operations
+  admin/events
   admin/billing
   admin/terminal
   local/page

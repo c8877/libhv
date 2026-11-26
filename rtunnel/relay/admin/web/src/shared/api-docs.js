@@ -161,6 +161,33 @@ export const DOCS = [
     resp: `{ "items": [{ "id": 7, "kind": "exec", "target_id": "mp135", "status": "applied", "risk": 2 }] }`,
   },
   {
+    group: 'device', method: 'GET', path: '/api/v1/agents/:devid/metrics/history', minRole: 'viewer',
+    summary: '分钟级指标历史（relay 采样）',
+    params: [
+      { name: 'devid', in: 'path', desc: '设备 ID' },
+      { name: 'from', in: 'query', desc: '起始时间（毫秒或秒）；默认 to-6h' },
+      { name: 'to', in: 'query', desc: '结束时间；默认现在' },
+      { name: 'step', in: 'query', desc: '聚合步长（秒，按 60 对齐），默认 60；区间最大 31 天' },
+    ],
+    note: '需要 device.view 且设备在授权范围内。relay 每分钟给在线设备要一份增量 sysinfo 落一条，'
+      + '保留 metrics.retention_days（默认 7 天）。step>60 按桶取平均，rx/tx 取桶内最大值',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" \\\\
+  "$RT/api/v1/agents/mp135/metrics/history?from=1764115200000&to=1764136800000&step=300"`,
+    resp: `{ "devid": "mp135", "from": 1764115200000, "to": 1764136800000, "step": 300, "points": [{ "ts": 1764115500000, "cpu": 12.4, "mem": 412000, "mem_total": 1048576, "load1": 0.31, "rx": 918273645, "tx": 12345678, "samples": 5 }] }`,
+  },
+  {
+    group: 'sys', method: 'GET', path: '/api/v1/events', minRole: 'viewer',
+    summary: '事件流（SSE）：设备上下线、会话、审计、告警、任务',
+    params: [
+      { name: 'last', in: 'query', desc: '从该 seq 之后开始（也可用 Last-Event-ID 头）' },
+    ],
+    note: '需要 device.view。响应是 text/event-stream：先一条 hello（带 cursor），之后每条事件带 id/event/data，'
+      + '15s 一次心跳注释。受限账号只收自己设备的事件；游标过期会收到 bus.lost 并跳到最旧一条。'
+      + '断线重连带 Last-Event-ID 即可续传',
+    curl: `curl -N -H "Authorization: Bearer $ATK" "$RT/api/v1/events"`,
+    resp: `event: hello\\ndata: {"cursor":42,"restricted":false}\\n\\nevent: device.online\\nid: 43\\ndata: {"devid":"mp135","version":"1.4.137","ts":1764136800000}\\n\\n`,
+  },
+  {
     group: 'device', method: 'GET', path: '/api/v1/agents/:devid/net', minRole: 'viewer',
     summary: '网络与 IPC 快照（TCP/UDP/UNIX/IPC）',
     params: [

@@ -143,6 +143,7 @@ void RelayServer::completePending(const char* devid) {
         s->a = p->a; s->a_sid = p->a_sid;
         s->c = agent; s->c_sid = ++agent->next_c_sid;
         s->port = p->port;
+        s->kind = "shell";
         s->opened_at_ms = s->last_active_ms = hloop_now_ms(loop);
         s->next_a = p->a->streams; p->a->streams = s;
         s->next_c = agent->streams; agent->streams = s;
@@ -723,6 +724,18 @@ void RelayServer::streamRemove(RelayStream* s) {
         if (findStreamByC(s->c, s->c_sid, &prev)) {
             if (prev) prev->next_c = s->next_c; else s->c->streams = s->next_c;
         }
+    }
+    if (s->opened) {
+        nlohmann::json ev;
+        ev["devid"] = (s->c && s->c->devid[0]) ? s->c->devid : "";
+        ev["kind"] = s->kind ? s->kind : "port";
+        ev["port"] = (int)s->port;
+        ev["token_id"] = (s->a ? s->a->token_id : 0);
+        ev["bytes_up"] = (long long)s->bytes_up;
+        ev["bytes_down"] = (long long)s->bytes_down;
+        uint64_t now = hloop_now_ms(loop);
+        ev["duration_ms"] = now > s->opened_at_ms ? (long long)(now - s->opened_at_ms) : 0;
+        pushEvent("stream.close", ev.dump());
     }
     usageOnStreamClose(s);
     tokenSessionRemove(s->a);
@@ -1912,6 +1925,9 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             if (!sj.is_discarded() && sj.contains("caps") && sj["caps"].contains("exec")) {
                 caps_exec[c->devid] = sj["caps"]["exec"].get<bool>() ? 1 : 0;
             }
+            // 分钟级时序：任何一次 sysinfo 到达都可能触发（增量帧也带 CPU/内存/网卡），
+            // 由 sampleMetrics 内部按 60s 节流，所以管理台频繁看页面也不会多写。
+            sampleMetrics(c->devid);
             // uptime 只出现在全量帧；用收帧时刻反推开机时间，列表可随时算当前时长
             if (full && !sj.is_discarded()) {
                 if (sj.contains("uptime_sec") && sj["uptime_sec"].is_number_integer()) {
@@ -1980,6 +1996,15 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             w.u32(15000);
             rtnp::send(c->io, rtnp::AUTH_OK, 0, w.data, (uint16_t)w.len);
             logf_("[relay] agent online: %s (fd=%d)", c->devid, hio_fd(c->io));
+            if (strncmp(c->devid, "a:", 2) != 0) {
+                nlohmann::json ev;
+                ev["devid"] = c->devid;
+                std::string ver = agentVersion(c->devid);
+                if (!ver.empty()) ev["version"] = ver;
+                std::string arch = agentArch(c->devid);
+                if (!arch.empty()) ev["arch"] = arch;
+                pushEvent("device.online", ev.dump());
+            }
             // 连上就对齐一次地址列表；未配置时不下发，agent 保留本地已有列表
             sendRelayList(c);
             completePending(c->devid);
@@ -2228,6 +2253,7 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             s->a = c; s->a_sid = f->sid;
             s->c = agent; s->c_sid = ++agent->next_c_sid;
             s->port = port;
+            s->kind = is_tty ? "tty" : (is_fs ? "fs" : (is_svc ? "svc" : (is_shell ? "shell" : "port")));
             s->opened_at_ms = s->last_active_ms = hloop_now_ms(loop);
             // 只读串口在 relay 侧也拦写方向：老 agent 不认识只读标志，不能只依赖它
             s->a_readonly = is_tty &&
@@ -2302,6 +2328,13 @@ void RelayServer::handleFrame(RelayConn* c, rtnp::Frame* f) {
             s->opened = 1;
             s->last_active_ms = hloop_now_ms(loop);
             ++stats.streams_opened_total;
+            nlohmann::json ev;
+            ev["devid"] = (s->c && s->c->devid[0]) ? s->c->devid : "";
+            ev["kind"] = s->kind ? s->kind : "port";
+            ev["port"] = (int)s->port;
+            ev["token_id"] = (s->a ? s->a->token_id : 0);
+            if (s->a && s->a->user[0]) ev["user"] = s->a->user;
+            pushEvent("stream.open", ev.dump());
         }
         forward(s->a, f->type, s->a_sid, f->payload, f->len, f->flags);
         if (f->type == rtnp::OPEN_FAIL) { s->a_closed = s->c_closed = 1; streamRemove(s); }
@@ -2385,6 +2418,11 @@ void RelayServer::onClose(RelayConn* c) {
             // 重连时 AUTH_OK 会重新下发并重新 ACK。
             relay_list_acks.erase(c->devid);
             logf_("[relay] agent offline: %s", c->devid);
+            if (strncmp(c->devid, "a:", 2) != 0) {
+                nlohmann::json ev;
+                ev["devid"] = c->devid;
+                pushEvent("device.offline", ev.dump());
+            }
         }
     } else if (c->role == rtnp::ROLE_CLIENT && c->user[0]) {
         logf_("[relay] client offline: %s", c->user);
@@ -2655,6 +2693,11 @@ int RelayServer::run(int argc, char** argv) {
     hevent_set_userdata(t, this);
     // 过期 / 配额的兜底扫描（限流与计量本身在收发路径上实时完成）
     htimer_t* tk = htimer_add(loop, tokenCb, 5000, INFINITE);
+    // 分钟级指标：30s 一轮，只给到点的设备要增量 sysinfo（对比全量帧省一半以上）
+    htimer_t* mt = htimer_add(loop,
+                              [](htimer_t* t) { ((RelayServer*)hevent_userdata(t))->metricsTick(); }, 30000,
+                              INFINITE);
+    hevent_set_userdata(mt, this);
     // 带宽整形恢复：50ms 粒度，只有被暂停的连接才会被遍历到
     htimer_t* rt = htimer_add(loop,
                               [](htimer_t* t) { ((RelayServer*)hevent_userdata(t))->rateSweep(); }, 50,

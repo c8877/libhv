@@ -117,6 +117,10 @@ void AdminServer::registerRoutes() {
     access("device.view", "GET", "/api/v1/agents/:devid/metrics/series/config", &AdminServer::handleMetricSeriesCfgGet);
     access("device.metrics.write", "PUT", "/api/v1/agents/:devid/metrics/series/config", &AdminServer::handleMetricSeriesCfgPut);
     access("device.view", "GET", "/api/v1/agents/:devid/metrics/series", &AdminServer::handleMetricSeriesData);
+    access("device.view", "GET", "/api/v1/agents/:devid/metrics/history",
+           &AdminServer::handleMetricsHistory);
+    // 事件流：按连接打开时的权限快照过滤（受限账号只收自己设备的事件）
+    access("device.view", "GET", "/api/v1/events", &AdminServer::handleEvents);
     access("device.tty.read", "GET", "/api/v1/agents/:devid/ttys", &AdminServer::handleTtyList);
     access("device.tty.write", "PUT", "/api/v1/agents/:devid/ttys", &AdminServer::handleTtyPut);
     access("device.tty.write", "DELETE", "/api/v1/agents/:devid/ttys", &AdminServer::handleTtyDelete);

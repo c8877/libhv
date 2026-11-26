@@ -463,6 +463,19 @@ void AdminServer::audit(const std::string& role, const std::string& action, cons
     std::string who = actorLabel();
     if (who.empty()) who = role.empty() ? "anonymous" : role;
     audit_.write(who, action, detail);
+
+    // 事件流只带概要（detail 可能很长）：完整内容仍在 audit.log/.jsonl
+    nlohmann::json j;
+    j["actor"] = who;
+    j["action"] = action;
+    if (!detail.empty()) {
+        j["detail"] = detail.size() > 200 ? detail.substr(0, 200) + "…" : detail;
+    }
+    bus_.publish("audit", j.dump());
+}
+
+void AdminServer::emitEvent(const std::string& type, const std::string& data_json) {
+    bus_.publish(type, data_json);
 }
 
 void AdminServer::auditEx(const std::string& action, const std::string& target_type,
@@ -479,6 +492,17 @@ void AdminServer::auditEx(const std::string& action, const std::string& target_t
     e.detail = detail;
     e.op_id = op_id;
     audit_.writeEntry(e);
+
+    // 同一条审计也进事件流：AI/页面不需要轮询 /audit 就能看到「谁在做什么」
+    nlohmann::json j;
+    j["actor"] = e.actor;
+    j["action"] = e.action;
+    j["target_type"] = e.target_type;
+    j["target_id"] = e.target_id;
+    j["result"] = e.result;
+    if (!e.detail.empty()) j["detail"] = e.detail;
+    if (!e.op_id.empty()) j["op_id"] = e.op_id;
+    bus_.publish("audit", j.dump());
 }
 
 int AdminServer::kickClients(const std::vector<std::string>& users, long long token_id, const char* reason) {
@@ -788,6 +812,61 @@ int AdminServer::start(const AdminConfig& cfg) {
     spawnWorker([this]() { relaySyncLoop(); });
     // Token 用量：relay 只保留内存计数，这里按周期拉快照落库；
     // 同时取走用量事件（流量增量/会话/在线时长）写入流水与日聚合。
+    // 事件流与分钟级指标：500ms 从 relay 取一次，事件进总线广播，指标写库。
+    // 采样本身是 60s 一条，这里只是把 relay 线程的队列搬进 SQLite/SSE。
+    spawnWorker([this]() {
+        long long last_prune = 0;
+        std::string metric_backlog;   // 写库失败时留着下一轮补写
+        while (!stopping_.load()) {
+            if (waitStop(500)) break;
+            if (relay_ != nullptr && relay_->loop != NULL) {
+                std::string ev = callRelay([this]() { return relay_->takeEvents(); });
+                if (ev.size() > 2 && ev[0] == '[') {
+                    nlohmann::json arr = nlohmann::json::parse(ev, nullptr, false);
+                    if (!arr.is_discarded() && arr.is_array()) {
+                        for (auto& e : arr) {
+                            if (!e.is_object()) continue;
+                            std::string type = e.value("type", std::string());
+                            if (type.empty()) continue;
+                            e.erase("type");
+                            bus_.publish(type, e.dump());
+                        }
+                    }
+                }
+                std::string rows = callRelay([this]() { return relay_->takeMetricSamples(); });
+                if (rows.size() > 2 && rows[0] == '[') {
+                    if (!metric_backlog.empty()) {
+                        // 上一批没写进去：合并后一起写，避免丢点
+                        nlohmann::json a = nlohmann::json::parse(metric_backlog, nullptr, false);
+                        nlohmann::json b = nlohmann::json::parse(rows, nullptr, false);
+                        if (a.is_array() && b.is_array()) {
+                            for (auto& x : b) a.push_back(x);
+                            rows = a.dump();
+                        }
+                        metric_backlog.clear();
+                    }
+                    if (db_.ok()) {
+                        int n = 0;
+                        std::string err;
+                        if (!db_.metricsAppend(rows, n, err)) metric_backlog = rows;
+                    } else {
+                        metric_backlog = rows;
+                    }
+                }
+            }
+            long long now = AdminDb::nowMs();
+            if (last_prune == 0) last_prune = now;
+            if (now - last_prune > 3600LL * 1000) {
+                last_prune = now;
+                int days = settingInt("metrics.retention_days", 7);
+                if (days < 1) days = 1;
+                if (days > 90) days = 90;
+                int n = 0;
+                db_.metricsPrune(now - (long long)days * 86400LL * 1000, n);
+            }
+        }
+    });
+
     spawnWorker([this]() {
         std::string backlog;   // 上次写库失败的事件，下一轮先补写，避免丢账
         while (!stopping_.load()) {
