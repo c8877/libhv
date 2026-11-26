@@ -1355,9 +1355,15 @@ alertCheckDevices / alertCheckCerts / notifyTaskFailed
 
 **前端**：对话里的 action 卡片显示 `风险 n`、完整 argv、状态（待批准/待执行/已执行）、
 批准与执行按钮、执行后的 exit code + stdout/stderr；草稿卡显示拟建的规则并可一键创建。
-**入口在首页**：`components/AiChat.vue` 是唯一实现，概览页用 `compact` 嵌入（固定高度、
-带「全屏」），`/assistant` 用同一组件全屏展示——不再维护两份对话界面。「概览 → AI 诊断」
-直接把巡检问题发给首页的助手（`ref.ask()`），结论就地出现在下方，不用跳页。
+**入口在首页**：`components/AiChat.vue` 是唯一实现。概览页用 `compact` 嵌入；点「全屏」是
+**原地展开**（`expanded` 交给父页面，同一个组件实例，`compact=false`），占满主区但不跳路由，
+所以草稿与当前会话都不会丢。`/assistant` 用同一组件常驻全屏——不再维护两份对话界面。
+
+**消息是页面里的节点，不是内部滚动区**：模板里 `v-for` 直接追加气泡，滚动发生在主区
+`.page`；头部与输入框各自 `position: sticky`（`right/bottom` 吸附），中间内容再长也是整页滚。
+紧凑模式只渲染最近 4 条，更早的给一行「还有 N 条更早的消息，展开查看」，避免仪表盘被聊天记录顶长。
+
+「概览 → AI 诊断」先把页面展开，再把巡检问题交给助手（`ref.ask()`），结论就地追加在下面。
 
 **输入侧防护**：客户端只能传 `user` / `assistant` 消息，`system` 一律丢弃（否则可以覆盖系统提示）；
 `devid` 先过 `ownsDevid`；单条消息 8 KB、上下文 40 条上限；工具结果进上下文前裁到 6 KB。
@@ -1382,7 +1388,8 @@ alertCheckDevices / alertCheckCerts / notifyTaskFailed
 排掉，翻页就漏；带上 `id` 才能稳定分页。
 
 前端在 `AiChat.vue` 里用 `el-drawer`：顶部「历史（n）」入口，列表显示标题、相对时间、条数，
-hover 出「改名/删除」，底部「加载更早的会话」。首页 compact 与全屏页共用同一份实现。
+hover 出「改名/删除」，底部「加载更早的会话」。首页 compact 与全屏页共用同一份实现；
+展开/收起只切 `compact`，不重建组件，所以正在输入的内容与消息列表都保留。
 
 #### 使用指南页
 

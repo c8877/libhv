@@ -34,18 +34,41 @@ const h = require('../lib/harness')
   // 等提示自己消失，否则会挡住后面的点击
   await p.waitForSelector('.el-message', { state: 'detached', timeout: 8000 }).catch(() => {})
 
-  // 全屏入口
+  // 消息区不是内部小滚动条：气泡直接追加在页面里
+  h.check('消息区没有内部滚动容器', (await p.locator('.ai-chat .msgs .el-scrollbar').count()) === 0)
+
+  // 全屏入口：原地展开，不跳路由、不丢会话
   const full = await p.locator('.ai-chat .panel-head button').filter({ hasText: '全屏' }).count()
   h.check('首页助手有全屏入口', full === 1)
+
+  const ta = p.locator('.ai-chat textarea')
+  await ta.fill('未发送的草稿')
   await p.locator('.ai-chat .panel-head button').filter({ hasText: '全屏' }).first()
     .dispatchEvent('click')
   await p.waitForTimeout(800)
-  h.check('全屏进入 AI 助手页', p.url().includes('#/assistant'), p.url())
+  h.check('全屏后仍在首页', !p.url().includes('#/assistant'), p.url())
+  h.check('全屏后占满主区', await p.locator('.ai-chat.full').isVisible())
+  h.check('全屏后统计卡片收起', !(await p.locator('.cards').isVisible()))
+  h.check('展开后草稿还在（同一个组件实例）',
+    (await p.locator('.ai-chat textarea').inputValue()) === '未发送的草稿')
+  const pos = await p.locator('.ai-chat.full .composer')
+    .evaluate((el) => getComputedStyle(el).position)
+  h.check('展开后输入框吸底', pos === 'sticky', pos)
+
+  // 退出全屏：回到仪表盘，草稿和会话都还在
+  await p.locator('.ai-chat .panel-head button').filter({ hasText: '退出全屏' }).first()
+    .dispatchEvent('click')
+  await p.waitForTimeout(700)
+  h.check('退出全屏后卡片回来', await p.locator('.cards').isVisible())
+  h.check('退出全屏后仍是首页', !p.url().includes('#/assistant'), p.url())
+  h.check('退出全屏后草稿还在',
+    (await p.locator('.ai-chat textarea').inputValue()) === '未发送的草稿')
+  await p.locator('.ai-chat textarea').fill('')
 
   // 品牌区回首页：侧栏 logo
   await p.locator('aside.side .logo').dispatchEvent('click')
   await p.waitForTimeout(600)
-  h.check('点侧栏品牌回首页', !p.url().includes('#/assistant'), p.url())
+  h.check('点侧栏品牌回首页', /#\/(overview)?$/.test(p.url()), p.url())
 
   // 手机上品牌在页头
   await p.setViewportSize({ width: 420, height: 820 })

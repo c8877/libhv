@@ -1,7 +1,7 @@
 <template>
-  <div class="panel ai-chat" :class="{ compact }">
+  <div ref="root" class="panel ai-chat" :class="{ compact, full: isFull }">
     <div class="panel-head">
-      <h2 v-if="!compact">AI 助手</h2>
+      <h2 v-if="isFull">AI 助手</h2>
       <span v-else class="mini-title">AI 助手</span>
       <el-tag v-if="cfg" size="small" :type="cfg.ready ? 'success' : 'warning'">
         {{ cfg.ready ? (providerLabel(cfg.provider) + ' · ' + cfg.model) : '未配置' }}
@@ -16,7 +16,8 @@
       </el-select>
       <el-button text @click="openHistory">历史{{ sessions.length ? '（' + sessions.length + '）' : '' }}</el-button>
       <el-button text :disabled="!msgs.length" @click="reset">新对话</el-button>
-      <el-button v-if="compact" text @click="$router.push('/assistant')">全屏</el-button>
+      <el-button v-if="compact" text @click="expand">全屏</el-button>
+      <el-button v-else-if="expanded" text @click="collapse">退出全屏</el-button>
       <el-button text @click="openSetup">模型设置</el-button>
     </div>
 
@@ -31,7 +32,7 @@
       </el-alert>
     </div>
 
-    <el-scrollbar ref="scroller" class="msgs" :height="chatHeight">
+    <div class="msgs">
       <div v-if="!msgs.length" class="empty">
         <div class="empty-title">我可以帮你查这套系统里的实际情况</div>
         <div class="chips">
@@ -43,7 +44,14 @@
         </div>
       </div>
 
-      <div v-for="(m, i) in msgs" :key="i" class="msg" :class="m.role">
+      <!-- 紧凑模式只显示最近几条：老消息在历史里，不在这里挤滚动条 -->
+      <div v-if="hiddenCount > 0" class="more-line">
+        <el-button text size="small" @click="expand">
+          还有 {{ hiddenCount }} 条更早的消息，展开查看
+        </el-button>
+      </div>
+
+      <div v-for="(m, i) in shownMsgs" :key="m._k || i" class="msg" :class="m.role">
         <div class="bubble">
           <MarkdownView v-if="m.role === 'assistant'" :source="m.content" dense />
           <div v-else class="plain">{{ m.content }}</div>
@@ -108,16 +116,23 @@
           <span class="muted">正在查数据…</span>
         </div>
       </div>
-    </el-scrollbar>
+    </div>
 
     <div class="composer">
-      <el-input v-model="input" type="textarea" :rows="compact ? 1 : 2" resize="none" maxlength="2000"
-                :placeholder="devid ? ('问关于 ' + devid + ' 的问题，Enter 发送，Shift+Enter 换行') : '问点什么，Enter 发送，Shift+Enter 换行'"
-                @keydown="onKey" />
-      <el-button type="primary" :loading="busy" :disabled="!canSend" @click="send">发送</el-button>
-    </div>
-    <div v-if="!compact" class="muted foot">
-      回答由模型生成，数据来自本平台的只读接口；涉及变更请走「作业」并走审批。
+      <div class="composer-inner">
+        <el-input v-model="input" type="textarea" :autosize="{ minRows: 1, maxRows: 6 }" resize="none"
+                  maxlength="2000" class="composer-input"
+                  :placeholder="devid ? ('问关于 ' + devid + ' 的问题…') : '问点什么，设备、任务、证书、费用、权限都能查…'"
+                  @keydown="onKey" />
+        <el-button class="send-btn" type="primary" :loading="busy" :disabled="!canSend" @click="send">
+          发送
+        </el-button>
+      </div>
+      <div class="muted compose-hint">
+        Enter 发送 · Shift + Enter 换行
+        <span v-if="isFull" class="spacer" />
+        <span v-if="isFull">回答由模型生成，数据来自本平台；变更请走「作业」并走审批</span>
+      </div>
     </div>
 
     <!-- 历史会话：最近 10 个在前，可继续往前翻；记录永久保留，只能主动删除 -->
@@ -216,11 +231,14 @@ import { ago, time } from '@/shared/utils.js'
 import MarkdownView from '@/components/MarkdownView.vue'
 
 const props = defineProps({
-  // 仪表盘里嵌入时用 compact：固定高度、少一点留白、带“全屏”入口
+  // 仪表盘里嵌入时用 compact：只显示最近几条、带“全屏”入口
   compact: { type: Boolean, default: false },
+  // 仪表盘内原地展开：占满主区，但不跳路由、不丢会话
+  expanded: { type: Boolean, default: false },
   // 从概览“AI 诊断”带过来的初始问题；只有全屏页绑定 query
   bindQuery: { type: Boolean, default: false },
 })
+const emit = defineEmits(['expand', 'collapse'])
 
 const route = useRoute()
 
@@ -239,8 +257,16 @@ const SUGGEST_COMPACT = [
   '这个月大概多少钱？',
 ]
 
-const suggest = computed(() => (props.compact ? SUGGEST_COMPACT : SUGGEST_FULL))
-const chatHeight = computed(() => (props.compact ? '300px' : 'calc(100vh - 320px)'))
+const isFull = computed(() => !props.compact || props.expanded)
+const suggest = computed(() => (isFull.value ? SUGGEST_FULL : SUGGEST_COMPACT))
+
+// 紧凑模式只显示最近 4 条；老消息不在这里挤滚动条，去“历史”或展开看。
+// 展开后所有消息按顺序追加到页面里，由主区（.page）滚动。
+const COMPACT_KEEP = 4
+const shownMsgs = computed(() =>
+  isFull.value ? msgs.value : msgs.value.slice(-COMPACT_KEEP))
+const hiddenCount = computed(() =>
+  isFull.value ? 0 : Math.max(0, msgs.value.length - COMPACT_KEEP))
 
 const cfg = ref(null)
 const devices = ref([])
@@ -255,7 +281,7 @@ const histCursor = ref({ before: 0, before_id: 0 })
 const msgs = ref([])
 const input = ref('')
 const busy = ref(false)
-const scroller = ref(null)
+const root = ref(null)
 const canSend = computed(() => !busy.value && input.value.trim().length > 0 &&
   !!(cfg.value && cfg.value.ready))
 
@@ -377,10 +403,34 @@ function argsText(a) {
   return s.length > 60 ? s.slice(0, 60) + '…' : s
 }
 
-async function scrollBottom() {
+// 页面级滚动：消息是追加到 iflow 里的节点，滚动的是主区 .page，
+// 不是对话内部的小窗口。用户往上翻看历史时不要拽回来。
+async function scrollBottom(force = false) {
   await nextTick()
-  const el = scroller.value && scroller.value.wrapRef
-  if (el) el.scrollTop = el.scrollHeight
+  const el = root.value
+  if (!el) return
+  const box = el.closest('.page')
+  if (!box) return
+  const near = box.scrollHeight - box.scrollTop - box.clientHeight < 220
+  if (force || near) box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' })
+}
+
+function expand() {
+  if (!props.compact) return
+  emit('expand')
+  nextTick(() => {
+    scrollBottom(true)
+    const ta = root.value && root.value.querySelector('textarea')
+    if (ta) ta.focus()
+  })
+}
+
+function collapse() {
+  emit('collapse')
+  nextTick(() => {
+    const box = root.value && root.value.closest('.page')
+    if (box) box.scrollTo({ top: 0, behavior: 'smooth' })
+  })
 }
 
 async function loadCfg() {
@@ -448,7 +498,7 @@ async function openSession(s) {
       return out
     })
     histOpen.value = false
-    scrollBottom()
+    scrollBottom(true)
   } catch (e) {
     ElMessage.error(e.message || '读取会话失败')
   }
@@ -519,7 +569,7 @@ async function send() {
   msgs.value.push({ role: 'user', content: text })
   input.value = ''
   busy.value = true
-  scrollBottom()
+  scrollBottom(true)
   // 只发最近 20 条，避免上下文过长
   const history = msgs.value.slice(-20).map((m) => ({ role: m.role, content: m.content }))
   try {
@@ -547,7 +597,7 @@ async function send() {
     })
   } finally {
     busy.value = false
-    scrollBottom()
+    scrollBottom(true)
     touchSessionLocal()
   }
 }
@@ -662,7 +712,50 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.ai-chat { display: flex; flex-direction: column; }
+.ai-chat { display: flex; flex-direction: column; min-width: 0; }
+
+/* 展开后原地占满主区：不跳路由、不丢会话。头部与输入框吸附，
+   中间的消息按顺序追加到页面里，滚的是主区（.page），不是内部小窗口。 */
+.ai-chat.full {
+  padding: 0;
+  margin-bottom: 0;
+  min-height: calc(100vh - 64px - 2 * var(--page-pad));
+}
+.ai-chat.full .panel-head {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  margin: 0;
+  padding: 12px 18px;
+  background: var(--el-bg-color);
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  border-radius: var(--app-radius) var(--app-radius) 0 0;
+}
+.ai-chat.full .msgs {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 18px 8px;
+}
+/* 消息列居中，和常见聊天页一样；空状态在可用高度里居中 */
+.ai-chat.full .msg { width: 100%; max-width: 880px; margin-left: auto; margin-right: auto; }
+.ai-chat.full .empty { width: 100%; max-width: 780px; margin: auto; }
+.ai-chat.full .composer {
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
+  margin-top: auto;
+  padding: 10px 18px 12px;
+  background: var(--el-bg-color);
+  border-top: 1px solid var(--el-border-color-lighter);
+  border-radius: 0 0 var(--app-radius) var(--app-radius);
+}
+@media (max-width: 599px) {
+  .ai-chat.full { min-height: calc(100vh - 56px - 2 * var(--page-pad)); }
+  .ai-chat.full .panel-head { padding: 10px 12px; }
+  .ai-chat.full .msgs { padding: 12px 12px 6px; }
+  .ai-chat.full .composer { padding: 8px 12px 10px; }
+}
 .mini-title { font-size: 14px; font-weight: 650; }
 .setup { margin: 8px 0 4px; }
 .setup-text { margin: 4px 0 8px; font-size: 12.5px; }
@@ -671,7 +764,8 @@ onMounted(() => {
 .hint code { background: var(--el-fill-color); padding: 1px 4px; border-radius: 3px; }
 .test { margin-top: 4px; font-size: 12.5px; color: var(--el-color-success); word-break: break-all; }
 .test.bad { color: var(--el-color-danger); }
-.msgs { padding: 4px 2px 8px; }
+.msgs { padding: 4px 2px 0; }
+.more-line { display: flex; justify-content: center; padding: 2px 0 6px; }
 .hist { display: flex; flex-direction: column; gap: 6px; min-height: 60px; }
 .hist-empty { padding: 12px 2px; font-size: 12.5px; line-height: 1.7; }
 .hist-item {
@@ -710,18 +804,26 @@ onMounted(() => {
   cursor: pointer;
 }
 .chip:hover { border-color: var(--el-color-primary); color: var(--el-color-primary); }
-.msg { display: flex; margin: 10px 0; }
+.msg { display: flex; margin: 14px 0; }
+.msg:first-child { margin-top: 4px; }
 .msg.user { justify-content: flex-end; }
 .bubble {
-  max-width: 84%;
-  padding: 9px 12px;
-  border-radius: 10px;
+  max-width: 88%;
+  padding: 11px 14px;
+  border-radius: 12px;
   background: var(--el-fill-color-light);
   font-size: 13.5px;
-  line-height: 1.65;
+  line-height: 1.7;
   word-break: break-word;
 }
-.msg.user .bubble { background: var(--el-color-primary-light-9); }
+.msg.assistant .bubble { border: 1px solid var(--el-border-color-lighter); }
+.msg.user .bubble {
+  max-width: 76%;
+  background: var(--el-color-primary-light-8);
+  border: 1px solid var(--el-color-primary-light-7);
+}
+.ai-chat.full .bubble { max-width: min(860px, 92%); }
+.ai-chat.full .msg.user .bubble { max-width: min(680px, 76%); }
 .plain { white-space: pre-wrap; }
 .bubble :deep(.md-code) { margin: 8px 0; }
 .acts { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
@@ -767,7 +869,35 @@ onMounted(() => {
 .dot:nth-child(2) { animation-delay: .2s; }
 .dot:nth-child(3) { animation-delay: .4s; }
 @keyframes blink { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
-.composer { display: flex; gap: 8px; align-items: flex-end; margin-top: 8px; }
-.foot { margin-top: 6px; font-size: 11.5px; }
+.composer { margin-top: 10px; }
+.composer-inner {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 5px 6px 5px 10px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 12px;
+  background: var(--el-bg-color);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.composer-inner:focus-within {
+  border-color: var(--el-color-primary);
+  box-shadow: 0 0 0 3px var(--el-color-primary-light-9);
+}
+.composer-input { flex: 1; min-width: 0; }
+.composer-input :deep(.el-textarea__inner) {
+  box-shadow: none !important;
+  background: transparent;
+  padding: 4px 0;
+  font-size: 13.5px;
+}
+.send-btn { flex: none; }
+.compose-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11.5px;
+}
 .ml6 { margin-left: 6px; }
 </style>
