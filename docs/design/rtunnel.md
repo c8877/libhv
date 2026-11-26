@@ -1245,21 +1245,31 @@ alertCheckDevices / alertCheckCerts / notifyTaskFailed
 前几层把能力做出来了，这一层解决“人怎么用起来”：管理台里有对话入口、模型配置、以及一份
 按顺序走的操作指南。
 
-#### 配置与密钥
+#### 配置与密钥（每个账号一份）
+
+模型配置**按账号隔离**，不是平台全局项：换人登录就是换模型、换密钥。原因很直接——API Key 是
+花钱的凭据，共享一份意味着谁都能用别人的额度，而且一个人改了会立刻影响所有人。
 
 | 项 | 位置 | 说明 |
 |---|---|---|
-| `ai.enabled` / `endpoint` / `model` / `max_tokens` / `temperature` / `timeout_s` / `max_rounds` / `insecure` | `settings` 表（`/api/v1/ai/config`） | 非敏感项，随其它设置一起下发与审计 |
-| API 密钥 | `<admin.db 同目录>/ai.key`（0600） | **不进数据库、不进任何接口响应**；`GET /ai/config` 只回 `key_set` 与路径 |
+| provider / model / endpoint / insecure | `ai_profiles` 表，主键 `subject` | `subject = u-<users.id>`（控制台账号）或 `c-<client_accounts.id>`（接入账号） |
+| API 密钥 | `<admin.db 同目录>/ai/<subject>.key`（0600） | **不进数据库、不进任何接口响应**；表里只存指纹 `key_hint` |
 
+- **只对外暴露三件事**：服务商、模型名、API Key。`max_tokens / temperature / timeout / max_rounds`
+  固定在服务端（2048 / 0.3 / 90s / 4 轮），不再作为配置项——运维问答不需要调这些，
+  摆出来只会让人不知道该填什么
+- 选预置服务商时自动带出默认 endpoint 与模型名；`custom` 才要求手填 `…/v1` 地址。
+  预置：deepseek / moonshot(Kimi) / openai / qwen / zhipu(GLM) / ollama / custom
 - 接口：`GET/PUT /api/v1/ai/config`、`PUT/DELETE /api/v1/ai/key`、`POST /api/v1/ai/chat`、
   `POST /api/v1/ai/test`
-- `ai/test` 用当前配置发一次最小 completion（32 token、无工具），返回 `latency_ms` 与上游
+- 资源键只有 `ai.chat`：能对话，也能配自己那份配置。不再有 `ai.config`
+  （它的语义本来是“改全局配置”，全局配置已经不存在）。接入令牌同样可以用 `ai.chat`，
+  配的是它归属接入账号自己的那份
+- `ai/test` 用当前账号的配置发一次最小 completion（32 token、无工具），返回 `latency_ms` 与上游
   实际返回的 `served_model`，失败时带上游错误原文——运维最常见的问题是 `/v1` 前缀、模型名、
   网关令牌，这些只有把原始错误摊开才查得快
-- 资源键：`ai.chat`（可用助手与测试）、`ai.config`（改配置与密钥）；`ai.config` 属运营商侧，
-  接入令牌不继承（但可以被授予 `ai.chat`，用于客户侧自助问答）
-- 密钥写临时文件再 `rename`，权限 `0600`；审计只记前后各几位
+- 密钥写临时文件再 `rename`，权限 `0600`；审计只记指纹。迁移时旧的全局 `settings.ai.*` 与
+  `ai.config` 资源键会被清理，避免权限页出现“改了没作用”的开关
 
 ```
 浏览器 ──POST /ai/chat {messages, devid}──▶ admin（hv worker）

@@ -210,7 +210,7 @@ bool permIsGlobalKey(const std::string& key) {
         "repo.read", "repo.write", "repo.delete",
         "op.approve",
         "playbook.read", "playbook.write",
-        "ai.chat", "ai.config",
+        "ai.chat",
     };
     for (const char* k : kGlobal)
         if (key == k) return true;
@@ -508,8 +508,7 @@ const PermResDef kPermRes[] = {
     {"op.approve", "运营", "审批操作作业", "批准或拒绝 risk ≥ 2 的设备写操作（不能批自己发起的）"},
     {"playbook.read", "运营", "查看自愈规则", "告警触发的自动应答规则与执行流水"},
     {"playbook.write", "运营", "管理自愈规则", "新建/修改/启停/删除自愈规则并手动触发"},
-    {"ai.chat", "运营", "使用 AI 助手", "在「AI 助手」里与模型对话（只读工具，只能查不能改）"},
-    {"ai.config", "运营", "配置 AI 模型", "设置模型 endpoint/型号/参数与 API 密钥"},
+    {"ai.chat", "运营", "使用 AI 助手", "在「AI 助手」里对话，并配置本人账号的模型与密钥"},
     {"usage.read", "运营", "查看用量", "隧道流量、会话与设备在线用量报表（全局）"},
     {"tenant.read", "运营", "查看租户", "租户列表与设备/账号归属"},
     {"tenant.write", "运营", "管理租户", "新建、改名、启停租户"},

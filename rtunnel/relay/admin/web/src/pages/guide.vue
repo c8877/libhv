@@ -197,19 +197,26 @@ rtunnel-agent --server relay.example.com --port 18443 --devid box-001
     title: '6. 接入大模型',
     blocks: [
       {
-        h: '① 配置模型与密钥',
-        p: '在「系统设置 → AI 模型」直接填接口地址与模型名（如 <code>deepseek-v4.1-flash</code>），' +
-          '保存密钥，然后点<b>测试连接</b>：它用当前配置发一次最小请求，回来说明耗时、实际路由到的模型名，' +
+        h: '① 选服务商、贴 Key',
+        p: '打开「AI 助手」点右上角<b>模型设置</b>：选一家服务商（DeepSeek / Kimi / OpenAI / 通义 / GLM / 本地 Ollama），' +
+          '模型名会自动填好，你只需要贴一个 <b>API Key</b>。用自建网关时在「高级」里填 <code>…/v1</code> 地址和模型名。' +
+          '保存前可以点<b>测试连接</b>：它发一次最小请求，回来说明耗时、实际路由到的模型名，' +
           '或上游的原始错误（<code>/v1</code> 写错、模型名不对、令牌没权限都能看出来）。' +
-          '密钥只写到 relay 本机文件（<code>&lt;admin.db 同目录&gt;/ai.key</code>，0600），不进数据库、不回显。',
-        code: `# 也可以用接口
-curl -k -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \
-  -d '{"endpoint":"https://api.deepseek.com/v1","model":"deepseek-v4.1-flash","enabled":true}' \
+          '<b>配置属于你自己的账号</b>：别人登录看到的是他自己那份，互不影响，也看不到你的密钥。' +
+          '密钥只写到 relay 本机文件（<code>&lt;admin.db 同目录&gt;/ai/&lt;账号&gt;.key</code>，0600），不进数据库、不回显。',
+        code: `# 也可以用接口（令牌属于哪个账号，就配哪个账号）
+curl -k -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\
+  -d '{"provider":"deepseek","model":"deepseek-chat"}' \\
   https://relay:9443/api/v1/ai/config
-curl -k -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \
+curl -k -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\
   -d '{"key":"sk-..."}' https://relay:9443/api/v1/ai/key
-curl -k -X POST -H "Authorization: Bearer $ATK" https://relay:9443/api/v1/ai/test`,
-        links: [{ to: '/settings', label: '去配置' }],
+curl -k -X POST -H "Authorization: Bearer $ATK" https://relay:9443/api/v1/ai/test
+
+# 自建网关：provider 选 custom，地址和模型都自己填
+curl -k -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\
+  -d '{"provider":"custom","endpoint":"https://gw.example.com/v1","model":"deepseek-v4.1-flash"}' \\
+  https://relay:9443/api/v1/ai/config`,
+        links: [{ to: '/assistant', label: '打开 AI 助手' }],
       },
       {
         h: '② 用对话查现状',

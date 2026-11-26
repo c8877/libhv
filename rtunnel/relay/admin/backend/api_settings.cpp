@@ -51,14 +51,6 @@ const Def kDefs[] = {
     {"playbook.enabled",     "1",   0, 1,        "启用自愈",       "",    "自愈", "总开关：关闭后所有规则只记录匹配、不生成作业"},
     {"playbook.auto_apply_max_risk","1",1,3,     "自动执行上限",   "",    "自愈", "命令风险不超过该值才自动执行（1只读 2改状态 3破坏性）；其余进待批"},
     {"playbook.max_per_hour","30",  0, 1000,     "自愈频率上限",   "次/时","自愈", "所有规则合计每小时最多触发次数，0=不限"},
-    {"ai.enabled",           "0",   0, 1,        "启用 AI 助手",   "",    "AI 模型", "关闭后 /ai/chat 返回 503；密钥与模型配置保留"},
-    {"ai.endpoint",          "https://api.deepseek.com/v1", 0, 0, "接口地址", "", "AI 模型", "OpenAI 兼容的 /chat/completions 前缀，如 https://api.openai.com/v1"},
-    {"ai.model",             "deepseek-chat", 0, 0, "模型名称",    "",    "AI 模型", "传给接口的 model 字段，例如 deepseek-chat / gpt-4o-mini / qwen2.5-7b-instruct"},
-    {"ai.max_tokens",        "2048",256, 16384,  "回答上限",       "token","AI 模型", "单次回复的最大 token 数"},
-    {"ai.temperature",       "0.30",0, 2,        "温度",           "",    "AI 模型", "0 更确定、2 更发散；运维问答建议 0.2-0.4"},
-    {"ai.timeout_s",         "60",  5, 300,      "请求超时",       "秒",  "AI 模型", "单次模型调用超时"},
-    {"ai.max_rounds",        "4",   1, 8,        "工具轮次",       "",    "AI 模型", "一次提问内允许的“调工具→再问模型”轮数"},
-    {"ai.insecure",          "0",   0, 1,        "跳过证书校验",   "",    "AI 模型", "仅内网自签证书时开启"},
 };
 
 // 字符串类配置的最大长度（默认 64）

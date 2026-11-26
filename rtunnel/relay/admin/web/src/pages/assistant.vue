@@ -3,10 +3,9 @@
     <div class="panel chat-panel">
       <div class="panel-head">
         <h2>AI 助手</h2>
-        <el-tag v-if="cfg" size="small" :type="cfg.key_set ? 'success' : 'warning'">
-          {{ cfg.model || '未配置' }}
+        <el-tag v-if="cfg" size="small" :type="cfg.ready ? 'success' : 'warning'">
+          {{ cfg.ready ? (providerLabel(cfg.provider) + ' · ' + cfg.model) : '未配置' }}
         </el-tag>
-        <el-tag v-if="cfg && !cfg.enabled" size="small" type="info">已停用</el-tag>
         <span class="spacer" />
         <el-select v-model="devid" clearable filterable placeholder="设备上下文（可选）"
                    style="width: 210px" @change="onDevChange">
@@ -16,19 +15,17 @@
           </el-option>
         </el-select>
         <el-button text :disabled="!msgs.length" @click="reset">新对话</el-button>
-        <el-button v-if="canConfig" text @click="$router.push('/settings')">模型配置</el-button>
+        <el-button text @click="openSetup">模型设置</el-button>
       </div>
 
-      <div v-if="!cfg || !cfg.enabled || !cfg.key_set" class="setup">
+      <div v-if="cfg && !cfg.ready" class="setup">
         <el-alert type="warning" :closable="false" show-icon>
-          <template #title>
-            {{ !cfg ? '读不到模型配置' : (!cfg.enabled ? 'AI 助手已停用' : '还没有配置 API 密钥') }}
-          </template>
+          <template #title>还不能对话：{{ cfg.subject ? '这个账号还没配好模型' : '读不到账号信息' }}</template>
           <div class="setup-text">
-            到「系统设置 → AI 模型」填 endpoint / 模型名，并保存密钥，然后回来提问。
-            <span v-if="!cfg || !cfg.enabled">开关也要打开。</span>
+            选一家服务商、贴一个 API Key 就能用，模型名有默认值。
+            配置只属于你自己的账号，别人登录看到的是他自己那份。
           </div>
-          <el-button v-if="canConfig" size="small" @click="$router.push('/settings')">去配置</el-button>
+          <el-button size="small" type="primary" @click="openSetup">去配置</el-button>
         </el-alert>
       </div>
 
@@ -120,15 +117,75 @@
         回答由模型生成，数据来自本平台的只读接口；涉及变更请走「作业」并走审批。
       </div>
     </div>
+
+    <!-- 模型设置：只填服务商 + 模型 + API Key，其它参数不给用户看 -->
+    <el-dialog v-model="setupDlg" title="模型设置（只影响本账号）" width="560px">
+      <el-form label-width="88px">
+        <el-form-item label="服务商">
+          <el-select v-model="form.provider" style="width: 100%" @change="onProvider">
+            <el-option v-for="p in providers" :key="p.key" :label="p.label" :value="p.key">
+              <span>{{ p.label }}</span>
+              <span v-if="p.model" class="muted opt-model">{{ p.model }}</span>
+            </el-option>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="模型">
+          <el-input v-model="form.model" placeholder="选服务商后自动填默认，可改"
+                    maxlength="128" />
+          <div v-if="providerHint" class="muted hint">{{ providerHint }}</div>
+        </el-form-item>
+        <el-form-item label="API Key">
+          <el-input v-model="form.key" type="password" show-password maxlength="512"
+                    :placeholder="keyPlaceholder" />
+          <div class="muted hint">
+            <template v-if="cfg && cfg.key_set">
+              已保存 {{ cfg.key_hint }}<span v-if="cfg.key_updated_ms">（{{ time(cfg.key_updated_ms) }}）</span>，
+              留空则保持不变。
+            </template>
+            <template v-else>密钥只写入 relay 本机文件，不进数据库、不回显。</template>
+          </div>
+        </el-form-item>
+        <el-form-item label=" ">
+          <el-button text type="primary" @click="showAdv = !showAdv">
+            {{ showAdv ? '收起高级' : '高级（接口地址 / 自签证书）' }}
+          </el-button>
+        </el-form-item>
+        <template v-if="showAdv">
+          <el-form-item label="接口地址">
+            <el-input v-model="form.endpoint" :placeholder="autoEndpoint" maxlength="300" />
+            <div class="muted hint">留空使用服务商默认地址；自建网关填完整的 <code>…/v1</code>。</div>
+          </el-form-item>
+          <el-form-item label="证书">
+            <el-checkbox v-model="form.insecure">跳过 TLS 证书校验（仅内网自签证书）</el-checkbox>
+          </el-form-item>
+        </template>
+      </el-form>
+
+      <div v-if="test" class="test" :class="{ bad: !test.ok }">
+        <template v-if="test.ok">
+          连接正常 · {{ test.latency_ms }}ms · 实际模型 {{ test.served_model || test.model }} ·
+          回复「{{ test.reply }}」
+        </template>
+        <template v-else>{{ test.error }}</template>
+      </div>
+
+      <template #footer>
+        <el-button v-if="cfg && cfg.key_set" text @click="clearKey">清除密钥</el-button>
+        <span class="spacer" />
+        <el-button :loading="testing" @click="testConn">测试连接</el-button>
+        <el-button @click="setupDlg = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveSetup">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Api } from '@/shared/api.js'
-import { can } from '@/shared/store.js'
+import { time } from '@/shared/utils.js'
 
 const route = useRoute()
 
@@ -147,9 +204,120 @@ const msgs = ref([])
 const input = ref('')
 const busy = ref(false)
 const scroller = ref(null)
-const canConfig = computed(() => can('ai.config'))
 const canSend = computed(() => !busy.value && input.value.trim().length > 0 &&
-  cfg.value && cfg.value.enabled && cfg.value.key_set)
+  !!(cfg.value && cfg.value.ready))
+
+// ---------------------------------------------------------------- 模型设置
+// 只暴露三件事：服务商、模型名、API Key。地址与自签证书放在“高级”里，
+// 因为绝大多数人用不上；max_tokens/temperature 之类固定在服务端，不问用户。
+const setupDlg = ref(false)
+const showAdv = ref(false)
+const saving = ref(false)
+const testing = ref(false)
+const test = ref(null)
+const form = reactive({ provider: 'deepseek', model: '', key: '', endpoint: '', insecure: false })
+
+const providers = computed(() => (cfg.value && cfg.value.providers) || [])
+const curProvider = computed(() => providers.value.find((p) => p.key === form.provider) || {})
+const autoEndpoint = computed(() => curProvider.value.endpoint || '完整的 …/v1 地址')
+const providerHint = computed(() => curProvider.value.hint || '')
+
+function providerLabel(key) {
+  const p = providers.value.find((x) => x.key === key)
+  return p ? p.label : (key || '')
+}
+
+const keyPlaceholder = computed(() => {
+  if (cfg.value && cfg.value.key_set) return '已配置，留空则保持不变'
+  if (form.provider === 'ollama') return '本地模型随便填一个，例如 sk-local'
+  return 'sk-… / 网关令牌'
+})
+
+function openSetup() {
+  const c = cfg.value || {}
+  form.provider = c.provider || 'deepseek'
+  form.model = c.model || ''
+  form.key = ''
+  form.endpoint = c.endpoint || ''
+  form.insecure = !!c.insecure
+  // 有配置时高级区默认收起；自定义厂商或地址不是预置值时展开，否则用户看不到地址栏
+  const def = providers.value.find((p) => p.key === form.provider)
+  showAdv.value = form.provider === 'custom' || (!!def && !!def.endpoint && c.endpoint !== def.endpoint)
+  test.value = null
+  setupDlg.value = true
+}
+
+function onProvider() {
+  const p = curProvider.value
+  // 换服务商时把模型名带回默认值，避免留着上一家的模型名
+  form.model = p.model || ''
+  form.endpoint = ''
+  if (p.key === 'custom') showAdv.value = true
+  test.value = null
+}
+
+async function saveSetup() {
+  if (!form.model.trim()) {
+    ElMessage.warning('请填模型名')
+    return
+  }
+  saving.value = true
+  try {
+    const body = { provider: form.provider, model: form.model.trim(), insecure: !!form.insecure }
+    const ep = form.endpoint.trim()
+    const def = curProvider.value
+    if (ep && ep !== def.endpoint) body.endpoint = ep
+    if (form.key.trim()) {
+      await Api.put('/api/v1/ai/key', { key: form.key.trim() })
+      form.key = ''
+    }
+    cfg.value = await Api.put('/api/v1/ai/config', body)
+    test.value = null
+    if (cfg.value.ready) {
+      ElMessage.success('已保存，现在可以对话了')
+      setupDlg.value = false
+    } else {
+      ElMessage.warning('已保存，但还缺 API Key')
+    }
+  } catch (e) {
+    ElMessage.error(e.message || '保存失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+async function testConn() {
+  testing.value = true
+  test.value = null
+  try {
+    // 先用当前表单值落库，测试才有意义（否则测的是旧配置）
+    if (form.key.trim() || form.model.trim()) {
+      const body = { provider: form.provider, model: form.model.trim(), insecure: !!form.insecure }
+      const ep = form.endpoint.trim()
+      if (ep && ep !== curProvider.value.endpoint) body.endpoint = ep
+      if (form.key.trim()) {
+        await Api.put('/api/v1/ai/key', { key: form.key.trim() })
+        form.key = ''
+      }
+      cfg.value = await Api.put('/api/v1/ai/config', body)
+    }
+    test.value = await Api.post('/api/v1/ai/test', {})
+  } catch (e) {
+    test.value = { ok: false, error: e.message || '测试失败' }
+  } finally {
+    testing.value = false
+  }
+}
+
+async function clearKey() {
+  try {
+    cfg.value = await Api.del('/api/v1/ai/key')
+    test.value = null
+    ElMessage.success('密钥已清除')
+  } catch (e) {
+    ElMessage.error(e.message || '清除失败')
+  }
+}
 
 function argsText(a) {
   if (!a || typeof a !== 'object') return ''
@@ -215,8 +383,9 @@ function onKey(e) {
 async function send() {
   const text = input.value.trim()
   if (!text || busy.value) return
-  if (!cfg.value || !cfg.value.enabled || !cfg.value.key_set) {
-    ElMessage.warning('先把模型配置和密钥补全')
+  if (!cfg.value || !cfg.value.ready) {
+    ElMessage.warning('先点「模型设置」选一个服务商并填 API Key')
+    openSetup()
     return
   }
   msgs.value.push({ role: 'user', content: text })
@@ -335,6 +504,11 @@ onMounted(() => {
 .chat-panel { width: 100%; max-width: 980px; display: flex; flex-direction: column; }
 .setup { margin: 8px 0 4px; }
 .setup-text { margin: 4px 0 8px; font-size: 12.5px; }
+.opt-model { float: right; font-size: 12px; }
+.hint { font-size: 12px; line-height: 1.6; }
+.hint code { background: var(--el-fill-color); padding: 1px 4px; border-radius: 3px; }
+.test { margin-top: 4px; font-size: 12.5px; color: var(--el-color-success); word-break: break-all; }
+.test.bad { color: var(--el-color-danger); }
 .msgs { padding: 4px 2px 8px; }
 .empty { padding: 24px 8px; }
 .empty-title { font-size: 15px; margin-bottom: 12px; }

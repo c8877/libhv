@@ -325,10 +325,9 @@ bool permIsOperatorKey(const std::string& k) {
                                     "settings.", "token.", "playbook."};
     for (const char* p : kPrefix)
         if (k.rfind(p, 0) == 0) return true;
-    // 价目、审批、模型密钥是运营方动作：接入令牌可以看本租户费用、也能用只读的 AI 助手，
-    // 但不能改单价、放行设备写操作或更换模型密钥。
-    return k == "system.shutdown" || k == "billing.write" || k == "op.approve" ||
-           k == "ai.config";
+    // 价目与审批是运营方动作：接入令牌可以看本租户费用、也能用自己的 AI 助手
+    // （模型配置按账号隔离，改的是自己的，不影响别人），但不能改单价或放行设备写操作。
+    return k == "system.shutdown" || k == "billing.write" || k == "op.approve";
 }
 }  // namespace
 

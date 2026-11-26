@@ -195,25 +195,25 @@ void AdminServer::registerRoutes() {
     access("device.view", "GET", "/api/v1/operations", &AdminServer::handleOpsList);
 
     // 自愈规则：fires 必须注册在 /:id 之前，否则 "fires" 会被当成 id
-    // AI 助手：配置读、配置写、密钥、对话
+    // AI 助手：配置按账号隔离，改的是自己的，所以只需要 ai.chat（不再有 ai.config）
     access("ai.chat", "GET", "/api/v1/ai/config", &AdminServer::handleAiConfigGet);
     service_.Handle("PUT", "/api/v1/ai/config", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requirePerm(ctx, "ai.config", role);
+        int rc = requirePerm(ctx, "ai.chat", role);
         if (rc) return rc;
         handleAiConfigSet(ctx, role);
         return 200;
     });
     service_.Handle("PUT", "/api/v1/ai/key", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requirePerm(ctx, "ai.config", role);
+        int rc = requirePerm(ctx, "ai.chat", role);
         if (rc) return rc;
         handleAiKeySet(ctx, role);
         return 200;
     });
     service_.Handle("DELETE", "/api/v1/ai/key", [this](const HttpContextPtr& ctx) {
         std::string role;
-        int rc = requirePerm(ctx, "ai.config", role);
+        int rc = requirePerm(ctx, "ai.chat", role);
         if (rc) return rc;
         handleAiKeyClear(ctx, role);
         return 200;

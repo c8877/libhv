@@ -15,6 +15,7 @@
 #include "http/client/HttpClient.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cstdio>
 #include <mutex>
@@ -41,12 +42,32 @@ std::string trimStr(const std::string& s) {
     return s.substr(b, e - b + 1);
 }
 
-// 密钥文件与库同目录：不依赖进程的 prefix，也不会被 --admin-file-dir 暴露
-std::string aiKeyPath(const std::string& db_path) {
+// 每个账号一份配置：控制台账号 u-<users.id>，接入账号 c-<client_accounts.id>。
+// 同一个账号的多个 atk 令牌共享这一份（本来就是同一个人的凭据）。
+std::string aiSubject(const AdminActor& a) {
+    if (a.is_client && a.client_id > 0) return "c-" + std::to_string(a.client_id);
+    if (a.id > 0) return "u-" + std::to_string(a.id);
+    return std::string();
+}
+
+// 密钥文件与库同目录、按主体分文件：不进库，备份库不会带出密钥，
+// 也不会被 --admin-file-dir 暴露给文件管理页
+std::string aiKeyDir(const std::string& db_path) {
     std::string dir = db_path;
     size_t slash = dir.find_last_of('/');
     dir = (slash == std::string::npos) ? std::string(".") : dir.substr(0, slash);
-    return dir + "/ai.key";
+    return dir + "/ai";
+}
+
+std::string aiKeyPath(const std::string& db_path, const std::string& subject) {
+    return aiKeyDir(db_path) + "/" + subject + ".key";
+}
+
+// 目录不存在就建（0700），否则第一次写密钥会失败
+bool ensureKeyDir(const std::string& dir) {
+    if (dir.empty()) return false;
+    if (mkdir(dir.c_str(), 0700) == 0) return true;
+    return errno == EEXIST;
 }
 
 std::string readAiKey(const std::string& path) {
@@ -61,6 +82,11 @@ std::string readAiKey(const std::string& path) {
 
 bool writeAiKey(const std::string& path, const std::string& key, std::string& err) {
     // 先写临时文件再 rename：避免写到一半留下空 key
+    size_t slash = path.find_last_of('/');
+    if (slash != std::string::npos && !ensureKeyDir(path.substr(0, slash))) {
+        err = "无法创建密钥目录";
+        return false;
+    }
     std::string tmp = path + ".tmp";
     mode_t old = umask(0077);
     FILE* f = fopen(tmp.c_str(), "w");
@@ -83,9 +109,109 @@ bool writeAiKey(const std::string& path, const std::string& key, std::string& er
 
 bool aiCan(const AiActor& a, const char* key) {
     if (a.super) return true;
-    // 接入令牌可用只读助手（工具内部仍按它自己的设备范围收窄），但不能改模型配置
-    if (a.is_client && std::string(key) == "ai.config") return false;
     return a.perms.count(key) > 0;
+}
+
+// ---------------------------------------------------------------- 账号配置
+
+// 预置厂商：用户只需要选一家、填 key；模型名有默认值，想换随手改。
+// endpoint 留空表示由 provider 决定，避免把网关地址写两遍。
+struct ProviderDef {
+    const char* key;
+    const char* label;
+    const char* endpoint;
+    const char* model;
+    const char* hint;
+};
+
+const ProviderDef kProviders[] = {
+    {"deepseek", "DeepSeek", "https://api.deepseek.com/v1", "deepseek-chat",
+     "官方直连；模型可填 deepseek-chat / deepseek-reasoner"},
+    {"moonshot", "Kimi（月之暗面）", "https://api.moonshot.cn/v1", "moonshot-v1-8k",
+     "每月有免费额度，长文本便宜"},
+    {"openai", "OpenAI", "https://api.openai.com/v1", "gpt-4o-mini", "需要可访问 api.openai.com"},
+    {"qwen", "通义千问", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus",
+     "阿里云百炼的 OpenAI 兼容地址"},
+    {"zhipu", "智谱 GLM", "https://open.bigmodel.cn/api/paas/v4", "glm-4-flash",
+     "glm-4-flash 免费，适合日常问答"},
+    {"ollama", "本地 Ollama", "http://127.0.0.1:11434/v1", "qwen2.5:7b",
+     "本机/内网跑模型，密钥随便填一个非空值"},
+    {"custom", "自定义 / 网关", "", "", "填完整的 .../v1 地址和模型名（如 deepseek-v4.1-flash）"},
+};
+
+const ProviderDef* findProvider(const std::string& key) {
+    for (const auto& p : kProviders)
+        if (key == p.key) return &p;
+    return nullptr;
+}
+
+json providerCatalog() {
+    json arr = json::array();
+    for (const auto& p : kProviders) {
+        json o;
+        o["key"] = p.key;
+        o["label"] = p.label;
+        o["endpoint"] = p.endpoint;
+        o["model"] = p.model;
+        o["hint"] = p.hint;
+        arr.push_back(o);
+    }
+    return arr;
+}
+
+struct AiProfile {
+    std::string provider = "deepseek";
+    std::string endpoint;
+    std::string model;
+    std::string key;
+    std::string key_hint;
+    long long   key_updated_ms = 0;
+    bool        key_set = false;
+    bool        insecure = false;
+    bool        saved = false;
+
+    // 三项齐了才算可用；缺哪项由调用方给具体提示
+    bool ready() const { return !endpoint.empty() && !model.empty() && key_set; }
+
+    // 缺什么就说缺什么，不要笼统地报“配置不完整”
+    std::string missing() const {
+        if (endpoint.empty()) return "还没配置模型：请在「AI 助手 → 模型设置」里选一家服务商";
+        if (model.empty()) return "还没填模型名：请在「AI 助手 → 模型设置」里补上";
+        if (!key_set) return "还没填 API Key：请在「AI 助手 → 模型设置」里保存密钥";
+        return std::string();
+    }
+};
+
+AiProfile loadAiProfile(AdminDb& db, const std::string& db_path, const std::string& subject) {
+    AiProfile p;
+    if (subject.empty()) return p;
+    std::string js;
+    if (!db.aiProfileGet(subject, js)) return p;
+    json j = json::parse(js, nullptr, false);
+    if (j.is_discarded() || !j.is_object()) return p;
+    p.saved = j.value("saved", false);
+    p.provider = j.value("provider", std::string("deepseek"));
+    p.endpoint = j.value("endpoint", std::string());
+    p.model = j.value("model", std::string());
+    p.key_hint = j.value("key_hint", std::string());
+    p.key_updated_ms = j.value("key_updated_ms", (long long)0);
+    if (j.contains("advanced") && j["advanced"].is_object())
+        p.insecure = j["advanced"].value("insecure", false);
+
+    std::string kp = aiKeyPath(db_path, subject);
+    p.key = readAiKey(kp);
+    p.key_set = !p.key.empty();
+    if (p.key_set && p.key_updated_ms == 0) {
+        struct stat st;
+        if (stat(kp.c_str(), &st) == 0) p.key_updated_ms = (long long)st.st_mtime * 1000;
+    }
+    return p;
+}
+
+// 密钥指纹：只留前 3 后 4，够本人确认是哪把，不至于泄露
+std::string keyHint(const std::string& key) {
+    if (key.size() <= 8) return std::string("已配置");
+    return key.substr(0, 3) + "…" + key.substr(key.size() - 4);
 }
 
 std::string joinPath(const std::string& base, const char* tail) {
@@ -192,81 +318,102 @@ std::string clampResult(const std::string& s) {
 // ---------------------------------------------------------------- 配置接口
 
 void AdminServer::handleAiConfigGet(const HttpContextPtr& ctx) {
-    std::string kp = aiKeyPath(cfg_.db_path);
-    struct stat st;
-    bool key_set = (stat(kp.c_str(), &st) == 0 && st.st_size > 0);
+    std::string subject = aiSubject(currentActor());
+    AiProfile p = loadAiProfile(db_, cfg_.db_path, subject);
     json j;
-    j["enabled"] = settingInt("ai.enabled", 0) != 0;
-    j["endpoint"] = settingStr("ai.endpoint", "https://api.deepseek.com/v1");
-    j["model"] = settingStr("ai.model", "deepseek-chat");
-    j["max_tokens"] = settingInt("ai.max_tokens", 2048);
-    j["temperature"] = atof(settingStr("ai.temperature", "0.3").c_str());
-    j["timeout_s"] = settingInt("ai.timeout_s", 60);
-    j["max_rounds"] = settingInt("ai.max_rounds", kDefaultMaxRounds);
-    j["insecure"] = settingInt("ai.insecure", 0) != 0;
-    j["key_set"] = key_set;
-    j["key_updated_ms"] = key_set ? (long long)st.st_mtime * 1000 : 0;
-    j["key_path"] = kp;   // 只回路径，不回内容
+    j["subject"] = subject;
+    j["saved"] = p.saved;
+    j["provider"] = p.provider;
+    j["endpoint"] = p.endpoint;
+    j["model"] = p.model;
+    j["key_set"] = p.key_set;
+    j["key_hint"] = p.key_hint;
+    j["key_updated_ms"] = p.key_updated_ms;
+    j["insecure"] = p.insecure;
+    // 前端只需要知道“能不能直接用”，不用自己拼判断
+    j["ready"] = p.ready();
+    j["providers"] = providerCatalog();
     j["tools"] = (int)toolDefs().size();
     ctx->send(j.dump());
 }
 
+// 只接受三件事：provider、model、可选的 endpoint 覆盖（自定义/网关时需要）。
+// max_tokens/temperature/timeout 之类不再暴露：运维答问题用默认值足够，
+// 暴露出来只会让人不知道该填什么。
 void AdminServer::handleAiConfigSet(const HttpContextPtr& ctx, const std::string& role) {
+    std::string subject = aiSubject(currentActor());
+    if (subject.empty()) {
+        apiError(ctx, HTTP_STATUS_UNAUTHORIZED, "请先登录管理台再配置模型");
+        return;
+    }
     json req = json::parse(ctx->body(), nullptr, false);
     if (req.is_discarded() || !req.is_object()) {
         apiBad(ctx, "bad json");
         return;
     }
-    if (req.contains("endpoint")) {
-        std::string ep = trimStr(req.value("endpoint", std::string()));
-        if (!ep.empty() && ep.rfind("http://", 0) != 0 && ep.rfind("https://", 0) != 0) {
-            apiBad(ctx, "endpoint 必须以 http:// 或 https:// 开头");
-            return;
-        }
-        if (!setSettingCached("ai.endpoint", ep, role)) {
-            apiBad(ctx, "db error");
-            return;
-        }
+    AiProfile cur = loadAiProfile(db_, cfg_.db_path, subject);
+    std::string provider = trimStr(req.value("provider", cur.provider));
+    if (provider.empty()) provider = "deepseek";
+    const ProviderDef* def = findProvider(provider);
+    if (def == nullptr) {
+        apiBad(ctx, "未知的 provider: " + provider);
+        return;
     }
-    if (req.contains("model")) {
-        std::string m = trimStr(req.value("model", std::string()));
-        if (m.size() > 128) {
-            apiBad(ctx, "model 过长");
-            return;
-        }
-        setSettingCached("ai.model", m, role);
+
+    std::string endpoint = req.contains("endpoint") && req["endpoint"].is_string()
+                               ? trimStr(req["endpoint"].get<std::string>())
+                               : cur.endpoint;
+    // 换厂商时没给地址：用该厂商的预置地址
+    if (endpoint.empty() || (provider != cur.provider && !req.contains("endpoint")))
+        endpoint = def->endpoint;
+    if (endpoint.empty()) {
+        apiBad(ctx, "自定义厂商需要填写接口地址（…/v1）");
+        return;
     }
-    auto setNum = [&](const char* key, int lo, int hi) {
-        if (!req.contains(key) || !req[key].is_number()) return;
-        int v = req[key].get<int>();
-        if (v < lo) v = lo;
-        if (v > hi) v = hi;
-        setSettingCached(key, std::to_string(v), role);
-    };
-    setNum("max_tokens", 128, 16384);
-    setNum("timeout_s", 5, 300);
-    setNum("max_rounds", 1, 8);
-    if (req.contains("temperature") && req["temperature"].is_number()) {
-        double t = req["temperature"].get<double>();
-        if (t < 0) t = 0;
-        if (t > 2) t = 2;
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%.2f", t);
-        setSettingCached("ai.temperature", buf, role);
+    if (endpoint.rfind("http://", 0) != 0 && endpoint.rfind("https://", 0) != 0) {
+        apiBad(ctx, "接口地址必须以 http:// 或 https:// 开头");
+        return;
     }
-    if (req.contains("enabled")) {
-        setSettingCached("ai.enabled", req["enabled"].is_boolean() && req["enabled"].get<bool>() ? "1" : "0",
-                       role);
+    if (endpoint.size() > 300) {
+        apiBad(ctx, "接口地址过长");
+        return;
     }
-    if (req.contains("insecure")) {
-        setSettingCached("ai.insecure",
-                       req["insecure"].is_boolean() && req["insecure"].get<bool>() ? "1" : "0", role);
+
+    std::string model = req.contains("model") && req["model"].is_string()
+                            ? trimStr(req["model"].get<std::string>())
+                            : cur.model;
+    if (model.empty() || (provider != cur.provider && !req.contains("model")))
+        model = def->model;
+    if (model.empty()) {
+        apiBad(ctx, "请填写模型名");
+        return;
     }
-    auditEx("ai.config", "ai", "", "ok", "更新模型配置");
+    if (model.size() > 128) {
+        apiBad(ctx, "模型名过长");
+        return;
+    }
+
+    json adv = json::object();
+    bool insecure = req.contains("insecure") && req["insecure"].is_boolean()
+                        ? req["insecure"].get<bool>()
+                        : cur.insecure;
+    if (insecure) adv["insecure"] = true;
+
+    std::string err;
+    if (!db_.aiProfileSave(subject, provider, endpoint, model, adv.dump(), err)) {
+        apiError(ctx, HTTP_STATUS_INTERNAL_SERVER_ERROR, err.empty() ? "db error" : err);
+        return;
+    }
+    auditEx("ai.profile", "ai", subject, "ok", provider + " / " + model);
     handleAiConfigGet(ctx);
 }
 
 void AdminServer::handleAiKeySet(const HttpContextPtr& ctx, const std::string& role) {
+    std::string subject = aiSubject(currentActor());
+    if (subject.empty()) {
+        apiError(ctx, HTTP_STATUS_UNAUTHORIZED, "请先登录管理台再配置模型");
+        return;
+    }
     json req = json::parse(ctx->body(), nullptr, false);
     if (req.is_discarded() || !req.is_object()) {
         apiBad(ctx, "bad json");
@@ -274,33 +421,48 @@ void AdminServer::handleAiKeySet(const HttpContextPtr& ctx, const std::string& r
     }
     std::string key = trimStr(req.value("key", std::string()));
     if (key.empty()) {
-        apiBad(ctx, "key 不能为空");
+        apiBad(ctx, "API Key 不能为空");
         return;
     }
     if (key.size() > 512) {
-        apiBad(ctx, "key 过长");
+        apiBad(ctx, "API Key 过长");
+        return;
+    }
+    if (key.find_first_of(" \t\r\n") != std::string::npos) {
+        apiBad(ctx, "API Key 里不能有空格或换行，请检查是否多粘了内容");
         return;
     }
     std::string err;
-    std::string kp = aiKeyPath(cfg_.db_path);
+    std::string kp = aiKeyPath(cfg_.db_path, subject);
     if (!writeAiKey(kp, key, err)) {
         apiError(ctx, HTTP_STATUS_INTERNAL_SERVER_ERROR, err);
         return;
     }
-    // 审计只记长度与指纹，不记内容
-    std::string hint = key.substr(0, 3) + "…" + key.substr(key.size() > 4 ? key.size() - 4 : 0);
-    auditEx("ai.key.set", "ai", "", "ok", "更新模型密钥 " + hint);
+    long long now = AdminDb::nowMs();
+    std::string hint = keyHint(key);
+    if (!db_.aiProfileSetKey(subject, hint, now, err)) {
+        apiError(ctx, HTTP_STATUS_INTERNAL_SERVER_ERROR, err.empty() ? "db error" : err);
+        return;
+    }
+    // 审计只记指纹，不记内容
+    auditEx("ai.key.set", "ai", subject, "ok", "更新模型密钥 " + hint);
     handleAiConfigGet(ctx);
 }
 
 void AdminServer::handleAiKeyClear(const HttpContextPtr& ctx, const std::string& role) {
+    std::string subject = aiSubject(currentActor());
+    if (subject.empty()) {
+        apiError(ctx, HTTP_STATUS_UNAUTHORIZED, "请先登录管理台再配置模型");
+        return;
+    }
     std::string err;
-    std::string kp = aiKeyPath(cfg_.db_path);
+    std::string kp = aiKeyPath(cfg_.db_path, subject);
     if (!writeAiKey(kp, std::string(), err)) {
         apiError(ctx, HTTP_STATUS_INTERNAL_SERVER_ERROR, err);
         return;
     }
-    auditEx("ai.key.clear", "ai", "", "ok", "清除模型密钥");
+    db_.aiProfileSetKey(subject, std::string(), 0, err);
+    auditEx("ai.key.clear", "ai", subject, "ok", "清除模型密钥");
     handleAiConfigGet(ctx);
 }
 
@@ -701,19 +863,16 @@ static bool aiCallModel(const std::string& endpoint, const std::string& key, con
 }
 
 void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& role) {
-    if (settingInt("ai.enabled", 0) == 0) {
-        apiError(ctx, HTTP_STATUS_SERVICE_UNAVAILABLE, "AI 助手未启用，请先在「系统设置 → AI 模型」开启");
+    // 每个账号用自己的配置：换人登录就是换模型/换密钥，不共享
+    std::string subject = aiSubject(currentActor());
+    AiProfile prof = loadAiProfile(db_, cfg_.db_path, subject);
+    if (!prof.ready()) {
+        apiError(ctx, HTTP_STATUS_SERVICE_UNAVAILABLE, prof.missing());
         return;
     }
-    std::string endpoint = trimStr(settingStr("ai.endpoint", ""));
-    std::string model = trimStr(settingStr("ai.model", ""));
-    std::string kp = aiKeyPath(cfg_.db_path);
-    std::string key = readAiKey(kp);
-    if (endpoint.empty() || model.empty() || key.empty()) {
-        apiError(ctx, HTTP_STATUS_SERVICE_UNAVAILABLE,
-                 "模型配置不完整（endpoint / model / key），请先到「系统设置 → AI 模型」补全");
-        return;
-    }
+    std::string endpoint = prof.endpoint;
+    std::string model = prof.model;
+    std::string key = prof.key;
 
     json req = json::parse(ctx->body(), nullptr, false);
     if (req.is_discarded() || !req.is_object() || !req.contains("messages") ||
@@ -760,13 +919,12 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
         return;
     }
 
-    int max_tokens = settingInt("ai.max_tokens", 2048);
-    int timeout_s = settingInt("ai.timeout_s", 60);
-    int max_rounds = settingInt("ai.max_rounds", kDefaultMaxRounds);
-    if (max_rounds < 1) max_rounds = 1;
-    if (max_rounds > 8) max_rounds = 8;
-    bool insecure = settingInt("ai.insecure", 0) != 0;
-    double temperature = atof(settingStr("ai.temperature", "0.3").c_str());
+    // 参数固定成一组对运维问答合适的值：这些不是给用户调的东西
+    int max_tokens = 2048;
+    int timeout_s = 90;
+    int max_rounds = kDefaultMaxRounds;
+    bool insecure = prof.insecure;
+    double temperature = 0.3;
 
     std::thread([this, ctx, msgs, endpoint, model, key, max_tokens, timeout_s, max_rounds,
                  temperature, insecure, devid, actor]() {
@@ -923,17 +1081,18 @@ void AdminServer::handleAiChat(const HttpContextPtr& ctx, const std::string& rol
 // 运维最容易出问题的是 endpoint 多了/少了 /v1、模型名写错、密钥没权限，
 // 这里把真实错误原文回给页面，比让人猜日志快。
 void AdminServer::handleAiTest(const HttpContextPtr& ctx) {
-    std::string endpoint = trimStr(settingStr("ai.endpoint", ""));
-    std::string model = trimStr(settingStr("ai.model", ""));
-    std::string key = readAiKey(aiKeyPath(cfg_.db_path));
-    if (endpoint.empty() || model.empty() || key.empty()) {
-        apiError(ctx, HTTP_STATUS_SERVICE_UNAVAILABLE,
-                 "模型配置不完整（endpoint / model / key），请先补全");
+    std::string subject = aiSubject(currentActor());
+    AiProfile prof = loadAiProfile(db_, cfg_.db_path, subject);
+    if (!prof.ready()) {
+        apiError(ctx, HTTP_STATUS_SERVICE_UNAVAILABLE, prof.missing());
         return;
     }
-    bool insecure = settingInt("ai.insecure", 0) != 0;
-    int timeout_s = settingInt("ai.timeout_s", 60);
-    std::thread([this, ctx, endpoint, model, key, insecure, timeout_s]() {
+    std::string endpoint = prof.endpoint;
+    std::string model = prof.model;
+    std::string key = prof.key;
+    bool insecure = prof.insecure;
+    int timeout_s = 90;
+    std::thread([this, ctx, endpoint, model, key, insecure, timeout_s, prof]() {
         json messages = json::array();
         json m;
         m["role"] = "user";
@@ -949,6 +1108,7 @@ void AdminServer::handleAiTest(const HttpContextPtr& ctx) {
                            .count();
         json resp;
         resp["ok"] = ok;
+        resp["provider"] = prof.provider;
         resp["endpoint"] = endpoint;
         resp["model"] = model;
         resp["latency_ms"] = ms;

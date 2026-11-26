@@ -274,6 +274,14 @@ public:
                                    std::string& json_out, std::string& err);
     bool billingStatementCsv(long long id, std::string& csv_out, std::string& err);
 
+    // 账号级模型配置（每个账号一份，密钥本体在文件里，这里只存指纹）
+    bool aiProfileGet(const std::string& subject, std::string& json_out);
+    bool aiProfileSave(const std::string& subject, const std::string& provider,
+                       const std::string& endpoint, const std::string& model,
+                       const std::string& advanced, std::string& err);
+    bool aiProfileSetKey(const std::string& subject, const std::string& hint, long long updated_ms,
+                         std::string& err);
+
     // 自愈规则（playbook）：告警匹配后生成 operation
     bool playbookList(std::string& json_out);
     bool playbookGet(long long id, std::string& json_out);

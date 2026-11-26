@@ -505,6 +505,17 @@ bool AdminDb::migrate(std::string& err) {
         " created_ms INTEGER NOT NULL,"
         " updated_ms INTEGER NOT NULL);"
         "CREATE INDEX IF NOT EXISTS idx_playbooks_event ON playbooks(event,enabled);"
+        // 每个账号自己的模型配置：provider + model + key 指纹（密钥本体在
+        // <db 同目录>/ai/<subject>.key，0600，不入库）。subject = u-<users.id> / c-<client_accounts.id>
+        "CREATE TABLE IF NOT EXISTS ai_profiles("
+        " subject TEXT PRIMARY KEY,"
+        " provider TEXT NOT NULL DEFAULT 'deepseek',"
+        " endpoint TEXT NOT NULL DEFAULT '',"
+        " model TEXT NOT NULL DEFAULT '',"
+        " key_hint TEXT NOT NULL DEFAULT '',"
+        " key_updated_ms INTEGER NOT NULL DEFAULT 0,"
+        " advanced TEXT NOT NULL DEFAULT '',"
+        " updated_ms INTEGER NOT NULL DEFAULT 0);"
         // relay 地址字典 + 有序下发列表 + 同步任务（逐设备行复用 distribution_tasks）
         "CREATE TABLE IF NOT EXISTS relay_dict("
         " id INTEGER PRIMARY KEY AUTOINCREMENT,"
@@ -661,6 +672,11 @@ bool AdminDb::migrate(std::string& err) {
             return false;
         exec("CREATE INDEX IF NOT EXISTS idx_operations_status ON operations(status,risk)", err);
     }
+    // 模型配置改成按账号隔离：旧的全局 ai.* 设置与 ai.config 资源键不再有读取方，
+    // 留着只会让权限页出现一个改了没任何作用的开关
+    exec("DELETE FROM settings WHERE key LIKE 'ai.%'", err);
+    exec("DELETE FROM perm_group_resources WHERE resource_key='ai.config'", err);
+    exec("DELETE FROM perm_resources WHERE key='ai.config'", err);
     return true;
 }
 

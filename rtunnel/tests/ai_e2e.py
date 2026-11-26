@@ -8,8 +8,10 @@
   - 上游 4xx 与连不上都转成 502 且文案可读
 """
 
+import http.cookiejar
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -134,6 +136,18 @@ class FakeModel(BaseHTTPRequestHandler):
 
 
 # ---------------------------------------------------------------- 辅助
+def login(base, user, password):
+    """另一个管理台会话：用来验证配置按账号隔离。"""
+    jar = http.cookiejar.CookieJar()
+    op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    req = urllib.request.Request(base + "/api/v1/login",
+                                 data=json.dumps({"username": user, "password": password}).encode(),
+                                 method="POST")
+    req.add_header("Content-Type", "application/json")
+    op.open(req, timeout=5).read()
+    return op
+
+
 def call_json(op, base, path, body=None, method="POST", headers=None):
     data = None if body is None else json.dumps(body).encode()
     req = urllib.request.Request(base + path, data=data, method=method)
@@ -174,6 +188,8 @@ def main():
             os.remove(os.path.join(LOG, n))
         except OSError:
             pass
+    # 密钥按账号分文件，整个目录也要清掉，否则上次运行留下的 key 会让“未配置”断言失败
+    shutil.rmtree(os.path.join(LOG, "ai"), ignore_errors=True)
 
     model_port = e2e.free_port()
     model = ThreadingHTTPServer(("127.0.0.1", model_port), FakeModel)
@@ -196,50 +212,71 @@ def main():
         adm, call = e2e.admin_client(base)
         atk = call("POST", "/api/v1/admin-tokens", {"name": "ai-test"})["token"]
 
-        # 1) 默认未启用
+        # 1) 默认没配：助手直接告诉你去配，而不是笼统报错
         code, r = call_json(adm, base, "/api/v1/ai/chat", {"messages": [{"role": "user", "content": "hi"}]})
-        e2e.check("ai: 默认未启用返回 503", code == 503 and "未启用" in r.get("error", ""),
+        e2e.check("ai: 未配置返回 503 并提示去配置",
+                  code == 503 and "还没配置模型" in r.get("error", ""),
                   "code=%d r=%s" % (code, r))
 
         code, cfg = call_json(adm, base, "/api/v1/ai/config", None, method="GET")
-        e2e.check("ai: 读到默认配置", code == 200 and cfg.get("model") and cfg.get("key_set") is False,
+        e2e.check("ai: 配置按账号返回", code == 200 and cfg.get("subject", "").startswith("u-"),
                   str(cfg)[:160])
-        e2e.check("ai: 配置不回密钥内容", "key" not in cfg or isinstance(cfg.get("key"), bool),
-                  str(cfg.keys()))
+        e2e.check("ai: 默认 DeepSeek 与未配置状态",
+                  cfg.get("provider") == "deepseek" and cfg.get("ready") is False and
+                  cfg.get("key_set") is False, str(cfg)[:200])
+        e2e.check("ai: 预置厂商清单完整",
+                  len(cfg.get("providers") or []) >= 6 and
+                  {"deepseek", "moonshot", "openai", "qwen", "zhipu", "ollama", "custom"} <=
+                  {p["key"] for p in cfg.get("providers", [])},
+                  str([p.get("key") for p in cfg.get("providers", [])]))
+        e2e.check("ai: 配置不回密钥内容", "key" not in cfg, str(cfg.keys()))
 
-        # 2) endpoint 校验
-        code, r = call_json(adm, base, "/api/v1/ai/config", {"endpoint": "ftp://x"}, method="PUT")
+        # 2) 地址校验：自定义厂商必须给合法地址
+        code, r = call_json(adm, base, "/api/v1/ai/config",
+                            {"provider": "custom", "endpoint": "ftp://x", "model": "m"}, method="PUT")
         e2e.check("ai: 非法 endpoint 被拒", code == 400, "code=%d r=%s" % (code, r))
+        code, r = call_json(adm, base, "/api/v1/ai/config",
+                            {"provider": "custom", "model": "m"}, method="PUT")
+        e2e.check("ai: 自定义厂商缺地址被拒", code == 400, "code=%d r=%s" % (code, r))
+        code, r = call_json(adm, base, "/api/v1/ai/config", {"provider": "nope"}, method="PUT")
+        e2e.check("ai: 未知服务商被拒", code == 400, "code=%d r=%s" % (code, r))
 
+        # 3) 选预置厂商时地址和模型自动带出来，不用手填
+        code, cfg = call_json(adm, base, "/api/v1/ai/config", {"provider": "moonshot"}, method="PUT")
+        e2e.check("ai: 选厂商自动带默认模型与地址",
+                  code == 200 and cfg.get("model") == "moonshot-v1-8k" and
+                  cfg.get("endpoint") == "https://api.moonshot.cn/v1", str(cfg)[:200])
+
+        # 4) 切到本地假模型
         code, cfg = call_json(adm, base, "/api/v1/ai/config", {
-            "endpoint": "http://127.0.0.1:%d/v1" % model_port,
-            "model": "fake-model", "max_rounds": 3, "max_tokens": 512, "temperature": 0.2,
+            "provider": "custom", "endpoint": "http://127.0.0.1:%d/v1" % model_port,
+            "model": "fake-model",
         }, method="PUT")
         e2e.check("ai: 保存配置", code == 200 and cfg.get("model") == "fake-model",
                   "code=%d" % code)
+        e2e.check("ai: 没密钥时 ready 为假", cfg.get("ready") is False, str(cfg)[:160])
 
-        # 3) 有配置但没 key
+        # 5) 有配置但没 key
         code, r = call_json(adm, base, "/api/v1/ai/chat", {"messages": [{"role": "user", "content": "hello"}]})
-        msg = r.get("error", "")
-        e2e.check("ai: 缺密钥返回 503", code == 503 and ("密钥" in msg or "未启用" in msg or "配置不完整" in msg),
-                  "code=%d r=%s" % (code, r))
+        e2e.check("ai: 缺密钥返回 503 且指出缺 key",
+                  code == 503 and "API Key" in r.get("error", ""), "code=%d r=%s" % (code, r))
 
-        # 4) 写 key
+        # 6) 写 key：按账号一个文件
         code, cfg = call_json(adm, base, "/api/v1/ai/key", {"key": "sk-test-1234567890"}, method="PUT")
         e2e.check("ai: 保存密钥", code == 200 and cfg.get("key_set") is True, "code=%d" % code)
-        kp = os.path.join(LOG, "ai.key")
+        e2e.check("ai: 保存后 ready", cfg.get("ready") is True, str(cfg)[:160])
+        kp = os.path.join(LOG, "ai", cfg.get("subject", "u-1") + ".key")
         mode = stat.S_IMODE(os.stat(kp).st_mode) if os.path.exists(kp) else 0
-        e2e.check("ai: 密钥文件权限 0600", mode == 0o600, "mode=%o" % mode)
+        e2e.check("ai: 密钥文件按账号隔离且 0600", mode == 0o600, "path=%s mode=%o" % (kp, mode))
         e2e.check("ai: 密钥内容正确", open(kp).read().strip() == "sk-test-1234567890", "")
         e2e.check("ai: 响应不带密钥", "sk-test" not in json.dumps(cfg), "")
+        e2e.check("ai: 只回指纹", cfg.get("key_hint") == "sk-…7890", str(cfg.get("key_hint")))
 
-        # 5) 未启用仍拒绝（enabled 还是 0）
-        code, r = call_json(adm, base, "/api/v1/ai/chat", {"messages": [{"role": "user", "content": "hello"}]})
-        e2e.check("ai: 关着开关仍 503", code == 503, "code=%d" % code)
+        # 6b) 空白/非法 key 直接拒
+        code, r = call_json(adm, base, "/api/v1/ai/key", {"key": "  sk a  "}, method="PUT")
+        e2e.check("ai: 含空白的 key 被拒", code == 400, "code=%d" % code)
 
-        call_json(adm, base, "/api/v1/ai/config", {"enabled": True}, method="PUT")
-
-        # 6) 普通问答
+        # 7) 普通问答
         code, r = call_json(adm, base, "/api/v1/ai/chat",
                             {"messages": [{"role": "user", "content": "hello"}]})
         e2e.check("ai: 普通问答", code == 200 and r.get("reply") == "hi", "code=%d r=%s" % (code, r))
@@ -296,6 +333,13 @@ def main():
         })
         rtk_scoped = call("POST", "/api/v1/client-accounts/%d/tokens" % scoped["id"],
                           {"name": "e2e"})["token"]
+        # 配置也按账号隔离：接入账号要用助手，得给自己这份配置填 key
+        code, _ = bearer(base, "/api/v1/ai/config", rtk_scoped,
+                         {"provider": "custom", "endpoint": "http://127.0.0.1:%d/v1" % model_port,
+                          "model": "fake-model"}, method="PUT")
+        e2e.check("ai: 接入账号可配自己的模型", code == 200, "code=%d" % code)
+        code, _ = bearer(base, "/api/v1/ai/key", rtk_scoped, {"key": "sk-scoped-0001"}, method="PUT")
+        e2e.check("ai: 接入账号可存自己的密钥", code == 200, "code=%d" % code)
         code, r = bearer(base, "/api/v1/ai/chat", rtk_scoped,
                          {"messages": [{"role": "user", "content": "dev2 详情"}]})
         tools = r.get("tools") or []
@@ -412,19 +456,41 @@ def main():
         e2e.check("ai: 草稿可落成停用规则", rule.get("id") and rule.get("enabled") is False,
                   str(rule)[:140])
 
-        # 15) 清密钥
+        # 15) 清密钥：只影响自己，清了就不能聊
         code, cfg = call_json(adm, base, "/api/v1/ai/key", None, method="DELETE")
-        e2e.check("ai: 清除密钥", code == 200 and cfg.get("key_set") is False, "code=%d" % code)
+        e2e.check("ai: 清除密钥", code == 200 and cfg.get("key_set") is False and
+                  cfg.get("ready") is False, "code=%d" % code)
         code, r = call_json(adm, base, "/api/v1/ai/chat",
                             {"messages": [{"role": "user", "content": "hello"}]})
         e2e.check("ai: 清密钥后不可用", code == 503, "code=%d" % code)
 
-        # 16) 关闭后不再可用
-        call_json(adm, base, "/api/v1/ai/key", {"key": "sk-again"}, method="PUT")
-        call_json(adm, base, "/api/v1/ai/config", {"enabled": False}, method="PUT")
-        code, _ = call_json(adm, base, "/api/v1/ai/chat",
-                            {"messages": [{"role": "user", "content": "hi"}]})
-        e2e.check("ai: 关闭开关后 503", code == 503, "code=%d" % code)
+        # 16) 多账号隔离：另一个账号配自己的 key/模型，互不覆盖
+        call("POST", "/api/v1/users", {"username": "aiother", "password": "aiother1", "role": "manager"})
+        _u = call("GET", "/api/v1/users")
+        _uid = next((u["id"] for u in _u if u.get("username") == "aiother"), 0)
+        call("POST", "/api/v1/permission/groups", {
+            "name": "ai-other", "description": "e2e",
+            "resources": ["device.view", "ai.chat"], "all_devices": True, "global_scope": True,
+            "devices": [], "ports": "*", "members": [{"type": "user", "id": str(_uid)}],
+        })
+        other = login(base, "aiother", "aiother1")
+        code, ocfg = call_json(other, base, "/api/v1/ai/config", None, method="GET")
+        e2e.check("ai: 另一个账号是独立配置", code == 200 and ocfg.get("key_set") is False and
+                  ocfg.get("subject", "").startswith("u-"), str(ocfg)[:140])
+        e2e.check("ai: 两个账号 subject 不同", ocfg.get("subject") != cfg.get("subject"),
+                  "%s vs %s" % (ocfg.get("subject"), cfg.get("subject")))
+        call_json(other, base, "/api/v1/ai/key", {"key": "sk-other-9999"}, method="PUT")
+        call_json(other, base, "/api/v1/ai/config", {
+            "provider": "custom", "endpoint": "http://127.0.0.1:%d/v1" % model_port,
+            "model": "other-model",
+        }, method="PUT")
+        okp = os.path.join(LOG, "ai", ocfg.get("subject", "u-2") + ".key")
+        e2e.check("ai: 第二账号密钥单独成文件",
+                  os.path.exists(okp) and open(okp).read().strip() == "sk-other-9999", okp)
+        code, me = call_json(adm, base, "/api/v1/ai/config", None, method="GET")
+        e2e.check("ai: 别人的配置不会覆盖自己的",
+                  me.get("key_set") is False and me.get("model") != "other-model",
+                  str(me)[:160])
 
         # 17) relay 仍活着（线程里异常没有把进程带崩）
         e2e.check("ai: relay 未崩溃", relay.poll() is None, "exit=%s" % relay.poll())

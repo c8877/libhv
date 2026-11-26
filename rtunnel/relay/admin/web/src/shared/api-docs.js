@@ -249,68 +249,69 @@ export const DOCS = [
   },
   {
     group: 'sys', method: 'GET', path: '/api/v1/ai/config', minRole: 'operator',
-    summary: 'AI 模型配置（不含密钥内容）',
-    note: '需要 ai.chat。返回 endpoint/模型/参数与 key_set；密钥只存在 <admin.db 同目录>/ai.key（0600），'
-      + '不会通过任何接口回显',
+    summary: '本账号的模型配置（不含密钥内容）',
+    note: '需要 ai.chat。配置按账号隔离：每个账号一份，别人的配置和密钥你看不到也用不到。'
+      + '返回 provider/model/endpoint/key_set/ready，以及 providers 预置清单（前端下拉用）',
     curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/ai/config"`,
-    resp: `{ "enabled": true, "endpoint": "https://api.deepseek.com/v1", "model": "deepseek-chat", "max_tokens": 2048, "temperature": 0.3, "timeout_s": 60, "max_rounds": 4, "insecure": false, "key_set": true, "key_updated_ms": 1764136800000, "key_path": "/var/lib/rtunnel/ai.key", "tools": 7 }`,
+    resp: `{ "subject": "u-3", "provider": "deepseek", "endpoint": "https://api.deepseek.com/v1", "model": "deepseek-chat", "key_set": true, "key_hint": "sk-…abcd", "ready": true, "insecure": false, "tools": 9, "providers": [{ "key": "deepseek", "label": "DeepSeek", "endpoint": "https://api.deepseek.com/v1", "model": "deepseek-chat" }] }`,
   },
   {
-    group: 'sys', method: 'PUT', path: '/api/v1/ai/config', minRole: 'admin',
-    summary: '修改模型配置',
+    group: 'sys', method: 'PUT', path: '/api/v1/ai/config', minRole: 'operator',
+    summary: '保存本账号的模型配置',
     params: [
-      { name: 'endpoint', in: 'body', desc: 'OpenAI 兼容前缀，必须以 http(s):// 开头' },
-      { name: 'model', in: 'body', desc: '模型名，例如 deepseek-chat / gpt-4o-mini' },
-      { name: 'enabled', in: 'body', desc: '是否启用助手' },
-      { name: 'max_tokens / temperature / timeout_s / max_rounds', in: 'body', desc: '采样与轮次参数' },
-      { name: 'insecure', in: 'body', desc: '跳过 TLS 证书校验（仅内网自签）' },
+      { name: 'provider', in: 'body', desc: 'deepseek / moonshot / openai / qwen / zhipu / ollama / custom' },
+      { name: 'model', in: 'body', desc: '模型名；不传时用该服务商的默认值' },
+      { name: 'endpoint', in: 'body', desc: '可选：覆盖服务商默认地址（自定义网关时必填）' },
+      { name: 'insecure', in: 'body', desc: '可选：跳过 TLS 证书校验（内网自签）' },
     ],
-    note: '需要 ai.config（接入令牌不生效）。保存后立即生效，返回最新配置',
-    body: `{ "enabled": true, "endpoint": "https://api.deepseek.com/v1", "model": "deepseek-chat" }`,
+    note: '需要 ai.chat。只影响调用者自己的账号；采样参数（max_tokens/temperature/超时/轮次）'
+      + '固定在服务端，不作为配置项暴露',
+    body: `{ "provider": "deepseek", "model": "deepseek-chat" }`,
     curl: `curl -sS -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \
-     -d '{"enabled":true,"model":"deepseek-chat"}' "$RT/api/v1/ai/config"`,
-    resp: `{ "enabled": true, "model": "deepseek-chat", "key_set": true }`,
+     -d '{"provider":"deepseek","model":"deepseek-chat"}' "$RT/api/v1/ai/config"`,
+    resp: `{ "subject": "u-3", "provider": "deepseek", "model": "deepseek-chat", "key_set": true, "ready": true }`,
   },
   {
-    group: 'sys', method: 'PUT', path: '/api/v1/ai/key', minRole: 'admin',
-    summary: '保存（或替换）模型 API 密钥',
-    params: [{ name: 'key', in: 'body', desc: '密钥明文，1-512 字节' }],
-    note: '需要 ai.config。密钥写到 relay 本机文件（0600），不进数据库、不回显；审计只记前后各几位',
+    group: 'sys', method: 'PUT', path: '/api/v1/ai/key', minRole: 'operator',
+    summary: '保存（或替换）本账号的模型 API Key',
+    params: [{ name: 'key', in: 'body', desc: '密钥明文，1-512 字节，不能含空白' }],
+    note: '需要 ai.chat。写到 relay 本机 <admin.db 同目录>/ai/<subject>.key（0600），'
+      + '不进数据库、不回显；审计只记前后各几位',
     body: `{ "key": "sk-..." }`,
     curl: `curl -sS -X PUT -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \
      -d '{"key":"sk-..."}' "$RT/api/v1/ai/key"`,
-    resp: `{ "key_set": true, "key_updated_ms": 1764136800000 }`,
+    resp: `{ "key_set": true, "key_hint": "sk-…abcd", "ready": true }`,
   },
   {
-    group: 'sys', method: 'DELETE', path: '/api/v1/ai/key', minRole: 'admin',
-    summary: '清除模型密钥',
-    note: '需要 ai.config。清除后 /ai/chat 返回 503，模型与参数配置保留',
+    group: 'sys', method: 'DELETE', path: '/api/v1/ai/key', minRole: 'operator',
+    summary: '清除本账号的模型密钥',
+    note: '需要 ai.chat。清除后 /ai/chat 返回 503 并提示去配置，模型名与服务商保留',
     curl: `curl -sS -X DELETE -H "Authorization: Bearer $ATK" "$RT/api/v1/ai/key"`,
-    resp: `{ "key_set": false }`,
+    resp: `{ "key_set": false, "ready": false }`,
   },
   {
     group: 'sys', method: 'POST', path: '/api/v1/ai/chat', minRole: 'operator',
-    summary: '与模型对话（只读工具，OpenAI 兼容 function calling）',
+    summary: '与模型对话（只读工具 + 提议作业，OpenAI 兼容 function calling）',
     params: [
       { name: 'messages', in: 'body', desc: '[{role: user|assistant, content}]，只接受这两种角色' },
       { name: 'devid', in: 'body', desc: '可选：当前设备上下文，必须在授权范围内' },
     ],
-    note: '需要 ai.chat。模型只能调用只读工具（设备/指标/审计/作业/用量/自愈），'
-      + '工具内部按调用者的资源权限与设备范围收窄。客户端传的 system 消息会被丢弃；'
-      + '写操作不会被直接执行：模型用 propose_exec 生成待确认作业、draft_playbook 生成规则草稿，'
-      + '在 actions 里返回，由页面渲染成确认卡片。上游错误统一转 502，响应不返回模型密钥',
+    note: '需要 ai.chat，且本账号已配好 provider/model/key。模型只能调用只读工具'
+      + '（设备/指标/审计/作业/用量/自愈），工具内部按调用者的资源权限与设备范围收窄。'
+      + '客户端传的 system 消息会被丢弃；写操作不会被执行：模型用 propose_exec 生成待确认作业、'
+      + 'draft_playbook 生成规则草稿，在 actions 里返回，由页面渲染成确认卡片',
     body: `{ "messages": [{ "role": "user", "content": "现在有哪些设备在线？" }] }`,
     curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \
      -d '{"messages":[{"role":"user","content":"现在有哪些设备在线？"}]}' "$RT/api/v1/ai/chat"`,
-    resp: `{ "reply": "共 3 台设备，在线 2 台……已生成一条待确认作业，请在卡片上批准/执行。", "actions": [{ "type": "propose_exec", "id": 21, "devid": "mp135", "risk": 2, "status": "pending_approval", "plan_hash": "7c1e…" }], "tools": [{ "name": "list_devices", "args": {}, "ok": true }], "rounds": 2, "usage": { "prompt_tokens": 820, "completion_tokens": 96 } }`,
+    resp: `{ "reply": "共 3 台设备，在线 2 台……", "actions": [], "tools": [{ "name": "list_devices", "args": {}, "ok": true }], "rounds": 2 }`,
   },
   {
     group: 'sys', method: 'POST', path: '/api/v1/ai/test', minRole: 'operator',
-    summary: '测试模型连通性（发一次最小请求）',
-    note: '需要 ai.chat。用当前 endpoint / model / 密钥发一次最小 completion，'
-      + '返回耗时与实际模型名；上游错误原文一并返回，便于排查 /v1 前缀、模型名、令牌权限',
+    summary: '测试本账号的模型连通性（发一次最小请求）',
+    note: '需要 ai.chat 且本账号配置完整。返回耗时与实际模型名；上游错误原文一并返回，'
+      + '便于排查 /v1 前缀、模型名、令牌权限',
     curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" "$RT/api/v1/ai/test"`,
-    resp: `{ "ok": true, "endpoint": "https://api.deepseek.com/v1", "model": "deepseek-v4.1-flash", "latency_ms": 860, "reply": "正常", "served_model": "deepseek-v4.1-flash" }`,
+    resp: `{ "ok": true, "provider": "deepseek", "endpoint": "https://api.deepseek.com/v1", "model": "deepseek-chat", "latency_ms": 860, "reply": "正常", "served_model": "deepseek-chat" }`,
   },
   {
     group: 'device', method: 'GET', path: '/api/v1/agents/:devid/metrics/history', minRole: 'viewer',
