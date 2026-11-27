@@ -122,6 +122,9 @@ GitHub Actions (`.github/workflows/CI.yml`): builds and tests on Linux (with Ope
 
 部署步骤、目标机、验证与回滚写在 `rtunnel/deploy/DEPLOY.md`，动手前先读，不要凭记忆重编。
 
+- 其它文档在 `rtunnel/docs/`：索引 `README.md`，架构 `architecture.md`，**页面改动先看 `uiue.md`**，
+  组件细节看 `relay/`、`client/`、`agent/`。`rtunnel/README.md` 只是入口页，不要再往里堆细节。
+
 - 测试环境用直推：板子跑 `install.sh`，relay 换静态二进制 + `admin/web` 目录。**直推不需要 `RT` / `ATK`**；只有「上传文件仓库 → OTA 分发」才需要令牌，别把直推当成缺凭据。
 - 部署前先找本机已有的脚本和通道（`/tmp/*.py`、免密 SSH、`relay.opts`），找不到再问；不要用"需要你提供……"收尾。
 - 上传文件仓库用 `deploy/publish.sh`（rtunnel-client + atk）；令牌放 `ATK_FILE`（0600），不要写进脚本或仓库，需要新的就直接开口要。

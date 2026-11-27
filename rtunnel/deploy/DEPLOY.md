@@ -14,7 +14,7 @@ grep -l "192.168.1.55" /tmp/*.py    # deploy_board.py / probe_board.py 等
 ```
 
 直推模式**不需要** `RT` / `ATK`。只有走「上传文件仓库 → 管理台 OTA 分发」时才需要
-API Token，见 `README.md` 的「Agent OTA 升级」。
+API Token，见 `../docs/agent/ota.md`。
 
 ## C：设备侧
 
