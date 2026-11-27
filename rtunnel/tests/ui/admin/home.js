@@ -21,8 +21,15 @@ const h = require('../lib/harness')
   h.check('消息区没有内部滚动容器', (await p.locator('.ai-chat .msgs .el-scrollbar').count()) === 0)
 
   const head = await p.locator('.ai-chat .panel-head').innerText()
-  h.check('头部有历史/新对话/设置', /历史/.test(head) && /新对话/.test(head) && /模型设置/.test(head),
-    head.slice(0, 120))
+  // 模型设置收在「更多」下拉里：头部只放历史/新对话，避免一行按钮像页签
+  h.check('头部有历史/新对话', /历史/.test(head) && /新对话/.test(head), head.slice(0, 120))
+  h.check('模型设置收进更多菜单', (await p.locator('.panel-head .more-btn').count()) === 1)
+  await p.locator('.panel-head .more-btn').last().dispatchEvent('click')
+  await p.waitForSelector('.el-dropdown-menu:visible', { timeout: 5000 })
+  h.check('更多菜单里有模型设置',
+    (await p.locator('.el-dropdown-menu:visible').innerText()).includes('模型设置'))
+  await p.keyboard.press('Escape')
+  await p.waitForTimeout(300)
   h.check('首页不再有全屏按钮', !/全屏/.test(head), head.slice(0, 120))
   h.check('有设备上下文选择', (await p.locator('.panel-head .el-select').count()) >= 1)
 

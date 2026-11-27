@@ -39,10 +39,11 @@ const h = require('../lib/harness')
   // 模型设置弹窗：只有服务商/模型/Key 三个必填项，高级默认收起
   // 页面加载完会再渲染一次，等它稳定再点，否则 Playwright 报 element is not stable
   await p.waitForTimeout(900)
-  const setupBtn = p.locator('.panel-head button').filter({ hasText: '模型设置' }).last()
-  // 点击会立刻弹出 modal，Playwright 复查时会被 overlay 挡住当成失败；
-  // 用 dispatchEvent 直接触发 click，绕开这个自检
-  await setupBtn.dispatchEvent('click')
+  // 模型设置不常改，收在头部的「更多」下拉里；先展开再点菜单项
+  // 点完会立刻弹层，Playwright 的 click 自检会被浮层挡住；直接派发 click
+  await p.locator('.panel-head .more-btn').last().dispatchEvent('click')
+  await p.waitForSelector('.el-dropdown-menu:visible', { timeout: 5000 })
+  await p.locator('.el-dropdown-menu:visible .el-dropdown-menu__item', { hasText: '模型设置' }).click()
   await p.waitForSelector('.el-dialog:visible', { timeout: 5000 })
   await p.waitForTimeout(700)   // 等 dialog 动画结束，否则 Playwright 报 element is not stable
   const dlg = p.locator('.el-dialog:visible')

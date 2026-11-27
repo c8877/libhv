@@ -767,7 +767,18 @@ relay/admin/web/src
 
 - 路由使用 hash history（`#/overview`），`router.beforeEach` 先 `ensureBoot()` 再按
   `nav.canVisit()` 做角色守卫；侧栏与守卫共用 `shared/nav.js` 的 `NAV_GROUPS`
-- 侧栏 5 组可折叠，默认只展开当前页所在组，空组自动隐藏
+- 分组按**对象**而不是模块划分：首页（助手/概览）、设备与链路（设备/客户端/会话/中继）、
+  文件与升级（仓库/分发/任务/OTA）、接入与自动化（部署/作业/自愈）、组织与权限（租户/账号/
+  接入账号/权限组/授权对象/字典）、用量与费用、开放接口（Token/文档/指南）、系统（告警/证书/
+  审计/设置）。侧栏可折叠，默认只展开当前页所在组，空组自动隐藏
+- 菜单显示名只取 `router.meta.title`，`nav.js` 只写结构/图标/权限：同一个名字不再两处维护
+- 手机（≤599px）底部固定四项高频入口（助手/设备/告警/概览，按权限过滤），其余走汉堡抽屉
+- 列表页统一：状态筛选用带计数的 `el-radio-group`，空状态 `el-empty :image-size="70"` 带可执行
+  下一步，前端分页（设备/账号/Token/作业/审计/告警/用量/分发）都先在全量数据上筛选排序再切片
+- 「告警」是独立页面（`alert_events` 表，最近 2000 条）：未确认/已确认/全部、单条与全部确认、
+  15s 轮询；概览只留「待处理」磁贴（未确认告警/待审批作业/失败任务/证书将过期）可点跳转
+- 审计页按 `ok/denied/error` 分色并可按结果筛选、按时间/操作者/操作/对象/结果排序（`sortable="custom"`，
+  先排全量再分页）、导出 CSV；越权请求（403）也会写一条 `perm.denied` 审计
 - `shared/api-docs.js` 是 `/docs` 页面与 Token「用法」抽屉的唯一数据源，
   `npm run check:docs` 与 `admin_routes.cpp` 对表
 - 构建：`cd relay/admin/web && npm install && npm run build`
@@ -816,7 +827,7 @@ relay 在 agent `AUTH_OK` 之后、以及同步任务下发时发送 `RELAY_LIST
 
 ### 13.9.1 部署：从管理台把组件装到内网主机
 
-目标：设备/中继接入前的那一步不该只能手工敲命令。运维在「运维 → 部署」登记目标主机的
+目标：设备/中继接入前的那一步不该只能手工敲命令。运维在「接入与自动化 → 部署」登记目标主机的
 SSH 地址与凭据，平台直接连过去装 agent/relay/client。
 
 实现要点：
@@ -939,7 +950,7 @@ GET /api/v1/usage?from=2026-11-01&to=2026-11-30&metric=bytes&subject_type=token&
 
 - `granularity=total` 按主体 + 指标汇总（出账用）；需要 `usage.read`（全局资源）
 - `tenant_id` 可选：控制台账号可按租户过滤；接入令牌固定为本租户，传别的值无效
-- 管理台「监控 → 用量」按日展示，支持切换指标、日期范围与租户
+- 管理台「用量与费用 → 用量」按日展示，支持切换指标、日期范围与租户
 
 **当前不做**：价目表、账单/发票、支付、带宽限速。表结构已按
 `tenant_id / subject_type / subject_id / metric` 抽象，接价目表时只需加 `price` 与账期汇总，
@@ -1032,7 +1043,7 @@ GET /api/v1/billing/summary?from&to&tenant_id
 
 - `billing.read` 看价目与费用；`billing.write` 改价目（预置组里只有超管有）
 - 价目是全局的：接入令牌（`rtk-`）即使被授了 `billing.write` 也不生效，只能看本租户费用
-- 管理台「监控 → 费用」：按租户×指标列出用量与金额，底部价目表可调单价
+- 管理台「用量与费用 → 费用」：按租户×指标列出用量与金额，底部价目表可调单价
 
 **结算单**
 
@@ -1286,7 +1297,7 @@ alertCheckDevices / alertCheckCerts / notifyTaskFailed
 
 **接口与页面**：`/api/v1/playbooks`（列表/新建/改/删/启停）、`/api/v1/playbooks/:id/run`（按规则给设备
 生成作业，走同一套审批与 auto_apply 判定）、`/api/v1/playbooks/fires`（触发流水）。资源键
-`playbook.read` / `playbook.write`，接入令牌不继承。管理台「运维 → 自愈」列出规则、触发记录，
+`playbook.read` / `playbook.write`，接入令牌不继承。管理台「接入与自动化 → 自愈」列出规则、触发记录，
 可新建/编辑/启停/删除/立即执行。
 
 **边界**：规则只能跑 agent 白名单内的 argv（没有 exec 的设备用不了）；只支持单设备动作，

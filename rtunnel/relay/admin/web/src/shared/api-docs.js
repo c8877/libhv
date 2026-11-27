@@ -1096,14 +1096,34 @@ export const DOCS = [
     curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/alerts/status"`,
   },
   {
+    group: 'sys', method: 'GET', path: '/api/v1/alerts', minRole: 'viewer',
+    summary: '告警事件列表（未确认 / 已确认 / 全部）',
+    note: '`state=open|acked|all`（默认 open），`limit` 默认 100、上限 500；' +
+      '返回 `counts`（total/open/critical/warning）用于页面上的计数',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/alerts?state=open&limit=100"`,
+    resp: `{ "items": [{ "id": 12, "at_ms": 1764300000000, "event": "device.offline", "level": "critical",\n    "title": "设备离线", "text": "board01 超过 90s 没有心跳", "detail": { "devid": "board01" },\n    "acked_ms": 0, "acked_by": "" }],\n  "counts": { "total": 37, "open": 4, "critical": 1, "warning": 3 } }`,
+  },
+  {
+    group: 'sys', method: 'POST', path: '/api/v1/alerts/:id/ack', minRole: 'manager',
+    summary: '确认一条告警',
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" "$RT/api/v1/alerts/12/ack"`,
+    resp: `{ "acked": true }`,
+  },
+  {
+    group: 'sys', method: 'POST', path: '/api/v1/alerts/ack-all', minRole: 'manager',
+    summary: '确认全部未确认告警',
+    curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" "$RT/api/v1/alerts/ack-all"`,
+    resp: `{ "acked": 4 }`,
+  },
+  {
     group: 'sys', method: 'POST', path: '/api/v1/alerts/test', minRole: 'admin',
     summary: '发送测试告警',
     curl: `curl -sS -X POST -H "Authorization: Bearer $ATK" -H 'Content-Type: application/json' \\\n  -d '{"text":"rtunnel test"}' "$RT/api/v1/alerts/test"`,
   },
   {
     group: 'sys', method: 'GET', path: '/api/v1/audit', minRole: 'manager',
-    summary: '审计日志（固定最近 200 条）',
-    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/audit"`,
+    summary: '审计日志（默认最近 200 条，limit 最大 1000）',
+    curl: `curl -sS -H "Authorization: Bearer $ATK" "$RT/api/v1/audit?limit=1000"`,
     resp: `[{ "at": "2026-11-17 10:12:03", "role": "deploy", "action": "files.edit", "detail": "fw.bin size=1024" }]`,
   },
   {

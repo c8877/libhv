@@ -15,7 +15,16 @@
       </el-select>
       <el-button text @click="openHistory">历史{{ sessions.length ? '（' + sessions.length + '）' : '' }}</el-button>
       <el-button text :disabled="!msgs.length" @click="reset">新对话</el-button>
-      <el-button text @click="openSetup">模型设置</el-button>
+      <el-dropdown trigger="click" @command="onHeadMenu">
+        <el-button text class="more-btn" aria-label="更多">
+          <el-icon><MoreFilled /></el-icon>
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="setup">模型设置</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
     </div>
 
     <div v-if="cfg && !cfg.ready" class="setup">
@@ -294,6 +303,11 @@ const keyPlaceholder = computed(() => {
   if (form.provider === 'ollama') return '本地模型随便填一个，例如 sk-local'
   return 'sk-… / 网关令牌'
 })
+
+// 头部只留高频动作；模型设置不常改，收进“更多”，避免一行按钮看着像页签
+function onHeadMenu(cmd) {
+  if (cmd === 'setup') openSetup()
+}
 
 function openSetup() {
   const c = cfg.value || {}

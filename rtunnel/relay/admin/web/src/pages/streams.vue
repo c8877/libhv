@@ -9,18 +9,18 @@
       </el-input>
     </div>
     <el-table :data="filtered" v-loading="loading">
-      <el-table-column label="A 用户:a_sid" :min-width="isPhone ? 150 : 160" prop="a_user"
+      <el-table-column label="用户会话" :min-width="isPhone ? 150 : 160" prop="a_user"
                        sortable :sort-by="(r) => `${r.a_user}:${r.a_sid}`"
                        :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
-          {{ row.a_user }}:{{ row.a_sid }}
+          <span class="mono">{{ row.a_user }}:{{ row.a_sid }}</span>
           <div v-if="isPhone" class="muted">→ {{ row.c_devid }}:{{ row.c_sid }}</div>
         </template>
       </el-table-column>
-      <el-table-column v-if="!isPhone" label="C 设备:c_sid" min-width="160" prop="c_devid"
+      <el-table-column v-if="!isPhone" label="设备会话" min-width="160" prop="c_devid"
                        sortable :sort-by="(r) => `${r.c_devid}:${r.c_sid}`"
                        :sort-orders="TEXT_ORDERS">
-        <template #default="{ row }">{{ row.c_devid }}:{{ row.c_sid }}</template>
+        <template #default="{ row }"><span class="mono">{{ row.c_devid }}:{{ row.c_sid }}</span></template>
       </el-table-column>
       <el-table-column label="状态" :width="isPhone ? 90 : 120" prop="state"
                        sortable :sort-orders="TEXT_ORDERS">

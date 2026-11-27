@@ -2,7 +2,7 @@
   <div class="panel">
     <div class="panel-head">
       <h2>操作作业</h2>
-      <span class="muted">共 {{ items.length }} 条</span>
+      <span class="muted">共 {{ all.length }} 条</span>
       <span class="spacer" />
       <el-select v-model="devid" clearable filterable placeholder="全部设备" class="sel" @change="load">
         <el-option v-for="d in devices" :key="d.devid" :label="d.devid" :value="d.devid" />
@@ -10,11 +10,17 @@
       <el-button :loading="loading" @click="load">刷新</el-button>
     </div>
 
-    <el-tabs v-model="tab" @tab-change="load">
-      <el-tab-pane v-for="t in tabs" :key="t.key" :name="t.key" :label="t.label" />
-    </el-tabs>
+    <div class="bar">
+      <el-radio-group v-model="tab" size="small">
+        <el-radio-button v-for="t in tabs" :key="t.key" :value="t.key">
+          {{ t.label }} {{ countOf(t.key) }}
+        </el-radio-button>
+      </el-radio-group>
+      <span class="spacer" />
+      <span class="muted">{{ filtered.length }} 条</span>
+    </div>
 
-    <el-table :data="items" v-loading="loading" row-key="id">
+    <el-table :data="pageRows" v-loading="loading" row-key="id">
       <el-table-column prop="id" label="ID" width="68" />
       <el-table-column label="设备" min-width="110">
         <template #default="{ row }">{{ row.target_id }}</template>
@@ -56,7 +62,11 @@
           <el-button link @click="openDetail(row)">详情</el-button>
         </template>
       </el-table-column>
-      <template #empty><span class="muted">没有符合条件的作业</span></template>
+      <template #empty>
+        <el-empty :description="all.length ? '没有符合条件的作业' : '还没有作业'" :image-size="70">
+          <span v-if="!all.length" class="muted">在设备详情里执行命令会先生成待审批作业</span>
+        </el-empty>
+      </template>
     </el-table>
 
     <el-dialog v-model="dlg" :title="'作业 #' + (cur.id || '')" width="640px">
@@ -90,7 +100,7 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Api } from '@/shared/api.js'
 import { can } from '@/shared/store.js'
 import { time } from '@/shared/utils.js'
@@ -98,8 +108,10 @@ import { time } from '@/shared/utils.js'
 const tab = ref('pending_approval')
 const devid = ref('')
 const devices = ref([])
-const items = ref([])
+const all = ref([])
 const loading = ref(false)
+const page = ref(1)
+const per = 20
 const dlg = ref(false)
 const cur = ref({})
 
@@ -110,6 +122,12 @@ const tabs = [
   { key: 'failed', label: '失败' },
   { key: '', label: '全部' },
 ]
+
+// 一次取回（limit=200），状态筛选、计数与分页都在本地做
+const filtered = computed(() => (tab.value ? all.value.filter((x) => x.status === tab.value) : all.value))
+const pageRows = computed(() => filtered.value.slice((page.value - 1) * per, page.value * per))
+const countOf = (key) => (key ? all.value.filter((x) => x.status === key).length : all.value.length)
+watch(tab, () => { page.value = 1 })
 
 function cmdline(row) {
   const argv = (row.plan && row.plan.argv) || []
@@ -149,10 +167,9 @@ async function load() {
   loading.value = true
   try {
     let url = '/api/v1/operations?limit=200'
-    if (tab.value) url += '&status=' + encodeURIComponent(tab.value)
     if (devid.value) url += '&devid=' + encodeURIComponent(devid.value)
     const r = await Api.get(url)
-    items.value = r.items || []
+    all.value = r.items || []
   } catch (e) {
     ElMessage.error('加载失败：' + e.message)
   } finally {
@@ -231,6 +248,8 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer) })
 </script>
 
 <style scoped>
+.bar { display: flex; align-items: center; gap: 10px; margin: -4px 0 10px; flex-wrap: wrap; }
+.foot { display: flex; justify-content: flex-end; margin-top: 12px; }
 .sel { width: 170px; }
 .cmd { font-family: var(--el-font-family-mono, monospace); font-size: 12.5px; }
 .ml4 { margin-left: 4px; }

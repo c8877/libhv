@@ -10,7 +10,7 @@
     </div>
 
     <div ref="tableWrap">
-      <el-table :data="filtered" v-loading="loading" row-class-name="row-click"
+      <el-table :data="pageRows" v-loading="loading" row-class-name="row-click"
                 @row-click="openRow" @row-contextmenu="openContextMenu">
         <el-table-column label="devid" min-width="140" prop="devid" sortable :sort-orders="TEXT_ORDERS">
           <template #default="{ row }"><b>{{ row.devid }}</b></template>
@@ -50,8 +50,17 @@
                         @action="(c) => onAction(c, row)" />
           </template>
         </el-table-column>
-        <template #empty><el-empty description="暂无在线设备" :image-size="70" /></template>
+        <template #empty>
+          <el-empty :description="q ? '没有匹配的设备' : '暂无在线设备'" :image-size="70">
+            <el-button v-if="!q" @click="$router.push('/deploy')">从「部署」装一台</el-button>
+          </el-empty>
+        </template>
       </el-table>
+    </div>
+
+    <div class="foot">
+      <el-pagination v-model:current-page="page" :page-size="per" :total="filtered.length"
+                     layout="prev, pager, next, total" background />
     </div>
 
     <el-dialog v-model="webDlg" :title="'打开 Web · ' + (webRow ? webRow.devid : '')"
@@ -99,7 +108,7 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import RowActions from '@/components/RowActions.vue'
 import { Api } from '@/shared/api.js'
@@ -138,6 +147,16 @@ const filtered = computed(() => {
     String(a.devid).toLowerCase().includes(k) ||
     String(a.remote_addr || '').toLowerCase().includes(k))
 })
+
+// 设备多起来后一屏放不下：分页只在本地切，5s 刷新不影响当前页
+const page = ref(1)
+const per = 20
+const pageRows = computed(() => {
+  const max = Math.max(1, Math.ceil(filtered.value.length / per))
+  if (page.value > max) page.value = max
+  return filtered.value.slice((page.value - 1) * per, page.value * per)
+})
+watch(q, () => { page.value = 1 })
 
 async function refresh(silent) {
   if (!silent) loading.value = true
@@ -313,6 +332,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.foot { display: flex; justify-content: flex-end; margin-top: 12px; }
 .search { width: 240px; }
 :deep(.row-click) { cursor: pointer; }
 .ctx-menu {

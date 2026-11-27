@@ -1,50 +1,67 @@
 // 导航分组与角色可见性：路由守卫与侧栏共用一份。
-// 组标题在 AppLayout 中渲染为可折叠的 el-sub-menu，空组由 navFor() 过滤掉。
+// 这里只写“结构 + 图标 + 权限”，显示名统一取 router 的 meta.title，
+// 避免同一个名字在两处维护、改一处漏一处。
 export const NAV_GROUPS = [
   {
     key: 'home',
     flat: true,
     label: '',
     items: [
-      { path: '/', icon: 'ChatDotRound', label: 'AI 助手', perm: 'ai.chat' },
-    ],
-  },
-  {
-    key: 'monitor',
-    label: '监控',
-    items: [
+      { path: '/', icon: 'ChatDotRound', perm: 'ai.chat' },
       { path: '/overview', icon: 'Odometer', perm: 'device.view' },
-      { path: '/agents', icon: 'Monitor', label: '设备', perm: 'device.view' },
+    ],
+  },
+  {
+    // 当前连着谁：设备、终端侧客户端、会话、中继拓扑
+    key: 'device',
+    label: '设备与链路',
+    items: [
+      { path: '/agents', icon: 'Monitor', perm: 'device.view' },
+      { path: '/clients', icon: 'Connection', perm: 'device.view' },
       { path: '/streams', icon: 'Sort', perm: 'device.view' },
-      { path: '/usage', icon: 'TrendCharts', label: '用量', perm: 'usage.read' },
-      { path: '/tenants', icon: 'OfficeBuilding', label: '租户', perm: 'tenant.read' },
-      { path: '/billing', icon: 'Wallet', label: '费用', perm: 'billing.read' },
+      { path: '/relay-list', icon: 'Share', perm: 'relay.read' },
     ],
   },
   {
-    key: 'ops',
-    label: '运维',
+    // 文件仓库 → 分发 / 升级：同一份包的三条出路
+    key: 'artifacts',
+    label: '文件与升级',
     items: [
-      { path: '/deploy', icon: 'UploadFilled', label: '部署', perm: 'deploy.read' },
       { path: '/files', icon: 'FolderOpened', perm: 'repo.read' },
-      { path: '/distribute', icon: 'Upload', label: '分发', perm: 'dist.write' },
+      { path: '/distribute', icon: 'Upload', perm: 'dist.write' },
       { path: '/tasks', icon: 'List', perm: 'dist.read' },
-      { path: '/operations', icon: 'Tickets', label: '作业', perm: 'device.exec' },
-      { path: '/playbooks', icon: 'MagicStick', label: '自愈', perm: 'playbook.read' },
       { path: '/ota', icon: 'Refresh', perm: ['dist.write', 'device.view', 'repo.read'] },
-      { path: '/relay-list', icon: 'Connection', perm: 'relay.read' },
     ],
   },
   {
-    key: 'perm',
-    label: '权限',
+    // 把组件装上去，以及装上去之后自动做什么
+    key: 'automation',
+    label: '接入与自动化',
     items: [
-      { path: '/groups', icon: 'UserFilled', label: '权限组', perm: 'group.read' },
-      { path: '/subjects', icon: 'Avatar', label: '授权对象', perm: 'group.read' },
-      { path: '/dicts', icon: 'Collection', label: '字典库', perm: 'dict.read' },
-      { path: '/access', icon: 'Key', perm: 'account.read' },
-      { path: '/clients', icon: 'Connection', label: '客户端', perm: 'device.view' },
+      { path: '/deploy', icon: 'UploadFilled', perm: 'deploy.read' },
+      { path: '/operations', icon: 'Tickets', perm: 'device.exec' },
+      { path: '/playbooks', icon: 'MagicStick', perm: 'playbook.read' },
+    ],
+  },
+  {
+    // 谁在用、谁管谁
+    key: 'org',
+    label: '组织与权限',
+    items: [
+      { path: '/tenants', icon: 'OfficeBuilding', perm: 'tenant.read' },
       { path: '/accounts', icon: 'User', perm: 'account.read' },
+      { path: '/access', icon: 'Key', perm: 'account.read' },
+      { path: '/groups', icon: 'UserFilled', perm: 'group.read' },
+      { path: '/subjects', icon: 'Avatar', perm: 'group.read' },
+      { path: '/dicts', icon: 'Collection', perm: 'dict.read' },
+    ],
+  },
+  {
+    key: 'money',
+    label: '用量与费用',
+    items: [
+      { path: '/usage', icon: 'TrendCharts', perm: 'usage.read' },
+      { path: '/billing', icon: 'Wallet', perm: 'billing.read' },
     ],
   },
   {
@@ -53,15 +70,16 @@ export const NAV_GROUPS = [
     items: [
       { path: '/tokens', icon: 'Postcard', perm: 'token.read' },
       { path: '/docs', icon: 'Document', perm: 'auth' },
-      { path: '/guide', icon: 'Reading', label: '使用指南', perm: 'auth' },
+      { path: '/guide', icon: 'Reading', perm: 'auth' },
     ],
   },
   {
     key: 'system',
     label: '系统',
     items: [
-      { path: '/certs', icon: 'Document', perm: 'cert.read' },
-      { path: '/audit', icon: 'Tickets', perm: 'audit.read' },
+      { path: '/alerts', icon: 'Bell', perm: 'alert.read' },
+      { path: '/certs', icon: 'Lock', perm: 'cert.read' },
+      { path: '/audit', icon: 'Memo', perm: 'audit.read' },
       { path: '/settings', icon: 'Setting', perm: 'settings.read' },
     ],
   },

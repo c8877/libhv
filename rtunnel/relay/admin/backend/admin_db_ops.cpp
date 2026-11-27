@@ -150,6 +150,20 @@ bool AdminDb::opsList(const std::string& devid, const std::string& status, int l
     if (!devid.empty()) where += " AND target_id=?";
     if (!status.empty()) where += " AND status=?";
     if (!where.empty()) sql += " WHERE" + where.substr(4);
+    // 总数单独 COUNT：调用方（概览/作业页）需要知道“还有多少”，不能只看当前页
+    long long total = 0;
+    {
+        std::string csql = "SELECT COUNT(*) FROM operations";
+        if (!where.empty()) csql += " WHERE" + where.substr(4);
+        sqlite3_stmt* c = nullptr;
+        if (sqlite3_prepare_v2(db_, csql.c_str(), -1, &c, nullptr) == SQLITE_OK) {
+            int ci = 1;
+            if (!devid.empty()) bindText(c, ci++, devid);
+            if (!status.empty()) bindText(c, ci++, status);
+            if (sqlite3_step(c) == SQLITE_ROW) total = (long long)sqlite3_column_int64(c, 0);
+            sqlite3_finalize(c);
+        }
+    }
     sql += " ORDER BY id DESC LIMIT ?";
     sqlite3_stmt* st = nullptr;
     if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &st, nullptr) != SQLITE_OK) return false;
@@ -162,6 +176,7 @@ bool AdminDb::opsList(const std::string& devid, const std::string& status, int l
     sqlite3_finalize(st);
     json out;
     out["items"] = arr;
+    out["total"] = total;
     json_out = out.dump();
     return true;
 }

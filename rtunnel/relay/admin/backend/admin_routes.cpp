@@ -343,6 +343,22 @@ void AdminServer::registerRoutes() {
         return (int)ctx->response->status_code;
     });
     access("settings.read", "GET", "/api/v1/alerts/status", &AdminServer::handleAlertStatus);
+    // 告警事件（与 webhook 配置无关）：列表给所有能看设备的人，确认要 alert.write
+    access("alert.read", "GET", "/api/v1/alerts", &AdminServer::handleAlerts);
+    service_.Handle("POST", "/api/v1/alerts/ack-all", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "alert.write", role);
+        if (rc) return rc;
+        handleAlertAckAll(ctx, role);
+        return (int)ctx->response->status_code;
+    });
+    service_.Handle("POST", "/api/v1/alerts/:id/ack", [this](const HttpContextPtr& ctx) {
+        std::string role;
+        int rc = requirePerm(ctx, "alert.write", role);
+        if (rc) return rc;
+        handleAlertAck(ctx, role);
+        return (int)ctx->response->status_code;
+    });
     service_.Handle("POST", "/api/v1/alerts/test", [this](const HttpContextPtr& ctx) {
         std::string role;
         int rc = requirePerm(ctx, "settings.write", role);

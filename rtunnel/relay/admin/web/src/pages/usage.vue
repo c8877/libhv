@@ -17,7 +17,33 @@
       <el-button :loading="loading" @click="load">刷新</el-button>
     </div>
 
-    <el-table :data="rows" v-loading="loading" size="small">
+    <div class="sum">
+      <div class="sum-card">
+        <div class="sum-num">{{ fmtQty(total, metric) }}</div>
+        <div class="sum-label">{{ metricLabel(metric) }}合计</div>
+      </div>
+      <div class="sum-card">
+        <div class="sum-num">{{ byDay.length ? fmtQty(Math.round(total / byDay.length), metric) : '—' }}</div>
+        <div class="sum-label">按天平均（{{ byDay.length }} 天）</div>
+      </div>
+      <div class="sum-card">
+        <div class="sum-num">{{ peak ? fmtQty(peak.qty, metric) : '—' }}</div>
+        <div class="sum-label">峰值日{{ peak ? ' · ' + peak.day : '' }}</div>
+      </div>
+    </div>
+
+    <div v-if="byDay.length" class="chart">
+      <div v-for="d in byDay" :key="d.day" class="bar-wrap"
+           :title="d.day + ' · ' + fmtQty(d.qty, metric) + ' · ' + d.events + ' 次事件'">
+        <div class="bar" :style="{ height: barHeight(d.qty) }" />
+      </div>
+    </div>
+    <div v-if="byDay.length" class="chart-axis muted">
+      <span>{{ byDay[0].day }}</span>
+      <span>{{ byDay[byDay.length - 1].day }}</span>
+    </div>
+
+    <el-table :data="pageRows" v-loading="loading" size="small">
       <el-table-column prop="day" label="日期" width="120" sortable :sort-orders="TEXT_ORDERS" />
       <el-table-column v-if="tenantId === 0" label="租户" min-width="110">
         <template #default="{ row }">{{ tenantName(row.tenant_id) }}</template>
@@ -39,6 +65,11 @@
       <template #empty><el-empty description="所选范围内没有用量" :image-size="70" /></template>
     </el-table>
 
+    <div class="foot">
+      <el-pagination v-model:current-page="page" :page-size="per" :total="rows.length"
+                     layout="prev, pager, next, total" background />
+    </div>
+
     <div class="hint muted">
       日按 relay 本地时区；流量统计隧道载荷字节（双向），会话按次与秒，设备在线按秒。
       原始流水保留 180 天（设置项 <code>usage.raw_retention_days</code>），日聚合长期保留。
@@ -47,7 +78,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { Api } from '@/shared/api.js'
 import { can } from '@/shared/store.js'
 import { NUM_ORDERS, TEXT_ORDERS } from '@/shared/tableSort.js'
@@ -76,6 +107,30 @@ function defaultRange() {
 }
 
 const total = computed(() => rows.value.reduce((n, r) => n + (Number(r.qty) || 0), 0))
+
+// 按天汇总：表格是“天 × 主体”，图上要的是每天一条
+const byDay = computed(() => {
+  const m = new Map()
+  for (const r of rows.value) {
+    const k = r.day || ''
+    const cur = m.get(k) || { day: k, qty: 0, events: 0 }
+    cur.qty += Number(r.qty) || 0
+    cur.events += Number(r.events) || 0
+    m.set(k, cur)
+  }
+  return Array.from(m.values()).sort((a, b) => (a.day < b.day ? -1 : 1))
+})
+const peak = computed(() => byDay.value.reduce((a, b) => (!a || b.qty > a.qty ? b : a), null))
+const maxQty = computed(() => byDay.value.reduce((n, d) => Math.max(n, d.qty), 0))
+function barHeight(qty) {
+  if (!maxQty.value) return '2px'
+  return Math.max(2, Math.round((qty / maxQty.value) * 100)) + '%'
+}
+
+const page = ref(1)
+const per = 30
+const pageRows = computed(() => rows.value.slice((page.value - 1) * per, page.value * per))
+watch(metric, () => { page.value = 1 })
 
 function metricLabel(key) {
   const m = METRICS.find((x) => x.value === key)
@@ -119,6 +174,33 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.sum { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.sum-card {
+  padding: 12px 14px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  background: var(--el-fill-color-light);
+}
+.sum-num { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sum-label { margin-top: 2px; font-size: 12px; color: var(--el-text-color-secondary); }
+.chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 96px;
+  padding: 6px 2px 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.bar-wrap { flex: 1; height: 100%; display: flex; align-items: flex-end; min-width: 2px; }
+.bar {
+  width: 100%;
+  border-radius: 3px 3px 0 0;
+  background: color-mix(in srgb, var(--el-color-primary) 70%, transparent);
+  transition: background 0.15s ease;
+}
+.bar-wrap:hover .bar { background: var(--el-color-primary); }
+.chart-axis { display: flex; justify-content: space-between; margin: 4px 0 12px; font-size: 11px; }
+.foot { display: flex; justify-content: flex-end; margin-top: 12px; }
 .mono { margin-left: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .hint { margin-top: 10px; font-size: 12.5px; line-height: 1.7; }
 .hint code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

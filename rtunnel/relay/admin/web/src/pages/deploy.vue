@@ -405,7 +405,7 @@
 </template>
 
 <script setup>
-// 运维 → 部署：SSH/SFTP 直连目标主机，把文件仓库里的安装包装上去并执行包内 install.sh。
+// 接入与自动化 → 部署：SSH/SFTP 直连目标主机，把文件仓库里的安装包装上去并执行包内 install.sh。
 // 凭据只在 relay 本机，前端只提交、不回读。
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'

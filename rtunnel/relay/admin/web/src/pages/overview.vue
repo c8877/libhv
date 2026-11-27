@@ -1,10 +1,29 @@
 <template>
   <div>
+    <!-- 待处理：概览先回答“现在有没有事要做”，再回答“有多少” -->
+    <div v-if="todoTiles.length" class="panel todo">
+      <div class="panel-head">
+        <h2>待处理</h2>
+        <el-tag v-if="todoTotal === 0" type="success" size="small" effect="plain">全部处理完</el-tag>
+        <span v-else class="muted">{{ todoTotal }} 项需要看一眼</span>
+        <span class="spacer" />
+        <span class="muted">15s 自动刷新</span>
+      </div>
+      <div class="tiles">
+        <router-link v-for="t in todoTiles" :key="t.key" :to="t.to" class="tile"
+                     :class="{ hot: t.value > 0 }">
+          <div class="tile-num">{{ t.value }}</div>
+          <div class="tile-label">{{ t.label }}</div>
+          <div class="tile-hint">{{ t.value > 0 ? t.hint : t.zero }}</div>
+        </router-link>
+      </div>
+    </div>
+
     <div class="cards">
-      <div v-for="s in stats" :key="s.label" class="stat">
+      <router-link v-for="s in stats" :key="s.label" :to="s.to" class="stat">
         <div class="num">{{ s.value }}</div>
         <div class="label">{{ s.label }}</div>
-      </div>
+      </router-link>
     </div>
 
     <div class="panel">
@@ -39,13 +58,15 @@
         <span class="muted">新事件在上</span>
         <el-button text size="small" @click="events = []">清空</el-button>
       </div>
-      <el-scrollbar height="300px">
+      <el-scrollbar height="240px">
         <div v-for="e in events" :key="e.seq" class="evt">
           <span class="evt-time">{{ time(e.ts) }}</span>
           <el-tag size="small" :type="tagType(e.type)" effect="plain">{{ label(e.type) }}</el-tag>
           <span class="evt-text">{{ text(e) }}</span>
         </div>
-        <div v-if="!events.length" class="muted evt-empty">等待事件…（设备上下线、会话、审计、告警、任务）</div>
+        <div v-if="!events.length" class="muted evt-empty">
+          等待事件…（设备上下线、会话、审计、告警、任务都会出现在这里）
+        </div>
       </el-scrollbar>
     </div>
   </div>
@@ -60,14 +81,57 @@ import { bytes, duration, time } from '@/shared/utils.js'
 
 const o = ref(overview.data)
 const router = useRouter()
+
+// ---------------------------------------------------------------- 待处理
+const todo = ref({ alerts: 0, pending: 0, failed: 0, certs: 0 })
+
+const todoTiles = computed(() => {
+  const t = todo.value
+  const out = []
+  if (can('alert.read')) {
+    out.push({ key: 'alerts', value: t.alerts, label: '未确认告警', to: '/alerts',
+      hint: '设备离线 / 证书到期 / 任务失败', zero: '没有未确认的告警' })
+  }
+  if (can('device.exec')) {
+    out.push({ key: 'pending', value: t.pending, label: '待审批作业', to: '/operations',
+      hint: '高风险命令等你批准', zero: '没有待审批的命令' })
+  }
+  if (can('dist.read')) {
+    out.push({ key: 'failed', value: t.failed, label: '失败任务', to: '/tasks',
+      hint: '分发 / OTA 需要重试', zero: '没有失败的任务' })
+  }
+  if (can('cert.read')) {
+    out.push({ key: 'certs', value: t.certs, label: '证书将过期', to: '/certs',
+      hint: '30 天内到期，建议续签', zero: '证书都在有效期内' })
+  }
+  return out
+})
+
+const todoTotal = computed(() => todoTiles.value.reduce((n, t) => n + (t.value || 0), 0))
+
+async function loadTodo() {
+  const [al, ops, dist, certs] = await Promise.all([
+    can('alert.read') ? Api.get('/api/v1/alerts?state=open&limit=1').catch(() => null) : null,
+    can('device.exec') ? Api.get('/api/v1/operations?status=pending_approval&limit=1').catch(() => null) : null,
+    can('dist.read') ? Api.get('/api/v1/distributions/summary').catch(() => null) : null,
+    can('cert.read') ? Api.get('/api/v1/certs').catch(() => null) : null,
+  ])
+  todo.value = {
+    alerts: (al && al.counts && al.counts.open) || 0,
+    pending: (ops && ops.total) || 0,
+    failed: (dist && dist.failed) || 0,
+    certs: Array.isArray(certs) ? certs.filter((c) => c.status === 'expiring').length : 0,
+  }
+}
+
 const stats = computed(() => {
   const d = o.value || {}
   return [
-    { label: '在线设备', value: d.agents ?? '—' },
-    { label: '在线客户端', value: d.clients ?? '—' },
-    { label: '活跃会话', value: d.streams ?? '—' },
-    { label: '累计下行', value: d.bytes_in != null ? bytes(d.bytes_in) : '—' },
-    { label: '累计上行', value: d.bytes_out != null ? bytes(d.bytes_out) : '—' },
+    { label: '在线设备', value: d.agents ?? '—', to: '/agents' },
+    { label: '在线客户端', value: d.clients ?? '—', to: '/clients' },
+    { label: '活跃会话', value: d.streams ?? '—', to: '/streams' },
+    { label: '累计下行', value: d.bytes_in != null ? bytes(d.bytes_in) : '—', to: '/usage' },
+    { label: '累计上行', value: d.bytes_out != null ? bytes(d.bytes_out) : '—', to: '/usage' },
   ]
 })
 
@@ -157,18 +221,50 @@ function diagnose() {
   router.push({ path: '/', query: { q } })
 }
 
+let todoTimer = null
 onMounted(() => {
   pull()
+  loadTodo()
   timer = setInterval(pull, 5000)
+  todoTimer = setInterval(loadTodo, 15000)
   connect()
 })
 onBeforeUnmount(() => {
   if (timer) clearInterval(timer)
+  if (todoTimer) clearInterval(todoTimer)
   if (es) { es.close(); es = null }
 })
 </script>
 
 <style scoped>
+/* 待处理 */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.tile {
+  display: block;
+  padding: 14px 16px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  background: var(--el-fill-color-light);
+  text-decoration: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.tile:hover { border-color: var(--el-color-primary-light-5); }
+.tile.hot { background: color-mix(in srgb, var(--el-color-danger) 6%, var(--el-bg-color)); border-color: color-mix(in srgb, var(--el-color-danger) 26%, transparent); }
+.tile-num {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  color: var(--el-text-color-primary);
+}
+.tile.hot .tile-num { color: var(--el-color-danger); }
+.tile-label { margin-top: 2px; font-size: 13px; color: var(--el-text-color-regular); }
+.tile-hint { margin-top: 4px; font-size: 12px; color: var(--el-text-color-secondary); }
+
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -178,6 +274,8 @@ onBeforeUnmount(() => {
 .stat {
   position: relative;
   overflow: hidden;
+  display: block;
+  text-decoration: none;
   background: var(--el-bg-color);
   border: 1px solid var(--el-border-color-lighter);
   border-radius: var(--app-radius);
@@ -206,6 +304,7 @@ onBeforeUnmount(() => {
   line-height: 1.15;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
+  color: var(--el-text-color-primary);
 }
 .label {
   margin-top: 6px;

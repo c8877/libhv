@@ -1,26 +1,47 @@
 <template>
-  <div>
-    <div v-for="g in groups" :key="g.name" class="panel">
-      <div class="panel-head">
-        <h2>{{ g.name }}</h2>
-        <span class="spacer" />
-        <el-button @click="openEdit(g)">编辑</el-button>
-      </div>
-      <el-descriptions :column="isPhone ? 1 : 2" size="small" border>
-        <el-descriptions-item v-for="d in g.defs" :key="d.key" :label="d.label">
-          {{ valueOf(d) }}<span v-if="d.unit" class="unit">{{ d.unit }}</span>
-          <div v-if="d.desc" class="muted">{{ d.desc }}<span v-if="d.min || d.max"> · 范围 {{ d.min }}–{{ d.max }}</span></div>
-        </el-descriptions-item>
-      </el-descriptions>
-      <div v-if="g.name === '告警' && canSettingsWrite" class="alert-bar">
-        <span class="muted">{{ alertText }}</span>
-        <span class="spacer" />
-        <el-button size="small" :loading="testing" @click="sendTest">发送测试</el-button>
+  <div class="set">
+    <div class="set-head">
+      <h2>设置</h2>
+      <span class="muted">共 {{ schema.length }} 项 · 保存后立即生效</span>
+    </div>
+
+    <div class="set-wrap">
+      <!-- 分组多、一屏放不下：左侧锚点跟着滚，右侧才是一组组的值 -->
+      <el-anchor class="set-nav" :container="'.page'" direction="vertical" :offset="80">
+        <el-anchor-link v-for="(g, i) in groups" :key="g.name" :href="'#set-' + i">
+          {{ g.name }}
+        </el-anchor-link>
+      </el-anchor>
+
+      <div class="set-body">
+        <div v-for="(g, i) in groups" :id="'set-' + i" :key="g.name" class="panel">
+          <div class="panel-head">
+            <h2>{{ g.name }}</h2>
+            <span class="spacer" />
+            <el-button v-if="canSettingsWrite" @click="openEdit(g)">编辑</el-button>
+          </div>
+          <el-descriptions :column="isPhone ? 1 : 2" size="small" border>
+            <el-descriptions-item v-for="d in g.defs" :key="d.key" :label="d.label">
+              {{ valueOf(d) }}<span v-if="d.unit" class="unit">{{ d.unit }}</span>
+              <div v-if="d.desc" class="muted">
+                {{ d.desc }}<span v-if="d.min || d.max"> · 范围 {{ d.min }}–{{ d.max }}</span>
+              </div>
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <div v-if="g.name === '告警' && canSettingsWrite" class="alert-bar">
+            <span class="muted">{{ alertText }}</span>
+            <span class="spacer" />
+            <el-button size="small" :loading="testing" @click="sendTest">发送测试</el-button>
+            <el-button size="small" @click="$router.push('/alerts')">看告警列表</el-button>
+          </div>
+        </div>
       </div>
     </div>
 
-    <el-dialog v-model="dlg" :title="'编辑 ' + (group ? group.name : '')" width="520px">
-      <el-form label-width="150px">
+    <el-dialog v-model="dlg" :title="'编辑 ' + (group ? group.name : '设置')"
+               :width="isPhone ? '94%' : '560px'">
+      <el-form label-width="150px" class="edit-form">
         <el-form-item v-for="d in (group ? group.defs : [])" :key="d.key" :label="d.label">
           <el-input v-if="isText(d)" v-model="form[d.key]"
                     :type="d.secret ? 'password' : 'text'" :show-password="!!d.secret"
@@ -31,10 +52,10 @@
           </template>
         </el-form-item>
       </el-form>
-      <div class="muted">保存后立即生效。</div>
+      <div class="muted">只提交改动过的项；保存后立即生效。</div>
       <template #footer>
         <el-button @click="dlg = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="save">保存本组</el-button>
+        <el-button type="primary" :loading="saving" @click="save">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -80,7 +101,6 @@ const alertText = computed(() => {
   return t
 })
 
-
 function isText(d) {
   return Number(d.min) === 0 && Number(d.max) === 0
 }
@@ -90,10 +110,12 @@ function valueOf(d) {
   return v === undefined || v === '' ? '—' : v
 }
 
+// g 为 null 时编辑全部（当前入口只按组编辑，保留这条路径给以后用）
 function openEdit(g) {
   group.value = g
   Object.keys(form).forEach((k) => delete form[k])
-  g.defs.forEach((d) => {
+  const defs = g ? g.defs : schema.value
+  defs.forEach((d) => {
     const v = st.value[d.key]
     form[d.key] = isText(d) ? String(v == null ? '' : v) : (Number(v) || 0)
   })
@@ -104,14 +126,24 @@ async function save() {
   saving.value = true
   try {
     const body = {}
-    group.value.defs.forEach((d) => { body[d.key] = String(form[d.key]) })
+    const defs = group.value ? group.value.defs : schema.value
+    defs.forEach((d) => {
+      const next = String(form[d.key])
+      // 没改的项不提交：避免把未回显的密钥重写一遍
+      if (next !== String(st.value[d.key] == null ? '' : st.value[d.key])) body[d.key] = next
+    })
+    if (!Object.keys(body).length) {
+      dlg.value = false
+      ElMessage.info('没有改动')
+      return
+    }
     await Api.put('/api/v1/settings', body)
     st.value = await Api.get('/api/v1/settings')
     auth.settings = st.value
     ElMessage.success('已保存，立即生效')
     dlg.value = false
     loadAlertStatus()
-    } catch (e) {
+  } catch (e) {
     ElMessage.error('保存失败：' + e.message)
   } finally {
     saving.value = false
@@ -153,6 +185,17 @@ onMounted(load)
 </script>
 
 <style scoped>
+.set-head { display: flex; align-items: baseline; gap: 10px; margin: 2px 2px 12px; }
+.set-head h2 { margin: 0; font-size: 16px; font-weight: 650; }
+.set-head .spacer { flex: 1; }
+.set-wrap { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 16px; align-items: start; }
+.set-nav { position: sticky; top: 0; }
+.set-nav :deep(.el-anchor__list) { padding: 0; }
+.set-body { min-width: 0; }
 .unit { margin-left: 6px; color: var(--el-text-color-secondary); font-size: 12px; }
-.alert-bar { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.alert-bar { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+@media (max-width: 959px) {
+  .set-wrap { grid-template-columns: 1fr; }
+  .set-nav { display: none; }
+}
 </style>

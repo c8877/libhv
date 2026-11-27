@@ -566,7 +566,7 @@ onMounted(reload)
 .pg-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .pg-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .pg-actions { margin-left: auto; display: flex; gap: 6px; }
-.pg-meta-form { display: grid; grid-template-columns: 1fr 180px; gap: 8px 18px; margin-bottom: 6px; }
+.pg-meta-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 18px; margin-bottom: 6px; }
 .pg-meta-form :deep(.el-form-item) { margin-bottom: 0; min-width: 0; }
 .pg-meta-form .wide { grid-column: 1 / -1; }
 .pg-flags { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 2px 0 6px; font-size: 12px; }

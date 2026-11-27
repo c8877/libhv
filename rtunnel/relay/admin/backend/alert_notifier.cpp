@@ -103,6 +103,8 @@ void AdminServer::alertEnqueue(const AlertEvent& ev) {
         }
     }
     bus_.publish("alert", j.dump());
+    // 落库供「告警」页查看与确认：事件流只推给当前打开页面的人，刷新就没了
+    db_.alertInsert(wallMs(), ev.event, ev.level, ev.title, ev.text, ev.details);
     // 自愈：同一条告警驱动规则匹配（匹配失败不影响告警本身）
     playbookOnAlert(ev);
 }
@@ -425,6 +427,49 @@ std::string AdminServer::alertStatusJson() {
         j["devices_offline"] = offline;
     }
     return j.dump();
+}
+
+void AdminServer::handleAlerts(const HttpContextPtr& ctx) {
+    std::string state = ctx->param("state", "open");
+    if (state != "open" && state != "acked" && state != "all") state = "open";
+    int limit = atoi(ctx->param("limit").c_str());
+    std::string out;
+    if (!db_.alertList(state, limit, out)) {
+        ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+        ctx->send("{\"error\":\"db error\"}");
+        return;
+    }
+    ctx->send(out);
+}
+
+void AdminServer::handleAlertAck(const HttpContextPtr& ctx, const std::string& role) {
+    long long id = atoll(ctx->param("id").c_str());
+    bool found = false;
+    if (id <= 0 || !db_.alertAck(id, role, found)) {
+        ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+        ctx->send("{\"error\":\"db error\"}");
+        return;
+    }
+    if (!found) {
+        ctx->response->status_code = HTTP_STATUS_NOT_FOUND;
+        ctx->send("{\"error\":\"告警不存在或已确认\"}");
+        return;
+    }
+    audit(role, "alerts.ack", std::to_string(id));
+    ctx->send("{\"acked\":true}");
+}
+
+void AdminServer::handleAlertAckAll(const HttpContextPtr& ctx, const std::string& role) {
+    int n = 0;
+    if (!db_.alertAckAll(role, n)) {
+        ctx->response->status_code = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+        ctx->send("{\"error\":\"db error\"}");
+        return;
+    }
+    audit(role, "alerts.ack_all", std::to_string(n));
+    json out;
+    out["acked"] = n;
+    ctx->send(out.dump());
 }
 
 void AdminServer::handleAlertStatus(const HttpContextPtr& ctx) {

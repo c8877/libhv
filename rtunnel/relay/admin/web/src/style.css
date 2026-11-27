@@ -75,6 +75,9 @@ body {
   font-size: 16px;
   font-weight: 650;
   letter-spacing: 0.01em;
+  /* 标题是 flex 项，中文的 min-content 只有 1 个字：不锁住会被右侧控件挤成两行 */
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .panel-head .spacer {
@@ -88,14 +91,34 @@ body {
   min-width: 0;
 }
 
+/* Element 的 secondary (#909399) 在白色上只有 ~2.9:1，长说明（字段提示、
+   表格附注）读着累。在 primary 与 bg 之间取一档：仍然弱于正文，但过 AA 4.5:1；
+   用 color-mix 跟随浅色/深色主题，不写死灰度。 */
 .muted {
-  color: var(--el-text-color-secondary);
+  color: color-mix(in srgb, var(--el-text-color-primary) 68%, var(--el-bg-color));
   font-size: 12px;
 }
 
 .mono {
   font-family: ui-monospace, Menlo, Consolas, monospace;
 }
+
+/* 控件宽度工具类：全站共用。以前每页各写一份 scoped 版本，漏写的页面
+   （OTA 的 w140、中继列表的 w140）下拉框会撑满整行，把标题挤成两行。 */
+.w90 { width: 90px; }
+.w110 { width: 110px; }
+.w120 { width: 120px; }
+.w130 { width: 130px; }
+.w140 { width: 140px; }
+.w160 { width: 160px; }
+.w180 { width: 180px; }
+.w200 { width: 200px; }
+.w220 { width: 220px; }
+.w240 { width: 240px; }
+.w260 { width: 260px; }
+.w300 { width: 300px; }
+.w320 { width: 320px; }
+.w340 { width: 340px; }
 
 .grid-2 {
   display: grid;
@@ -190,5 +213,9 @@ body {
   .panel {
     padding: 14px;
     border-radius: 10px;
+  }
+  /* 手机上固定宽度会把一行挤爆，表单类控件统一铺满 */
+  .w140, .w160, .w180, .w200, .w220, .w240, .w260, .w300, .w320, .w340 {
+    width: 100%;
   }
 }

@@ -36,6 +36,8 @@ SUITES=(
   admin/ai-session
   admin/guide
   admin/events
+  admin/alerts
+  admin/audit
   admin/billing
   admin/terminal
   local/page

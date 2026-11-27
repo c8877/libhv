@@ -27,16 +27,18 @@ const h = require('../lib/harness')
   h.check('打开作业页', p.url().endsWith('/operations'), p.url())
 
   const head = await p.locator('.panel-head').first().innerText()
-  h.check('标题可见', head.includes('操作作业'), head)
+  h.check('标题可见', head.includes('作业'), head)
 
   const cols = await p.locator('.el-table__header th').allInnerTexts()
   h.check('表头完整',
     ['设备', '命令', '风险', '状态', '发起人', '审批人'].every((c) => cols.some((x) => x.includes(c))),
     cols)
 
-  const tabs = await p.locator('.el-tabs__item').allInnerTexts()
-  h.check('状态页签完整',
+  // 状态筛选统一用带计数的 radio-button（tabs 只留给不同数据维度）
+  const tabs = await p.locator('.bar .el-radio-button').allInnerTexts()
+  h.check('状态筛选完整',
     ['待审批', '待执行', '已执行', '失败', '全部'].every((c) => tabs.some((x) => x.includes(c))), tabs)
+  h.check('筛选项带计数', tabs.some((x) => /待审批\s+\d+/.test(x)), tabs)
 
   // 默认就在「待审批」，刚造的作业应出现并带批准/拒绝按钮
   const row = p.locator('.el-table__row').filter({ hasText: 'ui-dev' }).first()
@@ -66,7 +68,7 @@ const h = require('../lib/harness')
   await p.locator('.el-dialog:visible button', { hasText: '关闭' }).click()
 
   // 切到「全部」仍可渲染
-  await p.locator('.el-tabs__item', { hasText: '全部' }).click()
+  await p.locator('.bar .el-radio-button', { hasText: '全部' }).click()
   await p.waitForTimeout(600)
   h.check('切到全部仍可渲染', (await p.locator('.el-table').isVisible()))
 

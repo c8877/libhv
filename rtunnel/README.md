@@ -42,8 +42,8 @@ build/bin/rtunnel-client --server B_IP --port 8443 --token rtk-... --socks5 127.
 ```
 
 第一次部署：浏览器打开 `http://B:9443/`，用 `--admin-token` 初始化管理员，然后在
-「权限 → 接入账号」建账号、签发 `rtk-` 令牌，并在「权限 → 权限组」里授权设备范围
-（未分组 = 无权限）。要给不同客户分开计费/隔离设备时，先在「监控 → 租户」建租户，
+「组织与权限 → 接入账号」建账号、签发 `rtk-` 令牌，并在「组织与权限 → 权限组」里授权设备范围
+（未分组 = 无权限）。要给不同客户分开计费/隔离设备时，先在「组织与权限 → 租户」建租户，
 把设备划到租户、账号也选同一租户；令牌只能访问本租户设备，用量按租户归集。
 
 开发者 `~/.ssh/config`（SOCKS5 方式）：
@@ -108,7 +108,7 @@ build/bin/rtunnel-client --server r1.example.com --server r2.example.com --port 
 设备上线后，relay 可以把最新的地址列表同步到 agent，agent 写入本地配置文件
 `rtunnel-agent.json`（`relay_servers` / `relay_servers_rev`），重启后继续使用。
 
-管理台入口在「运维 → 中继列表」，地址维护和下发是两件事：
+管理台入口在「设备与链路 → 中继列表」，地址维护和下发是两件事：
 
 - **中继地址** tab 维护地址字典（host/port、名称、备注、启停），勾选后「加入下发列表」，
   用 ↑/↓ 调整优先级（最多 8 个）。「保存列表」只更新期望状态
@@ -119,7 +119,7 @@ build/bin/rtunnel-client --server r1.example.com --server r2.example.com --port 
 - 任务创建时快照列表和 rev，之后改列表不会改写已建任务；保存新列表会暂停快照过期的任务，
   恢复时要求任务 rev 与当前列表一致，否则只能取消后重新创建
 - 没有失败但仍有设备待上线的任务记为「部分完成」，不会当成成功
-- 中继同步任务只在中继列表页展示，不进入「运维 → 任务」中心的文件/OTA 任务列表
+- 中继同步任务只在中继列表页展示，不进入「文件与升级 → 任务」中心的文件/OTA 任务列表
 - 每次 agent 认证成功，relay 自动下发当前列表，新设备/重启设备自动对齐
 - `--server` 里的地址不会被删除：启动时放在下发列表末尾做兜底，列表写错也能救回设备
 - 新列表不含 agent 当前连接的 relay 时默认拒绝；确认要迁移再打开「允许迁移」
@@ -129,7 +129,7 @@ build/bin/rtunnel-client --server r1.example.com --server r2.example.com --port 
 
 ### 由管理台把组件装到内网主机
 
-「运维 → 部署」是设备接入前的入口：登记一台能 SSH 登录的主机，平台直接把 agent / relay /
+「接入与自动化 → 部署」是设备接入前的入口：登记一台能 SSH 登录的主机，平台直接把 agent / relay /
 client 装上去，不用先手工 scp。
 
 - **扫描网段**：不知道要装哪台机器时，填一个私有网段（最多 1024 个地址，如 `192.168.1.0/24`），
@@ -241,7 +241,7 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
 - **统计**：每 60s 一条 `[relay] stats:` 日志（agents/clients/streams/bytes_in/bytes_out/frames/auth 失败）。
 - **用量**：流量（token）、会话次数/时长（token）、设备在线时长（device）按 5s 增量写入
   `usage_events` 并累加 `usage_daily`；`GET /api/v1/usage` 按日或总计查询，需要 `usage.read`。
-  「监控 → 用量」有报表页。原始流水保留 180 天（`usage.raw_retention_days`），日聚合长期保留。
+  「用量与费用 → 用量」有报表页。原始流水保留 180 天（`usage.raw_retention_days`），日聚合长期保留。
   流量按载荷字节双向统计；管理台自身的终端/代理不计入客户用量。
 - **带宽整形**：令牌可设 `rate_kbps`（kilobit/s，0 不限），relay 按令牌做令牌桶，
   超额时暂停数据来源侧的读（上行暂停客户端连接、下行暂停设备连接），靠 TCP 窗口回压，
@@ -251,7 +251,7 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
   argv（不经过 shell），stdout/stderr 分流、超时强杀、超字节截断；写审计 `device.exec`。
 - **操作作业**：写动作走 `operations` 的 plan→apply→verify，`plan_hash` 防 TOCTOU、
   `Idempotency-Key` 防重放。risk ≥ 2 默认进入待审批，**必须由另一个账号批准**（自己批自己 403）；
-  另有每分钟/每设备配额与 `HH:MM-HH:MM` 执行窗口。管理台「运维 → 作业」可批准/拒绝/执行/看详情。
+  另有每分钟/每设备配额与 `HH:MM-HH:MM` 执行窗口。管理台「接入与自动化 → 作业」可批准/拒绝/执行/看详情。
 - **事件流**：`GET /api/v1/events`（SSE）推设备上下线、会话建立/结束、审计、告警、任务状态，
   带 `id`（seq）支持 `Last-Event-ID` 续传；受限账号只收自己设备的事件。「概览」有实时事件面板。
 - **分钟级指标**：relay 每分钟给在线设备要一份增量 sysinfo，落 `metrics_minute`（cpu/内存/负载/网卡），
@@ -288,14 +288,14 @@ rtunnel/tests/ui/run-ui.sh admin/smoke   # 只跑一个用例，list 可列全�
 - **自愈规则（playbook）**：把「告警 → 命令」固化成规则。规则只生成 `operations` 作业，
   自动执行需要三把锁同时成立：规则开了 `auto_apply`、命令风险 ≤ 系统设置
   `playbook.auto_apply_max_risk`（默认 1，只读）、全局 `playbook.enabled` 打开。
-  另有规则冷却、每规则/全局每小时上限，执行单线程串行。管理台「运维 → 自愈」可配规则、
+  另有规则冷却、每规则/全局每小时上限，执行单线程串行。管理台「接入与自动化 → 自愈」可配规则、
   看触发流水、立即执行。命令风险由服务端算，客户端改不了。
 - **AI 接入（OpenAPI + MCP）**：`GET /api/v1/openapi.json` 在构建前端时从接口文档生成
   （文档由 `check:docs` 强制与路由表对表），接口变了它跟着变。`rtunnel/deploy/rt-mcp.py`
   把这份 schema 变成 MCP 工具，**默认只暴露只读接口**，写操作要 `--allow-write`，
   调用带 `X-Actor: ai:…` 进审计。用法见下节。
 - **费用试算**：`price_rules` 存每个指标的计价单位与单价（金额 1e-6 元），
-  `GET /api/v1/billing/summary` 把日聚合用量乘单价、按租户汇总；「监控 → 费用」可改价目
+  `GET /api/v1/billing/summary` 把日聚合用量乘单价、按租户汇总；「用量与费用 → 费用」可改价目
   （`billing.write`，默认只有超管）。
 - **结算单**：按账期把金额与明细冻结成 `billing_statements`（draft → issued → paid，可作废），
   出账后不随用量变化；可导出 CSV 交给财务。仍未接支付与发票。

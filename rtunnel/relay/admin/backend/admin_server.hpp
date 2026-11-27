@@ -310,6 +310,10 @@ private:
     std::string alertStatusJson();
     void handleAlertStatus(const HttpContextPtr& ctx);
     void handleAlertTest(const HttpContextPtr& ctx);
+    // 告警事件：列表 / 确认单条 / 全部确认
+    void handleAlerts(const HttpContextPtr& ctx);
+    void handleAlertAck(const HttpContextPtr& ctx, const std::string& role);
+    void handleAlertAckAll(const HttpContextPtr& ctx, const std::string& role);
     void handleProfileGet(const HttpContextPtr& ctx);
     void handleProfileSet(const HttpContextPtr& ctx);
     void handleLogoutAll(const HttpContextPtr& ctx);

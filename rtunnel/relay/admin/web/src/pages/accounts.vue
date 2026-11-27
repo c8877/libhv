@@ -10,7 +10,7 @@
       <el-button v-if="can('account.write')" type="primary" @click="openCreate">+ 新建账号</el-button>
     </div>
 
-    <el-table :data="filtered" v-loading="loading">
+    <el-table :data="pageRows" v-loading="loading">
       <el-table-column label="用户名" :min-width="isPhone ? 150 : 160" prop="username"
                        sortable :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
@@ -72,8 +72,13 @@
           </template>
         </template>
       </el-table-column>
-      <template #empty><el-empty description="暂无账号" :image-size="70" /></template>
+      <template #empty><el-empty :description="q ? '没有匹配的账号' : '暂无账号'" :image-size="70" /></template>
     </el-table>
+
+    <div class="foot">
+      <el-pagination v-model:current-page="page" :page-size="per" :total="filtered.length"
+                     layout="prev, pager, next, total" background />
+    </div>
 
     <!-- 新建 -->
     <el-dialog v-model="createDlg" title="新建账号" width="440px">
@@ -143,7 +148,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Api } from '@/shared/api.js'
 import { auth, isSuper, roleOf, ROLE_NAMES, can } from '@/shared/store.js'
 import { time } from '@/shared/utils.js'
@@ -161,6 +166,11 @@ const filtered = computed(() => {
   const k = q.value.trim().toLowerCase()
   return k ? users.value.filter((u) => u.username.toLowerCase().includes(k)) : users.value
 })
+
+const page = ref(1)
+const per = 20
+const pageRows = computed(() => filtered.value.slice((page.value - 1) * per, page.value * per))
+watch(q, () => { page.value = 1 })
 
 const roleChoices = computed(() => {
   const roles = isSuper() ? ['viewer', 'operator', 'manager'] : ['viewer', 'operator']
@@ -354,6 +364,7 @@ onMounted(load)
 </script>
 
 <style scoped>
+.foot { display: flex; justify-content: flex-end; margin-top: 12px; }
 .search { width: 220px; }
 .ml6 { margin-left: 6px; }
 .scope { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }

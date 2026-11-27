@@ -69,6 +69,7 @@ set(RTUNNEL_RELAY_SOURCES
                relay/admin/backend/deploy_ssh.cpp
                relay/admin/backend/deploy_scan.cpp
                relay/admin/backend/admin_db_deploy.cpp
+               relay/admin/backend/admin_db_alert.cpp
                relay/admin/backend/ai_prompt_library.cpp
                relay/admin/backend/admin_db_metrics_minute.cpp
                relay/admin/backend/event_bus.cpp

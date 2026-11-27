@@ -164,6 +164,8 @@ void AdminServer::handleFiles(const HttpContextPtr& ctx) {
     for (const auto& f : files) {
         json j;
         j["name"] = f.name;
+        // 和递归搜索保持一致：前端选文件要靠 path 拼下一层，不能只给 name
+        j["path"] = "/" + (rel.empty() ? f.name : rel + "/" + f.name);
         j["type"] = f.dir ? "dir" : "file";
         j["size"] = f.size;
         j["mtime_ms"] = f.mtime_ms;

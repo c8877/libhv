@@ -372,6 +372,14 @@ public:
     bool dictBatchDelete(const std::string& kind, const std::vector<long long>& ids,
                          std::string& json_out);
 
+    // ---- 告警事件（alertEnqueue 落库，供「告警」页查看与确认） ----
+    bool alertInsert(long long at_ms, const std::string& event, const std::string& level,
+                     const std::string& title, const std::string& text,
+                     const std::string& detail);
+    bool alertList(const std::string& state, int limit, std::string& json_out);
+    bool alertAck(long long id, const std::string& actor, bool& found);
+    bool alertAckAll(const std::string& actor, int& acked);
+
     // ---- 部署（SSH 到目标主机装 agent/relay/client） ----
     // 凭据不入库：secret 文件在 <db 同目录>/deploy/<id>.secret，0600
     bool deployHostList(std::string& json_out);

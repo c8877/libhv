@@ -113,6 +113,7 @@
               <polyline v-if="ovMemPath" :points="ovMemPath" class="ov-line mem" />
               <polyline v-if="ovCpuPath" :points="ovCpuPath" class="ov-line cpu" />
             </svg>
+            <div class="ov-dir muted">左旧右新</div>
           </div>
           <div v-else class="ov-empty ov-wait">{{ enabledCfg.length ? '等待采样数据…' : '未启用采样指标' }}</div>
         </div>
@@ -3747,6 +3748,7 @@ onBeforeUnmount(() => {
   color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums;
 }
 .ov-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-left: 6px; }
+.ov-dir { margin-top: 2px; font-size: 11px; text-align: right; }
 .ov-dot.cpu { background: #4a9eff; }
 .ov-dot.mem { background: #f5a623; }
 .ov-spark { height: 150px; }
@@ -3805,7 +3807,9 @@ onBeforeUnmount(() => {
   .ov-k-val { font-size: 24px; }
   .ov-k-val.sm { font-size: 14px; padding: 8px 0 7px; }
   .ov-spark, .ov-spark svg { height: 120px; }
-  .ov-legend { display: none; }
+  /* 手机上不再隐藏图例：两条线没有图例就分不清谁是谁，改成换行放一行 */
+  .ov-head { flex-wrap: wrap; row-gap: 2px; }
+  .ov-legend { order: 6; flex-basis: 100%; }
   .dh-ts { display: none; }
 }
 .period { width: 84px; }

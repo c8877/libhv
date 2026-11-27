@@ -15,7 +15,7 @@
       Token 继承所属账号的权限组；加入权限组后只能收窄，不会超过归属账号。
     </div>
 
-    <el-table :data="list" v-loading="loading">
+    <el-table :data="pageRows" v-loading="loading">
       <el-table-column label="名称 / 前缀" :min-width="isPhone ? 150 : 170" prop="name"
                        sortable :sort-orders="TEXT_ORDERS">
         <template #default="{ row }">
@@ -86,8 +86,15 @@
           </template>
         </template>
       </el-table-column>
-      <template #empty><el-empty description="暂无 API Token" :image-size="70" /></template>
+      <template #empty>
+        <el-empty :description="q ? '没有匹配的 Token' : '暂无 API Token'" :image-size="70" />
+      </template>
     </el-table>
+
+    <div class="foot">
+      <el-pagination v-model:current-page="page" :page-size="per" :total="list.length"
+                     layout="prev, pager, next, total" background />
+    </div>
   </div>
 
   <!-- 新建 / 编辑 -->
@@ -161,7 +168,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { Api } from '@/shared/api.js'
 import { auth, can, ROLE_NAMES } from '@/shared/store.js'
 import { copyText, time } from '@/shared/utils.js'
@@ -222,12 +229,18 @@ function splitGroups(s) {
   return (s || '').split(',').map((x) => x.trim()).filter(Boolean)
 }
 
+const page = ref(1)
+const per = 20
+const pageRows = computed(() => list.value.slice((page.value - 1) * per, page.value * per))
+
 let timer = null
 async function load() {
   loading.value = true
   try {
     const suffix = q.value.trim() ? '?q=' + encodeURIComponent(q.value.trim()) : ''
     list.value = await Api.get('/api/v1/admin-tokens' + suffix)
+    const max = Math.max(1, Math.ceil(list.value.length / per))
+    if (page.value > max) page.value = max
   } catch (e) {
     ElMessage.error('加载失败：' + e.message)
   } finally {
@@ -236,6 +249,7 @@ async function load() {
 }
 
 function onSearch() {
+  page.value = 1
   clearTimeout(timer)
   timer = setTimeout(load, 250)
 }
@@ -399,6 +413,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.foot { display: flex; justify-content: flex-end; margin-top: 12px; }
 .search { width: 240px; }
 .tip { margin-bottom: 12px; font-size: 12.5px; line-height: 1.7; }
 .tip code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

@@ -71,6 +71,15 @@
       <main class="page">
         <router-view />
       </main>
+
+      <!-- 手机上高频四页放底部：汉堡菜单里点两下太绕 -->
+      <nav class="tabbar">
+        <router-link v-for="t in tabs" :key="t.path" :to="t.path" class="tab"
+                     :class="{ on: tabActive(t.path) }">
+          <el-icon :size="18"><component :is="iconOf(t.icon)" /></el-icon>
+          <span>{{ t.label }}</span>
+        </router-link>
+      </nav>
     </div>
   </div>
 </template>
@@ -83,6 +92,7 @@ import {
   auth, avatarColor, logout, roleOf, ROLE_NAMES, saveTheme, siteTitle, overview, can,
 } from '@/shared/store.js'
 import { navFor } from '@/shared/nav.js'
+import { iconOf } from '@/shared/icons.js'
 import NavMenu from '@/components/NavMenu.vue'
 import { duration } from '@/shared/utils.js'
 
@@ -95,6 +105,16 @@ const drawerNav = ref(null)
 const ov = ref(overview.data)
 
 const items = computed(() => navFor(can))
+
+// 手机底部导航：只放最常用的几页，按权限过滤；没有的就不占位
+const tabs = computed(() => [
+  { path: '/', icon: 'ChatDotRound', label: '助手', show: can('ai.chat') },
+  { path: '/agents', icon: 'Monitor', label: '设备', show: can('device.view') },
+  { path: '/alerts', icon: 'Bell', label: '告警', show: can('alert.read') },
+  { path: '/overview', icon: 'Odometer', label: '概览', show: can('device.view') },
+  { path: '/profile', icon: 'Avatar', label: '我的', show: true },
+].filter((t) => t.show))
+const tabActive = (path) => (path === '/' ? route.path === '/' : route.path.startsWith(path))
 const active = computed(() => route.path)
 const activeGroup = computed(() => {
   const p = route.path
@@ -270,6 +290,8 @@ html.dark .side {
 .who span { font-size: 12px; color: var(--el-text-color-secondary); }
 .page { --page-pad: 24px; flex: 1; padding: var(--page-pad); min-width: 0; overflow-y: auto; }
 
+.tabbar { display: none; }
+
 .theme-box { display: flex; flex-direction: column; gap: 12px; }
 .theme-modes {
   display: flex;
@@ -303,7 +325,33 @@ html.dark .side {
 @media (max-width: 599px) {
   .topbar { padding: 0 14px; gap: 8px; height: 56px; }
   .relay-info, .uname, .brand-mini .bname { display: none; }
-  .page { --page-pad: 12px; padding: var(--page-pad); }
+  /* 给底部导航留出空间，最后一屏内容不被盖住 */
+  .page { --page-pad: 12px; padding: var(--page-pad); padding-bottom: calc(var(--page-pad) + 56px); }
+
+  .tabbar {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    height: 56px;
+    padding-bottom: env(safe-area-inset-bottom);
+    background: var(--el-bg-color);
+    border-top: 1px solid var(--el-border-color-lighter);
+  }
+  .tab {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    font-size: 11px;
+    color: var(--el-text-color-secondary);
+    text-decoration: none;
+  }
+  .tab.on { color: var(--el-color-primary); }
 }
 </style>
 

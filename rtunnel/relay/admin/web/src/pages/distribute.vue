@@ -1,13 +1,60 @@
 <template>
   <div v-if="!fileName" class="panel">
-    <el-empty description="缺少文件参数">
-      <el-button type="primary" @click="$router.replace('/files')">返回文件列表</el-button>
-    </el-empty>
+    <div class="panel-head">
+      <h2>分发文件</h2>
+      <span class="muted">从文件仓库选一个文件，再挑要分发到的设备</span>
+      <span class="spacer" />
+      <el-input v-model="pickQ" placeholder="搜索文件名" clearable class="w220">
+        <template #prefix><el-icon><Search /></el-icon></template>
+      </el-input>
+      <el-button :loading="pickLoading" @click="loadPick">刷新</el-button>
+    </div>
+
+    <div class="crumbs">
+      <el-button link @click="openDir('')">文件仓库</el-button>
+      <template v-for="c in crumbs" :key="c.path">
+        <span class="sep">/</span>
+        <el-button link @click="openDir(c.path)">{{ c.name }}</el-button>
+      </template>
+    </div>
+
+    <el-table :data="pickShown" v-loading="pickLoading" size="small">
+      <el-table-column label="名称" min-width="260">
+        <template #default="{ row }">
+          <el-button v-if="row.type === 'dir'" link type="primary" @click="openDir(row.path)">
+            <el-icon class="ico"><FolderOpened /></el-icon>{{ row.name }}
+          </el-button>
+          <span v-else class="fname">
+            <el-icon class="ico"><Document /></el-icon>{{ row.name }}
+          </span>
+        </template>
+      </el-table-column>
+      <el-table-column label="大小" width="110">
+        <template #default="{ row }">
+          <span class="muted">{{ row.type === 'dir' ? '—' : bytes(row.size) }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="修改时间" width="170">
+        <template #default="{ row }"><span class="muted">{{ when(row.mtime_ms) }}</span></template>
+      </el-table-column>
+      <el-table-column label="操作" width="120">
+        <template #default="{ row }">
+          <el-button v-if="row.type === 'file'" link type="primary" @click="pick(row)">分发…</el-button>
+          <el-button v-else link @click="openDir(row.path)">进入</el-button>
+        </template>
+      </el-table-column>
+      <template #empty>
+        <el-empty :description="pickQ ? '这个目录没有匹配的文件' : '这个目录还没有文件'" :image-size="70">
+          <el-button @click="$router.push('/files')">去文件仓库上传</el-button>
+        </el-empty>
+      </template>
+    </el-table>
   </div>
 
   <div v-else>
     <div class="back">
-      <el-button link @click="$router.push('/files')">← 文件列表</el-button>
+      <el-button link @click="$router.replace('/distribute')">← 换一个文件</el-button>
+      <el-button link @click="$router.push('/files')">文件列表</el-button>
     </div>
 
     <div class="panel">
@@ -74,6 +121,66 @@ const route = useRoute()
 const router = useRouter()
 const { isPhone } = useBreakpoint()
 const fileName = computed(() => String(route.query.file || ''))
+
+// ---------------------------------------------------------------- 选文件
+const pickDir = ref('')
+const pickRows = ref([])
+const pickLoading = ref(false)
+const pickQ = ref('')
+
+const crumbs = computed(() => {
+  const seg = pickDir.value.split('/').filter(Boolean)
+  const out = []
+  let cur = ''
+  for (const s of seg) {
+    cur += '/' + s
+    out.push({ name: s, path: cur })
+  }
+  return out
+})
+
+const pickShown = computed(() => {
+  const k = pickQ.value.trim().toLowerCase()
+  if (!k) return pickRows.value
+  return pickRows.value.filter((r) => r.name.toLowerCase().includes(k))
+})
+
+async function loadPick() {
+  pickLoading.value = true
+  try {
+    const arr = await Api.get('/api/v1/files?dir=' + encodeURIComponent(pickDir.value))
+    pickRows.value = (arr || []).map((f) => ({ ...f, type: f.type === 'dir' ? 'dir' : 'file' }))
+  } catch (e) {
+    pickRows.value = []
+    ElMessage.error('读文件仓库失败：' + e.message)
+  } finally {
+    pickLoading.value = false
+  }
+}
+
+function openDir(dir) {
+  pickDir.value = dir || ''
+  pickQ.value = ''
+  loadPick()
+}
+
+function pick(row) {
+  router.push({ path: '/distribute', query: { file: row.path } })
+}
+
+function bytes(n) {
+  if (!n && n !== 0) return '—'
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MiB'
+  if (n >= 1024) return (n / 1024).toFixed(0) + ' KiB'
+  return n + ' B'
+}
+
+function when(ms) {
+  if (!ms) return '—'
+  const d = new Date(ms)
+  const p = (x) => String(x).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
 
 const devices = ref([])
 const loading = ref(false)
@@ -170,11 +277,24 @@ async function submit() {
   }
 }
 
-onMounted(load)
+// 同一个路由切 query：组件不重建，靠 watch 切换“选文件 / 选设备”两种状态
+watch(() => route.query.file, (v) => {
+  if (v) load()
+  else loadPick()
+})
+
+onMounted(() => {
+  if (fileName.value) load()
+  else loadPick()
+})
 </script>
 
 <style scoped>
-.back { margin-bottom: 10px; }
+.back { display: flex; gap: 4px; margin-bottom: 10px; }
+.crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin: -4px 0 10px; font-size: 13px; }
+.crumbs .sep { color: var(--el-text-color-placeholder); }
+.fname { display: inline-flex; align-items: center; gap: 6px; }
+.ico { margin-right: 4px; vertical-align: -2px; color: var(--el-text-color-secondary); }
 .cfg { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; margin-bottom: 12px; }
 .cfg-item { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--el-text-color-secondary); }
 .w220 { width: 200px; }

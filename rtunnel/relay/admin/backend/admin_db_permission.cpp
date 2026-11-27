@@ -507,6 +507,9 @@ const PermResDef kPermRes[] = {
     {"cert.read", "证书", "查看证书", "证书台账与到期状态"},
     {"cert.write", "证书", "签发证书", "签发、吊销、签署证书"},
 
+    {"alert.read", "告警", "查看告警", "告警事件列表（设备离线、证书到期、任务失败等）"},
+    {"alert.write", "告警", "确认告警", "确认单条或全部告警"},
+
     {"audit.read", "审计", "查看审计", "管理台操作审计日志"},
     {"op.approve", "运营", "审批操作作业", "批准或拒绝 risk ≥ 2 的设备写操作（不能批自己发起的）"},
     {"playbook.read", "运营", "查看自愈规则", "告警触发的自动应答规则与执行流水"},
@@ -556,10 +559,10 @@ std::vector<std::string> presetResources(const std::string& builtin) {
                     k == "file.read" || k == "file.write" || k == "dist.read" ||
                     k == "repo.read" || k == "repo.write" ||
                     k == "dict.read" || k == "account.read" || k == "settings.read" ||
-                    k == "usage.read";
+                    k == "usage.read" || k == "alert.read";
         } else if (builtin == "viewer") {
             allow = k == "device.view" || k == "device.tty.read" || k == "device.proc.read" ||
-                    k == "settings.read";
+                    k == "settings.read" || k == "alert.read";
         }
         if (allow) out.push_back(k);
     }

@@ -67,8 +67,11 @@ void AdminServer::handleKickAgent(const HttpContextPtr& ctx, const std::string& 
 }
 
 void AdminServer::handleAudit(const HttpContextPtr& ctx) {
-    (void)ctx;
-    ctx->send(audit_.tailJson(200));
+    // 默认最近 200 条；页面一次要一屏以上的历史时传 limit（上限 ring 的 1000 条）
+    int limit = atoi(ctx->param("limit").c_str());
+    if (limit <= 0) limit = 200;
+    if (limit > 1000) limit = 1000;
+    ctx->send(audit_.tailJson(limit));
 }
 
 void AdminServer::handleShutdown(const HttpContextPtr& ctx, const std::string& role) {

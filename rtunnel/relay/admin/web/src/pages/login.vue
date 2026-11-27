@@ -1,7 +1,7 @@
 <template>
   <div class="login-wrap">
     <div class="login-card">
-      <div class="login-logo">◈ rtunnel</div>
+      <div class="login-logo"><span class="mark">◈</span><span>rtunnel</span></div>
       <h1>{{ auth.setupDone ? '登录' : '初始化超级管理员' }}</h1>
       <p class="sub">{{ auth.setupDone ? '使用管理台账号登录' : '首次部署，创建第一个管理员' }}</p>
 
@@ -10,7 +10,8 @@
           <el-input id="af-token" v-model="form.token" type="password" show-password placeholder="启动 relay 时配置的 --admin-token" />
         </el-form-item>
         <el-form-item label="用户名" prop="username">
-          <el-input id="af-user" v-model="form.username" autocomplete="username" placeholder="用户名" />
+          <el-input id="af-user" v-model="form.username" autocomplete="username" placeholder="用户名"
+                    autofocus />
         </el-form-item>
         <el-form-item label="密码" prop="password">
           <el-input id="af-pass" v-model="form.password" type="password" show-password autocomplete="current-password"
@@ -24,6 +25,14 @@
         </el-button>
       </el-form>
     </div>
+
+    <div class="login-foot">
+      <div>当前 relay：<b class="mono">{{ host }}</b></div>
+      <div class="muted">
+        登录用的是 relay 本地的账号库（每台 relay 各自独立）。进不去就找装这套平台的人，
+        或在能登录的账号里看「设置 → 账号安全」。
+      </div>
+    </div>
   </div>
 </template>
 
@@ -34,6 +43,8 @@ import { auth, login, setup } from '@/shared/store.js'
 
 const router = useRouter()
 const formRef = ref(null)
+// 多 relay 时先确认自己连的是哪一台，避免在 A 上改 B 的账号
+const host = location.host
 const form = reactive({ token: '', username: '', password: '' })
 const rules = {
   token: [{ required: true, message: '请填写部署 token', trigger: 'blur' }],
@@ -67,6 +78,7 @@ async function submit() {
 .login-wrap {
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 24px;
@@ -76,7 +88,9 @@ async function submit() {
     var(--el-bg-color-page);
 }
 .login-card {
-  width: min(400px, 100%);
+  /* 明确 border-box：否则 400 + 左右 32 padding 会超宽，手机上下边被裁 */
+  box-sizing: border-box;
+  width: min(464px, 100%);
   padding: 32px 32px 28px;
   background: var(--el-bg-color);
   border: 1px solid var(--el-border-color-lighter);
@@ -86,13 +100,36 @@ async function submit() {
 .login-logo {
   display: inline-flex;
   align-items: center;
-  padding: 6px 10px;
-  border-radius: 9px;
-  background: var(--el-color-primary-light-9);
-  font-size: 13px;
+  gap: 9px;
+  font-size: 15px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--el-color-primary);
+  letter-spacing: 0.02em;
+  color: var(--el-text-color-primary);
+}
+/* 与侧栏 logo 同一个标记，避免登录页和里面像两个产品 */
+.login-logo .mark {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  color: #fff;
+  font-size: 16px;
+  background: linear-gradient(135deg, var(--el-color-primary), color-mix(in srgb, var(--el-color-primary) 55%, #7c3aed));
+  box-shadow: 0 8px 18px -10px var(--el-color-primary);
+}
+.login-foot {
+  box-sizing: border-box;
+  width: min(464px, 100%);
+  padding: 0 4px;
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--el-text-color-regular);
 }
 h1 {
   margin: 16px 0 6px;

@@ -571,6 +571,18 @@ bool AdminDb::migrate(std::string& err) {
         " created_ms INTEGER NOT NULL DEFAULT 0,"
         " finished_ms INTEGER NOT NULL DEFAULT 0);"
         "CREATE INDEX IF NOT EXISTS idx_relay_task_due ON relay_sync_task(status, start_at_ms);"
+        // 告警事件：给人看与确认的队列，只留最近 2000 条（长期记录在审计文件）
+        "CREATE TABLE IF NOT EXISTS alert_events("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        " at_ms INTEGER NOT NULL DEFAULT 0,"
+        " event TEXT NOT NULL DEFAULT '',"
+        " level TEXT NOT NULL DEFAULT 'warning',"
+        " title TEXT NOT NULL DEFAULT '',"
+        " text TEXT NOT NULL DEFAULT '',"
+        " detail TEXT NOT NULL DEFAULT '',"
+        " acked_ms INTEGER NOT NULL DEFAULT 0,"
+        " acked_by TEXT NOT NULL DEFAULT '');"
+        "CREATE INDEX IF NOT EXISTS idx_alert_events_open ON alert_events(acked_ms,id);"
         // 部署：目标主机（SSH 凭据不入库，落 <db 同目录>/deploy/<id>.secret，0600）
         "CREATE TABLE IF NOT EXISTS deploy_hosts("
         " id INTEGER PRIMARY KEY AUTOINCREMENT,"

@@ -350,6 +350,10 @@ int AdminServer::requirePerm(const HttpContextPtr& ctx, const std::string& need,
         return 401;
     }
     if (need.empty() || need == "auth" || hasPerm(need)) return 0;
+    // 越权也要留痕：审计里“拒绝”比“成功”更该看得见（谁、从哪、要什么）
+    std::string path = ctx->request ? ctx->request->path : std::string();
+    auditEx("perm.denied", "perm", need, "denied",
+            "path=" + path + " need=" + need + " role=" + role);
     ctx->response->status_code = HTTP_STATUS_FORBIDDEN;
     ctx->response->content_type = APPLICATION_JSON;
     ctx->response->body = "{\"error\":\"forbidden\",\"need\":\"" + need + "\"}";
