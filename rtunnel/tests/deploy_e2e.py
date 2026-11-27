@@ -16,6 +16,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -110,6 +111,54 @@ def make_package(repo, ver):
     os.makedirs(outdir, exist_ok=True)
     sh("tar --format=ustar -C %s -czf %s/%s.tar.gz %s" % (os.path.dirname(stage), outdir, name, name))
     return name + ".tar.gz"
+
+
+def start_slow_proxy(target_port, delay=0.45):
+    """模拟 Dropbear 这类服务端：TCP 连上后要过几百毫秒才发 banner。
+
+    旧实现把「200ms 内没数据」当成握手超时，这种服务端就永远连不上。
+    """
+    srv = socket.socket()
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+    port = srv.getsockname()[1]
+
+    def pump(src, dst, delay_first):
+        first = True
+        try:
+            while True:
+                data = src.recv(65536)
+                if not data:
+                    break
+                if first and delay_first:
+                    time.sleep(delay)
+                    first = False
+                dst.sendall(data)
+        except Exception:
+            pass
+        finally:
+            try:
+                dst.shutdown(socket.SHUT_WR)
+            except Exception:
+                pass
+
+    def serve():
+        while True:
+            try:
+                c, _ = srv.accept()
+            except OSError:
+                return
+            try:
+                u = socket.create_connection(("127.0.0.1", target_port), timeout=5)
+            except Exception:
+                c.close()
+                continue
+            threading.Thread(target=pump, args=(c, u, False), daemon=True).start()
+            threading.Thread(target=pump, args=(u, c, True), daemon=True).start()
+
+    threading.Thread(target=serve, daemon=True).start()
+    return port, srv
 
 
 def call(op, base, path, body=None, method=None):
@@ -344,6 +393,18 @@ def main():
             code, _ = call(op, base, "/api/v1/deploy/hosts/%d" % info["host"],
                            {"auth": "key", "secret": keytext}, method="PUT")
 
+            # 4.7) 服务端慢半秒才发 banner（Dropbear）也必须能连上
+            proxy_port, proxy_srv = start_slow_proxy(ssh_port)
+            code, h5 = call(op, base, "/api/v1/deploy/hosts",
+                            {"name": "slow-banner", "host": "127.0.0.1", "port": proxy_port,
+                             "username": os.environ.get("USER", "root"), "auth": "key",
+                             "secret": keytext})
+            info["host5"] = h5.get("id")
+            code, pr5 = call(op, base, "/api/v1/deploy/hosts/%d/probe" % h5.get("id", 0), {})
+            e2e.check("deploy: 服务端慢发 banner 也能握手",
+                      code == 200 and pr5.get("ok") is True, str(pr5)[:200])
+            proxy_srv.close()
+
             # 5) 主机密钥变化必须拒绝
             code, _ = call(op, base, "/api/v1/deploy/hosts/%d/probe" % info["host"], {})
             kh = os.path.join(WORK, "deploy", "known_hosts")
@@ -400,7 +461,7 @@ def main():
     finally:
         # 清理：删主机（凭据文件一起删）
         try:
-            for k in ("host", "host3", "host4"):
+            for k in ("host", "host3", "host4", "host5"):
                 if info.get(k):
                     call(op, base, "/api/v1/deploy/hosts/%d" % info[k], method="DELETE")
             cred = os.path.join(WORK, "deploy", "%d.key" % info.get("host", 0))

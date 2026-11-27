@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <mutex>
@@ -91,6 +92,17 @@ bool DeploySsh::waitSocket(long ms) {
     return false;
 }
 
+// 200ms 没动静是正常现象（Dropbear 之类的服务端要等几百毫秒才发 banner），
+// 只按总 deadline 判定超时，避免把“慢一点”当成“连不上”。
+bool DeploySsh::waitUntil(Clock::time_point deadline, long slice_ms) {
+    auto now = Clock::now();
+    if (now >= deadline) return false;
+    long left = (long)std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+    if (left <= 0) return false;
+    waitSocket(std::min(left, slice_ms));
+    return Clock::now() < deadline;
+}
+
 bool DeploySsh::connect(const DeploySshTarget& t, std::string& err) {
     ensureInit();
     close();
@@ -170,13 +182,15 @@ bool DeploySsh::connect(const DeploySshTarget& t, std::string& err) {
     // 单次等待上限；外层循环还有总超时
     libssh2_session_set_timeout(s, 15000);
 
-    // 握手（非阻塞）
+    // 握手（非阻塞）：有的服务端（Dropbear）连上后要等几百毫秒才发 banner，
+    // 所以这里按总超时判断，单次 200ms 没动静就继续等。
+    auto hs_deadline = Clock::now() + std::chrono::seconds(20);
     for (;;) {
         int rc = libssh2_session_handshake(s, sock_);
         if (rc == 0) break;
         if (rc == LIBSSH2_ERROR_EAGAIN) {
-            if (!waitSocket(200)) {
-                err = "SSH 握手超时";
+            if (!waitUntil(hs_deadline)) {
+                err = "SSH 握手超时：目标 20 秒内没完成密钥交换（端口可能不是 SSH，或被中间设备拦了）";
                 close();
                 return false;
             }
@@ -194,12 +208,13 @@ bool DeploySsh::connect(const DeploySshTarget& t, std::string& err) {
     const char* hk = nullptr;
     size_t hklen = 0;
     int hktype = 0;
-    for (int i = 0; i < 50 && !hk; ++i) {
+    auto hk_deadline = Clock::now() + std::chrono::seconds(5);
+    while (!hk) {
         hk = libssh2_session_hostkey(s, &hklen, &hktype);
         if (hk) break;
         int rc2 = libssh2_session_last_errno(s);
         if (rc2 != LIBSSH2_ERROR_EAGAIN) break;
-        if (!waitSocket(100)) break;
+        if (!waitUntil(hk_deadline, 100)) break;
     }
     if (!hk) {
         char* msg = nullptr;
@@ -246,6 +261,7 @@ bool DeploySsh::connect(const DeploySshTarget& t, std::string& err) {
     // 认证（非阻塞）
     std::string u = t.user;
     int rc = LIBSSH2_ERROR_EAGAIN;
+    auto auth_deadline = Clock::now() + std::chrono::seconds(20);
     for (;;) {
         if (t.auth == "key") {
             rc = libssh2_userauth_publickey_frommemory(
@@ -255,8 +271,8 @@ bool DeploySsh::connect(const DeploySshTarget& t, std::string& err) {
                                              t.secret.size(), nullptr);
         }
         if (rc == LIBSSH2_ERROR_EAGAIN) {
-            if (!waitSocket(200)) {
-                err = "SSH 认证超时";
+            if (!waitUntil(auth_deadline)) {
+                err = "SSH 认证超时（20 秒）";
                 close();
                 return false;
             }
@@ -284,12 +300,13 @@ DeploySshResult DeploySsh::exec(const std::string& cmd, const std::string& stdin
         return r;
     }
     LIBSSH2_CHANNEL* ch = nullptr;
+    auto open_deadline = Clock::now() + std::chrono::seconds(20);
     for (;;) {
         ch = libssh2_channel_open_session(s);
         if (ch) break;
         int rc = libssh2_session_last_errno(s);
         if (rc == LIBSSH2_ERROR_EAGAIN) {
-            if (!waitSocket(200)) {
+            if (!waitUntil(open_deadline)) {
                 r.err = "打开 SSH 通道超时";
                 return r;
             }
@@ -300,11 +317,12 @@ DeploySshResult DeploySsh::exec(const std::string& cmd, const std::string& stdin
         r.err = std::string("打开通道失败: ") + (msg ? msg : "unknown");
         return r;
     }
+    auto exec_deadline = Clock::now() + std::chrono::seconds(20);
     for (;;) {
         int rc = libssh2_channel_exec(ch, cmd.c_str());
         if (rc == 0) break;
         if (rc == LIBSSH2_ERROR_EAGAIN) {
-            if (!waitSocket(200)) {
+            if (!waitUntil(exec_deadline)) {
                 r.err = "执行命令超时";
                 libssh2_channel_free(ch);
                 return r;
@@ -319,15 +337,23 @@ DeploySshResult DeploySsh::exec(const std::string& cmd, const std::string& stdin
     // 先写 stdin（sudo 密码），关掉写方向让远端知道输入结束
     if (!stdin_data.empty()) {
         size_t off = 0;
+        auto w_deadline = Clock::now() + std::chrono::seconds(20);
+        bool w_ok = true;
         while (off < stdin_data.size()) {
             ssize_t w = libssh2_channel_write_ex(ch, 0, stdin_data.data() + off,
                                                  stdin_data.size() - off);
             if (w == LIBSSH2_ERROR_EAGAIN) {
-                if (!waitSocket(200)) break;
+                if (!waitUntil(w_deadline)) { w_ok = false; break; }
                 continue;
             }
-            if (w < 0) break;
+            if (w < 0) { w_ok = false; break; }
             off += (size_t)w;
+        }
+        if (!w_ok) {
+            libssh2_channel_close(ch);
+            libssh2_channel_free(ch);
+            r.err = "写入远端 stdin 超时（sudo 密码没送出去）";
+            return r;
         }
     }
     libssh2_channel_send_eof(ch);
@@ -386,11 +412,12 @@ bool DeploySsh::upload(const std::string& local, const std::string& remote,
     }
     if (!sftp_) {
         LIBSSH2_SFTP* sf = nullptr;
+        auto sf_deadline = Clock::now() + std::chrono::seconds(20);
         for (;;) {
             sf = libssh2_sftp_init(s);
             if (sf) break;
             if (libssh2_session_last_errno(s) == LIBSSH2_ERROR_EAGAIN) {
-                if (!waitSocket(200)) {
+                if (!waitUntil(sf_deadline)) {
                     err = "打开 SFTP 超时";
                     return false;
                 }
@@ -410,13 +437,14 @@ bool DeploySsh::upload(const std::string& local, const std::string& remote,
         return false;
     }
     LIBSSH2_SFTP_HANDLE* h = nullptr;
+    auto ro_deadline = Clock::now() + std::chrono::seconds(20);
     for (;;) {
         h = libssh2_sftp_open_ex((LIBSSH2_SFTP*)sftp_, remote.c_str(), remote.size(),
                                  LIBSSH2_FXF_WRITE | LIBSSH2_FXF_CREAT | LIBSSH2_FXF_TRUNC,
                                  LIBSSH2_SFTP_S_IRUSR | LIBSSH2_SFTP_S_IWUSR, 0);
         if (h) break;
         if (libssh2_session_last_errno(s) == LIBSSH2_ERROR_EAGAIN) {
-            if (!waitSocket(200)) {
+            if (!waitUntil(ro_deadline)) {
                 fclose(f);
                 err = "创建远端文件超时";
                 return false;
@@ -450,7 +478,7 @@ bool DeploySsh::upload(const std::string& local, const std::string& remote,
         while (off < n) {
             ssize_t w = libssh2_sftp_write(h, buf.data() + off, n - off);
             if (w == LIBSSH2_ERROR_EAGAIN) {
-                if (!waitSocket(200)) {
+                if (!waitUntil(deadline)) {
                     err = "上传超时";
                     ok = false;
                     break;
@@ -467,11 +495,12 @@ bool DeploySsh::upload(const std::string& local, const std::string& remote,
         if (!ok) break;
     }
     fclose(f);
+    auto cl_deadline = Clock::now() + std::chrono::seconds(10);
     for (;;) {
         int rc = libssh2_sftp_close_handle(h);
         if (rc == 0) break;
         if (rc == LIBSSH2_ERROR_EAGAIN) {
-            if (!waitSocket(200)) break;
+            if (!waitUntil(cl_deadline)) break;
             continue;
         }
         break;

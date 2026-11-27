@@ -4,6 +4,7 @@
 // 只做部署需要的三件事：执行命令、可选写 stdin（sudo -S）、SFTP 上传文件。
 // 认证支持密码和私钥；主机密钥按 known_hosts 做 accept-new，指纹变了直接拒绝。
 
+#include <chrono>
 #include <functional>
 #include <string>
 
@@ -52,5 +53,8 @@ private:
     void*       sftp_ = nullptr;
     int         sock_ = -1;
     std::string last_error_;
-    bool        waitSocket(long ms);
+    using Clock = std::chrono::steady_clock;
+    bool waitSocket(long ms);
+    // 泵一次 socket：false 表示已经到 deadline（不是“这 200ms 没动静”）
+    bool waitUntil(Clock::time_point deadline, long slice_ms = 200);
 };
