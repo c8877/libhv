@@ -7,7 +7,10 @@
 
     <div class="set-wrap">
       <!-- 分组多、一屏放不下：左侧锚点跟着滚，右侧才是一组组的值 -->
-      <el-anchor class="set-nav" :container="'.page'" direction="vertical" :offset="80">
+      <!-- 路由是 hash history，锚点默认的 href="#set-0" 会被当成路由跳走；
+           组件自己会滚容器，这里只把浏览器默认跳转拦掉 -->
+      <el-anchor class="set-nav" :container="'.page'" direction="vertical" :offset="80"
+                 @click="onAnchorClick">
         <el-anchor-link v-for="(g, i) in groups" :key="g.name" :href="'#set-' + i">
           {{ g.name }}
         </el-anchor-link>
@@ -101,6 +104,10 @@ const alertText = computed(() => {
   return t
 })
 
+function onAnchorClick(e) {
+  e.preventDefault()
+}
+
 function isText(d) {
   return Number(d.min) === 0 && Number(d.max) === 0
 }
@@ -189,8 +196,21 @@ onMounted(load)
 .set-head h2 { margin: 0; font-size: 16px; font-weight: 650; }
 .set-head .spacer { flex: 1; }
 .set-wrap { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 16px; align-items: start; }
-.set-nav { position: sticky; top: 0; }
+/* 和右侧卡片一样的卡片样式：否则锚点自带的白色底会像一块没画完的矩形，
+   滚动时贴到顶栏下面也看不出边界 */
+.set-nav {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
+  background: var(--el-bg-color);
+}
 .set-nav :deep(.el-anchor__list) { padding: 0; }
+.set-nav :deep(.el-anchor__link) { font-size: 12.5px; }
 .set-body { min-width: 0; }
 .unit { margin-left: 6px; color: var(--el-text-color-secondary); font-size: 12px; }
 .alert-bar { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; }

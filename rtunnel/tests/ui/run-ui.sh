@@ -38,6 +38,7 @@ SUITES=(
   admin/events
   admin/alerts
   admin/audit
+  admin/settings
   admin/billing
   admin/terminal
   local/page
