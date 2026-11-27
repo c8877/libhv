@@ -9,6 +9,7 @@
       <template v-for="g in items" :key="g.key">
         <!-- flat 组：不折叠，直接一个顶级入口（首页 AI 助手） -->
         <template v-if="g.flat">
+          <div v-if="g.label" class="nav-caption">{{ g.label }}</div>
           <el-menu-item v-for="n in g.items" :key="n.path" :index="n.path" class="nav-flat-item">
             <el-icon><component :is="iconOf(n.icon)" /></el-icon>
             <span>{{ n.label || titleOf(n.path) }}</span>
@@ -96,16 +97,26 @@ defineExpose({
   padding: 4px 0;
   overflow-y: auto;
 }
-.nav-flat-item { margin: 4px 8px 6px; border-radius: 8px; }
-.menu :deep(.el-sub-menu__title) {
+/* 与二级菜单项同一缩进：图标/文字都对齐，不再比组内项靠左 */
+.nav-flat-item {
+  height: 38px;
+  line-height: 38px;
+  margin: 1px 10px;
+  padding-left: 30px !important;
+  border-radius: 8px;
+}
+/* 组标题与菜单项统一一套层级：字号 12px + 更亮的灰，不再用 11px 极淡色 */
+.menu :deep(.el-sub-menu__title),
+.nav-caption {
   height: 34px;
   line-height: 34px;
   margin: 2px 10px 0;
-  padding: 0 10px !important;
+  padding: 0 10px;
   border-radius: 8px;
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  color: rgba(148, 163, 184, 0.55);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: rgba(148, 163, 184, 0.78);
 }
 .menu :deep(.el-sub-menu:first-child > .el-sub-menu__title) {
   margin-top: 0;

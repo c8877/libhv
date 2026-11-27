@@ -107,6 +107,30 @@ const h = require('../lib/harness')
     h.check('切换权限组高亮', (await p.locator('.pg-list .el-menu-item.is-active').count()) === 1)
   }
 
+  // 侧栏排版：组标题（含「工作台」）同一字号，菜单项同一字号，图标同一条竖线
+  await p.setViewportSize({ width: 1440, height: 900 })
+  await p.waitForTimeout(500)
+  const navTypo = await p.evaluate(() => {
+    const uniq = (els) => Array.from(new Set(Array.from(els).map((e) => getComputedStyle(e).fontSize)))
+    const groups = document.querySelectorAll('.side .el-sub-menu__title, .side .nav-caption')
+    const items = document.querySelectorAll('.side .el-menu-item')
+    const iconX = (el) => {
+      const i = el.querySelector('.el-icon')
+      return i ? Math.round(i.getBoundingClientRect().x) : -1
+    }
+    const visible = Array.from(items).filter((e) => e.getBoundingClientRect().height > 0)
+    return {
+      groupSizes: uniq(groups),
+      itemSizes: uniq(items),
+      hasCaption: document.querySelectorAll('.side .nav-caption').length,
+      iconXs: Array.from(new Set(visible.map(iconX))),
+    }
+  })
+  h.check('组标题字号一致', navTypo.groupSizes.length === 1, navTypo.groupSizes)
+  h.check('菜单项字号一致', navTypo.itemSizes.length === 1, navTypo.itemSizes)
+  h.check('首页也有组标题', navTypo.hasCaption === 1, navTypo.hasCaption)
+  h.check('图标在同一条竖线', navTypo.iconXs.length === 1, navTypo.iconXs)
+
   h.check('无 JS 错误', errs.length === 0, errs.slice(0, 3))
   await ctx.close()
   await b.close()

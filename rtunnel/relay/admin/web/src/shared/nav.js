@@ -3,9 +3,10 @@
 // 避免同一个名字在两处维护、改一处漏一处。
 export const NAV_GROUPS = [
   {
+    // 首页两项不折叠，但同样给一个组标题：否则它们和下面的组标题不是同级字号
     key: 'home',
     flat: true,
-    label: '',
+    label: '工作台',
     items: [
       { path: '/', icon: 'ChatDotRound', perm: 'ai.chat' },
       { path: '/overview', icon: 'Odometer', perm: 'device.view' },
